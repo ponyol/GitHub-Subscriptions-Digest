@@ -209,6 +209,61 @@ python main.py
 - Зелеными акцентами (`#00a000`)
 - Моноширинным шрифтом (`Consolas, Monaco, Menlo`)
 
+## ⚠️ Важно: Отсутствующие репозитории
+
+### Проблема
+
+GitHub API endpoint `/user/subscriptions` может **не возвращать все** репозитории, на которые вы подписаны. Это связано с тем, как GitHub обрабатывает разные уровни "watching":
+
+- **All Activity** - получаете все уведомления
+- **Custom** - выборочные уведомления
+- **Ignore** - не получаете уведомления
+
+API endpoint может пропускать репозитории с определенными настройками watching.
+
+### Решение: Ручное добавление репозиториев
+
+Если вы заметили, что некоторые репозитории отсутствуют в дайджесте, используйте утилиту `add_repository.py`:
+
+```bash
+# Установите зависимости (если еще не установлены)
+pip install -r requirements.txt
+
+# Экспортируйте ваш GitHub токен
+export GH_PAT='your_github_token_here'
+
+# Добавьте репозиторий
+python add_repository.py coinbase/x402
+
+# Или добавьте несколько репозиториев сразу
+python add_repository.py owner1/repo1 owner2/repo2 owner3/repo3
+```
+
+После добавления:
+
+1. Закоммитьте изменения в `digest_data.json`:
+   ```bash
+   git checkout gh-pages
+   git add digest_data.json
+   git commit -m "Add missing repositories"
+   git push
+   git checkout main
+   ```
+
+2. Дождитесь следующего автоматического запуска или запустите workflow вручную
+
+### Проверка списка репозиториев
+
+Для отладки можно использовать скрипт `debug_subscriptions.py`:
+
+```bash
+export GH_PAT='your_token'
+pip install -r requirements.txt
+python debug_subscriptions.py
+```
+
+Этот скрипт покажет все репозитории, которые возвращает GitHub API, и сохранит список в файл `subscriptions_debug.txt`.
+
 ## 🔐 Безопасность
 
 - Никогда не коммитьте токены или API ключи в репозиторий

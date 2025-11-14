@@ -33,6 +33,11 @@ async def fetch_subscriptions(token: str) -> list[GitHubRepository]:
     """
     Fetch all repositories the authenticated user is watching.
 
+    NOTE: This function uses the /user/subscriptions endpoint which returns
+    repositories the user is "watching". However, GitHub's watching mechanism
+    has different levels (All Activity, Ignore, Custom), and this endpoint
+    may not return all watched repositories in all cases.
+
     Args:
         token: GitHub Personal Access Token with 'repo' scope.
 
@@ -100,7 +105,19 @@ async def fetch_subscriptions(token: str) -> list[GitHubRepository]:
         extra={"context": "github_api", "total_repos": len(all_repos)},
     )
 
-    return [GitHubRepository.model_validate(repo) for repo in all_repos]
+    # Log all repository names for debugging
+    validated_repos = [GitHubRepository.model_validate(repo) for repo in all_repos]
+    repo_names = [repo.full_name for repo in validated_repos]
+    logger.info(
+        "Fetched repositories list",
+        extra={
+            "context": "github_api",
+            "repositories": repo_names,
+            "total_count": len(repo_names),
+        },
+    )
+
+    return validated_repos
 
 
 async def fetch_latest_release(
