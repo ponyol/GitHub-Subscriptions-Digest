@@ -1,0 +1,103 @@
+name: Daily GitHub Subscriptions Digest
+
+on:
+  # Run daily at 05:00 UTC
+  schedule:
+    - cron: '0 5 * * *'
+
+  # Allow manual triggering for testing
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+# Prevent concurrent deployments
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  generate-digest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main
+
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+        continue-on-error: true
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+          cache-dependency-path: main/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          cd main
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Copy digest data from gh-pages
+        run: |
+          if [ -f gh-pages/digest_data.json ]; then
+            cp gh-pages/digest_data.json main/digest_data.json
+            echo "Copied existing digest_data.json from gh-pages"
+          else
+            echo "No existing digest_data.json found, will create new one"
+          fi
+
+      - name: Run digest generation
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          cd main
+          python main.py
+
+      - name: Prepare gh-pages deployment
+        run: |
+          # Create or clean gh-pages directory
+          mkdir -p gh-pages-new
+
+          # Copy generated site
+          cp -r main/_site/* gh-pages-new/
+
+          # Copy updated digest data
+          cp main/digest_data.json gh-pages-new/
+
+          # Create .nojekyll to disable Jekyll processing
+          touch gh-pages-new/.nojekyll
+
+          echo "Deployment prepared"
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./gh-pages-new
+          publish_branch: gh-pages
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          commit_message: 'Update digest - ${{ github.run_number }}'
+
+      - name: Summary
+        run: |
+          echo "## Digest Generation Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Digest data updated" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Static site generated" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Deployed to gh-pages" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "View your digest at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> $GITHUB_STEP_SUMMARY
