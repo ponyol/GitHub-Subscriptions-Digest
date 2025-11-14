@@ -120,6 +120,7 @@ def generate_index_page(
         html = template.render(
             projects=projects_with_latest,
             last_run=digest_data.last_run_timestamp,
+            css_path="static/style.css",
         )
 
         output_file = output_dir / "index.html"
@@ -177,6 +178,7 @@ def generate_project_page(
         html = template.render(
             project=project,
             updates=sorted_updates,
+            css_path="../static/style.css",
         )
 
         # Create output path: project/{owner}_{repo}.html
@@ -243,6 +245,7 @@ def generate_update_page(
         html = template.render(
             update=update,
             project_name=project_name,
+            css_path="../static/style.css",
         )
 
         output_file = output_dir / "update" / f"{update.id}.html"
