@@ -48,13 +48,13 @@ def configure_gemini(api_key: str) -> None:
     )
 
 
-async def summarize_text(text: str, model_name: str = "gemini-1.5-flash") -> Optional[str]:
+async def summarize_text(text: str, model_name: str = "gemini-2.0-flash-exp") -> Optional[str]:
     """
     Generate a Russian summary of the provided text using Gemini AI.
 
     Args:
         text: The text to summarize (release notes or commit messages).
-        model_name: The Gemini model to use (default: gemini-1.5-flash).
+        model_name: The Gemini model to use (default: gemini-2.0-flash-exp).
 
     Returns:
         Russian summary of the text, or None if summarization fails.
