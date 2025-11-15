@@ -116,7 +116,9 @@ async def process_repository(
                             "context": "main",
                             "repo": repo_name,
                             "error": str(e),
+                            "error_type": type(e).__name__,
                         },
+                        exc_info=True,  # Include full traceback
                     )
 
             # Create update object
@@ -170,7 +172,9 @@ async def process_repository(
                         "context": "main",
                         "repo": repo_name,
                         "error": str(e),
+                        "error_type": type(e).__name__,
                     },
+                    exc_info=True,  # Include full traceback
                 )
 
             # Use the most recent commit's date
