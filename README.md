@@ -209,6 +209,76 @@ python main.py
 - Зелеными акцентами (`#00a000`)
 - Моноширинным шрифтом (`Consolas, Monaco, Menlo`)
 
+## ⚠️ Важно: Отсутствующие репозитории
+
+### Проблема
+
+**GitHub API endpoint `/user/subscriptions` возвращает ТОЛЬКО репозитории с watching level "All Activity".**
+
+Если репозиторий настроен на:
+- **Custom** - выборочные уведомления → ❌ НЕ возвращается API
+- **Ignore** - без уведомлений → ❌ НЕ возвращается API
+- **All Activity** - все уведомления → ✅ Возвращается API
+
+Это означает, что репозитории, для которых вы настроили выборочные уведомления (чтобы не получать спам), не будут автоматически попадать в дайджест.
+
+### Решение 1: Изменить настройки watching (для всех репозиториев)
+
+Если хотите, чтобы все watched репозитории автоматически попадали в дайджест:
+
+1. Перейдите на https://github.com/watching
+2. Для каждого нужного репозитория измените на **"Watching" → "All Activity"**
+3. Запустите `seed_data.py` заново для обновления списка:
+   ```bash
+   export GH_PAT='your_token'
+   python seed_data.py
+   ```
+
+⚠️ **Внимание**: Вы будете получать email уведомления о всех изменениях в этих репозиториях!
+
+### Решение 2: Ручное добавление репозиториев (рекомендуется)
+
+Если вы заметили, что некоторые репозитории отсутствуют в дайджесте, используйте утилиту `add_repository.py`:
+
+```bash
+# Установите зависимости (если еще не установлены)
+pip install -r requirements.txt
+
+# Экспортируйте ваш GitHub токен
+export GH_PAT='your_github_token_here'
+
+# Добавьте репозиторий
+python add_repository.py coinbase/x402
+
+# Или добавьте несколько репозиториев сразу
+python add_repository.py owner1/repo1 owner2/repo2 owner3/repo3
+```
+
+После добавления:
+
+1. Закоммитьте изменения в `digest_data.json`:
+   ```bash
+   git checkout gh-pages
+   git add digest_data.json
+   git commit -m "Add missing repositories"
+   git push
+   git checkout main
+   ```
+
+2. Дождитесь следующего автоматического запуска или запустите workflow вручную
+
+### Проверка списка репозиториев
+
+Для отладки можно использовать скрипт `debug_subscriptions.py`:
+
+```bash
+export GH_PAT='your_token'
+pip install -r requirements.txt
+python debug_subscriptions.py
+```
+
+Этот скрипт покажет все репозитории, которые возвращает GitHub API, и сохранит список в файл `subscriptions_debug.txt`.
+
 ## 🔐 Безопасность
 
 - Никогда не коммитьте токены или API ключи в репозиторий
