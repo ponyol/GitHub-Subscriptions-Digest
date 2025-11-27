@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (63 commits) - modular/modular - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (63 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/modular_modular.html">modular/modular</a> /
+    Updates in main (63 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/modular_modular.html">modular/modular</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2025-11-26 19:03 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/modular/modular/commits/main" target="_blank">https://github.com/modular/modular/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление упрощает настройку распределенного вывода (DI), унифицируя переменные окружения и требуя явного указания целевых конечных точек для запросов. Основные улучшения производительности включают значительно ускоренные ядра редукции GPU (до 3 раз), увеличение пропускной способности на 13% для рабочих нагрузок Qwen за счет оптимизации планировщика, а также начальную поддержку операторов сравнения SIMD в предложениях `where`. Релиз также исправляет критические ошибки, такие как состояния гонки в тестах с использованием нескольких GPU и проблемы с разделяемой памятью ZMQ при межузловой связи, а также добавляет функции квантования NVFP4.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Update lockfiles to point to latest nightly version: 26.1.0.dev2025112617
+
+- [Doc][KGEN] Update changelog (NFC) (#73013)
+
+- [x] Update changelog to add `--elaboration-max-depth` and
+`--elaboration-error-verbose` updates.
+
+Stacked PRs:
+ * __-&gt;__ #73013
+ * #72998
+ * #72997
+ * #72996
+ * #72995
+ * #72994
+ * #72993
+
+--- --- ---
+
+### [Doc][KGEN] Update changelog.
+
+MODULAR_ORIG_COMMIT_REV_ID: 9e61db788965848da74ca7bea554cc088873b2cb
+
+- [stdlib] Enable SIMD relationals in where clauses
+
+This commit enables the use of most SIMD relational operators in `where`
+clauses. The notable exception is `__eq__` which will come later.
+
+MODULAR_ORIG_COMMIT_REV_ID: 47deeb02b40842673f4fd8b5559c062881decabf
+
+- Revert &#34;[ZMQ] Do not use shm encoding for ZMQ router dealer sockets as they can be used for internode communication&#34; (#73066)
+
+Reverts [Internal link]
+
+`Qwen/QwQ-32B` is failing on MI355 in the nightly.
+
+Ref MAXSERV-1048
+
+MODULAR_ORIG_COMMIT_REV_ID: 54f79946f08acf84a8faa7abc1e762b9c3b884c2
+
+- [DI] Simplify DI env vars and delete default destination address.
+
+The env vars needed to configure DI are way too convoluted. I am
+simplifying them here.
+
+Sample old env var:
+```
+MAX_SERVE_DISPATCHER_CONFIG=&#39;{&#34;transport&#34;: &#34;dynamic_zmq&#34;, &#34;transport_config&#34;: {&#34;bind_address&#34;: &#34;tcp://10.0.0.207:7000&#34;, &#34;default_destination_address&#34;: &#34;tcp://10.0.0.229:6000&#34;}}&#39;
+```
+
+This is annoying since it is a json string and we need to take care due
+to double quotes and spaces.
+You can easily mispecify this due to string escaping woes.
+
+Additionally, it allows us to configure the transport type
+(&#34;dynamic_zmq&#34;) when there are no other options.
+
+Finally, it allows us to pass the &#34;default_destination_address&#34;. This
+refers to the default prefill node
+to forward a request by a decode node if the target endpoint is not
+specified for the request. This field
+is meaningless for prefill nodes since they do not forward requests. I
+am deleting this field and making it
+a hard error if target endpoint is not specified for a request.
+
+Now the new env var is much simpler:
+```
+MAX_SERVE_DI_BIND_ADDRESS=tcp://10.0.0.207:7000
+```
+
+This is a simple string that is easy to specify and read.
+
+---
+
+I am on privileged Gcore 2x8xH100 with Infiniband. This is two nodes
+with 8 GPUs each.
+
+Here is how to run deepseek with DI. We do not use multi-node EP here.
+
+We use the `kathywu95/deepseek-v3-small-random` version since full
+deepseek
+does not fit on one 8xh100 node.
+
+MODULAR_DEVICE_CONTEXT_BUFFER_CACHE_SIZE_PERCENT=95 is specified to
+leave room
+for nvshmem which allocates memory via cuMemCreate. If I set 99, I get a
+crash
+during inititalization.
+
+prefill-chunk-size=128 is specified to minimize the amount of memory
+that
+nvshmem allocates.
+
+---
+
+Before:
+```
+// launch on decode node
+MODULAR_DEVICE_CONTEXT_BUFFER_CACHE_SIZE_PERCENT=95 \
+  MAX_SERVE_SCHEDULER_STATS_LOG_INTERVAL_S=0 \
+  UCX_TLS=&#34;rc,ud,dc,cuda_copy,cuda_ipc&#34; \
+  UCX_NET_DEVICES=&#34;mlx5_ib0:1,mlx5_ib1:1,mlx5_ib2:1,mlx5_ib3:1,mlx5_ib4:1,mlx5_ib5:1,mlx5_ib6:1,mlx5_ib7:1&#34; \
+  MAX_SERVE_DISPATCHER_CONFIG=&#39;{&#34;transport&#34;: &#34;dynamic_zmq&#34;, &#34;transport_config&#34;: {&#34;bind_address&#34;: &#34;tcp://10.0.0.207:7000&#34;, &#34;default_destination_address&#34;: &#34;tcp://10.0.0.229:6000&#34;}}&#39; \
+  br //max -- serve --model-path=kathywu95/deepseek-v3-small-random \
+  --pipeline-role=decode_only --devices=gpu:0,1,2,3,4,5,6,7 --ep-size=8 --prefill-chunk-size=128
+
+// launch on prefill node
+MODULAR_DEVICE_CONTEXT_BUFFER_CACHE_SIZE_PERCENT=95 \
+  MAX_SERVE_SCHEDULER_STATS_LOG_INTERVAL_S=0 \
+  UCX_TLS=&#34;rc,ud,dc,cuda_copy,cuda_ipc&#34; \
+  UCX_NET_DEVICES=&#34;mlx5_ib0:1,mlx5_ib1:1,mlx5_ib2:1,mlx5_ib3:1,mlx5_ib4:1,mlx5_ib5:1,mlx5_ib6:1,mlx5_ib7:1&#34; \
+  MAX_SERVE_DISPATCHER_CONFIG=&#39;{&#34;transport&#34;: &#34;dynamic_zmq&#34;, &#34;transport_config&#34;: {&#34;bind_address&#34;: &#34;tcp://10.0.0.229:6000&#34;, &#34;default_destination_address&#34;: &#34;deadbeef&#34;}}&#39; \
+  br //max -- serve --model-path=kathywu95/deepseek-v3-small-random \
+  --pipeline-role=prefill_only --devices=gpu:0,1,2,3,4,5,6,7 --ep-size=8 --prefill-chunk-size=128 --headless
+
+// send request to decode node. leave target endpoint unspecified so we use the default destination address.
+curl -N http://0.0.0.0:8000/v1/chat/completions \
+  -H &#34;Content-Type: application/json&#34; \
+  -d &#39;{
+    &#34;model&#34;: &#34;kathywu95/deepseek-v3-small-random&#34;,
+    &#34;max_tokens&#34;: 50,
+    &#34;messages&#34;: [
+        {&#34;role&#34;: &#34;system&#34;, &#34;content&#34;: &#34;You are a helpful assistant.&#34;},
+        {&#34;role&#34;: &#34;user&#34;, &#34;content&#34;: &#34;Who won the World Series in 2020?&#34;}
+    ]
+}&#39;
+```
+
+After:
+```
+// launch on decode node
+MODULAR_DEVICE_CONTEXT_BUFFER_CACHE_SIZE_PERCENT=95 \
+  MAX_SERVE_SCHEDULER_STATS_LOG_INTERVAL_S=0 \
+  UCX_TLS=&#34;rc,ud,dc,cuda_copy,cuda_ipc&#34; \
+  UCX_NET_DEVICES=&#34;mlx5_ib0:1,mlx5_ib1:1,mlx5_ib2:1,mlx5_ib3:1,mlx5_ib4:1,mlx5_ib5:1,mlx5_ib6:1,mlx5_ib7:1&#34; \
+  MAX_SERVE_DI_BIND_ADDRESS=tcp://10.0.0.207:7000 \
+  br //max -- serve --model-path=kathywu95/deepseek-v3-small-random \
+  --pipeline-role=decode_only --devices=gpu:0,1,2,3,4,5,6,7 --ep-size=8 --prefill-chunk-size=128
+
+// launch on prefill node
+MODULAR_DEVICE_CONTEXT_BUFFER_CACHE_SIZE_PERCENT=95 \
+  MAX_SERVE_SCHEDULER_STATS_LOG_INTERVAL_S=0 \
+  UCX_TLS=&#34;rc,ud,dc,cuda_copy,cuda_ipc&#34; \
+  UCX_NET_DEVICES=&#34;mlx5_ib0:1,mlx5_ib1:1,mlx5_ib2:1,mlx5_ib3:1,mlx5_ib4:1,mlx5_ib5:1,mlx5_ib6:1,mlx5_ib7:1&#34; \
+  MAX_SERVE_DI_BIND_ADDRESS=tcp://10.0.0.229:6000 \
+  br //max -- serve --model-path=kathywu95/deepseek-v3-small-random \
+  --pipeline-role=prefill_only --devices=gpu:0,1,2,3,4,5,6,7 --ep-size=8 --prefill-chunk-size=128 --headless
+
+// send request to decode node while specifying the target endpoint
+curl -N http://0.0.0.0:8000/v1/chat/completions \
+  -H &#34;Content-Type: application/json&#34; \
+  -d &#39;{
+    &#34;model&#34;: &#34;kathywu95/deepseek-v3-small-random&#34;,
+    &#34;max_tokens&#34;: 50,
+    &#34;target_endpoint&#34;: &#34;tcp://10.0.0.229:6000&#34;,
+    &#34;messages&#34;: [
+        {&#34;role&#34;: &#34;system&#34;, &#34;content&#34;: &#34;You are a helpful assistant.&#34;},
+        {&#34;role&#34;: &#34;user&#34;, &#34;content&#34;: &#34;Who won the World Series in 2020?&#34;}
+    ]
+}&#39;
+```
+
+Sample output (notice output is gibberish since the model has random
+weights):
+```
+curl -N http://0.0.0.0:8000/v1/chat/completions \
+  -H &#34;Content-Type: application/json&#34; \
+  -d &#39;{
+    &#34;model&#34;: &#34;kathywu95/deepseek-v3-small-random&#34;,
+    &#34;max_tokens&#34;: 50,
+    &#34;target_endpoint&#34;: &#34;tcp://10.0.0.229:6000&#34;,
+    &#34;messages&#34;: [
+        {&#34;role&#34;: &#34;system&#34;, &#34;content&#34;: &#34;You are a helpful assistant.&#34;},
+        {&#34;role&#34;: &#34;user&#34;, &#34;content&#34;: &#34;Who won the World Series in 2020?&#34;}
+    ]
+}&#39;
+{&#34;id&#34;:&#34;a24957ba22a045c59363a402ea6c1da7&#34;,&#34;choices&#34;:[{&#34;finish_reason&#34;:&#34;length&#34;,&#34;index&#34;:0,&#34;message&#34;:{&#34;content&#34;:&#34; Intensiveivial规范化 νchart Deutsche热线写了讲解了 manier Ellen////////////////////////////////berechart波士支部υ讓他하고clingبيرة是不一样的ровойexeciati桂林 Bewegunguly抗议rier钻井 Jonัวidéху達.source@endsectionquir비翘.\\)我被{Beh手游 financially臭幣 Galactic&#34;,&#34;refusal&#34;:&#34;&#34;,&#34;tool_calls&#34;:null,&#34;role&#34;:&#34;assistant&#34;,&#34;function_call&#34;:null},&#34;logprobs&#34;:{&#34;content&#34;:[],&#34;refusal&#34;:[]}}],&#34;created&#34;:1764098392,&#34;model&#34;:&#34;kathywu95/deepseek-v3-small-random&#34;,&#34;service_tier&#34;:null,&#34;system_fingerprint&#34;:null,&#34;object&#34;:&#34;chat.completion&#34;,&#34;usage&#34;:{&#34;completion_tokens&#34;:50,&#34;prompt_tokens&#34;:19,&#34;total_tokens&#34;:69}}[
+```
+
+Here are prefill node logs. Notice that we initialize 8x8=64 NIXL Agent
+connections.
+Decode and Prefill nodes have 8 NIXL Agents each (1/gpu or replica). As
+we can perform
+transfers between any 2 replicas, we need to initialize the connections
+pairwise.
+```
+[M] ubuntu@gpu-cluster-sines-2-x9fdt-8c49e9f9:~/modular$ MODULAR_DEVICE_CONTEXT_BUFFER_CACHE_SIZE_PERCENT=95 MAX_SERVE_SCHEDULER_STATS_LOG_INTERVAL_S=0 \
+  UCX_TLS=&#34;rc,ud,dc,cuda_copy,cuda_ipc&#34; UCX_NET_DEVICES=&#34;mlx5_ib0:1,mlx5_ib1:1,mlx5_ib2:1,mlx5_ib3:1,mlx5_ib4:1,mlx5_ib5:1,mlx5_ib6:1,mlx5_ib7:1&#34; \
+  MAX_SERVE_DI_BIND_ADDRESS=tcp://10.0.0.229:6000 \
+  br //max -- serve --model-path=kathywu95/deepseek-v3-small-random  \
+  --pipeline-role=prefill_only --devices=gpu:0,1,2,3,4,5,6,7 --ep-size=8 --prefill-chunk-size=128 --headless
+INFO: Invocation ID: 51dcddac-a386-4d25-9457-4e1f2c9d1fae
+INFO: Streaming build results to: https://modular.buildbuddy.io/invocation/51dcddac-a386-4d25-9457-4e1f2c9d1fae
+INFO: Analyzed target //max:max (0 packages loaded, 0 targets configured).
+INFO: Found 1 target...
+Target //max/python/max/entrypoints:pipelines up-to-date:
+  bazel-bin/max/python/max/entrypoints/pipelines
+Aspect //bazel/internal:mypy.bzl%mypy_aspect of //max:max up-to-date:
+  bazel-bin/max/python/max/entrypoints/pipelines.mypy_stdout
+INFO: Elapsed time: 0.472s, Critical Path: 0.01s
+INFO: 1 process: 1 action cache hit, 1 internal.
+INFO: Build completed successfully, 1 total action
+INFO: Streaming build results to: https://modular.buildbuddy.io/invocation/51dcddac-a386-4d25-9457-4e1f2c9d1fae
+19:18:41.494 INFO: Metrics initialized.
+19:18:47.987 INFO: Estimation for activation memory might be inaccurate, max-batch-context-length is not set.
+19:18:47.987 INFO: Estimated activation memory: 6.50 GiB
+19:18:49.892 INFO: Estimation for activation memory might be inaccurate, max-batch-context-length is not set.
+19:18:49.892 INFO: Estimated activation memory: 6.50 GiB
+19:18:49.892 INFO:
+19:18:49.892 INFO: ============================================================
+19:18:49.892 INFO: Pipeline Configuration (use --pretty-print-config to print full config)
+19:18:49.892 INFO: ============================================================
+19:18:49.892 INFO:     model              : kathywu95/deepseek-v3-small-random
+19:18:49.892 INFO:     architecture       : DeepseekV3ForCausalLM
+19:18:49.893 INFO:     pipeline           : TextGenerationPipeline
+19:18:49.893 INFO:     devices            : gpu[0], gpu[1], gpu[2], gpu[3], gpu[4], gpu[5], gpu[6], gpu[7]
+19:18:49.893 INFO:     max_batch_size     : 512
+19:18:49.893 INFO:     max_seq_len        : 163840
+19:18:49.893 INFO:     cache_memory       : 505.56 GiB
+19:18:49.893 INFO:
+19:18:49.893 INFO: Starting MAX Workers...
+Starting ASGI metrics server on port 8001
+19:18:56.687 INFO: Metrics initialized.
+19:18:58.237 INFO: Starting download of model: kathywu95/deepseek-v3-small-random
+100%|██████████████████████████████████████████████████████████████████████████████████████████| 6/6 [00:00&lt;00:00, 28.74it/s]
+19:18:58.454 INFO: Finished download of model: kathywu95/deepseek-v3-small-random in 0.21705 seconds.
+19:19:00.875 INFO: Building DeepseekV3 model...
+19:19:00.880 INFO: Initializing SHMEM context and allocating SHMEM memory...
+19:19:00.881 INFO: Estimated EP memory usage per device: 911.75 MiB
+19:19:03.943 INFO: Initialized EP for node 0
+19:19:06.730 INFO: Building graph took 5.855190 seconds. Compiling...
+19:19:08.770 INFO: Compiling model took 2.039549 seconds
+19:19:08.770 INFO: DeepseekV3 model loaded in 7.894882 seconds
+19:19:10.501 INFO: Starting Prefill Dispatcher Server on tcp://10.0.0.229:6000
+[AsyncRT/lib/NIXL/utils/stream/metadata_stream.cpp:85] MD listener is listening on port 8744...
+[AsyncRT/lib/NIXL/nixl_listener.cpp:166] Listener thread started for agent: prefill_agent_a0a455d4-90a3-40f6-8232-e5bf87db6c8e_0_0 (useListenThread=1)
+[AsyncRT/lib/NIXL/nixl_plugin_manager.cpp:203] MODULAR_NIXL_PLUGIN_DIR=&#34;/home/ubuntu/.cache/bazel/_bazel_ubuntu/a8246705211370f9a29d0c6e94adcf5a/execroot/_main/bazel-out/k8-dbg/bin/max/python/max/entrypoints/pipelines.runfiles/_main/AsyncRT&#34;
+[AsyncRT/lib/NIXL/nixl_plugin_manager.cpp:219] Loading plugin from path: /home/ubuntu/.cache/bazel/_bazel_ubuntu/a8246705211370f9a29d0c6e94adcf5a/execroot/_main/bazel-out/k8-dbg/bin/max/python/max/entrypoints/pipelines.runfiles/_main/AsyncRT/libplugin_ucx_cuda_verbs.so
+[AsyncRT/lib/NIXL/nixl_plugin_manager.cpp:157] Loaded NIXL plugin_ucx_cuda_verbs
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: ADDRESS_VERSION=v2
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: RNDV_THRESH=inf
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: MAX_COMPONENT_MDS=32
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: MAX_RMA_RAILS=2
+[AsyncRT/lib/NIXL/nixl_agent.cpp:312] Created backend: ucx
+[AsyncRT/lib/NIXL/utils/stream/metadata_stream.cpp:85] MD listener is listening on port 8287...
+[AsyncRT/lib/NIXL/nixl_listener.cpp:166] Listener thread started for agent: prefill_agent_a0a455d4-90a3-40f6-8232-e5bf87db6c8e_1_0 (useListenThread=1)
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: ADDRESS_VERSION=v2
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: RNDV_THRESH=inf
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: MAX_COMPONENT_MDS=32
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: MAX_RMA_RAILS=2
+[AsyncRT/lib/NIXL/nixl_agent.cpp:312] Created backend: ucx
+[AsyncRT/lib/NIXL/utils/stream/metadata_stream.cpp:85] MD listener is listening on port 8684...
+[AsyncRT/lib/NIXL/nixl_listener.cpp:166] Listener thread started for agent: prefill_agent_a0a455d4-90a3-40f6-8232-e5bf87db6c8e_2_0 (useListenThread=1)
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: ADDRESS_VERSION=v2
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: RNDV_THRESH=inf
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: MAX_COMPONENT_MDS=32
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: MAX_RMA_RAILS=2
+[AsyncRT/lib/NIXL/nixl_agent.cpp:312] Created backend: ucx
+[AsyncRT/lib/NIXL/utils/stream/metadata_stream.cpp:85] MD listener is listening on port 8576...
+[AsyncRT/lib/NIXL/nixl_listener.cpp:166] Listener thread started for agent: prefill_agent_a0a455d4-90a3-40f6-8232-e5bf87db6c8e_3_0 (useListenThread=1)
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: ADDRESS_VERSION=v2
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: RNDV_THRESH=inf
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: MAX_COMPONENT_MDS=32
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: MAX_RMA_RAILS=2
+[AsyncRT/lib/NIXL/nixl_agent.cpp:312] Created backend: ucx
+[AsyncRT/lib/NIXL/utils/stream/metadata_stream.cpp:85] MD listener is listening on port 8084...
+[AsyncRT/lib/NIXL/nixl_listener.cpp:166] Listener thread started for agent: prefill_agent_a0a455d4-90a3-40f6-8232-e5bf87db6c8e_4_0 (useListenThread=1)
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: ADDRESS_VERSION=v2
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: RNDV_THRESH=inf
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: MAX_COMPONENT_MDS=32
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: MAX_RMA_RAILS=2
+[AsyncRT/lib/NIXL/nixl_agent.cpp:312] Created backend: ucx
+[AsyncRT/lib/NIXL/utils/stream/metadata_stream.cpp:85] MD listener is listening on port 8292...
+[AsyncRT/lib/NIXL/nixl_listener.cpp:166] Listener thread started for agent: prefill_agent_a0a455d4-90a3-40f6-8232-e5bf87db6c8e_5_0 (useListenThread=1)
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: ADDRESS_VERSION=v2
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: RNDV_THRESH=inf
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: MAX_COMPONENT_MDS=32
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: MAX_RMA_RAILS=2
+[AsyncRT/lib/NIXL/nixl_agent.cpp:312] Created backend: ucx
+[AsyncRT/lib/NIXL/utils/stream/metadata_stream.cpp:85] MD listener is listening on port 8127...
+[AsyncRT/lib/NIXL/nixl_listener.cpp:166] Listener thread started for agent: prefill_agent_a0a455d4-90a3-40f6-8232-e5bf87db6c8e_6_0 (useListenThread=1)
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: ADDRESS_VERSION=v2
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: RNDV_THRESH=inf
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: MAX_COMPONENT_MDS=32
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: MAX_RMA_RAILS=2
+[AsyncRT/lib/NIXL/nixl_agent.cpp:312] Created backend: ucx
+[AsyncRT/lib/NIXL/utils/stream/metadata_stream.cpp:85] MD listener is listening on port 8035...
+[AsyncRT/lib/NIXL/nixl_listener.cpp:166] Listener thread started for agent: prefill_agent_a0a455d4-90a3-40f6-8232-e5bf87db6c8e_7_0 (useListenThread=1)
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: ADDRESS_VERSION=v2
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: RNDV_THRESH=inf
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: MAX_COMPONENT_MDS=32
+[AsyncRT/lib/NIXL/utils/ucx/config.cpp:42] Modified UCX config: MAX_RMA_RAILS=2
+[AsyncRT/lib/NIXL/nixl_agent.cpp:312] Created backend: ucx
+19:19:36.262 INFO:
+
+********************************************************************************
+
+                 🚀 Headless server ready (Press CTRL+C to quit)
+
+********************************************************************************
+
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_0_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_1_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_2_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_3_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_4_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_5_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_6_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_7_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_0_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_1_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_2_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_3_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_4_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_5_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_6_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_7_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_0_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_1_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_2_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_3_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_4_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_5_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_6_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_7_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_0_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_1_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_2_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_3_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_4_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_5_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_6_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_7_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_0_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_1_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_2_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_3_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_4_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_5_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_6_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_7_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_0_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_1_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_2_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_3_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_4_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_5_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_6_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_7_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_0_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_1_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_2_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_3_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_4_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_5_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_6_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_7_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_0_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_1_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_2_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_3_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_4_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_5_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_6_0
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_cc979055-32f3-44ef-bf22-6d634c255573_7_0
+[AsyncRT/lib/NIXL/plugins/ucx/ucx_backend.cpp:1113] engine 0x6516f980 bound shared worker 0
+19:19:51.045 INFO: Executed CE batch with 1 reqs | Terminated: 1 reqs, Pending: 0 reqs | Input Tokens: 19/128 toks | Prompt Tput: 65.7 tok/s, Generation Tput: 3.5 tok/s | Batch creation: 257.70us, Execution: 289.36ms | KVCache usage: 0.0% of 1840704 blocks | Cache hit rate: 0.0% | All Preemptions: 0 reqs
+[AsyncRT/lib/NIXL/plugins/ucx/ucx_backend.cpp:325] Transfer of 0.035 MiB took 1.126 ms on Device 0 (0.030 GiB/s)
+```
+MODULAR_ORIG_COMMIT_REV_ID: 3c73c53087c0e2b12549e874fe2a524b86b1b22c
+
+- [Kernels] Make reduce `axis` static &amp; use runtime dispatch
+
+Dynamic `axis` prevents the compiler from performing Mem2Reg
+optimization, which results in use of local memory (`st.local`,
+`ld.local`) which significantly slows down the kernel.
+
+Instead, this PR makes `axis` static &amp; uses runtime dispatch to select
+the right kernel. Performance improvement for the saturated kernel
+depends on size, varies from 1.5x to 3x faster.
+
+MODULAR_ORIG_COMMIT_REV_ID: 1ef88e0450a40122658843dcfcc84b6f5ab94d8f
+
+- [kbench] Refactor kbench (#72982)
+
+Contributes to HAR-7
+
+* Overall code refactor and cleanup
+* Added a skip clock check option that will eventually replace -f
+current behaviour
+* Added a test for check_valid_target_accelerator
+* Moved all core functionality of Kbench to kbench_model
+* Moved all auxiliary functionality to utils
+
+MODULAR_ORIG_COMMIT_REV_ID: 15e6c2af65e24cb1f1f96328069e3ceedf3ba4fb
+
+- [Max] Fix race cond in allgather tests, re-enable tests (#72989)
+
+Fixes KERN-2241
+Fixes KERN-2242
+
+The flaky hang in these tests was due to calling `signals.buffers()`
+*after* syncing the devices, instead of before. Under the hood,
+`signals.buffers()` calls `Tensor.zeros()` which asynchronously memsets
+the device memory to zero. This means there&#39;s a race condition where
+`GPU-0` enters the kernel&#39;s `_multi_gpu_barrier` before `GPU-1` has
+finished memsetting its signals buffer, or vice versa.
+
+I was able to reproduce the flaky failure with:
+```
+bt-mi355 //max/tests/integration/API/python:multi_gpu_tests/test_allgather --runs_per_test=100
+bt-h100 //max/tests/integration/API/python:multi_gpu_tests/test_allgather --runs_per_test=100
+```
+In my case up to 40 of the 100 iters would timeout. Since applying the
+changes in this PR, I no longer see any timeouts.
+
+MODULAR_ORIG_COMMIT_REV_ID: f00d66e9b2fb94b821f6e5243ed4182bffbc35f0
+
+- [stdlib] Start to enable SIMD types in `where` clauses
+
+This commit makes three SIMD constructors and the implicit Bool
+conversion method parser-foldable. This enables their use in `where`
+clauses.
+
+MODULAR_ORIG_COMMIT_REV_ID: 737dd15f0c1e951e1fd8b95cb9cc01eeb9094f02
+
+- [stdlib] Migrate `time`, `subprocess`, and `random` off
+`LegacyUnsafePointer`.
+
+MODULAR_ORIG_COMMIT_REV_ID: f4c2a46d6ca71addebdf5b00fa2b8b4dea79ba9e
+
+- [stdlib] Add `where` clause to `UnsafePointer`
+
+MODULAR_ORIG_COMMIT_REV_ID: 25829ed6bdeac08604e4d60423316584dcf159d3
+
+- [Deepseek] Default `max_batch_context_length` to max sequence length of
+the model if not specified
+
+If `max_batch_context_length` is not specified, we default it to the max
+sequence length of the model.
+
+MODULAR_ORIG_COMMIT_REV_ID: dd0490c343f63dddaa7c153b2e3c21db0f6c43ab
+
+- [stdlib] Moves the SIMD extension into other files (attempt 2!).
+
+MODULAR_ORIG_COMMIT_REV_ID: bb6acb88b2d1479876d926cdb1fb4b5744119ac2
+
+- [bazel] Add back rules_swift patch
+
+Part of the downgrade, this silences a warning we don&#39;t care about. It&#39;s
+hard to just update the version because of rules_cc compatibility
+
+MODULAR_ORIG_COMMIT_REV_ID: 9514f3fecdcd3e856e1d15236e9d9f533bdd125d
+
+- [kernels] Add a `where Self.mut` clause to `LayoutTensor.__setitem__()`
+
+Before, we used the &#34;fake conditional conformance&#34; hack to handle
+mutability. This led to particularly bad error reporting because there
+was no method available on the seemingly generic type to fail on. Now
+that we have `where` clauses, we can emit clearer errors. As part of
+this PR I also fix a handful of mutability violations in kernels.
+
+MODULAR_ORIG_COMMIT_REV_ID: cf9849274be5d538a16dc6ab70d77a8a5c5bc9e7
+
+- [Scheduler] Fix `max_batch_context_length` logic when scheduling CE
+requests
+
+We implemented it for TG previously. This PR does the same for CE.
+
+MODULAR_ORIG_COMMIT_REV_ID: be8a2521180ee5a2c2586f133bd8c18d19e707b4
+
+- [bazel] Downgrade to workaround interrupt bug
+
+https://github.com/bazelbuild/bazel/issues/27777
+
+MODULAR_ORIG_COMMIT_REV_ID: 500e582ea573ffda8aece2b454a76ff8e2c4e419
+
+- [MAX] Don&#39;t divide batch size by Data Parallelism degree
+
+When you specify --data-parallel-degree 8 --max-batch-size 32 there are
+two ways to interpret this:
+1. Each of the 8 DP replicas has a cap on batch size of 32. Across all
+replicas the aggregate max batch size is thus 8 * 32 = 256.
+2. Each of the 8 DP replicas has a cap on batch size of 4. Across all
+replicas the aggregate max batch size is thus 32.
+
+Currently our code uses interpretation #2. However, I think we should
+switch to #1 for the following reasons:
+- Maintaining max_batch_size and max_batch_size_per_replica is very
+error prone. It is very easy to mix them up.
+- This interpretation is consistent to what vLLM does.
+
+MODULAR_ORIG_COMMIT_REV_ID: e11df40525f02153819194e90562a816c427d716
+
+- [bazel] Ensure ./bazelw is used
+
+We got a report of someone trying to build with a random version of
+bazel from their package manager, which won&#39;t work. Now we validate
+bazelisk is used (or a custom build of bazel for testing)
+
+MODULAR_ORIG_COMMIT_REV_ID: 83cbff7c5d15caf42fbf29ea2cab626d984ec6d6
+
+- [bazel] Validate full Xcode version on CI
+
+In the past we didn&#39;t have this but it&#39;s required now for metal support
+anyways.
+
+MODULAR_ORIG_COMMIT_REV_ID: ebb1413f1eecda0ff454d64ddba0093dac69b42f
+
+- [kernels][gpu] migrate a gemm kernel off NDBuffer (#73018)
+
+MODULAR_ORIG_COMMIT_REV_ID: af65c9cff246a13084c03c9eb19e6bfdcb3542d3
+
+- [Benchmark] Enable server stats collection by default (Part 2)
+
+Follow-up to #72814
+
+Update config files and documentation after changing
+`collect_server_stats` default to `True`:
+
+- Add missing collect_server_stats entry to
+ServingBenchmarkConfig.help()
+- Update serving_config.yaml default from false to true
+- Add changelog entry for the behavior change
+
+MODULAR_ORIG_COMMIT_REV_ID: 9a073218340c0f74e98f59d7a3527651904efcf3
+
+- [Scheduler] Drain Queue During GPU Execution
+
+This PR ships two changes:
+1. The GIL release/acquisition scope is tightened during Tensor.dlPack
+conversions. This allows us to release the GIL more consistently during
+graph execution, leading to better overlap between CPU and GPU
+processing in the Model Worker.
+2. Changed the background queue strategy to yield to the background
+   queue during GPU execution. When the batch finishes the background
+queue is halted, leading to little interruptions on batch scheduling.
+
+These changes together lead to a 13% throughput improvement on specific
+Qwen workloads.
+
+MODULAR_ORIG_COMMIT_REV_ID: 208a2701d648c39b36ba567e398ce06cdb5daa1e
+
+- [PrefixCaching] Remove Redundant Image Hash after Serialization
+
+Prior, we were unconditionally hashing image inputs in the
+ImageMetadata.__post_init__. This led to a perf impact during
+deserialization as this code is run, and the image is hashed
+redundantly. This small changes, ensures the hash is not computed twice.
+This roughly leads to +3% improvement in specific VLM workloads.
+
+MODULAR_ORIG_COMMIT_REV_ID: fff518dabca9d24a69e765e6cc6f7e8610e5e4ae
+
+- [Serialization] Move Copy Default to False
+
+This was needed for specific workloads to ensure array data is mutable.
+But is a poor global default, causing unnecessary copies. This change
+moves this to False, moving some necessary copies downstream to other
+touch points. This should have no material impact on performance.
+
+MODULAR_ORIG_COMMIT_REV_ID: d3abca5cf7c2e07768259d0311a6af367b963cd3
+
+- [Kernels] Improve GPU reduction performance for large shapes
+
+This PR adds a new reduction kernel for shapes which are large enough to
+saturate the device. The kernel invokes no communication because each
+thread handles a whole row.
+
+MODULAR_ORIG_COMMIT_REV_ID: 81e51c625316e3d1f1e10319b80acb28c5a5da0a
+
+- [mojo-lang] Struct extensions naming/importing changes, attempt 2 (#72954)
+
+Re-merges the compiler parts of
+[Internal link] which were always fine
+but caught up in the revert of the stdlib changes.
+
+This PR does three main changes:
+
+* Cleanup: Makes extensions (eg extension MyStruct) known to their
+parents not as their struct&#39;s name (&#34;MyStruct&#34;) but instead prefixed
+with &#34;extension:&#34; (&#34;extension:MyStruct&#34;). This makes it so
+lookupAndResolveDecl(&#34;MyStruct&#34;) doesn&#39;t return the extensions as well.
+This is good because we generally like finding and resolving as little
+as possible.
+* Makes extensions (eg extension MyStruct) also known to their parents
+as &#34;extension:&#34;. This is helpful when we want to look up &#34;all extensions
+in a given scope&#34;, which is useful for the next point.
+* Makes it so when we import anything from a module, we also import all
+extensions (we just look for anything named &#34;extension:&#34;).
+
+Note that this might not be the final design, this makes an assumption
+that if a file wants to use an extension, then that extension is in a
+file that is indirectly imported. It&#39;s similar to Rust/Swift/C#/Kotlin,
+but we might want to be more similar to Python, which just makes all
+extensions globally visible to everyone everywhere, despite all the
+spooky action at a distance that entails (doc incoming on this).
+
+MODULAR_ORIG_COMMIT_REV_ID: a7c9b617c674b9c2f735d3e96ca2d416d6960f17
+
+- [DOCS] DOCS-587: Adds missing identity operators to operators page (#72987)
+
+Co-authored-by: Ken Jones &lt;165197230+KenJones-Modular@users.noreply.github.com&gt;
+MODULAR_ORIG_COMMIT_REV_ID: 019cbea3a857faecee9b6a11a2b542860fb02d65
+
+- [kernels] Migrate bench_kv_cache_ragged_rope off of HostNDBuffer (#72986)
+
+MODULAR_ORIG_COMMIT_REV_ID: 99bc7d2b2e1e8051b0e744341c02e6a3a682d439
+
+- [TransferEngine] Throw an error if UCX transports are not configured
+when connecting to a different node
+
+I ran into a confusing hang today where `load_remote_metadata` would
+hang. The root cause was that the
+UCX env flags were not being set properly (bazel did not propagate
+them). Lets add a explicit check for
+this.
+
+MODULAR_ORIG_COMMIT_REV_ID: b4749ca11c08d0ec6f6c58dc160457a107d4a688
+
+- [ZMQ] Do not use shm encoding for ZMQ router dealer sockets as they can
+be used for internode communication
+
+When running internode DI, I got the error below.
+
+This error occured since we serialized the text context array via shm
+and
+shuttled the encoded data from decode -&gt; prefill. As the prefill was on
+a
+different node, the shm file did not exist. As such it threw an file not
+found error.
+
+This PR fixes this issue by disabling shm encoding for router dealer
+sockets.
+Currently our push / pull sockets are mostly used for intra-node
+communication
+and the router / dealer sockets are only used for inter-node
+communication.
+As such router / dealer defaults to this being disabled while push
+sockets
+default to this being enabled but can be overridden.
+
+```
+x08\xc5\x05 \x00\x00\x06 \x00\x08\xc5\x05 \x00\x00\x06 \x00\x08\xc5\x05 \x00\x00\x06 \x00\x08\xc5\x05 \x00\x00\x06 \x00\x08\xc5\x05 \x00\x00\x06 \x00\x08\xc5\x05 \x00\x00\x06 \x00\x08\xc5\x05 \x00\x00\x06 \x00|&#39;)
+[AsyncRT/lib/NIXL/nixl_agent.cpp:1246] Loading remote metadata for agent: decode_agent_1fd86c36-bc47-41b0-90f2-af809879574f_0_1
+end load_remote_metadata with b&#39;decode_agent_1fd86c36-bc47-41b0-90f2-af809879574f_0_1&#39;
+end decode with decode_agent_1fd86c36-bc47-41b0-90f2-af809879574f_0_1
+done connecting to remote transfer engine
+Sending transfer engine metadata to b&#39;\x00kx\xdc&gt;&#39;
+done sending transfer engine metadata to dispatcher
+Process MODEL_bd6cb4d2-7b8e-4b69-b6ee-41e4d4b4dcf9:
+Traceback (most recent call last):
+  File &#34;/home/ubuntu/.cache/bazel/_bazel_ubuntu/a8246705211370f9a29d0c6e94adcf5a/execroot/_main/bazel-out/k8-dbg/bin/SDK/examples/di/di.runfiles/_main/max/python/max/interfaces/utils/shared_memory.py&#34;, line 134, in open_shm_array
+    shm = shared_memory.SharedMemory(name=meta[&#34;name&#34;])
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File &#34;/home/ubuntu/.cache/bazel/_bazel_ubuntu/a8246705211370f9a29d0c6e94adcf5a/execroot/_main/bazel-out/k8-dbg/bin/SDK/examples/di/di.runfiles/rules_python++python+python_3_12_x86_64-unknown-linux-gnu/lib/python3.12/multiprocessing/shared_memory.py&#34;, line 104, in __init__
+    self._fd = _posixshmem.shm_open(
+               ^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: &#39;/maximg-f7be2d54d8fe4c9c97b48d3054fbbfa9&#39;
+...
+  File &#34;/home/ubuntu/.cache/bazel/_bazel_ubuntu/a8246705211370f9a29d0c6e94adcf5a/execroot/_main/bazel-out/k8-dbg/bin/SDK/examples/di/di.runfiles/_main/max/python/max/serve/scheduler/prefill_scheduler.py&#34;, line 264, in run_iteration
+    request, identity = self.dispatcher.recv_request_nowait()
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File &#34;/home/ubuntu/.cache/bazel/_bazel_ubuntu/a8246705211370f9a29d0c6e94adcf5a/execroot/_main/bazel-out/k8-dbg/bin/SDK/examples/di/di.runfiles/_main/max/python/max/serve/queue/zmq_queue.py&#34;, line 286, in recv_request_nowait
+    msg = self._deserialize(serialized_msg)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File &#34;/home/ubuntu/.cache/bazel/_bazel_ubuntu/a8246705211370f9a29d0c6e94adcf5a/execroot/_main/bazel-out/k8-dbg/bin/SDK/examples/di/di.runfiles/_main/max/python/max/interfaces/utils/serialization.py&#34;, line 197, in __call__
+    return self._decoder.decode(data)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File &#34;/home/ubuntu/.cache/bazel/_bazel_ubuntu/a8246705211370f9a29d0c6e94adcf5a/execroot/_main/bazel-out/k8-dbg/bin/SDK/examples/di/di.runfiles/_main/max/python/max/interfaces/utils/serialization.py&#34;, line 250, in decode_numpy_array
+    return open_shm_array(obj)
+           ^^^^^^^^^^^^^^^^^^^
+  File &#34;/home/ubuntu/.cache/bazel/_bazel_ubuntu/a8246705211370f9a29d0c6e94adcf5a/execroot/_main/bazel-out/k8-dbg/bin/SDK/examples/di/di.runfiles/_main/max/python/max/interfaces/utils/shared_memory.py&#34;, line 136, in open_shm_array
+    raise RuntimeError(
+RuntimeError: Failed to open shared memory array in consumer: [Errno 2] No such file or directory: &#39;/maximg-f7be2d54d8fe4c9c97b48d3054fbbfa9&#39;
+python3: pthread_mutex_lock.c:94: ___pthread_mutex_lock: Assertion `mutex-&gt;__data.__owner == 0&#39; failed.
+```
+MODULAR_ORIG_COMMIT_REV_ID: ba326a57458d242763dd2f242e3c2689f41627c0
+
+- [kernels] More HostNDBuffer removals
+
+MODULAR_ORIG_COMMIT_REV_ID: c4d80b974f0a46467fd1bcbc07ccb33bcb493408
+
+- [DOCS] DOCS-1319: Differentiates pass and ellipsis trait methods (#72936)
+
+Co-authored-by: Scott Main &lt;scott@modular.com&gt;
+MODULAR_ORIG_COMMIT_REV_ID: db6d0e7b8354618a097558a8bf0b9f1200fb2b6b
+
+- [kernels] Add MixedLayoutTensor constructors from DeviceBuffer and HostBuffer (#72970)
+
+MODULAR_ORIG_COMMIT_REV_ID: f9eded7acccb2005bab1dc491dd107894a5a410d
+
+- [docs] Fixed wrong order of arguments in Mojo tutorial example
+
+In the Game of Life tutorial code, the `window_width` and
+`window_height` arguments to the pygame window were
+accidentally swapped.
+
+MODULAR_ORIG_COMMIT_REV_ID: 68af5a3b4e6b7c97734a58996c4960b74779af33
+
+- [Kernels][FP4] Add NVFP4 cublasLt matmul (#72931)
+
+This PR adds NVFP4 to cublasLt wrapper. In addition a naive NVFP4 kernel
+that emulates FP4 matmul is implemented for testing purpose.
+
+Please note that we are using UInt8 for two FP4 values.
+
+Towards KERN-2137.
+Fixes KERN-2232.
+
+MODULAR_ORIG_COMMIT_REV_ID: 00687c3595ed77252b392a255668d9c700a63a5f
+
+- [docs][build] Don&#39;t copy the `docs/code/` path
+
+MODULAR_ORIG_COMMIT_REV_ID: 84396897b28d0fcd20e04f8f63a20bae19243e47
+
+- [Pipelines] Fix multimodal text content key for all models
+
+Fixes gemma3multimodal not following text prompts.
+
+MAX was converting the `&#34;text&#34;` key to `&#34;content&#34;`, which required the
+use of a helper function `_wrap_str_message_content()` convert it back
+to the HuggingFace&#39;s expected `&#34;text&#34;` key for text content in
+multimodal messages. The original conversion was probably a bug, so
+remove this.
+
+MODULAR_ORIG_COMMIT_REV_ID: b72e8004db607eb5c535fd583678cacb55cb5b95
+
+- Revert &#34;[bazel] Improve build perf on macOS (#72859)&#34; (#72965)
+
+This breaks cache invalidation when only headers change, likely
+something with .d file generation or the allowed include paths added
+here
+
+This reverts commit 6b09e123066d56d96ed91e221fed8e400dd2895c.
+
+MODULAR_ORIG_COMMIT_REV_ID: 6a4a6a18ea1efa87bda23a21f9f2f4a6bf62781f
+
+- [Kernels][FP4] Add NVFP4 dynamic scaled quantization kernel (#72799)
+
+Stacked PRs:
+ * #72931
+ * __-&gt;__#72799
+
+--- --- ---
+
+### [Kernels][FP4] Add NVFP4 dynamic scaled quantization kernel
+
+This PR adds a quantization kernel for FP4 Activations. It follows the
+same implementation as flashInfer and vLLM. For correctness check,
+simillar to flashInfer we
+use `rtol=atol=1e-1` for scalers and `rtol=1e0, atol=1e-1` for output
+values. This is due to limitted accuracy of FP4 value. For example,
+Float32(2.5) is mapped to FP4(2.0) and Float32(2.500001) is mapped to
+3.0. Another approach for correctness check is to count number of errors
+  and make sure they are less than a threshold.
+
+Current limitations:
+
+1. Only supports with NVFP4 (with minor changes it can also support
+   MXFP4/MXFP8)
+2. Only supports 2D (MxN) tensors for which `N % 8 == 0`.
+3. Performance-wise it&#39;s not the ideal implementation and it can
+   potentially be a bottleneck
+
+MODULAR_ORIG_COMMIT_REV_ID: 5d46e98e10f8c7d74c8f85ce344540bbccbb5527
+
+- [Kernels][EP] Add token padding support to `ep.dispatch_cb` kernel
+
+This PR adds `expert_m_padding` support to the `ep.dispatch_cb` kernel
+to ensure per-expert token counts are padded to multiples of the
+specified alignment. This enables the optimized grouped FP8 matmul
+kernel by guaranteeing that a_scales is aligned to 16 bytes.
+
+Also, the `grouped_dynamic_scaled_fp8_matmul` function has a new
+`expert_tokens_padded` parameter that signals whether the input data has
+been padded. If `true`, we will enable the optimized grouped matmul
+path.
+
+MODULAR_ORIG_COMMIT_REV_ID: 63a3c6bbd6085de632ed0e4343cdb4c66e228d54
+
+- [kernels] Fix wrong size of the output buffer in `test_pool_gpu` (#72838)
+
+`output_tensor` is constructed using `out_layout`&#39;s size, while
+`d_output_buffer` is constructed using `in_laout`&#39;s size, which is 4x
+smaller. That leads to possible memory overwrite when `enqueue_copy` is
+called on a `d_output_buffer`.
+
+Also enable this test on Apple GPU as it works fine
+
+MODULAR_ORIG_COMMIT_REV_ID: 5962b81feb2a9e0615bbd80df6049d5628464c17
+
+- [Qwen2.5-VL] Process Vision Pixel Images in bf16 in Tokenizer
+
+Convert image preprocessing to store pixel values as bfloat16 (uint16
+representation) instead of float32, following the InternVL pattern.
+This will potentially half the size of data transferred.
+
+- Use `float32_to_bfloat16_as_uint16()` conversion with proper rounding.
+- Update vision graph to accept bfloat16 inputs
+- Add zero-copy uint16→bfloat16 view before GPU execution
+
+Follow-up PR to organize the code.
+
+MODULAR_ORIG_COMMIT_REV_ID: 4588baca19b2b01395db237cd9c7ebd6b0d0ba39
+
+- [CI] Reduce CLA bot triggers
+
+Avoid some spammy messages
+
+MODULAR_ORIG_COMMIT_REV_ID: 2c925d66fda3771cd63b4a1775b31e45483f3a79
+
+- [bazel] Fix ALL_MOJOPKGS alias
+
+MODULAR_ORIG_COMMIT_REV_ID: 1382ea5bd771a21f6c6711656550e4c6ff728444
+
+- [stdlib] DOCS-1321: Corrects custom ops link for device context (#72937)
+
+MODULAR_ORIG_COMMIT_REV_ID: cad9e6bd595186b7ff52a47d0d2f57dc21776e1b
+
+- [stdlib] Mark `Tuple.__len__()` as builtin
+This makes it possible to use `Tuple.__len__()` in where clauses, which
+improves ergonomics a bit.
+
+MODULAR_ORIG_COMMIT_REV_ID: 954a790e0a64c7940804368d41d64998047a9d74
+
+- [Kernels] Constraint fp8 GMM to 1-CTA UMMA
+
+MODULAR_ORIG_COMMIT_REV_ID: 33e4174d728d17f1eb43e98744eed77ba3ef1c7a
+
+- [Models] Add language attention layer for Qwen3VL-MoE
+
+This PR adds an attention layer for the Qwen3VL-MoE decoder, as well as
+a layer test.
+
+MODULAR_ORIG_COMMIT_REV_ID: 0c445c7efab34aa5a791b5267784cc47f14e3c1e
+
+- [bazel] Move warning disable to separate cc_args
+
+This way it can apply to more action types
+
+MODULAR_ORIG_COMMIT_REV_ID: 9fa00c48eb7b8b2ddc5aed80631cb395024b3420
+
+- [kernels] Create iterator type for `MixedLayoutTensor`
+
+This creates a basic iterator type (just a minimal port of
+`LayoutTensorIter`). Currently `mask` is not supported, and I still need
+to create a way to get a tiled iterator from a tensor.
+
+MODULAR_ORIG_COMMIT_REV_ID: dda3066a3b3d8a776b53fd698f4bbf42de6175a7
+
+- [max] Re-disable broken macOS tests (#72944)
+
+Accidentally re-enabled while testing CI, they only break on OSS CI, not
+internal CI
+
+This partially reverts commit cb66df357342159c0c810dd9dd1a3ce82fee81b6.
+
+MODULAR_ORIG_COMMIT_REV_ID: 101db14a2c8ce750259bcb9c4888012e83559b95
+
+- Revert &#34;[mojo-lang] Struct extensions naming/importing changes&#34; (#72942)
+
+Reverts [Internal link]
+
+crashes tests on main:
+
+```
+0.	Program arguments: bazel-out/cfg/bin/KGEN/tools/mojo/mojo-compiler-only package -strip-file-prefix=. -o bazel-out/cfg/bin/open-source/max/mojo/stdlib/stdlib/stdlib.mojopkg open-source/max/mojo/stdlib/stdlib
+1.	Crash resolving decl signature at loc(&#34;open-source/max/mojo/stdlib/stdlib/algorithm/functional.mojo&#34;:1179:4)
+    &gt;&gt; fn elementwise[
+          ^...........
+    &gt;&gt;     func: fn[width: Int, rank: Int, alignment: Int = 1] (
+    &gt;&gt;         IndexList[rank]
+    &gt;&gt;     ) capturing [_] -&gt; None,
+    &gt;&gt;     simd_width: Int,
+```
+
+MODULAR_ORIG_COMMIT_REV_ID: 6a2d8e9ea66ec1fa15ce024a8eefd5ef8d34a987
+
+- [mojo-lang] Struct extensions naming/importing changes (#72612)
+
+Re-merges the compiler parts of
+[Internal link] which were always fine
+but caught up in the revert of the stdlib changes.
+
+This PR does three main changes:
+
+* Cleanup: Makes extensions (eg extension MyStruct) known to their
+parents not as their struct&#39;s name (&#34;MyStruct&#34;) but instead prefixed
+with &#34;extension:&#34; (&#34;extension:MyStruct&#34;). This makes it so
+lookupAndResolveDecl(&#34;MyStruct&#34;) doesn&#39;t return the extensions as well.
+This is good because we generally like finding and resolving as little
+as possible.
+* Makes extensions (eg extension MyStruct) also known to their parents
+as &#34;extension:&#34;. This is helpful when we want to look up &#34;all extensions
+in a given scope&#34;, which is useful for the next point.
+* Makes it so when we import anything from a module, we also import all
+extensions (we just look for anything named &#34;extension:&#34;).
+
+Note that this might not be the final design, this makes an assumption
+that if a file wants to use an extension, then that extension is in a
+file that is indirectly imported. It&#39;s similar to Rust/Swift/C#/Kotlin,
+but we might want to be more similar to Python, which just makes all
+extensions globally visible to everyone everywhere, despite all the
+spooky action at a distance that entails (doc incoming on this).
+
+MODULAR_ORIG_COMMIT_REV_ID: ff5f6def0da9f9f5c0ea73e3bdd9fc84b7c1437f
+
+- [CI] Test //max/... on macOS (#72843)
+
+MODULAR_ORIG_COMMIT_REV_ID: cb66df357342159c0c810dd9dd1a3ce82fee81b6
+
+- [bazel] Improve build perf on macOS
+
+With recent bazel changes there is a significant difference in perf when
+you have large directory
+trees being used in every action. In this case the sysroots have
+thousands of files,
+and each were symlinked individually. Now instead they are symlinked
+once as the top level
+directory, and everything under that comes with it.
+
+This affects linux as well but my experience testing was that the less
+memory you have the
+more of an issue it was, so testing on beefy remote Linux machines
+doesn&#39;t show as much of a wall
+time improvement.
+
+As a follow up I want to do this with the toolchain files as well, but
+there are 10x fewer than there
+were with the sysroots, so it&#39;s likely less of an issue.
+
+MODULAR_ORIG_COMMIT_REV_ID: 6b09e123066d56d96ed91e221fed8e400dd2895c
+
+- [stdlib] Change SIMD -&gt; Bool conversion to use `!pop.simd.reduce_or`
+
+This commit simplifies the implementation of the SIMD -&gt; Bool conversion
+method to use the recently added `!pop.simd.reduce_or` operation. This
+will, with some further changes, allow it to be marked as
+`@always_inline(&#34;builtin&#34;)`.
+
+An added benefit is that it also better supports floating-point SIMD
+vectors, which were previously not supported (though undocumented as
+such).
+
+MODULAR_ORIG_COMMIT_REV_ID: 760227a8594cea9c2c1d5c8d556f5d27909dffd1
+
+- [stdlib] Add support for _malloc to not be allowed to use as runtime
+code for GPU.
+
+- [x] Add support for _malloc to not be allowed to use as runtime code
+for GPU.
+- [x] Add test
+
+MODULAR_ORIG_COMMIT_REV_ID: d9e91858f5727a502a192b078edce63bcde7cb43
+
+- [Kernels] FP8 GMM with 1d2d FP32 scaling
+
+MODULAR_ORIG_COMMIT_REV_ID: c15f9163928723d33d04bbe3fb6d7587cb52cac5
+
+- [max] Reduce number of unused layers during DeepSeek R1 construction (#72811)
+
+The constructors for many layer types (e.g. Linear, MoE, MLP) initialize
+their child layer during construction. When sharding, the child layers
+are discarded in favor of the sharded versions of those layers.
+
+This results in a large amount of time spent constructing various layer
+instances that are never used (small millions of layers).
+
+This change reworks the constructors for Linear, MoE, and MLP layers to
+not build their child layers during the sharding process. This drops the
+graph build time from ~27 seconds to ~14 seconds.
+
+MODULAR_ORIG_COMMIT_REV_ID: d169bd32b5c55edec57d274c67e82ccd63dd013b
+
+- [Kernels] Remove TensorCore unqualified access
+
+Remove unqualified struct parameter access from `TensorCore` in
+tensor_core.mojo.
+This removes a compiler warning.
+
+MODULAR_ORIG_COMMIT_REV_ID: 0dfe76fe82a704e611bf08bc76fe4545ab63f19f
+
+- [stdlib][CUDA] Use arch_name in gpu_info.mojo
+
+`ctx.arch_name()` now returns the correct value for CUDA
+
+MODULAR_ORIG_COMMIT_REV_ID: c8d78edfa1db9cfe9b1b5cca8d84b6ec163e2284
+
+- [stdlib] Simplify SIMD dunder relational methods
+
+This commit simplifies several SIMD dunder relational methods.
+
+The methods work by calling into their respective non-dunder variants,
+which return SIMD bool vectors. Those are then used to create a `Bool`
+using the constructor and the `ImplicitlyBoolable` trait, which calls
+back into SIMD&#39;s `__bool__` method.
+
+Instead, we can avoid this roundtrip by calling `__bool__` ourselves.
+This keeps things in the SIMD domain and avoids the trait interface.
+
+An added benefit of this is that this specific `Bool` constructor is not
+supported by `@always_inline(&#34;builtin&#34;)` due to an unsupported argument
+convention. Future work will thus be able to mark these dunder
+relational methods `@always_inline(&#34;builtin&#34;)` and enable better support
+for SIMD types in `where` clauses.
+
+MODULAR_ORIG_COMMIT_REV_ID: edcd83ea6275bb1784109eac742f8f854bab67eb</div>
+</div>
+
+<a href="../project/modular_modular.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
