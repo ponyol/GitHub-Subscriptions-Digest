@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (9 commits) - google/adk-python - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (9 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/google_adk-python.html">google/adk-python</a> /
+    Updates in main (9 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/google_adk-python.html">google/adk-python</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2025-12-02 02:08 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/google/adk-python/commits/main" target="_blank">https://github.com/google/adk-python/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление значительно улучшает экосистему ADK, вводя постоянное локальное хранение сессий и артефактов с использованием SQLite по умолчанию. Крупная переработка `adk_stale_agent` оптимизирует использование API с помощью GraphQL и фильтрации на стороне сервера, что устраняет ошибки квоты и повышает эффективность вызовов Gemini API. Также улучшена обработка транскрипций Gemini API, предоставлена более гибкая настройка моделей `LlmAgent` и добавлен эндпоинт для сохранения артефактов.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix: Flush pending transcriptions on turn/generation complete or interrupt for Gemini API
+
+The Gemini API may not always send an explicit transcription finished signal. This change ensures that any buffered input or output transcription text is yielded as a finished transcription when a turn is completed, generation is complete, or the session is interrupted.
+
+Also, refined the check for `event.partial` in runners.py to be more explicit.
+
+Co-authored-by: Hangfei Lin &lt;hangfei@google.com&gt;
+PiperOrigin-RevId: 839008606
+
+- fix: allow LlmAgent model to be provided via CodeConfig
+
+LlmAgentConfig.model now accepts either a plain model string or a CodeConfig. This lets YAML configs pass a LiteLLM instance with managed API settings (e.g., api_base and fallbacks) so agents can hit KimiK2’s managed endpoint instead of only the default modelID.
+
+Close #3579
+
+Co-authored-by: George Weale &lt;gweale@google.com&gt;
+PiperOrigin-RevId: 838978654
+
+- fix: Add a FastAPI endpoint for saving artifacts
+
+This change adds new `POST` endpoint `/apps/{app_name}/users/{user_id}/sessions/{session_id}/artifacts` to the ADK web server. This endpoint lets clients to save new artifacts associated with a specific session. The endpoint uses `SaveArtifactRequest` and returns `SaveArtifactResponse`, including the version and canonical URI of the saved artifact.
+
+Close #1975
+
+Co-authored-by: George Weale &lt;gweale@google.com&gt;
+PiperOrigin-RevId: 838977880
+
+- feat!: Introduction of ADK folder for local session and artifact storage
+
+Default CLI session storage to SQLite instead of in-memory
+
+Previously, adk run and adk web used in-memory session storage by default, causing sessions to be lost on restart. Now sessions persist to .adk/session.db automatically. To use in-memory storage, pass --session-service-uri memory://
+
+Co-authored-by: George Weale &lt;gweale@google.com&gt;
+PiperOrigin-RevId: 838975328
+
+- chore: Move simulation related modules to a sub-package in evaluation
+
+Co-authored-by: Keyur Joshi &lt;keyurj@google.com&gt;
+PiperOrigin-RevId: 838904075
+
+- fix: Optimize Stale Agent with GraphQL and Search API to resolve 429 Quota errors
+
+Merge https://github.com/google/adk-python/pull/3700
+
+### Description
+This PR refactors the `adk_stale_agent` to address `429 RESOURCE_EXHAUSTED` errors encountered during workflow execution. The previous implementation was inefficient in fetching issue history (using pagination over the REST API) and lacked server-side filtering, causing excessive API calls and huge token consumption that breached Gemini API quotas.
+
+The new implementation switches to a **GraphQL-first approach**, implements server-side filtering via the Search API, adds robust concurrency controls, and significantly improves code maintainability through modular refactoring.
+
+### Root Cause of Failure
+The previous workflow failed with the following error due to passing too much context to the LLM and processing too many irrelevant issues:
+```text
+google.genai.errors.ClientError: 429 RESOURCE_EXHAUSTED.
+Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_paid_tier_input_token_count
+```
+### Key Changes
+
+#### 1. Optimization: REST → GraphQL (`agent.py`)
+*   **Old:** Fetched issue comments and timeline events using multiple paginated REST API calls (`/timeline`).
+*   **New:** Implemented `get_issue_state` using a single **GraphQL** query. This fetches comments, `userContentEdits`, and specific timeline events (Labels, Renames) in one network request.
+*   **Refactoring:** The complex analysis logic has been decomposed into focused helper functions (_fetch_graphql_data, _build_history_timeline, _replay_history_to_find_state) for better readability and testing.
+*   **Configurable:** Added GRAPHQL_COMMENT_LIMIT and GRAPHQL_TIMELINE_LIMIT settings to tune context depth
+*   **Impact:** Drastically reduces the data payload size and eliminates multiple API round-trips, significantly lowering the token count sent to the LLM.
+
+#### 2. Optimization: Server-Side Filtering (`utils.py`)
+*   **Old:** Fetched *all* open issues via REST and filtered them in Python memory.
+*   **New:** Uses the GitHub Search API (`get_old_open_issue_numbers`) with `created:&lt;DATE` syntax.
+*   **Impact:** Only fetches issue numbers that actually meet the age threshold, preventing the agent from wasting cycles and tokens on brand-new issues.
+
+#### 3. Concurrency &amp; Rate Limiting (`main.py` &amp; `settings.py`)
+*   **Old:** Sequential execution loop.
+*   **New:** Implemented `asyncio.gather` with a configurable `CONCURRENCY_LIMIT` (set to 3).
+*   **New:** Added `urllib3` retry strategies (exponential backoff) in `utils.py` to handle GitHub API rate limits (HTTP 429) gracefully.
+
+#### 4. Logic Improvements (&#34;Ghost Edits&#34;)
+*   **New Feature:** The agent now detects &#34;Ghost Edits&#34; (where an author updates the issue description without posting a new comment).
+*   **Action:** If a silent edit is detected on a stale candidate, the agent now alerts maintainers instead of marking it stale, preventing false positives.
+
+### File Comparison Summary
+
+| File | Change |
+| :--- | :--- |
+| `main.py` | Switched from `InMemoryRunner` loop to `asyncio` chunked processing. Added execution timing and API usage logging. |
+| `agent.py` | Replaced REST logic with GraphQL query. Added logic to handle silent body edits. Decomposed giant get_issue_state into helper functions with docstrings. Added _format_days helper. |
+| `utils.py` | Added `HTTPAdapter` with Retries. Added `get_old_open_issue_numbers` using Search API. |
+| `settings.py` | Removed `ISSUES_PER_RUN`; added configuration for CONCURRENCY_LIMIT, SLEEP_BETWEEN_CHUNKS, and GraphQL limits. |
+| `PROMPT_INSTRUCTIONS.txt` | Simplified decision tree; removed date calculation responsibility from LLM. |
+
+### Verification
+The new logic minimizes token usage by offloading date calculations to Python and strictly limiting the context passed to the LLM to semantic intent analysis (e.g., &#34;Is this a question?&#34;).
+
+*   **Metric Check:** The workflow now tracks API calls per issue to ensure we stay within limits.
+*   **Safety:** Silent edits by users now correctly reset the &#34;Stale&#34; timer.
+*   **Maintainability:** All complex logic is now isolated in typed helper functions with comprehensive docstrings.
+
+Co-authored-by: Xuan Yang &lt;xygoogle@google.com&gt;
+COPYBARA_INTEGRATE_REVIEW=https://github.com/google/adk-python/pull/3700 from ryanaiagent:feat/improve-stale-agent 888064eff125ae74f7c3a9ad6c74f98de80243a2
+PiperOrigin-RevId: 838885530
+
+- chore: Adding Eval Client label to model calls made during evals
+
+Co-authored-by: Ankur Sharma &lt;ankusharma@google.com&gt;
+PiperOrigin-RevId: 838857867
+
+- fix: Refactor Anthropic integration to support both direct API and Vertex AI
+
+This change introduces an `AnthropicLlm` base class for direct Anthropic API calls using `AsyncAnthropic`. The existing `Claude` class now inherits from `AnthropicLlm` and is specialized to use `AsyncAnthropicVertex` for models hosted on Vertex AI. The `messages.create` call is now properly awaited
+
+Merge: https://github.com/google/adk-python/pull/2904
+
+Co-authored-by: George Weale &lt;gweale@google.com&gt;
+PiperOrigin-RevId: 838851026
+
+- chore: Add warning for full resource path in VertexAiMemoryBankService agent_engine_id
+
+This change updates the docstring for `agent_engine_id` to clarify that only the resource ID is expected. It also adds a warning log if the provided `agent_engine_id` contains a &#39;/&#39; character, suggesting it might be a full resource path, and provides guidance on how to extract the ID. Unit tests are added to verify the warning behavior.
+
+Merge: https://github.com/google/adk-python/pull/2941
+
+Co-authored-by: George Weale &lt;gweale@google.com&gt;
+PiperOrigin-RevId: 838845022</div>
+</div>
+
+<a href="../project/google_adk-python.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
