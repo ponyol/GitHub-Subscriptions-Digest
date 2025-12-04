@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (3 commits) - browserbase/stagehand - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (3 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/browserbase_stagehand.html">browserbase/stagehand</a> /
+    Updates in main (3 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/browserbase_stagehand.html">browserbase/stagehand</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2025-12-04 02:27 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/browserbase/stagehand/commits/main" target="_blank">https://github.com/browserbase/stagehand/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление добавляет всестороннюю поддержку колбэков (callbacks) в агент Stagehand, позволяя пользователям подключаться к различным этапам его выполнения как в потоковом, так и в непотоковом режимах. Новые интерфейсы колбэков позволяют изменять настройки перед шагами, реагировать на завершение шага, обрабатывать потоковые фрагменты, управлять завершением потока или ошибками. Реализация обеспечивает строгую типобезопасность, предотвращая некорректное использование потоковых колбэков в непотоковых контекстах на этапе компиляции и во время выполнения.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- [fix]: dont attach to targets if already attached (#1346)
+
+- Agent callbacks (#1316)
+
+## Summary
+
+Adds callback support to the Stagehand agent for both streaming and
+non-streaming execution modes, allowing users to hook into various
+stages of agent execution.
+
+## Changes
+
+### New Types (`lib/v3/types/public/agent.ts`)
+
+Added callback interfaces for agent execution:
+
+- **`AgentCallbacks`** - Base callbacks shared between modes:
+  - `prepareStep` - Modify settings before each LLM step
+  - `onStepFinish` - Called after each step completes
+
+- **`AgentExecuteCallbacks`** - Non-streaming mode callbacks (extends
+`AgentCallbacks`)
+
+- **`AgentStreamCallbacks`** - Streaming mode callbacks (extends
+`AgentCallbacks`):
+  - `onChunk` - Called for each streamed chunk
+  - `onFinish` - Called when stream completes
+  - `onError` - Called on stream errors
+  - `onAbort` - Called when stream is aborted
+
+- **`AgentExecuteOptionsBase`** - Base options without callbacks
+- **`AgentExecuteOptions`** - Non-streaming options with
+`AgentExecuteCallbacks`
+- **`AgentStreamExecuteOptions`** - Streaming options with
+`AgentStreamCallbacks`
+
+### Handler Updates (`lib/v3/handlers/v3AgentHandler.ts`)
+
+- Modified `createStepHandler` to accept optional user callback
+- Updated `execute()` to pass callbacks to `generateText`
+- Updated `stream()` to pass callbacks to `streamText`
+
+### Type Safety
+
+Added compile-time enforcement that streaming-only callbacks (`onChunk`,
+`onFinish`, `onError`, `onAbort`) can only be used with `stream: true`:
+
+```typescript
+// Works - streaming callbacks with stream: true
+const agent = stagehand.agent({ stream: true });
+await agent.execute({
+  instruction: &#34;...&#34;,
+  callbacks: { onChunk: async (chunk) =&gt; console.log(chunk) }
+});
+
+// Compile error - streaming callbacks without stream: true
+const agent = stagehand.agent({ stream: false });
+await agent.execute({
+  instruction: &#34;...&#34;,
+  callbacks: { onChunk: async (chunk) =&gt; console.log(chunk) }
+  // Error: &#34;This callback requires &#39;stream: true&#39; in AgentConfig...&#34;
+});
+```
+
+## Type Castings Explained
+
+Several type assertions were necessary due to TypeScript&#39;s limitations
+with conditional types:
+
+### 1. Callback extraction in handlers
+
+```typescript
+const callbacks = (instructionOrOptions as AgentExecuteOptions).callbacks as
+  | AgentExecuteCallbacks
+  | undefined;
+```
+
+**Why:** `instructionOrOptions` can be `string | AgentExecuteOptions`.
+When it&#39;s a string, there are no callbacks. We cast after the
+`prepareAgent` call because at that point we know it&#39;s been resolved to
+options.
+
+### 2. Streaming vs non-streaming branch in v3.ts
+
+```typescript
+result = await handler.execute(
+  instructionOrOptions as string | AgentExecuteOptions,
+);
+```
+
+**Why:** The implementation signature accepts `string |
+AgentExecuteOptions | AgentStreamExecuteOptions` to satisfy both
+overloads, but within the non-streaming branch we know it&#39;s the
+non-streaming type. TypeScript can&#39;t narrow based on the `isStreaming`
+runtime check.
+
+### 3. Error fallback in stream()
+
+```typescript
+return {
+  textStream: (async function* () {})(),
+  result: resultPromise,
+} as unknown as AgentStreamResult;
+```
+
+**Why:** When `prepareAgent` fails in streaming mode, we return a
+minimal object with just `textStream` and `result`. This doesn&#39;t satisfy
+all properties of `StreamTextResult`, but the `result` promise will
+reject with the actual error. The double cast (`as unknown as`) is
+needed because TypeScript knows this partial object doesn&#39;t match the
+full type.
+
+## Usage Example
+
+```typescript
+const agent = stagehand.agent({
+  stream: true,
+  model: &#34;anthropic/claude-sonnet-4-20250514&#34;,
+});
+
+const result = await agent.execute({
+  instruction: &#34;Search for something&#34;,
+  maxSteps: 20,
+  callbacks: {
+    prepareStep: async (ctx) =&gt; {
+      console.log(&#34;Preparing step...&#34;);
+      return ctx;
+    },
+    onStepFinish: async (event) =&gt; {
+      console.log(`Step finished: ${event.finishReason}`);
+      if (event.toolCalls) {
+        for (const tc of event.toolCalls) {
+          console.log(`Tool used: ${tc.toolName}`);
+        }
+      }
+    },
+    onChunk: async (chunk) =&gt; {
+      // Process each chunk
+    },
+    onFinish: (event) =&gt; {
+      console.log(`Completed in ${event.steps.length} steps`);
+    },
+  },
+});
+
+for await (const chunk of result.textStream) {
+  process.stdout.write(chunk);
+}
+
+const finalResult = await result.result;
+console.log(finalResult.message);
+```
+
+## Testing
+
+- Added `agent-callbacks.spec.ts` with tests for:
+  - Non-streaming callbacks (`onStepFinish`, `prepareStep`)
+- Streaming callbacks (`onChunk`, `onFinish`, `prepareStep`,
+`onStepFinish`)
+  - Combined callback usage
+  - Tool call information in callbacks
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Adds lifecycle callbacks to the Stagehand agent for both non-streaming
+and streaming modes, letting users hook into steps, chunks, finish, and
+errors. Strong type safety and runtime validation prevent using
+streaming-only callbacks without stream: true; callbacks remain behind
+experimental.
+
+- **New Features**
+- Added runtime errors in non-streaming mode when
+onChunk/onFinish/onError/onAbort are provided, with clear messages
+instructing to set stream: true.
+
+&lt;sup&gt;Written for commit 15c08d181385129b95fcd2d8365ec6844d8e380b.
+Summary will update automatically on new commits.&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+---------
+
+Co-authored-by: greptile-apps[bot] &lt;165735046+greptile-apps[bot]@users.noreply.github.com&gt;
+
+- Update extract docs + remove redundant section (#1342)
+
+# why
+
+- v2 jump links for `extract` were broken
+- v3 jump links for `extract` were also broken + included a redundant
+section
+
+# what changed
+
+&lt;img width=&#34;707&#34; height=&#34;797&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/9b4bce83-a126-4627-854e-90d2b812b19a&#34;
+/&gt;
+
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Fix broken jump links in the v2 and v3 extract docs and remove a
+redundant section to improve navigation and clarity.
+
+- **Bug Fixes**
+  - v2: Updated &#34;prompt-only&#34; anchor to #prompt-only-extraction.
+- v3: Standardized anchors to #instruction-only and #no-parameters;
+fixed Card link to #basic-schema.
+- v3: Removed duplicate &#34;Using extract()&#34; section; renamed to &#34;Return
+value&#34;.
+
+&lt;sup&gt;Written for commit 29acc0d81a4cb07facddab2797ef125ed499ba94.
+Summary will update automatically on new commits.&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;</div>
+</div>
+
+<a href="../project/browserbase_stagehand.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
