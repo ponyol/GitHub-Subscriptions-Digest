@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (6 commits) - infiniflow/ragflow - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (6 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/infiniflow_ragflow.html">infiniflow/ragflow</a> /
+    Updates in main (6 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/infiniflow_ragflow.html">infiniflow/ragflow</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2025-12-18 03:35 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/infiniflow/ragflow/commits/main" target="_blank">https://github.com/infiniflow/ragflow/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Основное обновление устраняет критические проблемы в исполнителе задач, решая ошибки `TOO_MANY_CONNECTIONS` путем оптимизации обработки соединений с базой данных Infinity и исправляя ошибку парсера MinerU, связанную с блоками `DISCARDED`. Также добавлена новая функция загрузки изображений в диалоговом окне редактирования чанков. Помимо этого, обновление включает незначительные исправления ошибок при редактировании изображений и несколько рефакторингов для улучшения обработки предупреждений IDE, согласованности временных меток и расчетов общего количества Cohere.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Fix: image edit in edit_chunk (#12009)
+
+### What problem does this PR solve?
+
+Fix: image edit in edit_chunk #11971
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+- Fix IDE warnings (#12010)
+
+### What problem does this PR solve?
+
+As title
+
+### Type of change
+
+- [x] Refactoring
+
+Signed-off-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Refactor: improve cohere calculate total counts (#12007)
+
+### What problem does this PR solve?
+
+improve cohere calculate total counts
+
+### Type of change
+
+
+- [x] Refactoring
+
+- task executor issues (#12006)
+
+### What problem does this PR solve?
+
+**Fixes #8706** - `InfinityException: TOO_MANY_CONNECTIONS` when running
+multiple task executor workers
+
+### Problem Description
+
+When running RAGFlow with 8-16 task executor workers, most workers fail
+to start properly. Checking logs revealed that workers were
+stuck/hanging during Infinity connection initialization - only 1-2
+workers would successfully register in Redis while the rest remained
+blocked.
+
+### Root Cause
+
+The Infinity SDK `ConnectionPool` pre-allocates all connections in
+`__init__`. With the default `max_size=32` and multiple workers (e.g.,
+16), this creates 16×32=512 connections immediately on startup,
+exceeding Infinity&#39;s default 128 connection limit. Workers hang while
+waiting for connections that can never be established.
+
+### Changes
+
+1. **Prevent Infinity connection storm** (`rag/utils/infinity_conn.py`,
+`rag/svr/task_executor.py`)
+- Reduced ConnectionPool `max_size` from 32 to 4 (sufficient since
+operations are synchronous)
+- Added staggered startup delay (2s per worker) to spread connection
+initialization
+
+2. **Handle None children_delimiter** (`rag/app/naive.py`)
+   - Use `or &#34;&#34;` to handle explicitly set None values from parser config
+
+3. **MinerU parser robustness** (`deepdoc/parser/mineru_parser.py`)
+   - Use `.get()` for optional output fields that may be missing
+- Fix DISCARDED block handling: change `pass` to `continue` to skip
+discarded blocks entirely
+
+### Why `max_size=4` is sufficient
+
+| Workers | Pool Size | Total Connections | Infinity Limit |
+|---------|-----------|-------------------|----------------|
+| 16      | 32        | 512               | 128 ❌         |
+| 16      | 4         | 64                | 128 ✅         |
+| 32      | 4         | 128               | 128 ✅         |
+
+- All RAGFlow operations are synchronous: `get_conn()` → operation →
+`release_conn()`
+- No parallel `docStoreConn` operations in the codebase
+- Maximum 1-2 concurrent connections needed per worker; 4 provides
+safety margin
+
+### MinerU DISCARDED block bug
+
+When MinerU returns blocks with `type: &#34;discarded&#34;` (headers, footers,
+watermarks, page numbers, artifacts), the previous code used `pass`
+which left the `section` variable undefined, causing:
+
+- **UnboundLocalError** if DISCARDED is the first block
+- **Duplicate content** if DISCARDED follows another block (stale value
+from previous iteration)
+
+**Root cause confirmed via MinerU source code:**
+
+From
+[`mineru/utils/enum_class.py`](https://github.com/opendatalab/MinerU/blob/main/mineru/utils/enum_class.py#L14):
+```python
+class BlockType:
+    DISCARDED = &#39;discarded&#39;
+    # VLM 2.5+ also has: HEADER, FOOTER, PAGE_NUMBER, ASIDE_TEXT, PAGE_FOOTNOTE
+```
+
+Per [MinerU
+documentation](https://opendatalab.github.io/MinerU/reference/output_files/),
+discarded blocks contain content that should be filtered out for clean
+text extraction.
+
+**Fix:** Changed `pass` to `continue` to skip discarded blocks entirely.
+
+### Testing
+
+- Verified all 16 workers now register successfully in Redis
+- All workers heartbeating correctly
+- Document parsing works as expected
+- MinerU parsing with DISCARDED blocks no longer crashes
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+---------
+
+Co-authored-by: user210 &lt;user210@rt&gt;
+
+- Refactor: Improve the timestamp consistency  (#11942)
+
+### What problem does this PR solve?
+
+Improve the timestamp consistency 
+
+### Type of change
+- [x] Refactoring
+
+- feat: add image uploader in edit chunk dialog (#12003)
+
+### What problem does this PR solve?
+
+Add image uploader in edit chunk dialog for replacing image chunk
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)</div>
+</div>
+
+<a href="../project/infiniflow_ragflow.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

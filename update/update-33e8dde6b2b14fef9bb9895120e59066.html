@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (4 commits) - facebookresearch/faiss - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (4 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a> /
+    Updates in main (4 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2025-12-18 03:26 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/facebookresearch/faiss/commits/main" target="_blank">https://github.com/facebookresearch/faiss/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Faiss теперь поддерживает многобитное квантование (от 1 до 9 бит) для индексов `IndexRaBitQFastScan` и `IndexIVFRaBitQFastScan`. Это улучшение позволяет достичь более высокой точности и улучшенного показателя recall на больших наборах данных, сохраняя при этом производительность FastScan и обратную совместимость. Кроме того, реализован новый `IndexRefinePanorama`, который интегрирует поточечную доработку Panorama для ускорения поисковых запросов до 2 раз за счет эффективной обработки подмножеств кандидатов.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Add multi-bit support for IndexIVFRaBitQFastScan (#4722)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4722
+
+Extends IndexIVFRaBitQFastScan to support multi-bit quantization (1-9 bits), complementing the flat IndexRaBitQFastScan multi-bit implementation. This enables higher precision quantization with IVF partitioning for improved recall on large-scale datasets while maintaining FastScan performance characteristics.
+
+The implementation uses a two-stage search strategy: fast 1-bit SIMD filtering followed by accurate ex-bit refinement with error-bound-based candidate selection. Backward compatible serialization uses separate fourcc codes (&#34;Iwrf&#34; for 1-bit, &#34;Iwrm&#34; for multi-bit), and factory string support follows the same pattern as flat multi-bit: &#34;IVF{nlist},RaBitQfs{nb_bits}&#34;.
+
+Reviewed By: mdouze
+
+Differential Revision: D88869280
+
+fbshipit-source-id: 8630fe14950897fa7357fcd1743aa183399c01a6
+
+- Implement `IndexRefinePanorama` (#4683)
+
+Summary:
+This PR implements `IndexRefinePanorama`, integrating point-wise Panorama (as specified in the [paper](https://arxiv.org/abs/2510.00566)) into `IndexRefine`.
+
+## IndexRefinePanorama
+In order to enable point-wise Panorama refinement on a subset of candidates, I have added a `search_subset` to Index.h. There are two main reasons behind this:
+1. `IndexFlat`&#39;s `compute_distance_subset` is not an API Panorama can conform to. By definition, Panorama&#39;s gains come from _avoiding_ full distance computations. Thus, a new `search_subset` is introduced.
+2. Since Panorama indexes are typically used within an `IndexPreTransform`, both `IndexPreTransform` and `IndexFlatPanorama` need to have this new `search_subset`. I could just define it within those indexes, but then checking that `IndexRefinePanorama`&#39;s `refine_index` has `search_subset` becomes a hairy mess of `dynamic_casts`.
+
+For the above reasons, I have defined `search_subset` in Index.h, with a default implementation that throws an error. I would understand if this approach is not preferred and am open to any suggestions folks may have.
+
+## Speedups
+For two key reasons, `IndexRefinePanorama` is expected to have less speedups than other Panorama indexes:
+1. Loss of contiguous memory accesses: Since the `refine_index` operates on a (typically sparse) subset of the total dataset, we lose all gains due to memory layout changes and batching.
+2. The unavoidable cost of the `base_index`
+
+Despite these limitations, `IndexRefinePanorama` is able to provide 2x end-to-end speedups (seen below).
+
+## Testing
+1. Correctness tests can be found in `tests/test_refine_panorama.py`
+4. A benchmark can be found in `benchs/bench_refine_panorama.py,` yielding the following results:
+```
+Benchmark on GIST1M with base &#39;IVF256,PQ60x4fs&#39;, k=10, nq=100
+nprobe  k_factor   recall_flat   qps_flat   recall_pano   qps_pano   dims_scanned(%)  speedup(x)
+     4      1.0      0.037000   11705.14      0.037000   11107.50            100.00       0.95x
+     4      8.0      0.149000    7341.04      0.149000    7331.16             53.14       1.00x
+     4     64.0      0.336000    2010.27      0.336000    2783.57             26.82       1.38x
+     4    256.0      0.404000     609.62      0.404000    1086.37             19.66       1.78x
+     4   1024.0      0.425000     181.52      0.425000     422.38             15.52       2.33x
+    16      1.0      0.036000    5894.10      0.036000    5702.58            100.00       0.97x
+    16      8.0      0.156000    3381.69      0.156000    3418.20             53.61       1.01x
+    16     64.0      0.473000    1473.81      0.473000    1847.22             27.05       1.25x
+    16    256.0      0.700000     559.01      0.700000     937.59             20.09       1.68x
+    16   1024.0      0.818000     171.81      0.818000     365.66             16.28       2.13x
+    64      1.0      0.036000    1876.12      0.036000    1778.08            100.00       0.95x
+    64      8.0      0.157000    1181.66      0.157000    1292.00             53.58       1.09x
+    64     64.0      0.488000     783.60      0.488000    1146.26             26.94       1.46x
+    64    256.0      0.741000     422.59      0.741000     635.95             20.04       1.50x
+    64   1024.0      0.942000     158.79      0.942000     299.14             16.32       1.88x
+   256      1.0      0.036000     650.09      0.036000     640.78            100.00       0.99x
+   256      8.0      0.157000     553.64      0.157000     617.19             53.52       1.11x
+   256     64.0      0.491000     450.86      0.491000     549.18             26.93       1.22x
+   256    256.0      0.746000     309.26      0.746000     413.02             20.02       1.34x
+   256   1024.0      0.948000     138.77      0.948000     232.52             16.31       1.68x
+   ```
+&lt;img width=&#34;2361&#34; height=&#34;1470&#34; alt=&#34;bench_refine_panorama&#34; src=&#34;https://github.com/user-attachments/assets/c77d44ca-4ac7-4b0f-a533-13b953aa9750&#34; /&gt;
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4683
+
+Reviewed By: limqiying
+
+Differential Revision: D87448314
+
+Pulled By: mnorris11
+
+fbshipit-source-id: fd8987dda74eab7ca32bf1251827b51ead96cfa1
+
+- Add multi-bit support for IndexRaBitQFastScan (#4721)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4721
+
+Extends IndexRaBitQFastScan to support multi-bit quantization (1-9 bits) while maintaining backward compatibility with existing 1-bit indexes. This unifies the API with IndexRaBitQ and enables higher precision quantization for improved recall.
+
+Key improvements:
+- Unified constructor pattern matching IndexRaBitQ with nb_bits parameter
+- Backward compatible serialization using separate fourcc codes (&#34;Irfs&#34; for 1-bit, &#34;Irfm&#34; for multi-bit)
+- Factory string support for multi-bit construction (e.g., &#34;RaBitQfs4&#34;)
+
+Reviewed By: mdouze
+
+Differential Revision: D88495746
+
+fbshipit-source-id: 424878c2e64a943d86a90aafb10802285ae47cbe
+
+- Update SVS binary to v0.1.0 (#4726)
+
+Summary:
+Updates SVS binary and adds `CACHE STRING` to allow users to set SVS_URL when running cmake
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4726
+
+Reviewed By: zoeyeye
+
+Differential Revision: D89343512
+
+Pulled By: mnorris11
+
+fbshipit-source-id: a538f02d250edcbcf4b95de223ed3319436c1f55</div>
+</div>
+
+<a href="../project/facebookresearch_faiss.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
