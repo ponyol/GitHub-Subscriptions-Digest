@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (57 commits) - modular/modular - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (57 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/modular_modular.html">modular/modular</a> /
+    Updates in main (57 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/modular_modular.html">modular/modular</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2025-12-19 21:59 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/modular/modular/commits/main" target="_blank">https://github.com/modular/modular/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Этот выпуск вводит выражения `comptime(x)` для оценки во время компиляции и значительно улучшает опыт разработчиков благодаря подавлению частых обновлений в LSP, снижая задержки при наборе текста. Основные обновления API включают миграцию ядер матричного умножения для CPU на `UnsafePointer` и добавление конструктора без владения для `DeviceContext` с целью улучшения производительности. Документация для указателей получила важные исправления в виде добавления недостающих инструкций импорта, а также была расширена поддержка платформ для Apple GPU и MI355.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Update lockfiles to point to latest nightly version: 26.1.0.dev2025121919
+
+- [External] [docs] Add missing import statements to pointer documentation (#74455)
+
+[External] [docs] Add missing import statements to pointer documentation
+
+## Summary
+
+Add `from memory import` statements to code examples in the &#34;Intro to
+pointers&#34; documentation.
+
+## Problem
+
+Fixes modular/modular#5630
+
+The pointer documentation shows code examples using `Pointer`,
+`OwnedPointer`, and `ArcPointer` without including the required import
+statements. This causes confusion and errors for newcomers trying to run
+the example code.
+
+## Solution
+
+Added the following import statements to standalone code examples:
+- `from memory import OwnedPointer` (first example and OwnedPointer
+section)
+- `from memory import Pointer` (Pointer section)
+- `from memory import ArcPointer` (ArcPointer section)
+
+## Testing
+
+Verified that the documented code examples compile and run correctly
+with the added imports using Mojo 0.26.1.0.dev2025121305.
+
+Without import:
+```
+error: use of unknown declaration &#39;OwnedPointer&#39;
+```
+
+With import: Works correctly.
+
+Signed-off-by: magi8101 &lt;mj7841@srmist.edu.in&gt;
+ORIGINAL_AUTHOR=Magi Sharma J &lt;mj7841@srmist.edu.in&gt;
+ORIGINAL_USER=@magi8101
+
+Signed-off-by: magi8101 &lt;mj7841@srmist.edu.in&gt;
+Co-authored-by: Magi Sharma J &lt;mj7841@srmist.edu.in&gt;
+Closes modular/modular#5652
+MODULAR_ORIG_COMMIT_REV_ID: 395db32c087865a9dc2995859b2b7a6f0fdb2de5
+
+- [DeviceContext] Add non-owning constructor to DeviceContext
+
+# Background
+
+The lifetime of a DeviceContext object is maintained by a reference
+count in C++. The Mojo DeviceContext is just a wrapper that holds a
+pointer to the C++ object, forwards all calls through the FFI, and
+maintains an associated refcount.
+
+Within the graph, the lifetime of each DeviceContext is managed by the
+graph compiler. Mojo Kernels that work with a DeviceContext receive a
+DeviceContextPtr argument, which represents a pointer to an existing C++
+DeviceContext object. Dereferencing DeviceContextPtr calls a private
+constructor of DeviceContext that simply initializes the internal
+pointer and bypasses the regular constructor call.
+
+# Problem
+
+The documentation for DeviceContextPtr states that we do not increment
+the reference count when dereferencing to create a DeviceContext object:
+
+Note: When initializing a `DeviceContext` from a pointer, the refcount
+is not
+    incremented. This is considered safe because `get_device_context()`
+is only used within kernels and the `DeviceContext` lifetime is managed
+    by the graph compiler.
+
+This is not accurate, we do call retain and release, which adds a small
+amount of overhead when working with these objects.
+
+    @doc_private
+    fn __init__(out self, ctx_ptr: _DeviceContextPtr):
+&#34;&#34;&#34;Create a Mojo DeviceContext from a pointer to an existing C++ object.
+        &#34;&#34;&#34;
+        self._handle = ctx_ptr
+        self._retain()
+
+But AsyncRT_DeviceContext_release also calls checkPendingWork(), which
+can invoke event handlers and do other work with the context. As a
+result, seemingly cheap calls like getting the device ID can force an
+expensive context switch and do arbitrary work.
+
+# Changes
+
+Add an &#34;owning&#34; to DeviceContext boolean to mark whether an instance
+owns a reference count to the C++ object. When we create a DeviceContext
+via the private constructor, owning is set to false. When we move or
+copy a DeviceContext, propagate the owning flag. Objects with
+owning=False should not call release upon destruction.
+MODULAR_ORIG_COMMIT_REV_ID: 475842823ba91b537ad9f67550a87ba72610d99a
+
+- [docs] Cleanup semantic formatting
+
+Use numbered lists for simple procedures (instead of headings) and use
+headings in the appropriate semantic order (H2 should always be followed
+by H3, followed by H4, etc.).
+
+MODULAR_ORIG_COMMIT_REV_ID: 42195af31ae616b9c75a085de44d5926938328ac
+
+- [Docs] Add kbench link to the MAX tools sidebar.
+
+MODULAR_ORIG_COMMIT_REV_ID: 5dd3ef0db0c22c56a8597bcf50c961088f6f36c8
+
+- [stdlib] feat: Mark `Movable` as `@explicit_destroy`
+
+Generic code using `T: Movable` today may want to change to `T: Movable
+&amp; ImplicitlyDestructible` to preserve its previous behavior.
+
+MODULAR_ORIG_COMMIT_REV_ID: 7546cb52b278917abf489eaeeadd0669c8681bb6
+
+- [kernels][stdlib] Get a simple gemm kernel working
+
+MODULAR_ORIG_COMMIT_REV_ID: 5bd608c32acba80a4ee669030085f9fce9c4e10e
+
+- [Models] Pass position ids to Qwen3VL attention kernel
+
+MODULAR_ORIG_COMMIT_REV_ID: 1b6bf61385567be92b5864d2ff0ac620358d92a6
+
+- [stdlib] Add variadic.zip and varidic.slice
+
+MODULAR_ORIG_COMMIT_REV_ID: 0b9a1699bd075d841651841ca5c858a2a2babe06
+
+- [kernels][bazel] Use `size = large` for `test_matmul_kernel_10`
+
+MODULAR_ORIG_COMMIT_REV_ID: 01c55db1bf61903cdaa5cd57983341274058143b
+
+- [examples] enable `reduction.mojo` on Apple GPU
+
+MODULAR_ORIG_COMMIT_REV_ID: 912918e7ee7595fcb97bd817b735f6eadaefc53c
+
+- [stdlib] polish: Remove `List[Scalar].extend(Span[Scalar])` overload
+
+This overload of `List` was previously used to optimize extending a list
+to a `memcpy()` in the case that the list element was a simple scalar
+value.
+
+However, as of a few months ago, the more general `List.extend(Span)`
+overload provides that optimization by checking
+`Self.T.__copyinit__is_trivial`, so this overload is no longer needed.
+
+Additionally, this overload is ambiguous, leading to an ambiguity error
+during the refactoring to drop `Copyable` as a requirement for `List`
+elements.
+
+MODULAR_ORIG_COMMIT_REV_ID: d55d8347fc160369d3c295d0b8ebe83904ac086f
+
+- [Driver] More python level host buffer cache tests
+
+Each test is in its own file. This is because the buffer cache is
+persistent in a process.
+If we run multiple tests in the same process, they will share the same
+buffer cache.
+This can lead to test failures. Having multiple test files adds
+isolation.
+
+We should investigate adding exposing a `BufferCache::clear()` api or a
+`@pytest.isolate` like decorator so we could have multiple tests running
+in the same file.
+
+MODULAR_ORIG_COMMIT_REV_ID: c1a6512ede4f90470589eb6e0e15a0548f486ae3
+
+- [External] [stdlib] Make Counter conform to Writable, Stringable and Representable (#74418)
+
+[External] [stdlib] Make Counter conform to Writable, Stringable and
+Representable
+
+Example of usage:
+```
+var c = Counter[String](&#34;a&#34;, &#34;a&#34;, &#34;a&#34;, &#34;b&#34;, &#34;b&#34;, &#34;c&#34;, &#34;d&#34;, &#34;c&#34;, &#34;c&#34;)
+print(c)  # prints Counter({&#39;a&#39;: 3, &#39;c&#39;: 3, &#39;b&#39;: 2, &#39;d&#39;: 1})
+```
+
+ORIGINAL_AUTHOR=Manuel Saelices &lt;msaelices@gmail.com&gt;
+ORIGINAL_USER=@msaelices
+
+Co-authored-by: Manuel Saelices &lt;msaelices@gmail.com&gt;
+Closes modular/modular#5662
+MODULAR_ORIG_COMMIT_REV_ID: 69235ff262a383ec547b08d12de161e77c01fa47
+
+- [External] [Kernels] Migrate CPU matmul kernels from LegacyUnsafePointer to UnsafePointer (#74417)
+
+[External] [Kernels] Migrate CPU matmul kernels from LegacyUnsafePointer
+to UnsafePointer
+
+Fixes modular/modular#5670
+
+This PR migrates the CPU matmul kernel implementations to use the new
+`UnsafePointer` API, removing the deprecated `LegacyUnsafePointer`
+alias.
+
+### Changes
+Updated 6 files in `max/kernels/src/linalg/matmul/cpu/`:
+- `impl.mojo` - Core matmul orchestration
+- `apple_accelerate.mojo` - Apple Accelerate BLAS wrapper
+- `default.mojo` - Default CPU microkernel
+- `i8mm.mojo` - ARM i8mm instruction microkernel
+- `neon.mojo` - ARM NEON microkernel
+- `vnni.mojo` - x86 VNNI microkernel
+
+### Implementation Notes
+The new `UnsafePointer` API requires explicit mutability
+(`mut=True/False`) and origin tracking. Where needed for compatibility
+with unmigrated code (like `_Accumulator`) and FFI interfaces, we use
+`rebind[]` to convert between pointer types.
+
+### Testing
+- All matmul tests pass
+- Code formatted with `bazelw run //bazel/lint:format`
+
+ORIGINAL_AUTHOR=Krish Gupta &lt;krishom70@gmail.com&gt;
+ORIGINAL_USER=@KrxGu
+
+---------
+
+Co-authored-by: Krish Gupta &lt;krishom70@gmail.com&gt;
+Co-authored-by: Nathan Ward &lt;nward@modular.com&gt;
+Closes modular/modular#5685
+MODULAR_ORIG_COMMIT_REV_ID: 626ca3ef7f16f5a77e7050e5922dba3da0cf0dc0
+
+- [docs] Fixes outdated material and adds field coverage
+
+MODULAR_ORIG_COMMIT_REV_ID: 7c43ce4ab0f1d5475842ea68e230a424ee8236ee
+
+- [stdlib][docs] Remove some implicit conversions from `UInt` to `SIMD`
+
+MODULAR_ORIG_COMMIT_REV_ID: ba78a2d561ed111e8cc867a2b5ca8051fd5503e4
+
+- [kernels] Enable `test_gemv` on Apple GPU
+
+It previously crashed with a Metal internal compiler error due to use of
+`double` type, which is not supported by MSL.
+
+MODULAR_ORIG_COMMIT_REV_ID: 463037b7bc5e4b81f2215ea6a78f329038db5525
+
+- [stdlib] Make `benchmark.Report` testable
+
+By adding a method that allows dumping it as a string. The benchmark
+tests are also migrated off `lit`.
+
+MODULAR_ORIG_COMMIT_REV_ID: fbe8e474229c5ae61efe491b8f98cdae33e8dc2e
+
+- [kernels] Add a test to support MHA head-dim=96
+
+MODULAR_ORIG_COMMIT_REV_ID: caac5980724c95b7e7c32eaa13ca60b58203398f
+
+- [stdlib][kernels] Enable 4 more tests to work on Apple GPU
+
+MODULAR_ORIG_COMMIT_REV_ID: ff588d651c2211287c16df288c05c1044d99f52f
+
+- [stdlib] Updated tests to use float32 instead of float64 on Apple GPU
+
+Apple GPU does not support float64 type
+
+MODULAR_ORIG_COMMIT_REV_ID: 17000a962b0cee428486065cc131e4343963efe4
+
+- [stdlib] Correctly initialize array of argument sizes
+
+`dense_args_sizes` array has to be initialized in a same way as
+`dense_args_addrs`, i.e. using `translated_arg_idx`. That helps to
+ignore optimized args with a size 0.
+
+MODULAR_ORIG_COMMIT_REV_ID: 76218e149c7df0b2f5cf0c1510d55583ec0fc8cf
+
+- [Kernels] Fix mfused_qk_rope parameter ordering
+
+Move mrope_section from a positional parameter to keyword-only by
+placing it after the // separator in the execute function signature.
+
+With emit Mojo enabled, the graph compiler skips parameters that can be
+inferred from tensor types (dtype, freq_dtype) and emits only explicit
+parameters as named arguments. When mrope_section was positional (before
+//), the generated call `execute[mrope_section = &#34;32_80_128&#34;, target =
+&#34;gpu&#34;]` caused Mojo to incorrectly match the string literal to the first
+positional parameter (dtype: DType), resulting in:
+
+```
+error: cannot implicitly convert &#39;StringLiteral[&#34;32_80_128&#34;]&#39; value to &#39;DType&#39;
+```
+
+This fix aligns with the codebase convention where inferable DType
+parameters are positional (before //) and explicitly-provided string
+parameters are keyword-only (after //).
+
+Fixes compilation of Qwen2.5-VL models that use multi-axis RoPE and
+allows the failing smoke tests to pass.
+
+MODULAR_ORIG_COMMIT_REV_ID: 3e6af9f08695edef35e2d3b039b00e4290b319e9
+
+- [stdlib] Add tests for paged kv cache mha with group=16
+
+MODULAR_ORIG_COMMIT_REV_ID: a121ea76334ca5b3b3eaa450684f8981e4c8f18d
+
+- [Pipelines] Move parse_float8_config to max.pipelines.lib
+
+Move parse_float8_config and its internal helpers from max.nn to
+max.pipelines.lib.float8 to remove the transformers dependency from
+max.nn. The pure data classes (Float8Config, Float8ScaleGranularity,
+etc.) remain in max.nn.float8_config since they have no external
+dependencies.
+
+MODULAR_ORIG_COMMIT_REV_ID: 8454de079749e46255150937adb38d11fbd378ba
+
+- [Models] Add max_concurrent and num_questions params to smoke_test.py (#74355)
+
+MODULAR_ORIG_COMMIT_REV_ID: 1a5e73118702e85673a2207385109010590c176e
+
+- [kernels] Support MHA head-dim=96
+
+MODULAR_ORIG_COMMIT_REV_ID: f67c1687ed1ad0e1a07c964747bbec9cbf876b28
+
+- [mojo-docs] Add &#34;comptime-expr proposal.
+
+This adds the miniproposal about extending &#34;comptime&#34; to
+subexpressions.
+
+MODULAR_ORIG_COMMIT_REV_ID: f7c2664d10498d6eb3022b114d476885e9242a6d
+
+- [Test] Update error detection regex in test_custom_op_parameter_errors
+
+MODULAR_ORIG_COMMIT_REV_ID: ec2f8d0685b71cd6a0b8f43a7a7b1dfebc2ba494
+
+- [mojo-lang] Introduce `comptime(x)` expressions.
+
+Mojo now allows the use of a `comptime(x)` expression to force a
+subexpression
+to be evaluated at compile time. This can help make working with certain
+types more elegant when you can&#39;t (or don&#39;t want to) materialize them
+into a
+runtime value. For example, if you just want the size from a compile
+time
+layout:
+
+  ```mojo
+  fn takes_layout[a: Layout]():
+    # materializes entire layout value just to get the size out of it
+    print(a.size())
+# Could already work around this with a comptime declaration, verbosely.
+    comptime a_size = a.size()
+    print(a_size)
+    # Can now tell Mojo to evaluate the expression at comptime.
+    print(comptime(a.size()))
+  ```
+
+This arguably shouldn&#39;t require parens around the subexpression (like
+ref,
+not, yield and many other unary expressions) but this takes a
+conservative
+step forward by requiring them.
+
+MODULAR_ORIG_COMMIT_REV_ID: cefd81467d4b1bd4995983f69ab2ae1262bd8ec2
+
+- [stdlib] Pitches init unification for `Copyable` and `Movable`
+
+MODULAR_ORIG_COMMIT_REV_ID: 286c103898be71ff26559228765fcc0f41e252fc
+
+- [Driver] Add a Python test for the host buffer cache
+
+The first test is disabled
+
+The second test shows how freeing of host buffer cache is highly wonky.
+There
+is a bug where a call to synchronize() is needed for correctness.
+
+I also update to_human_readable_bytes() to print 1.00 MiB instead of
+1024.00 KiB.
+
+MODULAR_ORIG_COMMIT_REV_ID: cdd6bd43ed3e6af9621f069d7c352569196af0bd
+
+- [Interfaces] Remove draft_offset property and move to
+apply_processing_offset
+
+This removes an un-used property, and standardizes the language in the
+context object on the TokenBuffer APIs, to make the transition simpler
+in the future.
+
+MODULAR_ORIG_COMMIT_REV_ID: 0ca58658094423e5bdbadb6f64af618a080b160d
+
+- [Models] Default to 1 hidden layer when debugging model. (#74315)
+
+MODULAR_ORIG_COMMIT_REV_ID: 56b00c37e9a238c4203be173385e157c1fe83c83
+
+- [max] update some stubfiles due to llvm update with upstream
+
+- [x] update stubfile
+
+MODULAR_ORIG_COMMIT_REV_ID: 45fe7708d3ed5e0f457ae63510449828e561976d
+
+- [Graph] Disable integration tests for opaque with emit Mojo
+
+We don&#39;t have full support for opaque types with emit Mojo enabled, so
+disable these tests that validate that works. We plan to add support
+later, but it is not necessary to enable the emit Mojo feature.
+
+MODULAR_ORIG_COMMIT_REV_ID: 74ef9787ee8b839ada50c2e5477ea81f755b0ad7
+
+- [LSP] Add debouncing for document updates in Mojo LSP Server
+
+This change introduces debouncing for document updates to reduce CPU
+usage during rapid typing. Previously, every keystroke triggered a full
+document parse including stdlib bytecode loading, causing significant
+lag.
+
+Impact: Reduces parse frequency by 10-50x during active typing. For
+example, typing a 50-character line triggers ~50 parses without
+debouncing, but only 1-2 with debouncing (at natural pauses). Given each
+parse can take 500ms+ (loading stdlib bytecode), this significantly
+reduces CPU pressure and UI lag during editing.
+
+| Scenario | Without Debouncing | With Debouncing |
+
+|---------------------------------|---------------------------|------------------------------|
+| Type `var x = foo()` (15 chars) | 15 full parses | 1 parse |
+| Type a 50-char line in 3 sec | 50 parses | ~1-2 parses |
+| Rapid edits across 10 seconds | Continuous CPU saturation | Parses
+only at natural pauses|
+
+The `DocumentDebouncer` has a configurable default delay with 150ms as
+its default. It allows for coalescing rapid updates to the same document
+into a single parse of a mojopkg.
+
+This is a low-risk optimization that provides immediate relief while
+larger architectural changes (bytecode caching, incremental parsing) are
+planned.
+
+MODULAR_ORIG_COMMIT_REV_ID: 4c37f7f4b2fcdc232570f8454b7d2cace23e1cd8
+
+- [stdlib] Remove `Copyable` requirement for `Iterator`
+
+MODULAR_ORIG_COMMIT_REV_ID: abd1fbbf4ddbf73494faa2f3ef62ec35d419e0a1
+
+- [Interfaces] Remove TextGenerationContext.end_idx
+
+This API is largely unnecessary and should not be used by downstream
+consumers. It is being removed to ease the transition to new TokenBuffer
+APIs.
+
+MODULAR_ORIG_COMMIT_REV_ID: 941b21b291a92f8bd7e3bf2920e14c29bc699387
+
+- [Pipelines] Run the embedding tests in parallel
+
+This allows the test to complete faster. With emit Mojo enabled, we have
+increased the compilation time for these tests, which can cause them to
+time out. With this change, the tests go from ~300s to ~100s with the
+`--config=remote-intel` configuration.
+
+MODULAR_ORIG_COMMIT_REV_ID: bd4cd00b9ee0ffb436a87ebcf8aa2fefde52a1c7
+
+- [Torch] Run torch tests in parallel to improve performance
+
+With the emit Mojo code, we have longer compilation times, so these
+tests time out sometimes. We need to run them in parallel to allow them
+to succeed consistently. This change should not modify the behavior of
+these tests.
+
+MODULAR_ORIG_COMMIT_REV_ID: ee773a21f47c665beb4015ec23318636544c35e0
+
+- [Pipelines] Make the test_mlp tests run in parallel
+
+This allows the test to complete much more quickly. With the emit Mojo
+configuration, the graph compilation takes longer, so this test was
+timing out. With these changes, the end-to-end run time of the test goes
+from ~900s to ~100s with `--config=remote-intel`.
+
+I don&#39;t expect these changes to modify the behavior of the test at all.
+
+MODULAR_ORIG_COMMIT_REV_ID: 3265f0151cd5050e87947925b05011c5b1e1fc61
+
+- [bazel] Update rules_cc
+
+Just pulling in some patches that landed upstream
+
+MODULAR_ORIG_COMMIT_REV_ID: cdcb2cd1a29a47a04b2c40c8838ca5bd8c33bf86
+
+- [kernels] Re-enable &#34;where&#34; clause on LayoutTensor.stride.
+
+MODULAR_ORIG_COMMIT_REV_ID: c7bfc3ed3cc31a44f16d1bc52b1fc38b23274041
+
+- [Interfaces] Rename public active_idx API to current_position
+
+This is intended to make the transition to the TokenBuffer APIs simpler.
+
+MODULAR_ORIG_COMMIT_REV_ID: eb37348c206e25eb82e486abe5deacd56737d8a1
+
+- [Models] Test MOE layer for Qwen3VL
+
+MODULAR_ORIG_COMMIT_REV_ID: ea3dff259baf5e9bb0ac6599364ed7a94e397cbc
+
+- [kernels] Fix out-of-bounds access in dual_gemm test for M=1
+
+The test_dual_gemm test was calling multistage_dual_gemm directly with
+M=1, but this kernel isn&#39;t designed to handle M &lt; BM (block tile M
+dimension = 128). When M=1, warps with warp_y &gt;= 1 get tiles that are
+entirely outside the tensor bounds, resulting in zero-sized dimensions.
+
+The general dual_gemm() function has a guard that redirects M=1 cases to
+dual_gemv instead. Since this test is specifically testing
+multistage_dual_gemm, we remove M=1 from the test matrix.
+
+This fix was exposed by the upcoming `LayoutTensor` bounds checking PR.
+
+MODULAR_ORIG_COMMIT_REV_ID: 01e600c633bdaf31b5a3dd7d6c32b2adfeaf1b79
+
+- [kernels] Use NVPTX target in `test_compile_nvptx_debuginfo.mojo`
+
+MODULAR_ORIG_COMMIT_REV_ID: ce66b8071a89486cc44cbfb1e32c2122aa8875dd
+
+- [Models] Fix Qwen3VL vision batching crash for batch_size &gt; 1
+
+When batching multiple vision requests, the bilinear interpolation
+weights and indices were being concatenated along the wrong axis.
+
+Each tensor has shape:
+- weights: (4, N_patches, 1) - 4 bilinear interpolation neighbors
+- indices: (4, N_patches)
+
+The default np.concatenate (axis=0) produced (4*n_requests, ...) instead
+of (4, total_patches, ...), causing a shape mismatch error in the vision
+graph which expects axis 0 to always be 4.
+
+Fix: Add axis=1 to concatenate along the patches dimension.
+MODULAR_ORIG_COMMIT_REV_ID: 2fe0998d98d38fa828766d59983c92c3ffd9ad8d
+
+- [Interfaces] Rename start_idx for processing_length
+
+This replaces the start_idx which is fairy unintuitive with the
+processing_length API instead. This PR also removes use of setting
+_start_idx as a private attribute. Both of these changes simplifies the
+downstream transition to the TokenBuffer API.
+
+MODULAR_ORIG_COMMIT_REV_ID: 5786a89d3894ed89c5e3a041c15431105b743020
+
+- [MAX] Disable returned opaque test until supported in Emit Mojo
+
+MODULAR_ORIG_COMMIT_REV_ID: 92f3c7293c3b24629ee29939ad1aea836a00faca
+
+- [Pipelines] Fix Qwen3VL MoE gate/up split
+
+HuggingFace Qwen3VL-MoE stores gate and up projections in concatenated
+format
+`[up, gate]`, but the code was splitting them as if they were
+interleaved
+(alternating columns). This caused incorrect gating behavior and poor
+model
+accuracy.
+
+MODULAR_ORIG_COMMIT_REV_ID: 9ce091d9627e13db241a676bbea8ee7ef364a0bc
+
+- [Test] Revert error detection regex in test_custom_op_parameter_errors
+
+MODULAR_ORIG_COMMIT_REV_ID: 5da66a9e4a6b37d40bcf38dccfd286336e68b60e
+
+- [Models] Don&#39;t initialize VisionStacker on every request for
+Gemma3multimodal
+
+Initialize `_VisionStacker` once in `__init__` instead of creating a new
+one on every `_prepare_vision_inputs` call.
+
+MODULAR_ORIG_COMMIT_REV_ID: 8d8a101bfe01484779411bdeca0cc14719128000
+
+- [Models] Enable max-ci on MI355 for all models in smoke tests
+
+Enable more MI355 models now that PR #74223 (HipBLASLt workspace sizing)
+has landed.
+
+MODULAR_ORIG_COMMIT_REV_ID: fdbee41e401ce110218275474776fa76dfbedbfa
+
+- [Models] Add qwen3-vl to vision models list in smoke_test.py
+
+Add qwen3-vl to the list of vision models and sort the list
+alphabetically for easier maintenance.
+
+MODULAR_ORIG_COMMIT_REV_ID: 5b08cedb8dfa04a274a3aaa5e41af0e1aa4ec924</div>
+</div>
+
+<a href="../project/modular_modular.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
