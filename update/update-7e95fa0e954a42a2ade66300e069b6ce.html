@@ -1,0 +1,1932 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in master (50 commits) - milvus-io/milvus - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in master (50 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/milvus-io_milvus.html">milvus-io/milvus</a> /
+    Updates in master (50 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/milvus-io_milvus.html">milvus-io/milvus</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2025-12-26 17:43 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/milvus-io/milvus/commits/master" target="_blank">https://github.com/milvus-io/milvus/commits/master</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Были представлены новые возможности, включая QueryIterator для GoSDK для эффективной постраничной разбивки на основе первичных ключей, всестороннюю поддержку обнуляемых векторных полей и интеграцию парсера выражений Go с C++. Основные улучшения направлены на производительность и эффективность, такие как перенос оптимизации запросов в прокси, унификация загрузки сегментов с использованием дифференциального подхода, параллельное выполнение построения текстовых индексов и повышение эффективности использования памяти/диска путем группировки строк. Многочисленные исправления и доработки повышают надежность и стабильность системы, решая такие проблемы, как корректное восстановление задач уплотнения, точное отслеживание задержки репликации, правильная обработка устаревших форматов binlog, повторные попытки при превышении лимита запросов к объектному хранилищу и улучшенное управление группами потребителей Kafka.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- feat: [GoSDK] add QueryIterator support for Go client (#46633)
+
+Related to #31293
+
+Implement QueryIterator for the Go SDK to enable efficient iteration
+over large query result sets using PK-based pagination.
+
+Key changes:
+- Add QueryIterator interface and implementation with PK-based
+pagination
+- Support Int64 and VarChar primary key types for pagination filtering
+- Add QueryIteratorOption with batchSize, limit, filter, outputFields
+config
+- Fix ResultSet.Slice to handle Query results without IDs/Scores
+- Add comprehensive unit tests and integration tests
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+- Core invariant: the iterator requires the collection primary key (PK)
+to be present in outputFields so PK-based pagination and accurate row
+counting work. The constructor enforces this by appending the PK to
+outputFields when absent, and all pagination (lastPK tracking, PK-range
+filters) and ResultCount calculations depend on that guaranteed PK
+column.
+
+- New capability: adds a public QueryIterator API (Client.QueryIterator,
+QueryIterator interface, QueryIteratorOption) that issues server-side
+Query RPCs in configurable batches and implements PK-based pagination
+supporting Int64 and VarChar PKs, with options for batchSize, limit,
+filter, outputFields and an upfront first-batch validation to fail fast
+on invalid params.
+
+- Removed/simplified logic: ResultSet.Slice no longer assumes IDs and
+Scores are always present — it branches on presence of IDs (use IDs
+length when non-nil; otherwise derive row count from Fields[0]) and
+guards Scores slicing. This eliminates redundant/unsafe assumptions and
+centralizes correct row-count logic based on actual returned fields.
+
+- No data loss or behavior regression: pagination composes the user
+filter with a PK-range filter and always requests the PK field, so
+lastPK is extracted from a real column and fetchNextBatch only advances
+when rows are returned; EOF is returned only when the server returns no
+rows or iterator limit is reached. ResultSet.Slice guards prevent panics
+for queries that lack IDs/Scores; Query RPC → ResultSet.Fields remains
+the authoritative path for row data, so rows are not dropped and
+existing query behavior is preserved.
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- feat: set related resource ids in collection schema (#46423)
+
+Support crate analyzer with file resource info, and return used file
+resource ids when validate analyzer.
+Save the related resource ids in collection schema.
+relate: https://github.com/milvus-io/milvus/issues/43687
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+- Core invariant: analyzer file-resource resolution is deterministic and
+traceable by threading a FileResourcePathHelper (collecting used
+resource IDs in a HashSet) through all tokenizer/analyzer construction
+and validation paths; validate_analyzer(params, extra_info) returns the
+collected Vec&lt;i64) which is propagated through C/Rust/Go layers to
+callers (CValidateResult → RustResult::from_vec_i64 → Go []int64 →
+querypb.ValidateAnalyzerResponse.ResourceIds →
+CollectionSchema.FileResourceIds).
+
+- Logic removed/simplified: ad‑hoc, scattered resource-path lookups and
+per-filter file helpers (e.g., read_synonyms_file and other inline
+file-reading logic) were consolidated into ResourceInfo +
+FileResourcePathHelper and a centralized get_resource_path(helper, ...)
+API; filter/tokenizer builder APIs now accept &amp;mut
+FileResourcePathHelper so all file path resolution and ID collection use
+the same path and bookkeeping logic (redundant duplicated lookups
+removed).
+
+- Why no data loss or behavior regression: changes are additive and
+default-preserving — existing call sites pass extra_info = &#34;&#34; so
+analyzer creation/validation behavior and error paths remain unchanged;
+new Collection.FileResourceIds is populated from resp.ResourceIds in
+validateSchema and round‑tripped through marshal/unmarshal
+(model.Collection ↔ schemapb.CollectionSchema) so schema persistence
+uses the new list without overwriting other schema fields; proto change
+adds a repeated field (resource_ids) which is wire‑compatible (older
+clients ignore extra field). Concrete code paths: analyzer creation
+still uses create_analyzer (now with extra_info &#34;&#34;), tokenizer
+validation still returns errors as before but now also returns IDs via
+CValidateResult/RustResult, and rootcoord.validateSchema assigns
+resp.ResourceIds → schema.FileResourceIds.
+
+- New capability added: end‑to‑end discovery, return, and persistence of
+file resource IDs used by analyzers — validate flows now return resource
+IDs and the system stores them in collection schema (affects tantivy
+analyzer binding, canalyzer C bindings, internal/util analyzer APIs,
+querynode ValidateAnalyzer response, and rootcoord/create_collection
+flow).
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+Signed-off-by: aoiasd &lt;zhicheng.yue@zilliz.com&gt;
+
+- enhance: Maintain compatibility with the legacy FlushAll (#46564)
+
+issue: https://github.com/milvus-io/milvus/issues/45919
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+- Core invariant: FlushAll verification must accept both per-channel
+FlushAllTss (new schema) and the legacy single FlushAllTs;
+GetFlushAllState chooses the verification path based on which field is
+present and treats a channel as flushed only if its channel checkpoint
+timestamp &gt;= the applicable threshold (per-channel timestamp or legacy
+FlushAllTs).
+- Logic removed/simplified: The previous mixed/ambiguous checks were
+split into two focused
+routines—verifyFlushAllStateByChannelFlushAllTs(logger, channel,
+flushAllTss) and verifyFlushAllStateByLegacyFlushAllTs(logger, channel,
+flushAllTs)—and GetFlushAllState now selects one path. This centralizes
+compatibility logic, eliminates interleaved/duplicated checks, and
+retains the outer-loop short-circuiting on the first unflushed channel.
+- Why this does NOT cause data loss or regressions: Changes only affect
+read-only verification paths (GetFlushAllState/GetFlushState) that
+compare in-memory channel checkpoints (meta.GetChannelCheckpoint) to
+provided thresholds; no writes to checkpoints or persisted state occur
+and FlushAll enqueue/wait behavior is unchanged. Unit tests were added
+to cover legacy FlushAllTs behavior and the new FlushAllMsgs→FlushAllTs
+extraction, exercising both code paths.
+- Enhancement scope and location: Adds backward-compatible support and
+concrete FlushAllTs extraction from streaming FlushAllMsgs in Proxy
+(internal/proxy/task_flush_all_streaming.go) and compatibility verifiers
+in DataCoord (internal/datacoord/services.go), plus corresponding tests
+(internal/datacoord/services_test.go, internal/proxy/*_test.go).
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+---------
+
+Signed-off-by: bigsheeper &lt;yihao.dai@zilliz.com&gt;
+
+- fix: Restore the compaction task correctly to ensure it can be properly cleaned up (#46577)
+
+issue: #46576 
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+- Core invariant: During meta load, only tasks that are truly
+terminal-cleaned (states cleaned or unknown) should be dropped; all
+other non-terminal tasks (including timeout and completed) must be
+restored so the inspector can reattach them to executing/cleaning queues
+and finish their cleanup lifecycle.
+- Removed/simplified logic: loadMeta no longer uses the broad
+isCompactionTaskFinished predicate (which treated timeout, completed,
+cleaned, unknown as terminal). It now uses the new
+isCompactionTaskCleaned predicate that only treats cleaned/unknown as
+terminal. This removes the redundant exclusion of timeout/completed
+tasks and simplifies the guard to drop only cleaned/unknown tasks.
+- Bug fix (root cause &amp; exact change): Fixes issue #46576 — the previous
+isCompactionTaskFinished caused timeout/completed tasks to be skipped
+during meta load and thus not passed into restoreTask(). The PR adds
+isCompactionTaskCleaned and replaces the finished check so timeout and
+completed tasks are included in restoreTask() and re-attached to the
+inspector’s existing executing/cleaning queues.
+- No data loss or regression: Tasks in cleaned/unknown remain dropped
+(isCompactionTaskCleaned still returns true for cleaned/unknown).
+Non-terminal timeout/completed tasks now follow the same restoreTask()
+control path used previously for restored tasks — they are enqueued into
+the inspector’s queue/executing/cleaning flows rather than being
+discarded. No exported signatures changed and all restored tasks flow
+into existing handlers, avoiding behavior regression or data loss.
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+Signed-off-by: Cai Zhang &lt;cai.zhang@zilliz.com&gt;
+
+- fix: Fix replicate lag when server is idle (#46574)
+
+issue: https://github.com/milvus-io/milvus/issues/46116
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+- Core invariant: the metric CDCLastReplicatedTimeTick must reflect the
+most recent time-tick when replication has effectively processed all
+pending messages (including idle periods), so reported replicate lag =
+confirmed WAL tick − last replicated tick can reach zero when the server
+is idle.
+
+- Exact fix (bug): addresses issue #46116 by ensuring the
+last-replicated metric is updated when the server is idle. Concretely, a
+new ReplicateMetrics.UpdateLastReplicatedTimeTick(ts uint64) was added
+and called from OnConfirmed (OnConfirmed now delegates to
+UpdateLastReplicatedTimeTick(msg.TimeTick())), and from Replicate’s
+self-controlled-message path when the pending queue is empty — so the
+code records the time tick before returning ErrReplicateIgnored.
+
+- Logic simplified / removed: direct, ad-hoc metric writes in
+OnConfirmed were replaced by a single UpdateLastReplicatedTimeTick
+helper on the metrics implementation. The scattered manual set of
+CDCLastReplicatedTimeTick is consolidated into one method, removing
+redundant direct metric manipulations and centralizing timestamp
+conversion (tsoutil.PhysicalTimeSeconds).
+
+- No data loss / no behavior regression: this change only updates
+monitoring metrics and does not alter replication control flow or
+message processing. Replicate still returns ErrReplicateIgnored for
+self-controlled messages and does not change message persistence or
+acknowledgement paths; OnConfirmed continues to be invoked on confirmed
+messages but now delegates metric recording to the new method. Therefore
+no replication state, message ordering, or persistence semantics are
+modified.
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+Signed-off-by: bigsheeper &lt;yihao.dai@zilliz.com&gt;
+
+- test: test case json_contains_any is not stable (#46506)
+
+### **User description**
+issue: #46367
+
+
+___
+
+### **PR Type**
+Bug fix, Tests
+
+
+___
+
+### **Description**
+- Fix unstable test case by adjusting float precision
+
+- Change listMix float value from 1.1 to 1.111
+
+- Improves test stability for json_contains_any query
+
+
+___
+
+### Diagram Walkthrough
+
+
+```mermaid
+flowchart LR
+  A[&#34;Test Data Generation&#34;] -- &#34;Adjust float precision&#34; --&gt; B[&#34;listMix field value&#34;]
+  B -- &#34;1.1 to 1.111&#34; --&gt; C[&#34;Improved test stability&#34;]
+```
+
+
+
+&lt;details&gt;&lt;summary&gt;&lt;h3&gt;File Walkthrough&lt;/h3&gt;&lt;/summary&gt;
+
+&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;&lt;/th&gt;&lt;th align=&#34;left&#34;&gt;Relevant
+files&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;&lt;strong&gt;Bug
+fix&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;&lt;table&gt;
+&lt;tr&gt;
+  &lt;td&gt;
+    &lt;details&gt;
+&lt;summary&gt;&lt;strong&gt;test_milvus_client_query.py&lt;/strong&gt;&lt;dd&gt;&lt;code&gt;Adjust
+float precision in test data&lt;/code&gt;&amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp;
+&amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp;
+&amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &lt;/dd&gt;&lt;/summary&gt;
+&lt;hr&gt;
+
+tests/python_client/milvus_client/test_milvus_client_query.py
+
+&lt;ul&gt;&lt;li&gt;Modified test data generation in
+&lt;br&gt;&lt;code&gt;test_milvus_client_query_expr_all_datatype_json_contains_all&lt;/code&gt;
+method&lt;br&gt; &lt;li&gt; Changed &lt;code&gt;listMix&lt;/code&gt; field float value from
+&lt;code&gt;1.1&lt;/code&gt; to &lt;code&gt;1.111&lt;/code&gt; for improved &lt;br&gt;precision&lt;br&gt;
+&lt;li&gt; Addresses test instability issue by adjusting floating-point test
+data&lt;/ul&gt;
+
+
+&lt;/details&gt;
+
+
+  &lt;/td&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://github.com/milvus-io/milvus/pull/46506/files#diff-d6fe357e4678415bc62596b802571043fa571c7d1b8e841aa43124437dd2f739&#34;&gt;+1/-1&lt;/a&gt;&amp;nbsp;
+&amp;nbsp; &amp;nbsp; &lt;/td&gt;
+
+&lt;/tr&gt;
+&lt;/table&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;
+
+&lt;/details&gt;
+
+___
+
+
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+- Core invariant: the test assumes stable float equality/containment
+behavior for JSON-typed fields when generating test rows; small changes
+in stored float precision can make json_contains_any assertions flaky.
+- Exact fix for the bug (refs #46367): in
+tests/python_client/milvus_client/test_milvus_client_query.py, the test
+data value for the second element of the &#34;listMix&#34; JSON field was
+adjusted from i * 1.1 to i * 1.111 in
+test_milvus_client_query_expr_all_datatype_json_contains_all to increase
+numeric precision and remove instability in json_contains_any
+assertions.
+- Logic removed/simplified: no production logic was changed or removed —
+only a one-line test-data change. There is no control-flow or
+algorithmic simplification because the test’s intent and checks remain
+identical; the change removes the redundant dependence on a borderline
+float value that caused flakiness.
+- No data loss or behavior regression: this change only updates
+test-generated input
+(test_milvus_client_query_expr_all_datatype_json_contains_all) and does
+not touch any library or runtime code paths. Production code paths
+(query parsing/execution, JSON handling) are unchanged, so no persisted
+data, API behavior, or client logic is affected.
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+Signed-off-by: nico &lt;cheng.yuan@zilliz.com&gt;
+
+- enhance: add channel balanced primary key generator for integration tests (#46431)
+
+issue: #46352
+
+- Add GenerateChannelBalancedPrimaryKeys function supporting Int64 and
+VarChar PK types with even distribution across channels
+- Add GenerateBalancedInt64PKs and GenerateBalancedVarCharPKs helper
+functions using murmur3 and crc32 hash algorithms respectively
+- Add PrimaryKeyConfig struct to configure PK generation in
+InsertAndFlush
+- Update InsertAndFlush to use channel balanced PKs instead of random
+hash keys for better test coverage
+- Add comprehensive unit tests including end-to-end validation with
+typeutil.HashPK2Channels to verify exact channel distribution
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+## Summary by CodeRabbit
+
+* **Tests**
+* Enhanced integration tests with configurable primary-key sequencing
+across insert batches.
+* Added utilities to generate channel-balanced primary keys for integer
+and string types.
+* Expanded test coverage validating balanced distribution, uniqueness,
+continuation, and large-scale behavior across multiple channels.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+---------
+
+Signed-off-by: wayblink &lt;anyang.wang@zilliz.com&gt;
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- fix: flush log when os exit (#46608)
+
+issue: #45640
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+
+- fix: check final result only in LeaderCacheObserver flaky test (#46601)
+
+Related to #46600
+
+The test previously checked if all 3 collection IDs were batched
+together in a single InvalidateShardLeaderCache call. This caused
+flakiness because the observer may split events across multiple calls.
+
+Fix by accumulating all collection IDs across multiple calls and
+verifying that eventually all expected IDs (1, 2, 3) are processed.
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+- Core invariant: the test asserts that all registered collection IDs
+{1,2,3} are eventually processed by InvalidateShardLeaderCache across
+any number of calls — i.e., the observer must invalidate every
+registered collection ID, not necessarily in a single batched RPC (fixes
+flaky assumption from issue #46600).
+- Logic removed/simplified: the strict expectation that all three IDs
+arrive in one InvalidateShardLeaderCache call was replaced by
+accumulating IDs into a ConcurrentSet (collectionIDs.Upsert in the mock)
+and asserting eventual containment of 1,2,3. This removes the brittle
+per-call batching assertion and uses a set-based accumulation (lines
+where the mock calls Upsert and final Eventually checks
+collectionIDs.Contain(...)).
+- Why this is safe (no data loss or behavior regression): only test
+assertions changed — production code (LeaderCacheObserver calling
+InvalidateShardLeaderCache) is unchanged. The mock intercepts
+InvalidateShardLeaderCache and accumulates req.GetCollectionIDs(); the
+test still verifies single-ID handling via the existing len==1 &amp;&amp;
+lo.Contains(... ) check (first mock block) and verifies that all IDs
+were invalidated over time in the batch scenario (second mock block). No
+production code paths were modified, so invalidation behavior and RPC
+usage remain identical.
+- Bug-fix note: this is a targeted test-only fix for issue #46600 — it
+tolerates legitimate splitting of events across multiple
+InvalidateShardLeaderCache invocations by aggregating IDs across calls
+in the test mock, eliminating flakiness without altering runtime
+behavior.
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- enhance: Optimize QuotaCenter CPU usage (#46388)
+
+issue: https://github.com/milvus-io/milvus/issues/46387
+
+---------
+
+Signed-off-by: sijie-ni-0214 &lt;sijie.ni@zilliz.com&gt;
+
+- fix: Handle legacy binlog format (v1) in segment load diff computation (#46598)
+
+When computing load diff, binlogs in v1/legacy format have empty
+child_fields. In this case, the field_id itself should be used as the
+child_id (group_id == field_id for legacy format).
+
+Without this fix, legacy format binlogs are not recognized during diff
+computation, causing segments to fail loading and TestProxy to timeout.
+
+Changes:
+- Add fallback to use fieldid as child_id when child_fields is empty
+- Add LoadDiff::ToString() for debugging
+- Add logging for diff in Load/Reopen operations
+- Add comprehensive unit tests for legacy format handling
+
+Related to #46594
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+- Core invariant: load-diff computation must enumerate every binlog
+child group for a field so current vs new segment state comparisons
+include all column-group/binlog groups; for legacy (v1) binlogs that
+have empty child_fields, the code must treat group_id == field_id to
+preserve that mapping.
+- Bug fix (resolves #46594): SegmentLoadInfo now normalizes
+field_binlog.child_fields() into a vector and falls back to using
+field_id as the single child group when child_fields is empty; the same
+normalization is applied for both current and new-info paths, ensuring
+legacy v1 binlogs are discovered and included in Load/ComputeDiff
+results so segments load correctly.
+- Logic simplified: removed the implicit assumption that child_fields is
+always present by centralizing a single normalization/fallback step used
+symmetrically for both diff paths, avoiding ad-hoc special-casing and
+unifying iteration over child groups.
+- No data loss / no behavior regression: the fallback only activates
+when child_fields is empty — non-legacy binlogs continue to use their
+child_fields unchanged. Add/drop semantics are preserved because the
+same normalization is applied to both sides of the diff. Unit tests
+(v1-only, v4-only, mixed cases) were added to validate correctness;
+LoadDiff::ToString() and extra logging are diagnostic only.
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+Co-authored-by: Cai Zhang &lt;cai.zhang@zilliz.com&gt;
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- fix: failed to check invalid timestamptz default value (#46546)
+
+Also support space separator and offset in TIMESTAMPTZ
+issue: https://github.com/milvus-io/milvus/issues/46376
+https://github.com/milvus-io/milvus/issues/46365
+
+Signed-off-by: zhenshan.cao &lt;zhenshan.cao@zilliz.com&gt;
+
+- fix: remove EnableStorageV2 override in TestProxy (#46594) (#46596)
+
+Related to #46594
+
+Remove the temporary config override that forced EnableStorageV2 to
+false in TestProxy. This override caused test failures with the new load
+logic, as segments could not be loaded with v1 format.
+
+This PR is a quick fix to make ut back to normal
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- fix: Disable VCS to allow pkg tests to run (#46501)
+
+### **Description**
+- Add `-buildvcs=false` flag to Go test commands in coverage script
+
+- Increase default session TTL from 10s to 15s
+
+- Update SessionTTL parameter default value from 30 to 15
+
+
+Signed-off-by: Cai Zhang &lt;cai.zhang@zilliz.com&gt;
+Co-authored-by: bigsheeper &lt;yihao.dai@zilliz.com&gt;
+Co-authored-by: chyezh &lt;chyezh@outlook.com&gt;
+Co-authored-by: czs007 &lt;zhenshan.cao@zilliz.com&gt;
+
+- enhance: STL_SORT to support LIKE operator (#46534)
+
+issue: https://github.com/milvus-io/milvus/issues/44399
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+
+## Summary by CodeRabbit
+
+## Release Notes
+
+* **New Features**
+* Enhanced pattern matching for string indexes with support for prefix,
+postfix, inner, and regex-based matching operations.
+* Optimized pattern matching performance through prefix-based filtering
+and range-based lookups.
+
+* **Tests**
+* Added comprehensive test coverage for pattern matching functionality
+across multiple index implementations.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- fix:add json stats version because previous change #46130 (#46467)
+
+#42533
+
+Signed-off-by: luzhang &lt;luzhang@zilliz.com&gt;
+Co-authored-by: luzhang &lt;luzhang@zilliz.com&gt;
+
+- enhance: update highlight ci (#46573)
+
+relate: https://github.com/milvus-io/milvus/issues/46571
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+- Core invariant: the LexicalHighlighter API now expects the match
+queries under the parameter name highlight_query (not queries); all call
+sites must pass highlight_query to supply match data. This PR assumes
+the underlying highlighter behavior and processing of those query values
+are unchanged.
+- Logic simplified/removed: removed the legacy keyword queries in tests
+and updated calls to use highlight_query
+(tests/python_client/milvus_client/test_milvus_client_highlighter.py).
+This eliminates a redundant/incorrect keyword alias and aligns tests
+with the consolidated LexicalHighlighter constructor parameter name.
+- Why this does NOT introduce data loss or behavior regression: the
+change is a parameter-name rename only — no parsing, matching, or
+storage logic was modified. Tests now construct LexicalHighlighter with
+pre_tags/post_tags/highlight_search_text/fragment_* and pass the query
+list under highlight_query; the highlighter execution path
+(client.search → highlighter processing → result[&#39;highlight&#39;]) is
+untouched, so existing highlight outputs and stored data remain
+unchanged.
+- Other changes: bumped pymilvus test dependency to 2.7.0rc93 in
+tests/python_client/requirements.txt to match the updated constructor
+signature; scope of change is limited to tests and dependency pinning
+(no production code changes).
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+Signed-off-by: aoiasd &lt;zhicheng.yue@zilliz.com&gt;
+
+- enhance: move jemalloc_stats from pkg to internal/util/segcore (#46560)
+
+Related to #46133
+
+Move jemalloc_stats.go and its test file from pkg/util/hardware to
+internal/util/segcore. This is a more appropriate location because:
+- jemalloc_stats depends on milvus_core C++ library via cgo
+- The pkg directory should remain independent of internal C++
+dependencies
+- segcore is the natural home for core memory allocator utilities
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+
+## Summary by CodeRabbit
+
+* **Refactor**
+* Improved internal code organization by reorganizing memory statistics
+collection infrastructure for better maintainability and modularity. No
+impact on end-user functionality or behavior.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- enhance: disallow the file resource interface before release (#46362)
+
+relate: https://github.com/milvus-io/milvus/issues/43687
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+## Summary by CodeRabbit
+
+* **Chores**
+* File resource operations (add, remove, list) are now unavailable and
+return a not-implemented response.
+* **Tests**
+* Tests updated to expect error responses for those file resource
+operations and removed some previous coordination-path assertions.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+Signed-off-by: aoiasd &lt;zhicheng.yue@zilliz.com&gt;
+
+- enhance: support new server label rule for milvus and MILVUS_SERVER_LABEL_RESOURCE_GROUP (#46401)
+
+issue: #46400
+
+- add new server label rule.
+- add `MILVUS_SERVER_LABEL_RESOURCE_GROUP` to determine the resource
+group of querynode.
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+## Summary by CodeRabbit
+
+* **New Features**
+* Automatic creation of resource groups when nodes with resource-group
+labels join.
+* Expanded server-label system supporting role-specific and global
+labels.
+
+* **Bug Fixes**
+* Node acceptance now enforces resource-group name compatibility,
+preventing cross-group assignment.
+
+* **Refactor**
+* Node handling flows updated to use richer node information for
+assignment and validation.
+
+* **Tests**
+* Added tests validating resource-group labeling and node acceptance
+behavior.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+---------
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+
+- enhance: Support delaying scanner startup (#46369)
+
+Introduce a ScannerStartupDelay configuration to enable WAL write-only
+recovery, allowing fence messages to be persisted during
+primary–secondary switchover when the StreamingNode is trapped in crash
+loops.
+
+issue: https://github.com/milvus-io/milvus/issues/46368
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+## Summary by CodeRabbit
+
+* **New Features**
+* Added a configurable WAL scanner pause/resume and a consumer request
+flag to optionally ignore pause signals.
+
+* **Metrics**
+* Added a scanner pause gauge and pause-duration tracking for WAL
+scanning.
+
+* **Tests**
+* Added coverage for pause-consumption behavior and cleanup in stream
+client tests.
+
+* **Chores**
+* Consolidated flush-all logging into a single field and added a helper
+for bulk message conversion.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+---------
+
+Signed-off-by: bigsheeper &lt;yihao.dai@zilliz.com&gt;
+
+- fix: unify ro node handling to avoid balance channel task stuck (#46440)
+
+issue: #46393
+
+RO node can be created from two sources: stopping a QueryNode or replica
+node transfer (e.g., suspend node). Before this fix, there were two
+defects and one constraint that caused a deadlock:
+
+Defects:
+1. LeaderChecker does not sync segment distribution to RO nodes
+2. Scheduler only cancels tasks on stopping nodes, not RO nodes
+
+Constraint:
+- Balance channel task blocks waiting for new delegator to become
+serviceable (via sync segment) before executing release action
+
+Deadlock scenario:
+When target node becomes RO node (but not stopping) during balance
+channel execution, the task gets stuck because:
+- Cannot sync segment to RO node (defect 1) -&gt; task blocks
+- Task is not cancelled since node is not stopping (defect 2)
+
+PR #45949 attempted to fix defect 1 but was not successful.
+
+This PR unifies RO node handling by:
+- LeaderChecker: only sync segment distribution to RW nodes
+- Scheduler: cancel task when target node becomes RO node
+- Simplify checkStale logic with unified node state checking
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- enhance: Unify segment Load and Reopen through diff-based loading (#46536)
+
+Related to #46358
+
+Refactor segment loading to use a unified diff-based approach for both
+initial Load and Reopen operations:
+
+- Extract ApplyLoadDiff from Reopen to share loading logic
+- Add GetLoadDiff to compute diff from empty state for initial load
+- Change column_groups_to_load from map to vector&lt;pair&gt; to preserve
+order
+- Add validation for empty index file paths in diff computation
+- Add comprehensive unit tests for GetLoadDiff
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+
+## Summary by CodeRabbit
+
+* **Performance**
+* Improved segment loading efficiency through incremental updates,
+reducing memory overhead and enhancing performance during data updates.
+
+* **Tests**
+  * Expanded test coverage for load operation scenarios.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- feat: Add nullable vector support for proxy and querynode (#46305)
+
+related: #45993 
+
+This commit extends nullable vector support to the proxy layer,
+querynode,
+and adds comprehensive validation, search reduce, and field data
+handling
+    for nullable vectors with sparse storage.
+    
+    Proxy layer changes:
+- Update validate_util.go checkAligned() with getExpectedVectorRows()
+helper
+      to validate nullable vector field alignment using valid data count
+- Update checkFloatVectorFieldData/checkSparseFloatVectorFieldData for
+      nullable vector validation with proper row count expectations
+- Add FieldDataIdxComputer in typeutil/schema.go for logical-to-physical
+      index translation during search reduce operations
+- Update search_reduce_util.go reduceSearchResultData to use
+idxComputers
+      for correct field data indexing with nullable vectors
+- Update task.go, task_query.go, task_upsert.go for nullable vector
+handling
+    - Update msg_pack.go with nullable vector field data processing
+    
+    QueryNode layer changes:
+    - Update segments/result.go for nullable vector result handling
+- Update segments/search_reduce.go with nullable vector offset
+translation
+    
+    Storage and index changes:
+- Update data_codec.go and utils.go for nullable vector serialization
+- Update indexcgowrapper/dataset.go and index.go for nullable vector
+indexing
+    
+    Utility changes:
+- Add FieldDataIdxComputer struct with Compute() method for efficient
+      logical-to-physical index mapping across multiple field data
+- Update EstimateEntitySize() and AppendFieldData() with fieldIdxs
+parameter
+    - Update funcutil.go with nullable vector support functions
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+## Summary by CodeRabbit
+
+* **New Features**
+* Full support for nullable vector fields (float, binary, float16,
+bfloat16, int8, sparse) across ingest, storage, indexing, search and
+retrieval; logical↔physical offset mapping preserves row semantics.
+  * Client: compaction control and compaction-state APIs.
+
+* **Bug Fixes**
+* Improved validation for adding vector fields (nullable + dimension
+checks) and corrected search/query behavior for nullable vectors.
+
+* **Chores**
+  * Persisted validity maps with indexes and on-disk formats.
+
+* **Tests**
+  * Extensive new and updated end-to-end nullable-vector tests.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+---------
+
+Signed-off-by: marcelo-cjl &lt;marcelo.chen@zilliz.com&gt;
+
+- test: add e2e test cases for highlighter (#46505)
+
+### **User description**
+Issue: #46504 
+test: create e2e test case for highlighter
+
+ On branch feature/highlighter
+ Changes to be committed:
+	new file:   milvus_client/test_milvus_client_highlighter.py
+
+
+___
+
+### **PR Type**
+Tests
+
+
+___
+
+### **Description**
+- Add comprehensive e2e test suite for LexicalHighlighter functionality
+
+- Test highlighter initialization with collection setup and data
+insertion
+
+- Validate highlighter with various parameters (tags, fragments,
+offsets)
+
+- Test edge cases including Chinese characters, long text, and invalid
+inputs
+
+- Verify error handling for invalid fragment sizes, offsets, and
+configurations
+
+
+___
+
+### Diagram Walkthrough
+
+
+```mermaid
+flowchart LR
+  A[&#34;Test Suite Setup&#34;] --&gt; B[&#34;Highlighter Init Tests&#34;]
+  B --&gt; C[&#34;Valid Test Cases&#34;]
+  C --&gt; D[&#34;Fragment Parameters&#34;]
+  C --&gt; E[&#34;Search Variations&#34;]
+  C --&gt; F[&#34;Language Support&#34;]
+  B --&gt; G[&#34;Invalid Test Cases&#34;]
+  G --&gt; H[&#34;Parameter Validation&#34;]
+  G --&gt; I[&#34;Error Handling&#34;]
+```
+
+
+
+&lt;details&gt;&lt;summary&gt;&lt;h3&gt;File Walkthrough&lt;/h3&gt;&lt;/summary&gt;
+
+&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;&lt;/th&gt;&lt;th align=&#34;left&#34;&gt;Relevant
+files&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;&lt;strong&gt;Tests&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;&lt;table&gt;
+&lt;tr&gt;
+  &lt;td&gt;
+    &lt;details&gt;
+
+&lt;summary&gt;&lt;strong&gt;test_milvus_client_highlighter.py&lt;/strong&gt;&lt;dd&gt;&lt;code&gt;Add
+comprehensive LexicalHighlighter e2e test suite&lt;/code&gt;&amp;nbsp; &amp;nbsp;
+&amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &lt;/dd&gt;&lt;/summary&gt;
+&lt;hr&gt;
+
+tests/python_client/milvus_client/test_milvus_client_highlighter.py
+
+&lt;ul&gt;&lt;li&gt;Create new test file with 1163 lines of comprehensive
+highlighter test &lt;br&gt;cases&lt;br&gt; &lt;li&gt; Implement
+&lt;code&gt;TestMilvusClientHighlighterInit&lt;/code&gt; class to initialize
+&lt;br&gt;collection with pre-defined test data including English, Chinese,
+and &lt;br&gt;long text samples&lt;br&gt; &lt;li&gt; Implement
+&lt;code&gt;TestMilvusClientHighlighterValid&lt;/code&gt; class with 15+ test
+methods &lt;br&gt;covering basic usage, multiple tags, fragment parameters,
+offsets, &lt;br&gt;numbers, sentences, and language support&lt;br&gt; &lt;li&gt; Implement
+&lt;code&gt;TestMilvusClientHighlighterInvalid&lt;/code&gt; class with 8+ test
+&lt;br&gt;methods validating error handling for invalid parameters and
+&lt;br&gt;configurations&lt;br&gt; &lt;li&gt; Test highlighter with BM25 search, text
+matching, and various analyzer &lt;br&gt;configurations&lt;/ul&gt;
+
+
+&lt;/details&gt;
+
+
+  &lt;/td&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://github.com/milvus-io/milvus/pull/46505/files#diff-443e3fefb65fbdb088d5920083306ecfe3605745b1e2714198c6566ca67b3736&#34;&gt;+1163/-0&lt;/a&gt;&lt;/td&gt;
+
+&lt;/tr&gt;
+&lt;/table&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;
+
+&lt;/details&gt;
+
+___
+
+
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+## Summary by CodeRabbit
+
+* **Tests**
+  * Added a comprehensive highlighter test suite covering:
+- Core highlighting with single and multi-analyzer setups and multi-tag
+variations
+    - Fragment parameter behaviors and edge cases (size, offset, count)
+- Text-match and query-based highlighting, including BM25 and vector
+interactions
+- Sub-word, long-text/tag, case sensitivity, Chinese/multi-language
+scenarios
+- Error handling for invalid parameters, no-match cases, and other edge
+conditions
+- Module-scoped fixture preparing multilingual, long-form test data and
+teardown
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+---------
+
+Signed-off-by: Eric Hou &lt;eric.hou@zilliz.com&gt;
+Co-authored-by: Eric Hou &lt;eric.hou@zilliz.com&gt;
+
+- enhance: moved query optimization to proxy, added various optimizations (#45526)
+
+issue: https://github.com/milvus-io/milvus/issues/45525
+
+see added README.md for added optimizations
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+## Summary by CodeRabbit
+
+* **New Features**
+* Added query expression optimization feature with a new `optimizeExpr`
+configuration flag to enable automatic simplification of filter
+predicates, including range predicate optimization, merging of IN/NOT IN
+conditions, and flattening of nested logical operators.
+
+* **Bug Fixes**
+* Adjusted delete operation behavior to correctly handle expression
+evaluation.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+---------
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- enhance: Execute text indexes for multiple fields concurrently (#46279)
+
+issue: #46274 
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+## Summary by CodeRabbit
+
+* **Performance Improvements**
+* Field-level text index creation and JSON-key statistics now run
+concurrently, reducing overall indexing time and speeding task
+completion.
+
+* **Observability Enhancements**
+* Per-task and per-field logging expanded with richer context and
+per-phase elapsed-time reporting for improved monitoring and
+diagnostics.
+
+* **Refactor**
+* Node slot handling simplified to compute slot counts on demand instead
+of storing them.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+---------
+
+Signed-off-by: Cai Zhang &lt;cai.zhang@zilliz.com&gt;
+
+- fix: Skip Finished tasks when recovery with compatibility (#46515)
+
+### **User description**
+issue: #46466
+
+
+___
+
+### **PR Type**
+Bug fix
+
+
+___
+
+### **Description**
+- Extract finished task state check into reusable helper function
+
+- Skip finished tasks during compaction recovery to prevent reprocessing
+
+- Add backward compatibility check for pre-allocated segment IDs
+
+
+___
+
+### Diagram Walkthrough
+
+
+```mermaid
+flowchart LR
+  A[&#34;Compaction Task States&#34;] --&gt;|&#34;Check with helper&#34;| B[&#34;isCompactionTaskFinished()&#34;]
+  B --&gt;|&#34;Used in&#34;| C[&#34;compactionInspector.loadMeta()&#34;]
+  B --&gt;|&#34;Used in&#34;| D[&#34;compactionTaskMeta.reloadFromKV()&#34;]
+  C --&gt;|&#34;Skip finished tasks&#34;| E[&#34;Recovery Process&#34;]
+  D --&gt;|&#34;Backward compatibility&#34;| E
+```
+
+
+
+&lt;details&gt;&lt;summary&gt;&lt;h3&gt;File Walkthrough&lt;/h3&gt;&lt;/summary&gt;
+
+&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;&lt;/th&gt;&lt;th align=&#34;left&#34;&gt;Relevant
+files&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;&lt;strong&gt;Enhancement&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;&lt;table&gt;
+&lt;tr&gt;
+  &lt;td&gt;
+    &lt;details&gt;
+&lt;summary&gt;&lt;strong&gt;compaction_util.go&lt;/strong&gt;&lt;dd&gt;&lt;code&gt;Add
+isCompactionTaskFinished helper function&lt;/code&gt;&amp;nbsp; &amp;nbsp; &amp;nbsp;
+&amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp;
+&lt;/dd&gt;&lt;/summary&gt;
+&lt;hr&gt;
+
+internal/datacoord/compaction_util.go
+
+&lt;ul&gt;&lt;li&gt;Added new helper function
+&lt;code&gt;isCompactionTaskFinished()&lt;/code&gt; to check if a &lt;br&gt;compaction
+task is in a terminal state&lt;br&gt; &lt;li&gt; Function checks for failed,
+timeout, completed, cleaned, or unknown &lt;br&gt;states&lt;br&gt; &lt;li&gt; Centralizes
+task state validation logic for reuse across multiple
+&lt;br&gt;components&lt;/ul&gt;
+
+
+&lt;/details&gt;
+
+
+  &lt;/td&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://github.com/milvus-io/milvus/pull/46515/files#diff-8f2cb8d0fef37617202c5a2290ad2bdbf2df5b5983604b5b505bc73a65c7eb43&#34;&gt;+8/-0&lt;/a&gt;&amp;nbsp;
+&amp;nbsp; &amp;nbsp; &lt;/td&gt;
+
+&lt;/tr&gt;
+&lt;/table&gt;&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;&lt;strong&gt;Bug fix&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;&lt;table&gt;
+&lt;tr&gt;
+  &lt;td&gt;
+    &lt;details&gt;
+&lt;summary&gt;&lt;strong&gt;compaction_inspector.go&lt;/strong&gt;&lt;dd&gt;&lt;code&gt;Refactor to
+use finished task helper function&lt;/code&gt;&amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp;
+&amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &lt;/dd&gt;&lt;/summary&gt;
+&lt;hr&gt;
+
+internal/datacoord/compaction_inspector.go
+
+&lt;ul&gt;&lt;li&gt;Replaced inline state checks with call to
+&lt;code&gt;isCompactionTaskFinished()&lt;/code&gt; &lt;br&gt;helper&lt;br&gt; &lt;li&gt; Simplifies
+code by removing repetitive state comparison logic&lt;br&gt; &lt;li&gt; Maintains
+same behavior of skipping finished tasks during recovery&lt;/ul&gt;
+
+
+&lt;/details&gt;
+
+
+  &lt;/td&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://github.com/milvus-io/milvus/pull/46515/files#diff-1c884001f2e84de177fea22b584f3de70a6e73695dbffa34031be9890d17da6d&#34;&gt;+1/-5&lt;/a&gt;&amp;nbsp;
+&amp;nbsp; &amp;nbsp; &lt;/td&gt;
+
+&lt;/tr&gt;
+
+&lt;tr&gt;
+  &lt;td&gt;
+    &lt;details&gt;
+&lt;summary&gt;&lt;strong&gt;compaction_task_meta.go&lt;/strong&gt;&lt;dd&gt;&lt;code&gt;Add finished
+task check for backward compatibility&lt;/code&gt;&amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp;
+&amp;nbsp; &amp;nbsp; &amp;nbsp; &lt;/dd&gt;&lt;/summary&gt;
+&lt;hr&gt;
+
+internal/datacoord/compaction_task_meta.go
+
+&lt;ul&gt;&lt;li&gt;Added check to skip finished tasks before processing
+pre-allocated &lt;br&gt;segment IDs&lt;br&gt; &lt;li&gt; Ensures backward compatibility
+for tasks without pre-allocated segment &lt;br&gt;IDs&lt;br&gt; &lt;li&gt; Prevents
+marking already-finished tasks as failed during reload&lt;/ul&gt;
+
+
+&lt;/details&gt;
+
+
+  &lt;/td&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://github.com/milvus-io/milvus/pull/46515/files#diff-0dae7214c4c79ddf5106bd51d375b5fb2f41239d5d433798afa90708e443eca8&#34;&gt;+1/-1&lt;/a&gt;&amp;nbsp;
+&amp;nbsp; &amp;nbsp; &lt;/td&gt;
+
+&lt;/tr&gt;
+&lt;/table&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;
+
+&lt;/details&gt;
+
+___
+
+
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+## Summary by CodeRabbit
+
+* **Bug Fixes**
+* Improved detection of finished compaction tasks to reduce false
+failures.
+* Prevented finished tasks with missing pre-allocations from being
+incorrectly marked as failed.
+* Simplified abandonment logic for completed/timeout/cleaned tasks to
+reduce erroneous retries and noisy logs.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+---------
+
+Signed-off-by: Cai Zhang &lt;cai.zhang@zilliz.com&gt;
+
+- enhance: update tantivy (#46521)
+
+issue: #46520
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- enhance: add concurrency pool for analyzer (#46185)
+
+relate: https://github.com/milvus-io/milvus/issues/42589
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+
+## Summary by CodeRabbit
+
+## New Features
+- Added `concurrency_per_cpu_core` configuration parameter for the
+analyzer component, enabling customizable per-CPU concurrency tuning
+(default: 8).
+
+## Tests
+- Added test coverage for batch analysis operations.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+Signed-off-by: aoiasd &lt;zhicheng.yue@zilliz.com&gt;
+
+- doc: fix quickstart section for Milvus Lite (#46474)
+
+### **User description**
+As of https://github.com/milvus-io/pymilvus/pull/2976 `milvus-lite` is
+no longer included as part of the default `pymilvus` installation and
+must be explicitly specified
+
+
+___
+
+### **PR Type**
+Documentation
+
+
+___
+
+### **Description**
+- Update installation docs to reflect milvus-lite as optional dependency
+
+- Clarify explicit installation requirement for Milvus Lite
+functionality
+
+
+___
+
+### Diagram Walkthrough
+
+
+```mermaid
+flowchart LR
+  A[&#34;pymilvus default install&#34;] -- &#34;does not include&#34; --&gt; B[&#34;Milvus Lite&#34;]
+  C[&#34;pymilvus[milvus-lite]&#34;] -- &#34;includes&#34; --&gt; B
+  B -- &#34;enables&#34; --&gt; D[&#34;Local vector database&#34;]
+```
+
+
+
+&lt;details&gt;&lt;summary&gt;&lt;h3&gt;File Walkthrough&lt;/h3&gt;&lt;/summary&gt;
+
+&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;&lt;/th&gt;&lt;th align=&#34;left&#34;&gt;Relevant
+files&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;&lt;strong&gt;Documentation&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;&lt;table&gt;
+&lt;tr&gt;
+  &lt;td&gt;
+    &lt;details&gt;
+&lt;summary&gt;&lt;strong&gt;README.md&lt;/strong&gt;&lt;dd&gt;&lt;code&gt;Clarify Milvus Lite as
+optional dependency&lt;/code&gt;&amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp;
+&amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp;
+&lt;/dd&gt;&lt;/summary&gt;
+&lt;hr&gt;
+
+README.md
+
+&lt;ul&gt;&lt;li&gt;Updated installation documentation to clarify that
+&lt;code&gt;milvus-lite&lt;/code&gt; is no &lt;br&gt;longer included by default&lt;br&gt; &lt;li&gt;
+Changed wording from &#34;includes Milvus Lite&#34; to &#34;can try Milvus Lite by
+&lt;br&gt;installing &lt;code&gt;pymilvus[milvus-lite]&lt;/code&gt;&#34;&lt;br&gt; &lt;li&gt; Reflects the
+breaking change from pymilvus PR #2976 where milvus-lite &lt;br&gt;became an
+optional dependency&lt;/ul&gt;
+
+
+&lt;/details&gt;
+
+
+  &lt;/td&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://github.com/milvus-io/milvus/pull/46474/files#diff-b335630551682c19a781afebcf4d07bf978fb1f8ac04c6bf87428ed5106870f5&#34;&gt;+1/-1&lt;/a&gt;&amp;nbsp;
+&amp;nbsp; &amp;nbsp; &lt;/td&gt;
+
+&lt;/tr&gt;
+&lt;/table&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;
+
+&lt;/details&gt;
+
+___
+
+
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+
+## Summary by CodeRabbit
+
+* **Documentation**
+* Updated Milvus Lite installation guidance to specify the proper
+installation method using the optional feature specification.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+Signed-off-by: Nathan Weinberg &lt;nathan2@stwmd.net&gt;
+
+- enhance: map multi row groups into one cache cell (#46249)
+
+issue: #45486
+
+Introduce row group batching to reduce cache cell granularity and
+improve
+memory&amp;disk efficiency. Previously, each parquet row group mapped 1:1 to
+a cache
+cell. Now, up to `kRowGroupsPerCell` (4) row groups are merged into one
+cell.
+This reduces the number of cache cells (and associated overhead) by ~4x
+while
+maintaining the same data granularity for loading.
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+## Summary by CodeRabbit
+
+* **Refactor**
+* Switched to cell-based grouping that merges multiple row groups for
+more efficient multi-file aggregation and reads.
+* Chunk loading now combines multiple source batches/tables per cell and
+better supports mmap-backed storage.
+
+* **New Features**
+* Exposed helpers to query row-group ranges and global row-group offsets
+for diagnostics and testing.
+* Translators now accept chunk-type and mmap/load hints to control
+on-disk vs in-memory behavior.
+
+* **Bug Fixes**
+* Improved bounds checks and clearer error messages for out-of-range
+cell requests.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+Signed-off-by: Shawn Wang &lt;shawn.wang@zilliz.com&gt;
+
+- enhance: support pk isolation optional field data loading from manifest for index build (#46480)
+
+### **User description**
+Related to #44956
+
+Add manifest-based data loading path for optional fields in
+`cache_opt_field_memory_v2`. When a manifest file is provided in the
+config, the function now retrieves field data directly from the manifest
+using `GetFieldDatasFromManifest` instead of reading from segment insert
+files. This enables storage v2 compatibility for building indexes with
+optional fields.
+
+
+___
+
+### **PR Type**
+Enhancement
+
+
+___
+
+### **Description**
+- Add manifest-based data loading for optional fields in index building
+
+- Support storage v2 compatibility via `GetFieldDatasFromManifest`
+function
+
+- Enable PK isolation optional field handling without segment insert
+files
+
+
+___
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- enhance: fix IsMmapSupported for stl sort  (#46472)
+
+issue: https://github.com/milvus-io/milvus/issues/44399
+
+this PR also adds `ByteSize()` methods for scalar indexes. currently not
+used in milvus code, but used in scalar benchmark. may be used by
+cachinglayer in the future.
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+## Summary by CodeRabbit
+
+* **Refactor**
+* Improved and standardized memory-size computation and caching across
+index types so reported index footprints are more accurate and
+consistent.
+
+* **Chores**
+* Ensured byte-size metrics are refreshed immediately after index
+build/load operations to keep memory accounting in sync with runtime
+state.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+---------
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- enhance: Set latestDeletePos from L0 segments to bound L1 selection (#46436)
+
+This commit refines L0 compaction to ensure data consistency by properly
+setting the delete position boundary for L1 segment selection.
+
+Key Changes:
+1. L0 View Trigger Sets latestDeletePos for L1 Selection
+2. Filter L0 Segments by Growing Segment Position in policy, not in
+views
+3. Renamed LevelZeroSegmentsView to LevelZeroCompactionView
+4. Renamed fields for semantic clarity: * segments -&gt; l0Segments *
+earliestGrowingSegmentPos -&gt; latestDeletePos
+5. Update Default Compaction Prioritizer to level
+
+See also: #46434
+
+---------
+
+Signed-off-by: yangxuan &lt;xuan.yang@zilliz.com&gt;
+
+- enhance: Estimate index task slot using field size instead of segment size (#46275)
+
+issue: #45186
+
+Signed-off-by: Cai Zhang &lt;cai.zhang@zilliz.com&gt;
+
+- enhance: Retry reads from object storage on rate limit error (#46455)
+
+This PR improves the robustness of object storage operations by retrying
+both explicit throttling errors (e.g. HTTP 429, SlowDown, ServerBusy).
+These errors commonly occur under high concurrency and are typically
+recoverable with bounded retries.
+
+issue: https://github.com/milvus-io/milvus/issues/44772
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+## Summary by CodeRabbit
+
+* **New Features**
+* Configurable retry support for reads from object storage and improved
+mapping of transient/rate-limit errors.
+* Added a retryable reader wrapper used by CSV/JSON/Parquet/Numpy import
+paths.
+
+* **Configuration**
+  * New parameter to control storage read retry attempts.
+
+* **Tests**
+* Expanded unit tests covering error mapping and retry behaviors across
+storage backends.
+* Standardized mock readers and test initialization to simplify test
+setups.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+---------
+
+Signed-off-by: bigsheeper &lt;yihao.dai@zilliz.com&gt;
+
+- fix: fix chunk iterator merge order (#46461)
+
+issue: #46349 
+When using brute-force search, the iterator results from multiple chunks
+are merged; at that point, we need to pay attention to how the metric
+affects result ranking.
+
+Signed-off-by: xianliang.li &lt;xianliang.li@zilliz.com&gt;
+
+- feat: expose the Go expr parser to C++ and embed into libmilvus-core.so (#45703)
+
+generated a library that wraps the go expr parser, and embedded that
+into libmilvus-core.so
+
+issue: https://github.com/milvus-io/milvus/issues/45702
+
+see `internal/core/src/plan/milvus_plan_parser.h` for the exposed
+interface
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+
+## Summary by CodeRabbit
+
+* **New Features**
+* Introduced C++ API for plan parsing with schema registration and
+expression parsing capabilities.
+* Plan parser now available as shared libraries instead of a standalone
+binary tool.
+
+* **Refactor**
+* Reorganized build system to produce shared library artifacts instead
+of executable binaries.
+* Build outputs relocated to standardized library and include
+directories.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+---------
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- fix: set enable.auto.commit false to prevent from creating kafka consumer group (#46508)
+
+### **User description**
+issue: #46507
+
+we use the assign/unassign api to manage the consumer manually, the
+commit operation will generate a new consumer group which is not what we
+want. so we disable the auto commit to avoid it, also see:
+https://github.com/confluentinc/confluent-kafka-python/issues/250#issuecomment-331377925
+
+
+___
+
+### **PR Type**
+Bug fix
+
+
+___
+
+### **Description**
+- Disable auto-commit in Kafka consumer configuration
+
+- Prevents unwanted consumer group creation from manual offset
+management
+
+- Clarifies offset reset behavior with explanatory comments
+
+
+___
+
+### Diagram Walkthrough
+
+
+```mermaid
+flowchart LR
+  A[&#34;Kafka Consumer Config&#34;] --&gt; B[&#34;Set enable.auto.commit to false&#34;]
+  B --&gt; C[&#34;Prevent auto consumer group creation&#34;]
+  A --&gt; D[&#34;Set auto.offset.reset to earliest&#34;]
+  D --&gt; E[&#34;Handle deleted offsets gracefully&#34;]
+```
+
+
+
+&lt;details&gt;&lt;summary&gt;&lt;h3&gt;File Walkthrough&lt;/h3&gt;&lt;/summary&gt;
+
+&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;&lt;/th&gt;&lt;th align=&#34;left&#34;&gt;Relevant
+files&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;&lt;strong&gt;Bug
+fix&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;&lt;table&gt;
+&lt;tr&gt;
+  &lt;td&gt;
+    &lt;details&gt;
+&lt;summary&gt;&lt;strong&gt;builder.go&lt;/strong&gt;&lt;dd&gt;&lt;code&gt;Disable auto-commit and
+add configuration comments&lt;/code&gt;&amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp;
+&amp;nbsp; &amp;nbsp; &lt;/dd&gt;&lt;/summary&gt;
+&lt;hr&gt;
+
+pkg/streaming/walimpls/impls/kafka/builder.go
+
+&lt;ul&gt;&lt;li&gt;Added &lt;code&gt;enable.auto.commit&lt;/code&gt; configuration set to
+&lt;code&gt;false&lt;/code&gt; to prevent &lt;br&gt;automatic consumer group creation&lt;br&gt;
+&lt;li&gt; Added explanatory comments for both &lt;code&gt;auto.offset.reset&lt;/code&gt;
+and &lt;br&gt;&lt;code&gt;enable.auto.commit&lt;/code&gt; settings&lt;br&gt; &lt;li&gt; Clarifies that
+manual assign/unassign API is used for consumer &lt;br&gt;management&lt;/ul&gt;
+
+
+&lt;/details&gt;
+
+
+  &lt;/td&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://github.com/milvus-io/milvus/pull/46508/files#diff-4b5635821fdc8b585d16c02d8a3b59079d8e667b2be43a073265112d72701add&#34;&gt;+7/-0&lt;/a&gt;&amp;nbsp;
+&amp;nbsp; &amp;nbsp; &lt;/td&gt;
+
+&lt;/tr&gt;
+&lt;/table&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;
+
+&lt;/details&gt;
+
+___
+
+
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+
+## Summary by CodeRabbit
+
+## Bug Fixes
+* Kafka consumer now reads from the earliest available messages and
+auto-commit has been disabled to support manual offset management.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+
+- enhance: Don&#39;t seal segments when only alter collection properties (#46488)
+
+### **PR Type**
+Enhancement
+
+
+___
+
+### **Description**
+- Only flush and fence segments for schema-changing alter collection
+messages
+
+- Skip segment sealing for collection property-only alterations
+
+- Add conditional check using messageutil.IsSchemaChange utility
+function
+
+
+___
+
+### Diagram Walkthrough
+
+
+```mermaid
+flowchart LR
+  A[&#34;Alter Collection Message&#34;] --&gt; B{&#34;Is Schema Change?&#34;}
+  B --&gt;|Yes| C[&#34;Flush and Fence Segments&#34;]
+  B --&gt;|No| D[&#34;Skip Segment Operations&#34;]
+  C --&gt; E[&#34;Set Flushed Segment IDs&#34;]
+  D --&gt; E
+  E --&gt; F[&#34;Append Operation&#34;]
+```
+
+
+
+&lt;details&gt;&lt;summary&gt;&lt;h3&gt;File Walkthrough&lt;/h3&gt;&lt;/summary&gt;
+
+&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;&lt;/th&gt;&lt;th align=&#34;left&#34;&gt;Relevant
+files&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;&lt;strong&gt;Enhancement&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;&lt;table&gt;
+&lt;tr&gt;
+  &lt;td&gt;
+    &lt;details&gt;
+&lt;summary&gt;&lt;strong&gt;shard_interceptor.go&lt;/strong&gt;&lt;dd&gt;&lt;code&gt;Conditional
+segment sealing based on schema changes&lt;/code&gt;&amp;nbsp; &amp;nbsp; &amp;nbsp;
+&amp;nbsp; &amp;nbsp; &amp;nbsp; &lt;/dd&gt;&lt;/summary&gt;
+&lt;hr&gt;
+
+
+internal/streamingnode/server/wal/interceptors/shard/shard_interceptor.go
+
+&lt;ul&gt;&lt;li&gt;Added import for &lt;code&gt;messageutil&lt;/code&gt; package to access
+schema change detection &lt;br&gt;utility&lt;br&gt; &lt;li&gt; Modified
+&lt;code&gt;handleAlterCollection&lt;/code&gt; to conditionally flush and fence
+&lt;br&gt;segments only for schema-changing messages&lt;br&gt; &lt;li&gt; Wrapped segment
+flushing logic in &lt;code&gt;if
+&lt;/code&gt;&lt;br&gt;&lt;code&gt;messageutil.IsSchemaChange(header)&lt;/code&gt; check&lt;br&gt;
+&lt;li&gt; Skips unnecessary segment sealing when only collection properties
+are &lt;br&gt;altered&lt;/ul&gt;
+
+
+&lt;/details&gt;
+
+
+  &lt;/td&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://github.com/milvus-io/milvus/pull/46488/files#diff-c1acf785e5b530e59137b21584cf567ccd9aeeb613fb3684294b439289e80beb&#34;&gt;+9/-3&lt;/a&gt;&amp;nbsp;
+&amp;nbsp; &amp;nbsp; &lt;/td&gt;
+
+&lt;/tr&gt;
+&lt;/table&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;
+
+&lt;/details&gt;
+
+___
+
+
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+
+## Summary by CodeRabbit
+
+* **Bug Fixes**
+* Optimized collection schema alteration to conditionally perform
+segment allocation operations only when schema changes are detected,
+reducing unnecessary overhead in unmodified collection scenarios.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+Signed-off-by: Cai Zhang &lt;cai.zhang@zilliz.com&gt;
+
+- enhance: support milvus version when coordinator startup (#46456)
+
+issue: #46451
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+## Summary by CodeRabbit
+
+* **New Features**
+* Session versioning added to validate coordinator compatibility during
+registration and active takeover.
+
+* **Changes**
+* Active–standby flow simplified: standby-to-active activation now
+always enabled and initialized unconditionally.
+* Registration uses version-aware transactions to ensure version
+consistency during takeover.
+  * Startup/health startup path streamlined.
+
+* **Tests**
+* Added version-key integration test; removed test for disabling
+active-standby.
+  * Updated flush test to assert rate-limiter errors occur.
+
+* **Chores**
+  * Removed centralized connection manager and its test suite.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+---------
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+
+- fix: test flush rate failure because of config modification (#46497)
+
+### **User description**
+issue: #46097
+
+- the flush rate is modified into 4qps, so the testcase is fail.
+
+
+___
+
+### **PR Type**
+Tests, Bug fix
+
+
+___
+
+### **Description**
+- Replace sequential flush calls with concurrent requests to trigger
+rate limiting
+
+- Add sync.WaitGroup for concurrent goroutine execution
+
+- Check for rate limit errors across multiple concurrent flush
+operations
+
+- Remove hardcoded error message expectation for flexibility
+
+
+___
+
+### Diagram Walkthrough
+
+
+```mermaid
+flowchart LR
+  A[&#34;Sequential Flush Calls&#34;] --&gt;|Replace with| B[&#34;Concurrent Flush Requests&#34;]
+  B --&gt;|Use| C[&#34;sync.WaitGroup&#34;]
+  C --&gt;|Validate| D[&#34;Rate Limit Errors&#34;]
+```
+
+
+
+&lt;details&gt;&lt;summary&gt;&lt;h3&gt;File Walkthrough&lt;/h3&gt;&lt;/summary&gt;
+
+&lt;table&gt;&lt;thead&gt;&lt;tr&gt;&lt;th&gt;&lt;/th&gt;&lt;th align=&#34;left&#34;&gt;Relevant
+files&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;&lt;tbody&gt;&lt;tr&gt;&lt;td&gt;&lt;strong&gt;Tests&lt;/strong&gt;&lt;/td&gt;&lt;td&gt;&lt;table&gt;
+&lt;tr&gt;
+  &lt;td&gt;
+    &lt;details&gt;
+&lt;summary&gt;&lt;strong&gt;insert_test.go&lt;/strong&gt;&lt;dd&gt;&lt;code&gt;Refactor flush rate
+test to use concurrent requests&lt;/code&gt;&amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp; &amp;nbsp;
+&amp;nbsp; &lt;/dd&gt;&lt;/summary&gt;
+&lt;hr&gt;
+
+tests/go_client/testcases/insert_test.go
+
+&lt;ul&gt;&lt;li&gt;Added &lt;code&gt;sync&lt;/code&gt; package import for concurrent goroutine
+synchronization&lt;br&gt; &lt;li&gt; Replaced sequential flush calls with 10
+concurrent flush operations &lt;br&gt;using goroutines&lt;br&gt; &lt;li&gt; Implemented
+WaitGroup to synchronize all concurrent flush requests&lt;br&gt; &lt;li&gt; Modified
+error validation to check for rate limit errors across all
+&lt;br&gt;concurrent attempts instead of expecting specific sequential
+behavior&lt;br&gt; &lt;li&gt; Relaxed error message matching to only check for &#34;rate
+limit exceeded&#34; &lt;br&gt;substring&lt;/ul&gt;
+
+
+&lt;/details&gt;
+
+
+  &lt;/td&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://github.com/milvus-io/milvus/pull/46497/files#diff-89a4ddfa15d096e6a5f647da0e461715e5a692b375b04a3d01939f419b00f529&#34;&gt;+19/-4&lt;/a&gt;&amp;nbsp;
+&amp;nbsp; &lt;/td&gt;
+
+&lt;/tr&gt;
+&lt;/table&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;&lt;/table&gt;
+
+&lt;/details&gt;
+
+___
+
+
+
+&lt;!-- This is an auto-generated comment: release notes by coderabbit.ai
+--&gt;
+
+## Summary by CodeRabbit
+
+## Release Notes
+
+* **Tests**
+* Enhanced testing of concurrent flush operations to improve validation
+of system reliability under concurrent load scenarios.
+
+---
+
+**Note:** This release contains internal testing improvements with no
+direct user-facing feature changes.
+
+&lt;sub&gt;✏️ Tip: You can customize this high-level summary in your review
+settings.&lt;/sub&gt;
+
+&lt;!-- end of auto-generated comment: release notes by coderabbit.ai --&gt;
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+
+- enhance: change highlight query keyword to `highlight_query` (#46360)
+
+Instead of `queries`.
+relate: https://github.com/milvus-io/milvus/issues/42589
+
+Signed-off-by: aoiasd &lt;zhicheng.yue@zilliz.com&gt;
+
+- test: add HNSW_SQ test cases (#46428)
+
+/kind improvement
+/assign @yanliang567
+
+Signed-off-by: zilliz &lt;jiaming.li@zilliz.com&gt;
+
+- fix: truncate_collection status check and add database interceptor su… (#46430)
+
+issue: https://github.com/milvus-io/milvus/issues/46166
+
+Signed-off-by: sijie-ni-0214 &lt;sijie.ni@zilliz.com&gt;
+
+- doc: [skip e2e]Add design document for entity level ttl (#46406)
+
+issue: #46033
+
+Signed-off-by: Cai Zhang &lt;cai.zhang@zilliz.com&gt;
+
+- fix: Remove stale proxy clients on rewatch etcd (#46398)
+
+AddProxyClients now removes clients not in the new snapshot before
+adding new ones. This ensures proper cleanup when ProxyWatcher re-watche
+etcd.
+
+issue: https://github.com/milvus-io/milvus/issues/46397
+
+Signed-off-by: bigsheeper &lt;yihao.dai@zilliz.com&gt;
+
+- enhance: Align the monitoring of last_replicated_time_tick with wal_last_confirm_time_tick (#46469)
+
+issue: https://github.com/milvus-io/milvus/issues/46116
+
+Signed-off-by: bigsheeper &lt;yihao.dai@zilliz.com&gt;
+
+- fix: call truncate when checkpoint is persisted (#46382)
+
+issue: #44434
+
+Signed-off-by: tinswzy &lt;zhenyuan.wei@zilliz.com&gt;</div>
+</div>
+
+<a href="../project/milvus-io_milvus.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
