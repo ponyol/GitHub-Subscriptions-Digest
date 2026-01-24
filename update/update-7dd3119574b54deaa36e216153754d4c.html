@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (2 commits) - timescale/pg-aiguide - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (2 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/timescale_pg-aiguide.html">timescale/pg-aiguide</a> /
+    Updates in main (2 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/timescale_pg-aiguide.html">timescale/pg-aiguide</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-01-21 18:05 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/timescale/pg-aiguide/commits/main" target="_blank">https://github.com/timescale/pg-aiguide/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Этот документ описывает два важных запроса на слияние. Первый PR (#69) исправляет многочисленные проблемы с API и сигнатурами в навыке `setup-timescaledb-hypertables`, приводя его примеры в соответствие с текущим API TimescaleDB 2.24.0 и устраняя ошибки, такие как отсутствующие обязательные параметры, дублирование политик и неверные вызовы процедур. Одновременно, второй PR (#68) рефакторизует инструменты поиска, объединяя их в единый инструмент `search_docs` и включая надежный BM25-поиск по ключевым словам для документации PostgreSQL.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- API/Signature fixes for setup-timescaledb-hypertables (#69)
+
+This PR addresses multiple issues encountered while using
+`setup-timescaledb-hypertables`
+
+## Approach
+
+Attempt to complete tasks at
+https://github.com/timescale/TigerData-Workshops/tree/main/Agentic-Postgres-Workshop
+
+Prompt to uncover the issues:
+
+```
+Goal for this session is to debug Tiger skills and make sure it returns accurate results.
+
+I want you to remember what SQL queries you created and ran and why. If the query was invalid, trace
+the invalid syntax to the source (either your own knowledge or data received from the skill). My goal is
+to make sure the skill contains the relevant and correct information.
+
+use skill at skills/setup-timescaledb-hypertables/SKILL.md
+
+  1. Look at the two CSV files in this directory
+  2. Use Tiger service postgres://tsdbadmin:XXXXXXX@mxdjwp5a5k.ocssgijfrc.tsdb.cloud.timescale.com:35695/tsdb?sslmode=require
+  3. Using Tiger best practices, create an optimized schema for the data
+  4. Save the schema to `schema.sql`
+  5. Apply schema to the newly created database
+  6. Load data from CSV files
+```
+
+## Issues Encountered and Resolutions
+
+### Issue 1: Incorrect API Signature for add_continuous_aggregate_policy
+**Source**: Tiger skill documentation
+(setup-timescaledb-hypertables/SKILL.md:263-275)
+
+**Tiger Skill Suggested**:
+```sql
+SELECT add_continuous_aggregate_policy(&#39;sensor_data_hourly&#39;,
+    end_offset =&gt; INTERVAL &#39;15 minutes&#39;,
+    schedule_interval =&gt; INTERVAL &#39;15 minutes&#39;);
+```
+
+**Error Encountered**:
+```
+ERROR: function add_continuous_aggregate_policy(unknown, end_offset =&gt; interval,
+schedule_interval =&gt; interval) does not exist
+HINT: No function matches the given name and argument types.
+```
+
+**Actual API** (TimescaleDB 2.24.0):
+```sql
+add_continuous_aggregate_policy(
+    continuous_aggregate regclass,
+    start_offset &#34;any&#34;,           -- REQUIRED parameter (not optional)
+    end_offset &#34;any&#34;,
+    schedule_interval interval,
+    ...
+)
+```
+
+**Resolution**:
+```sql
+-- Must provide start_offset parameter, use NULL to refresh all data
+SELECT add_continuous_aggregate_policy(&#39;sensor_data_hourly&#39;,
+    start_offset =&gt; NULL,
+    end_offset =&gt; INTERVAL &#39;15 minutes&#39;,
+    schedule_interval =&gt; INTERVAL &#39;15 minutes&#39;);
+```
+
+**Root Cause**: The Tiger skill documentation (Step 5) shows the API
+without `start_offset` as a required parameter, but the actual
+TimescaleDB API in version 2.24.0 requires it as a positional parameter.
+The skill suggests omitting `start_offset` to refresh all data, but the
+API requires explicitly passing `NULL`.
+
+### Issue 2: Duplicate Columnstore Policy
+**Source**: Tiger skill documentation
+(setup-timescaledb-hypertables/SKILL.md:45-48)
+
+**Tiger Skill Suggested**:
+```sql
+-- In CREATE TABLE
+) WITH (
+    ...
+    tsdb.enable_columnstore=true,
+    ...
+);
+
+-- Then separately (Step 2)
+CALL add_columnstore_policy(&#39;sensor_data&#39;, after =&gt; INTERVAL &#39;1 day&#39;);
+```
+
+**Error Encountered**:
+```
+ERROR: columnstore policy already exists for hypertable or continuous aggregate &#34;sensor_data&#34;
+HINT: Set option &#34;if_not_exists&#34; to true to avoid error.
+```
+
+**Root Cause**: The `tsdb.enable_columnstore=true` option in `CREATE
+TABLE` automatically creates a columnstore policy with default settings
+(7 days). Calling `add_columnstore_policy()` again creates a duplicate.
+
+**Resolution**:
+Comment out the manual `add_columnstore_policy()` call since it&#39;s
+auto-created:
+```sql
+-- Note: Columnstore policy is auto-created by tsdb.enable_columnstore=true
+-- CALL add_columnstore_policy(&#39;sensor_data&#39;, after =&gt; INTERVAL &#39;1 day&#39;);
+```
+
+### Issue 3: Deprecated View Names
+**Source**: Tiger skill documentation mentions deprecated vs new view
+names
+
+**Attempted**:
+```sql
+SELECT * FROM timescaledb_information.columnstore_settings;
+SELECT * FROM timescaledb_information.hypertable_columnstore_stats;
+```
+
+**Error**:
+```
+ERROR: relation &#34;timescaledb_information.columnstore_settings&#34; does not exist
+ERROR: relation &#34;timescaledb_information.hypertable_columnstore_stats&#34; does not exist
+```
+
+**Root Cause**: The new views mentioned in the skill documentation (API
+Reference section) are not available in TimescaleDB 2.24.0 yet, or have
+different names.
+
+**Resolution**: Use the function-based API instead:
+```sql
+SELECT * FROM hypertable_compression_stats(&#39;sensor_data&#39;);
+-- Works correctly and returns compression statistics
+```
+
+### Issue 4: convert_to_columnstore is a Procedure, Not a Function
+**Source**: Tiger skill documentation
+(setup-timescaledb-hypertables/SKILL.md:430-439)
+
+**Attempted**:
+```sql
+SELECT convert_to_columnstore(&#39;_hyper_7_1_chunk&#39;);
+```
+
+**Error**:
+```
+ERROR: convert_to_columnstore(unknown) is a procedure
+HINT: To call a procedure, use CALL.
+```
+
+**Resolution**:
+```sql
+CALL convert_to_columnstore(&#39;_timescaledb_internal._hyper_7_1_chunk&#39;);
+```
+
+Also needed to use fully-qualified chunk name with schema prefix
+`_timescaledb_internal.`.
+
+- Refactor: Consolidate search tools and enable BM25 for Postgres docs (#68)
+
+## Summary
+This PR unifies the disparate search tools (semantic/keyword for
+Tiger/Postgres) into a single `search_docs` tool, simplifying the API
+surface. It also enables BM25 keyword search for PostgreSQL
+documentation, providing a robust alternative to semantic search.
+
+## Key Changes
+- **Unified Tool:** Replaced `keywordSearchTigerDocs`,
+`semanticSearchPostgresDocs`, and `semanticSearchTigerDocs` with a
+single `search_docs` tool.
+- **BM25 for Postgres:** Added BM25 indexes to `postgres_chunks` via a
+new migration and updated the `ingest/postgres_docs.py` script to
+preserve them during data refreshes.
+- **Docker Update:** Upgraded the `timescaledb-ha` image to `pg18` to
+ensure compatibility with the `pg_textsearch` extension required for
+BM25.
+- **Cleanup:** Removed redundant files and fixed minor typos.
+
+## Verification
+- Verified build, lint, and typecheck pass locally.
+- Verified that the new ingestion logic correctly handles index
+preservation.</div>
+</div>
+
+<a href="../project/timescale_pg-aiguide.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
