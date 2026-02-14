@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in master (34 commits) - milvus-io/milvus - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in master (34 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/milvus-io_milvus.html">milvus-io/milvus</a> /
+    Updates in master (34 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/milvus-io_milvus.html">milvus-io/milvus</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-02-13 04:50 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/milvus-io/milvus/commits/master" target="_blank">https://github.com/milvus-io/milvus/commits/master</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление Milvus v2.6.11 значительно повышает стабильность системы и целостность данных, особенно в отношении операций со снимками и безопасности памяти для полей, допускающих значения NULL. Основные исправления предотвращают потерю данных во время восстановления снимков и сборки мусора, устраняют ряд проблем с безопасностью памяти и обработкой смещений, а также улучшают координацию запросов. Релиз также добавляет поддержку поиска по первичным ключам в Go SDK, включает обширные сквозные тесты для функции предварительного прогрева и оптимизирует выполнение модульных тестов C++.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- [automated] Bump milvus version to v2.6.11 (#47765)
+
+Bump milvus version to v2.6.11
+Signed-off-by: sre-ci-robot sre-ci-robot@users.noreply.github.com
+
+Co-authored-by: github-actions[bot] &lt;41898282+github-actions[bot]@users.noreply.github.com&gt;
+
+- fix: prevent DropSnapshot while restore jobs reference the snapshot (#47608)
+
+issue: #47578
+issue: #44358
+Implement snapshot restore reference tracking to prevent DropSnapshot
+from deleting snapshots that are actively being restored. This fixes
+issue #47578 where CopySegmentJob tasks could fail indefinitely if their
+source snapshot was deleted mid-restore.
+
+Architecture:
+- Add SnapshotRestoreRefTracker in CopySegmentMeta to track active
+restore operations per snapshot using reference counting
+- Increment ref count when CopySegmentJob is created (in RestoreData)
+- Decrement ref count when job transitions to a terminal state
+(Completed/Failed)
+- Check ref count in DropSnapshot RPC and reject deletion if non-zero
+
+Implementation details:
+- SnapshotRestoreRefTracker uses sync.RWMutex for thread-safe operations
+- Integrated into CopySegmentMeta for data cohesion
+- Job lifecycle: Pending → Executing → Completed/Failed
+- Snapshot protected from job creation until terminal state transition
+
+Testing:
+- TestSnapshotRestoreRefTracker: Basic increment/decrement operations
+- TestSnapshotRestoreRefTracker_Concurrent: 20 goroutines concurrent
+safety
+- TestSnapshotRestoreRefTracker_UnderflowProtection: Negative count
+prevention
+
+---------
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- test: add e2e tests for warmup feature at field/collection/index levels (#47764)
+
+## Summary
+
+Add 25 e2e test cases (38 with parametrization) for the warmup feature,
+covering field/collection/index level warmup configuration and
+cross-feature interactions.
+
+### Test Coverage
+
+- **Schema-level**: `add_field(warmup=sync/disable)` for all data types
+- **Collection-level**: `warmup.scalarField / vectorField / scalarIndex
+/ vectorIndex` properties
+- **Index-level**: `alter_index_properties` warmup lifecycle
+(set/update/drop)
+- **Priority**: three-level priority (field/index &gt; collection &gt;
+cluster), index overrides collection
+- **Cross-feature**: warmup × mmap, partition, compaction,
+multi-replica, growing segment, dynamic field, multi-vector fields
+- **Negative cases**: invalid values, wrong-level keys
+- **Idempotency &amp; boundary**: create_index idempotent behavior,
+drop/recreate residue check, empty collection, toggle repeatedly
+
+### Changes
+
+**Modified Files:**
+- `tests/python_client/common/common_func.py`: Add 3 warmup helper
+functions (`get_field_warmup`, `get_collection_warmup`,
+`get_index_warmup`)
+- `tests/python_client/milvus_client/test_milvus_client_alter.py`: Add
+`TestMilvusClientWarmup` test class with 25 test methods
+
+### Test Plan
+
+- [x] All 38 tests passed locally with `-n 6` parallel execution (100s)
+- [x] Tested against Milvus master branch with pymilvus 2.6.9
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: wangting0128 &lt;ting.wang@zilliz.com&gt;
+
+- fix: protect snapshot-referenced files from garbage collection (#47669)
+
+## Summary
+
+This PR prevents RestoreSnapshot failures caused by garbage collection
+of snapshot-referenced files during compaction and index rebuild cycles.
+
+**Root cause:**
+When a collection undergoes compaction or index rebuild after a snapshot
+is created, the old segment/index files referenced by the snapshot are
+garbage collected without checking snapshot references. This causes
+RestoreSnapshot to fail with &#34;key not found&#34; errors.
+
+**Changes:**
+- Add snapshot reference checks before deleting binlog files
+- Add snapshot reference checks before deleting index files
+- Add snapshot reference checks before deleting text index files
+- Add snapshot reference checks before deleting JSON index files
+- Add nil-safety checks for snapshotMeta in all GC operations
+- Upgrade mockey to v1.4.4 for improved testing
+
+All GC functions now query `GetSnapshotBySegment`/`GetSnapshotByIndex`
+before file deletion. Files referenced by active snapshots are preserved
+to ensure RestoreSnapshot can always access the files recorded in the
+snapshot metadata.
+
+## Related Issue
+
+issue: #47658
+issue: #44358
+
+## Test Coverage
+
+- Added snapshot reference protection tests for all modified GC
+functions
+- Added nil snapshotMeta handling tests
+- All tests pass with race detector enabled
+- Coverage increased from 0% to 40%+ for text/JSON index GC functions
+
+## Type of Change
+
+- [x] Bug fix (non-breaking change which fixes an issue)
+- [ ] New feature (non-breaking change which adds functionality)
+- [ ] Breaking change (fix or feature that would cause existing
+functionality to not work as expected)
+- [ ] Documentation update
+
+---------
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix: fix use-after-free in DecodeKeyMetadata key parsing (#47705)
+
+*Vulnerability identified and fix provided by
+[Kolega.dev](https://kolega.dev/)*
+
+[Issue #:47719](https://github.com/milvus-io/milvus/issues/47719)
+
+## Null Pointer Dereference in KeyRetriever String Parsing
+
+## Location
+`internal/core/src/storage/KeyRetriever.cpp:62` (function
+`DecodeKeyMetadata`)
+
+## Description
+`DecodeKeyMetadata()` assigns a temporary `std::string`&#39;s internal
+buffer pointer to `context-&gt;key` via `.c_str()`. The expression:
+
+```cpp
+context-&gt;key = key_metadata.substr(second_pos + 1).c_str();
+```
+
+`substr()` returns a temporary `std::string`, and `.c_str()` returns a
+pointer to its internal buffer. When the temporary is destroyed at the
+end of the statement, `context-&gt;key` becomes a dangling pointer. When
+`GetKey()` at line 21 later uses `std::string(context-&gt;key)`, it reads
+from freed memory (use-after-free).
+
+## Analysis Notes
+The scanner identified this as a null pointer dereference, but the
+actual vulnerability is a **use-after-free**. At line 62, `context-&gt;key
+= key_metadata.substr(second_pos + 1).c_str()` assigns a pointer to a
+temporary `std::string`&#39;s internal buffer. When the temporary is
+destroyed at the end of the statement, `context-&gt;key` becomes a dangling
+pointer. When `GetKey()` at line 21 later uses
+`std::string(context-&gt;key)`, it reads from freed memory. The
+`CPluginContext` struct is a C-compatible struct with `const char* key`,
+so the fix must work within that constraint.
+
+## Fix Applied
+Used `strdup()` to allocate persistent heap memory for the key string,
+ensuring the pointer remains valid after the temporary `std::string` is
+destroyed. Added a custom `shared_ptr` deleter that calls `free()` on
+`context-&gt;key` when the `CPluginContext` is released, preventing memory
+leaks. The `CPluginContext` is explicitly zero-initialized (`{0, 0,
+nullptr}`) so the deleter safely handles exception paths where
+`strdup()` hasn&#39;t been called yet (since `free(nullptr)` is a no-op).
+
+## Tests/Linters Ran
+- **clang-format** (v14.0.6): Ran `clang-format -style=file` on the
+modified file — no formatting changes needed (verified with `diff`)
+- **Unit tests**: No existing unit tests for
+`DecodeKeyMetadata`/`EncodeKeyMetadata`/`KeyRetriever` were found in the
+test suite. The C++ build environment was not available in the
+development container to run compilation or `make codecov-cpp`.
+
+## Contribution Notes
+- This PR follows the [Contributing Guidelines](CONTRIBUTING.md)
+including DCO sign-off on the commit
+- The change follows Google C++ Style Guide as specified, with 4-space
+indentation and Camel-Cased file names
+- Only `KeyRetriever.cpp` is modified — the fix is minimal and does not
+change the `CPluginContext` C struct definition or any other files
+- Full C++ build was not available in the development environment; CI
+will verify compilation
+
+Signed-off-by: kolega.dev &lt;faizan@kolega.ai&gt;
+Co-authored-by: kolega.dev &lt;faizan@kolega.ai&gt;
+
+- fix: assemble validity map for query aggregation result(#47350) (#47445)
+
+related: #47350
+
+Signed-off-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+Co-authored-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+
+- [automated] Bump milvus version to v2.6.11 (#47753)
+
+Bump milvus version to v2.6.11
+Signed-off-by: sre-ci-robot sre-ci-robot@users.noreply.github.com
+
+Co-authored-by: github-actions[bot] &lt;41898282+github-actions[bot]@users.noreply.github.com&gt;
+
+- fix: workaround chunk reader lacking projection support by passing needed_columns to Reader (#47750)
+
+Related to #44956
+
+milvus-storage chunk reader does not yet support projection push-down,
+causing it to return all columns in a column group regardless of what
+fields the segment actually needs. This leads to assertion failures in
+ManifestGroupTranslator when unexpected field IDs appear in the result.
+
+Workaround:
+- Add Schema::ConvertToLoonArrowSchema() that uses field ID strings as
+arrow field names (matching milvus-storage column naming convention)
+- Pass all schema field IDs as needed_columns when creating the Reader,
+so the top-level Reader filters columns before they reach chunk reader
+- Skip unknown field IDs in ManifestGroupTranslator::load_group_chunk
+instead of asserting, as a safety net until chunk reader supports
+projection natively
+
+Other changes:
+- System fields (RowID/Timestamp, field_id &lt; 100) are now always
+proactively loaded in ComputeDiffColumnGroups, preventing them from
+being incorrectly placed into lazy load when partial load is active
+- Add column_groups_to_lazyload to LoadDiff::ToString() for debugging
+- Improve error message in LoadColumnGroup to include status details
+- Add unit tests for ConvertToLoonArrowSchema
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- test: add parallel execution support for C++ unit tests (#47587)
+
+Add parallel execution capability for C++ unit tests using GTest
+sharding, enabling faster CI feedback while maintaining test isolation.
+
+Changes:
+- Add run_cpp_ut.sh: New script for parallel UT execution without
+coverage
+- Update run_cpp_codecov.sh: Add optional parallel support (disabled by
+default)
+- Add GetTestTempBasePath/GetTestTempPath helpers for shard-specific
+temp paths
+- Initialize ArrowFileSystemSingleton in test global setup
+- Fix flaky ThreadLocalGEOSContextTest with synchronization barrier
+- Update test files to use dynamic temp paths instead of hardcoded /tmp/
+
+The coverage script (run_cpp_codecov.sh) defaults to sequential mode for
+accurate coverage data. The new run_cpp_ut.sh script defaults to
+parallel mode (3 shards) for fast CI feedback.
+
+Signed-off-by: Zhikun Yao &lt;zhikun.yao@zilliz.com&gt;
+
+- test: add e2e test case for search order by (#47616)
+
+Issue: #47548
+
+ On branch feature/search-order
+ Changes to be committed:
+	new file:   milvus_client/test_milvus_client_search_order.py
+
+---------
+
+Signed-off-by: Eric Hou &lt;eric.hou@zilliz.com&gt;
+Co-authored-by: Eric Hou &lt;eric.hou@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix: list file resource not work (#47568)
+
+relate: https://github.com/milvus-io/milvus/issues/41424
+
+---------
+
+Signed-off-by: aoiasd &lt;zhicheng.yue@zilliz.com&gt;
+
+- enhance: upgrade milvus-common (#47613)
+
+Signed-off-by: yangxuan &lt;xuan.yang@zilliz.com&gt;
+
+- fix: make all c++ ut to write to non-tmp and fixed path (#47715)
+
+issue: #44452
+
+Previously, unit tests could not run in parallel because:
+
+1. Tests used hardcoded /tmp paths (e.g., /tmp/test-bitmap-index/,
+/tmp/milvus/rtree-index/), causing file conflicts between shards.
+2. Multiple tests independently initialized and released global
+singletons (ArrowFileSystemSingleton, LocalChunkManagerSingleton),
+leading to use-after-release crashes when shards ran concurrently.
+
+This PR fixes that by:
+
+- Add centralized init_gtest.cpp that generates shard-aware random test
+paths (TestLocalPath/TestRemotePath/TestMmapPath) and initializes all
+singletons once.
+- Replace hardcoded /tmp paths across ~40 test files with TestLocalPath.
+- Remove redundant per-test singleton init/release that conflict across
+shards.
+
+This PR also fixes 2 other issues:
+
+- Fix `ConvertToArrowSchema` to use `field_ids_` (insertion-ordered
+vector) instead of `fields_` (`unordered_map`) for deterministic column
+ordering.
+- Add thread barrier in PreparedGeometryTest to prevent TLS address
+reuse.
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- enhance: move text index loading into C++ LoadDiff pipeline (#47691)
+
+Related to #46358
+
+Move text index loading/creation from Go CGO calls into the C++
+SegmentLoadInfo diff computation and ApplyLoadDiff pipeline. This
+removes the LoadTextIndex and CreateTextIndex C API functions and their
+Go callers, replacing them with ComputeDiffTextIndexes() which handles
+both pre-built text index loading and raw-data text index creation as
+part of the unified segment load diff mechanism.
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- fix: update tantivy release build config (#47723)
+
+issue: https://github.com/milvus-io/milvus/issues/42879
+
+Signed-off-by: SpadeA &lt;tangchenjie1210@gmail.com&gt;
+
+- fix: resolve channel exclusive mode lost and vchannel list bug (#47701)
+
+issue: #47700
+
+Move DescribeCollection before SpawnReplicasWithReplicaConfig in
+LoadCollectionJob.Execute to use collInfo.GetVirtualChannelNames()
+instead of broadcast message vchannels, and handle ErrCollectionNotFound
+gracefully. Add tryBalanceNodeForChannel call in
+TryEnableChannelExclusiveMode to ensure nodes are balanced across
+channels when exclusive mode is enabled.
+
+Fix querycoord test suite: initialize AssignPolicyFactory, add
+VirtualChannelNames to DescribeCollection mock, and remove stale mock
+overrides. Add unit tests for both fixes.
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix: acquire global lock for control channel exclusive messages in lock interceptor (#47677)
+
+issue: #47647 
+
+Control channel messages (AlterReplicateConfig, FlushAll, AlterWAL) were
+incorrectly falling through to the per-vchannel lock path, causing wrong
+lock granularity and incomplete transaction cleanup. This fix ensures
+these messages acquire the global write lock, consistent with recovery
+storage and wal flusher handling.
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- test: Increase PyMilvus version to 2.7.0rc141 for master branch (#47714)
+
+Automated daily bump from pymilvus master branch. Updates
+tests/python_client/requirements.txt.
+
+Signed-off-by: pymilvus-bot &lt;pymilvus@zilliz.com&gt;
+
+- enhance: [GoSDK] support pointer types for nullable columns in row-based API (#47712)
+
+Related to #47711
+
+Enable Go pointer struct fields (*string, *int32, etc.) to represent
+nullable columns in the row-based data processing path. A nil pointer
+maps to a NULL value in Milvus; a non-nil pointer dereferences to the
+actual value.
+
+Changes:
+- ParseSchema: pointer fields auto-infer Nullable=true (PK excluded)
+- AnyToColumns: use reflect.Value.IsNil() to call AppendNull for nil
+pointers, Elem().Interface() for non-nil — bypasses Go&#39;s typed-nil
+problem where (*T)(nil) as interface{} is != nil
+- SetField: wrap/unwrap pointer values during field assignment
+- fillData/fillPKEntry: check IsNull() on columns and set nil pointers
+for null values, wrap non-null values in reflect.New pointers
+- Dynamic field path: same nil/deref logic for pointer fields going into
+the JSON dynamic column
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- fix: memory safety issues for nullable fields in growing and sealed segments (#47685)
+
+issue: #47160 
+issue: #47666 
+
+relate: #45993 
+
+commit 1
+ThreadSafeValidData::get_data() previously returned a const reference
+without holding the lock, causing two issues:
+- Data race: concurrent read/write without synchronization.
+- Use-after-free: even with a lock, returning a reference allows callers
+to hold it after the lock is released. Concurrent writers calling
+set_data_raw() may resize the underlying vector, invalidating the
+reference and causing memory access violations.
+
+commit 2
+For nullable columns, the offsets passed to BulkValueAt and similar
+methods are physical offsets (indexing only valid/non-null rows), but
+ToChunkIdAndOffset maps them as logical offsets (indexing all rows
+including nulls). This mismatch causes incorrect chunk/offset
+resolution. Add ToChunkIdAndOffsetByPhysical() which uses cumulative
+valid row counts per chunk to correctly map physical offsets, and use it
+in BulkValueAt, BulkPrimitiveValueAt, and BulkVectorValueAt for both
+ChunkedColumn and ProxyChunkColumn when the column is nullable.
+
+commit 3
+- CachedSearchIterator used chunk_row_nums() (total logical rows) as
+chunk_size, but nullable vector chunks only store valid vectors. This
+caused out-of-bounds reads during brute force search.
+- SearchOnSealedColumn&#39;s iterator_v2 path was missing TransformOffset
+after NextBatch, returning physical offsets instead of logical offsets
+
+---------
+
+Signed-off-by: marcelo-cjl &lt;marcelo.chen@zilliz.com&gt;
+
+- fix: change queryPreExecute merge logic from row-based to column-based (#47122)
+
+issue: #46953 
+- GenNullableFieldData only supported scalar types, causing error when
+partial upsert after adding nullable vector fields
+
+issue: #47160  
+- pickFieldData used row index directly to access Contents array without
+converting to data index, causing index out of range panic
+
+relate: #45993
+
+
+Row-based processing had two problems:
+- Nullable vector handling was tightly coupled with other field types,
+requiring complex special-case logic
+- Update path was inefficient for nullable vectors: data had to be read
+first then updated in-place. For example, changing a valid vector to
+null requires shifting subsequent data since null values are not stored,
+which is very inefficient.
+
+Column-based processing solves both:
+- Each field type is processed independently, nullable vector logic is
+cleanly separated from other types
+- Nullable vectors are appended directly without read-then-update,
+avoiding expensive data shifting operations - Iterate over fields
+instead of rows when merging upsert and existing data
+
+key changes:
+- Remove nullable vector special handling: nullableVectorMergeContext,
+buildNullableVectorIdxMap, rebuildNullableVectorFieldData, etc.
+- Use generic column utilities: AppendFieldDataByColumn,
+UpdateFieldDataByColumn
+- Add vector type support to GenNullableFieldData
+- Add unit test for nullable vector upsert scenarios
+
+---------
+
+Signed-off-by: marcelo-cjl &lt;marcelo.chen@zilliz.com&gt;
+
+- enhance: remove some redundant data copy in segcore (#47623)
+
+issue: #44452
+
+Signed-off-by: Shawn Wang &lt;shawn.wang@zilliz.com&gt;
+
+- enhance: optimize index load async process (#47575)
+
+issue: #47298
+
+---------
+
+Signed-off-by: Shawn Wang &lt;shawn.wang@zilliz.com&gt;
+
+- enhance: remove deprecated lazy load code (#47590)
+
+Related to #44452
+
+Remove the deprecated lazy load feature which has been superseded by
+warmup-related parameters. This cleanup includes:
+
+- Remove AddFieldDataInfoForSealed from C++ segcore layer
+- Remove IsLazyLoad() method and isLazyLoad field from segment
+- Remove lazy load checks in proxy alterCollectionTask
+- Remove DiskCache lazy load handling in search/retrieve paths
+- Remove LazyLoadEnableKey constant and related helper functions
+- Update mock files to reflect interface changes
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- fix: use correct global offset for null_offset_ in BuildIndexFromFieldData (#47696)
+
+Related to #47695
+
+When loading multi-batch nullable fields through LoadFieldData path,
+null_offset_ incorrectly recorded the batch-local index `i` instead of
+the global accumulated `offset`, causing wrong null tracking for all
+batches after the first. This affected IsNull()/IsNotNull() results and
+text_match queries with null filtering on GrowingSegments loaded via
+recovery/streaming replay.
+
+Also fix the same bug in InvertedIndexTantivy::BuildWithFieldData for
+the single-segment path.
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- fix: Handle v2.5/v2.6 compatibility in syncTargetVersion [QueryNode] (#47649)
+
+issue: #47652
+
+## Summary
+
+Prevent tsafe latency during 2.5→2.6 upgrade by rejecting incomplete
+v2.5 syncTargetVersion RPC messages that lack SealedSegmentRowCount
+field.
+
+During standalone upgrade from 2.5 to 2.6, the old coordinator sends
+syncTargetVersion RPC to new 2.6 nodes. The 2.5 RPC proto lacks the
+SealedSegmentRowCount field, causing 2.6 delegator to incorrectly skip
+the serviceable check and be marked as serviceable prematurely.
+
+## Changes
+
+- Add field consistency check (`SealedInTarget` vs
+`SealedSegmentRowCount`
+  length mismatch) in SyncDistribution UpdateVersion handler to detect
+  and reject v2.5 format messages
+- Add test for v2.5 message rejection scenario
+
+## Impact
+
+This fix prevents delegator from prematurely entering serviceable state
+when stream message consumption is delayed during cluster upgrade, which
+was causing query timeouts due to unmet tsafe constraints.
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- feat: [Go SDK] Support search by primary key IDs (#47633)
+
+issue: https://github.com/milvus-io/milvus/issues/46879
+design doc:
+https://github.com/milvus-io/milvus-design-docs/blob/main/design_docs/20230403-search_by_pk.md
+
+## Summary
+- Add `NewSearchByIDsOption` constructor for searching by primary key
+IDs, bringing Go SDK feature parity with Python SDK (PR #46993)
+- Add `AnnRequest.WithIDs()` method and `column2IDs` helper for ID-based
+search
+- Add comprehensive E2E tests covering float/binary/sparse vectors,
+nullable fields, duplicate IDs, invalid IDs, range search, hybrid
+search, and search iterator compatibility
+
+## API Design
+```go
+// Vector search (existing)
+opt := client.NewSearchOption(collName, 10, vectors)
+
+// Search by IDs (new)
+idColumn := column.NewColumnInt64(&#34;id&#34;, []int64{1, 2, 3})
+opt := client.NewSearchByIDsOption(collName, 10, idColumn)
+```
+
+## Test plan
+- [x] Unit tests for `NewSearchByIDsOption`, `column2IDs`,
+`AnnRequest.WithIDs`
+- [x] E2E: float vector search by PK with self-match verification (FLAT
+index + COSINE)
+- [x] E2E: binary vector search by PK (VarChar PK)
+- [x] E2E: sparse vector search by PK (non-nullable)
+- [x] E2E: nullable sparse vector field with mixed null/non-null IDs
+- [x] E2E: empty IDs error handling
+- [x] E2E: duplicate IDs error handling
+- [x] E2E: non-existent IDs error handling
+- [x] E2E: search by IDs with filter expression
+- [x] E2E: search by IDs with group by
+- [x] E2E: search by IDs with output fields
+- [x] E2E: search by IDs with range search parameters
+- [x] E2E: hybrid search does not support search by IDs (negative test)
+- [x] E2E: search iterator does not support search by IDs (documented)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: yanliang567 &lt;yanliang.qly@gmail.com&gt;
+Signed-off-by: yanliang567 &lt;yanliang.qiao@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix: make it easier to compile on rocky linux (#47648)
+
+issue: #44452
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- test: restructure timestamptz e2e cases with shared collection (#47670)
+
+## Summary
+- Restructure `TestMilvusClientTimestamptz` to use a shared collection
+with non-overlapping PK ranges, reducing test setup overhead
+- Add query verification to `test_partial_update` to assert timestamps
+are correctly updated
+- Separate test data into isolated PK slots to prevent cross-test
+interference
+
+Issue: #47668
+
+## Test plan
+- [x] Run timestamptz e2e tests to verify all cases pass
+- [x] Verify partial update test now properly asserts query results
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: Eric Hou &lt;eric.hou@zilliz.com&gt;
+Co-authored-by: Eric Hou &lt;eric.hou@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix: make snapshot creation idempotent to prevent callback retry loop [DataCoord] (#47580)
+
+## Summary
+
+Move snapshot existence checks to occur after acquiring exclusive locks
+in CreateSnapshot and DropSnapshot. This ensures that when multiple
+concurrent requests attempt to create snapshots with the same name, only
+one succeeds and others immediately fail with &#34;already exists&#34; error,
+allowing DDL callbacks to handle the result properly without entering
+infinite retry loops.
+
+## Related Issue
+
+issue: #47101
+
+## Changes
+
+- **CreateSnapshot**: Move snapshot name existence check to after lock
+acquisition
+- **DropSnapshot**: Move snapshot existence check to after lock
+acquisition
+- **Test**: Fix concurrent snapshot creation test to verify &#34;already
+exists&#34; errors by directly calling client methods to bypass
+ResponseChecker framework masking
+
+## Test Plan
+
+- ✅ Unit test: `test_snapshot_concurrent_create_same_name` passes
+consistently
+- ✅ Verified concurrent behavior: 1 success + 4 &#34;already exists&#34; errors
+- ✅ No race conditions observed across multiple test runs
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- enhance: remove stream reduce logic(#47516) (#47544)
+
+related: #47516
+
+Signed-off-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+Co-authored-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+
+- enhance: make openssl dependency shared (#47662)
+
+After integrating Loon FFI (#46076), segment loading switched from
+  Go-side S3 downloads (Go TLS) to C++-side loading via SegmentLoad()
+  (C++ AWS SDK → libcurl → OpenSSL). This exposed a latent symbol
+  interposition bug between libmilvus-storage.so and librdkafka.so.1,
+  both of which statically link their own copy of OpenSSL.
+
+  Root cause:
+  - libmilvus-storage.so statically links libcrypto.a, which causes
+    OPENSSL_cpuid_setup to be exported as a global dynamic symbol (T).
+  - librdkafka.so.1 also statically links OpenSSL and exports
+    OPENSSL_cpuid_setup (T), but keeps OPENSSL_armcap_P as a local
+    symbol (b).
+  - libmilvus-storage.so is loaded first (NEEDED by libmilvus_core.so),
+    so its OPENSSL_cpuid_setup takes precedence in the global scope.
+  - When librdkafka.so.1&#39;s init code calls OPENSSL_cpuid_setup via PLT,
+    the dynamic linker resolves it to libmilvus-storage.so&#39;s version,
+    which writes ARM CPU capabilities to its own OPENSSL_armcap_P.
+  - librdkafka.so.1&#39;s local OPENSSL_armcap_P is never initialized (=0),
+    so OpenSSL thinks there is no ARMv8 Crypto Extension support.
+- All TLS decryption falls back to software AES_encrypt + gcm_ghash_4bit
+    (~86% CPU), instead of hardware armv8_aes_gcm_decrypt (~33% CPU).
+
+  Fix:
+  Set &#34;openssl:shared&#34;: True in conan default_options so that
+  libmilvus-storage.so links against the shared libssl.so.3 /
+  libcrypto.so.3 instead of static libssl.a / libcrypto.a.
+
+  The shared libcrypto.so.3 properly hides OPENSSL_cpuid_setup and
+  OPENSSL_armcap_P as local symbols (lowercase t/b), preventing any
+  cross-library interposition. librdkafka.so.1&#39;s PLT call now resolves
+  to its own OPENSSL_cpuid_setup, correctly initializing its own
+  OPENSSL_armcap_P for hardware-accelerated AES-GCM.
+
+Signed-off-by: chasingegg &lt;chao.gao@zilliz.com&gt;
+
+- fix: handle BroadcastToAll messages on control channel in recovery storage (#47638)
+
+## Summary
+- Recovery storage&#39;s control channel filter silently dropped FlushAll
+messages,
+  preventing growing segments from being marked as flushed
+- Replace explicit type checks with `IsBroadcastToAll()` to allow all
+broadcast
+messages through, matching the pattern in `wal_flusher.go` and
+`shard_interceptor.go`
+
+## Test plan
+- [x] Unit test: FlushAll on control channel flushes all growing
+segments
+- [x] Unit test: FlushAll on regular channel still works (regression)
+- [x] Unit test: FlushAll is idempotent
+- [x] Existing recovery storage tests pass
+- [x] golangci-lint passes
+
+issue: https://github.com/milvus-io/milvus/issues/47637
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: bigsheeper &lt;yihao.dai@zilliz.com&gt;
+
+- fix: stl-sort allows struct scalar fields (#47626)
+
+issue: https://github.com/milvus-io/milvus/issues/47620
+
+Signed-off-by: SpadeA &lt;tangchenjie1210@gmail.com&gt;</div>
+</div>
+
+<a href="../project/milvus-io_milvus.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
