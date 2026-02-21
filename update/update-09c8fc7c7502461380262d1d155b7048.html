@@ -1,0 +1,1267 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (28 commits) - browserbase/stagehand - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (28 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/browserbase_stagehand.html">browserbase/stagehand</a> /
+    Updates in main (28 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/browserbase_stagehand.html">browserbase/stagehand</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-02-21 02:59 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/browserbase/stagehand/commits/main" target="_blank">https://github.com/browserbase/stagehand/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление устраняет критическое состояние гонки в методе `v3.close()` API Stagehand, которое ранее приводило к бесконечным зависаниям во время параллельных выполнений оценки, особенно в средах с высокой задержкой. Проблема возникала из-за закрытия веб-сокета CDP раньше, чем приходил HTTP-ответ клиента API, что приводило к неразрешенным промисам и непринятым вызовам CDP в процессе выполнения. Решение обеспечивает надежное завершение `close()` путем обработки уже закрытых веб-сокетов, отклонения всех ожидающих CDP-запросов при завершении работы сокета и предотвращения повторного входа в путь завершения работы.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- [fix]: handle race in `close()` when using API (#1728)
+
+# why
+when running evals at high concurrency (~30) with the stagehand API
+enabled in a region far from the client machine, browser sessions die
+and the entire eval run hangs indefinitely. the process never exits
+because `v3.close()` awaits a promise that never resolves.
+
+the root cause is a race in the shutdown path between:
+- the HTTP round-trip of `apiClient.end()` (client → API → client), and
+- the CDP websocket close event arriving from the browser
+
+race sequence:
+1. `v3.close()` awaits `apiClient.end()` (HTTP request/response)
+2. the API requests release immediately, and the browser closes the CDP
+websocket
+3. the websocket `&#34;close&#34;` event can reach the client before the HTTP
+response returns
+4. only after the HTTP response returns do we call `ctx.close()` →
+`CdpConnection.close()`
+
+if the close event wins the race and fires before step (4), then
+`CdpConnection.close()` attaches its one-shot
+`&#34;close&#34;` listener too late (the event already happened), so the promise
+never resolves.
+
+far regions make this more likely because the HTTP RTT is longer,
+increasing the window where the close event can
+beat the response.
+
+two additional issues were found in the same shutdown path:
+- inflight CDP calls are never rejected when the websocket closes
+unexpectedly. pending `send()` promises hang forever alongside
+`close()`, which compounds the original hang
+- the `_onCdpClosed` transport handler was still registered when
+`apiClient.end()` was called. the server-side websocket close would fire
+`_onCdpClosed` -&gt; `_immediateShutdown()` -&gt; `close({ force: true })`,
+re-entering the close path while the original `close()` was still in
+progress
+
+this bug only reproduced reliably with regions that are far away from
+the client machine because:
+- `apiClient.end()` awaits a full request/response to the hosted API;
+higher client-region latency makes that await longer
+- during that longer window, the server-side websocket close can arrive
+and be processed before `CdpConnection.close()` is called
+- if the client machine is close to the region, the timing often works
+out and `close()` registers the `&#34;close&#34;` listener in time
+# what changed
+in`packages/core/lib/v3/understudy/cdp.ts`:
+- updated `close()` to have an early return when `this.ws.readyState ===
+WebSocket.CLOSED` so that calling `close()` on an already-closed
+websocket resolves immediately instead of hanging.
+- added `rejectAllInflight(why)`, which is a private method that
+iterates the `inflight` map and rejects every pending CDP call with a
+`CdpConnectionClosedError`, then clears the entry. this is called from
+both the websocket `&#34;close&#34;` and `&#34;error&#34;` handlers in the constructor
+- updated the `&#34;close&#34;` and `&#34;error&#34;` handlers to call
+`this.rejectAllInflight(why)` before `this.emitTransportClosed(why)` to
+make sure all pending promises are rejected when the ws dies
+
+in `packages/core/lib/v3/v3.ts`:
+- updated `v3.close()` such that `offTransportClosed` runs _before_
+`apiClient.end()`
+- this prevents `_onCdpClosed` from firing during the API teardown and
+re-entering `close({ force: true })`
+# test plan
+- added unit tests in `cdp-connection-close.test.ts` which check that:
+- `CdpConnection.close()` resolves when the websocket is already closed
+  - inflight `send()` calls reject when the websocket is terminated
+- added an e2e test in `cdp-connection-close.spec.ts` which:
+- terminates the underlying websocket, then calls `v3.close()` and
+asserts it resolves
+- terminates the websocket with an inflight CDP call and asserts the
+pending promise rejects
+- added another e2e test in `cdp-close-api-region.spec.ts` which:
+- reproduces the full production trigger chain by creating a stagehand
+instance with `disableAPI: false` and `region: &#34;ap-southeast-1&#34;`,
+  - calls `v3.close()` and asserts it resolves within 30 seconds
+
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Fixes a shutdown race that caused eval runs to hang when using the
+Stagehand API in non-us-west-2 regions. v3.close() now resolves reliably
+and inflight CDP requests reject on socket shutdown, addressing Linear
+STG-1422.
+
+- **Bug Fixes**
+- CdpConnection.close(): return immediately if the WebSocket is already
+CLOSED.
+- Reject inflight CDP calls on &#34;close&#34;/&#34;error&#34; via new
+CdpConnectionClosedError (exported in public error types).
+- Unhook transport-close handler before apiClient.end() to prevent
+double-close during API teardown.
+- Added unit and e2e tests (incl. ap-southeast-1) verifying close
+resolves and inflight requests reject.
+
+&lt;sup&gt;Written for commit 699b48a8a75d0b7d33da83d11f7b133ef5673195.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1728&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- chore: consolidate test directories in packages/core (#1723)
+
+- Fix typechecking for core/tests, fix SEA build for windows, speed up CI (#1721)
+
+# why
+
+# what changed
+
+# test plan
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Fixes TypeScript across core tests/scripts, finalizes the default
+export/CLI, and makes the SEA build reliable on Windows. CI splits build
+and lint, OpenAPI generation no longer runs Prettier, and builds run in
+parallel across packages for faster pipelines.
+
+- **Bug Fixes**
+- Stricter TS across tests/scripts (tsconfig includes tests + CLI, added
+@types/jsdom, switched to playwright-core); tightened types (child-frame
+probes, DocumentReadyState, model utils, source-map Raw types); fixed
+OpenAPI typing; removed cross-package imports in server tests; added
+default-export parity test.
+- Default export and CLI fixed: introduced StagehandDefault mirroring
+named exports; ESM/CJS indices now export default; corrected
+package.json CLI paths/types.
+- SEA build works on Windows: build scripts use pnpm.cmd with better
+spawn error handling.
+- List parsing now works from raw source across core/server/evals and
+maps cleanly to dist outputs.
+
+- **Refactors**
+- CI split into separate Build and Lint jobs; lint cancels the workflow
+on failure; optional Turbo cache restore; discovery/runner steps no
+longer depend on the build job.
+- Parallelized builds: DOM script generators run concurrently; ESM/CJS
+builds and server/evals build tasks run in parallel; tuned Turbo inputs
+to reduce noisy rebuilds and improve caching.
+
+&lt;sup&gt;Written for commit a25e17c2411b374e8d35c39f6120d242102ff8dc.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1721&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+---------
+
+Co-authored-by: cubic-dev-ai[bot] &lt;191113872+cubic-dev-ai[bot]@users.noreply.github.com&gt;
+
+- add variables to agent (#1580)
+
+# Why
+
+Users need a way to pass sensitive data (passwords, API keys, personal
+info) to agent executions without exposing the actual values to the LLM.
+This also enables reusable agent scripts where variable values can
+change without invalidating cached executions.
+
+## Usage
+
+```typescript
+const agent = stagehand.agent({
+  model: &#34;google/gemini-3-flash-preview&#34;,
+  mode: &#34;hybrid&#34;
+});
+
+await agent.execute({
+  instruction: &#34;Log in to the dashboard&#34;,
+  variables: {
+    username: { value: &#34;john@example.com&#34;, description: &#34;The user&#39;s email address&#34; },
+    password: { value: process.env.USER_PASSWORD, description: &#34;The user&#39;s password&#34; },
+  },
+});
+```
+
+# What Changed
+
+- Added `variables` option to `agent.execute()` accepting
+`Record&lt;string, { value: string | number | boolean; description: string
+}&gt;`
+- LLM sees variable names and descriptions in system prompt, uses
+`%variableName%` syntax in tool calls
+- Variable substitution implemented in `act`, `type`, `fillForm`, and
+`fillFormVision` tools
+- Sensitive values never returned to LLM in tool outputs
+- Cache keys use variable names only (not values) - changing values
+won&#39;t invalidate cache
+- Feature requires `experimental: true`, not supported in CUA mode
+- Shared utilities in `agent/utils/variables.ts`
+
+# Test Plan
+
+- [x] Test agent execution with variables for login flow
+(username/password)
+- [x] Verify LLM correctly uses `%variableName%` syntax in tool calls
+- [x] Confirm sensitive values don&#39;t appear in LLM responses/tool
+outputs
+- [x] Test cache hit when variable values change but names stay same
+- [x] Verify error thrown when `variables` used without `experimental:
+true`
+- [x] Verify error thrown when `variables` used with CUA mode
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Add first-class variables to agent.execute and act with a single
+VariableValue type. Use %name% placeholders that are swapped at runtime,
+never shown to the LLM, and cached by variable names only.
+
+- **New Features**
+- Unified API: Variables = Record&lt;string, VariableValue&gt; where
+VariableValue = string | number | boolean | { value; description? };
+shared utils: resolveVariableValue, substituteVariables,
+flattenVariables.
+- Prompt/tool UX: System prompt adds a variables section (names,
+optional descriptions, usage and example); tool inputs list available
+variables; %name% supported in act, type, fillForm, and fillFormVision
+(hybrid included).
+- Runtime safety: Substitution only during execution; logs/replay keep
+original %tokens%; tool outputs never include sensitive values.
+- Cache: Keys include variable names only; replay substitutes current
+values across act/fillForm steps.
+- Guardrails/docs: Requires experimental: true; blocked in CUA mode with
+clear errors; docs updated for agent variables and act reference.
+
+&lt;sup&gt;Written for commit 02a9cd584d37dabe20d2f8a624eae88ed044c282.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1580&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+---------
+
+Co-authored-by: Shrey Pandya &lt;shrey@browserbase.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- [feat]: add `context.setExtraHTTPHeaders()` (#1708)
+
+# why
+- to enable users to set headers to be included in every request created
+by every page within the `context`
+# what changed
+- added a new function `context.setExtraHTTPHeaders()` which calls the
+`Network.setExtraHTTPHeaders` CDP command on all existing sessions
+- we also call `Network.setExtraHTTPHeaders` with the user defined
+headers whenever we attach to a new target (via `onAttachedToTarget`)
+- if there is a rejected promise when headers are being set, a
+`StagehandSetExtraHTTPHeadersError` will be thrown
+# test plan
+- added an e2e test to confirm that headers are being correctly set by
+listening to `Network.requestWillBeSent` and inspecting headers
+- also added unit tests to confirm that the custom error is being thrown
+correctly when promises reject
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Adds context.setExtraHTTPHeaders() to set default HTTP headers on every
+request from all pages in a context. Implements STG-1411; applies to
+current sessions and newly attached targets after Network.enable.
+
+- **New Features**
+- New API: context.setExtraHTTPHeaders(headers) sends Network.enable
+then Network.setExtraHTTPHeaders to each active session; repeats on
+attach for new targets.
+- Public error: StagehandSetExtraHTTPHeadersError with per-session
+failure details.
+- Tests: e2e verifies navigation headers; unit tests cover multi-session
+send and error reporting; public error type is exported.
+
+&lt;sup&gt;Written for commit 21606892ebf693f7798d3d4fea695c1563caa16f.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1708&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- [feat]: add cookie related getters &amp; setters (#1681)
+
+# Why
+
+Browser automation workflows frequently need to manage authentication
+state, persist sessions across runs, and handle cookie-based features.
+Currently, users have no direct API to read, write, or clear cookies in
+Stagehand, forcing workarounds through raw CDP commands or page-level
+JavaScript injection.
+
+# What Changed
+
+## Cookie Management APIs
+
+Added cookie management methods that mirror the familiar Playwright
+BrowserContext API:
+
+**On `context` instance:**
+- `context.cookies(urls?)` — Get all browser cookies, optionally
+filtered by URL(s)
+- `context.addCookies(cookies)` — Set one or more cookies in the browser
+context
+- `context.clearCookies(options?)` — Clear all cookies or selectively by
+name/domain/path (supports RegExp)
+
+### Types Added
+- `Cookie` — Cookie object returned by the browser
+- `CookieParam` — Parameters for setting a cookie (supports `url` OR
+`domain`+`path`)
+- `ClearCookieOptions` — Filter options for selective cookie clearing
+
+# Test Plan
+
+## Cookie Management
+- [ ] `context.cookies()` returns all cookies when no URLs provided
+- [ ] `context.cookies(url)` filters cookies by single URL
+- [ ] `context.cookies([url1, url2])` filters cookies by multiple URLs
+- [ ] `context.addCookies([...])` successfully sets cookies
+- [ ] `context.addCookies()` validates cookie params (requires url OR
+domain+path)
+- [ ] `context.addCookies()` rejects `sameSite: &#34;None&#34;` without `secure:
+true`
+- [ ] `context.addCookies()` throws on browser rejection (checks CDP
+success flag)
+- [ ] `context.clearCookies()` clears all cookies atomically via single
+CDP call
+- [ ] `context.clearCookies({ name: &#34;session&#34; })` clears by exact name
+- [ ] `context.clearCookies({ domain: /\.example\.com/ })` clears by
+regex
+- [ ] Selective clear only deletes matching cookies, leaves others
+untouched
+
+---------
+
+Co-authored-by: Sean McGuire &lt;seanmcguire1@outlook.com&gt;
+
+- [docs]: add Google Vertex AI configuration (#1696)
+
+## Summary
+- Adds a **Google Vertex** tab to the First Class Models section in the v3 models docs
+- Documents the `experimental: true` requirement, model object format (`project`, `location`, `googleAuthOptions`), and service account credentials setup
+- Adds Google Vertex to the API key troubleshooting table
+
+This was requested in Discord — the `vertex/` provider is fully supported in code but was missing from documentation.
+
+## Test plan
+- [ ] Verify the new tab renders correctly on the docs site
+- [ ] Confirm code snippet matches the accepted `GoogleVertexProviderSettings` type
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Added Google Vertex configuration to v3 models docs. New tab with TS example using vertex/gemini-3-flash-preview, service account setup, and required fields (project, location, googleAuthOptions) with experimental: true; updated troubleshooting to say “Vertex” and point to service account credentials.
+
+&lt;sup&gt;Written for commit c7ed246476436dc3581ae8d0699d8acb50f1d99b. Summary will update on new commits. &lt;a href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1696&#34;&gt;Review in cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- [fix]: skip piercer injection for chrome-extension:// and non-HTML targets (#1692)
+
+## Summary
+
+Navigating to a PDF URL crashes Chrome&#39;s built-in PDF viewer because the piercer script gets injected into the PDF viewer&#39;s `chrome-extension://` target.
+
+The fix adds an `isNonWebTarget()` predicate (alongside existing `isTopLevelPage()`) that uses an **allowlist** — only `&#34;page&#34;` and `&#34;iframe&#34;` targets receive piercer injection. All other target types (workers, background pages, browser, webviews, worklets, etc.) are resumed but skipped. Additionally, `chrome-extension://` and `chrome://` URLs are always skipped even if the type is `&#34;page&#34;`, since Chrome&#39;s PDF viewer reports as `type: &#34;page&#34;` with a `chrome-extension://` URL.
+
+This is future-proof: Chrome currently has [14 target types](https://chromium.googlesource.com/chromium/src/+/main/content/browser/devtools/devtools_agent_host_impl.cc) and adding new ones won&#39;t require updating a blocklist.
+
+## Root Cause
+
+`onAttachedToTarget()` only filtered out worker targets. Chrome&#39;s PDF viewer (`chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai`) gets auto-attached as a `type: &#34;page&#34;` target — the piercer script patches `Element.prototype.attachShadow` and walks the DOM inside this extension, corrupting the viewer.
+
+## Test plan
+
+- [x] Open a PDF URL (e.g. `https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf`) with Stagehand — verify it loads without error
+- [x] Verify normal page navigation still works after viewing a PDF
+- [x] Verify OOPIF (cross-origin iframe) targets still get piercer injection
+- [x] Verify shadow DOM piercing works (open + closed shadow roots tracked and accessible)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+- Add proper logging messages for shutdown supervisor (#1717)
+
+# why
+
+# what changed
+
+# test plan
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Add clear shutdown logs to the supervisor and pass reason strings
+through all cleanup paths. Stderr is now inherited so logs are visible
+for local Chrome and Browserbase sessions.
+
+- **New Features**
+- Pass and log cleanup reasons for local Chrome and Browserbase
+(lifeline complete vs crash/killed, PID polling).
+  - Log deletingUserDataDir in local shutdown.
+  - Inherit supervisor stderr to surface crash/cleanup messages.
+
+- **Refactors**
+  - Broaden .prettierignore to exclude all openapi.*.yaml files.
+
+&lt;sup&gt;Written for commit 1f78b4c121d817e606362ad8323751836406df17.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1717&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- Evals pathfix (#1716)
+
+# why
+
+# what changed
+
+# test plan
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Fixed WebTailBench evals to resolve dataset paths under ESM by deriving
+the module directory from import.meta.url when __dirname isn’t
+available. Also tightened .prettierignore to only exclude
+packages/server/openapi.v3.yaml for consistent formatting.
+
+&lt;sup&gt;Written for commit d4e0bd000e9421dc88dfcc170fe2329ef34a5ebf.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1716&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- lint fixes (#1715)
+
+# why
+
+# what changed
+
+# test plan
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Fixed lint and formatting in the ESM build script and the server OpenAPI
+spec to match project style rules. No runtime or API changes.
+
+- **Refactors**
+- Indented import/export lines in build-esm.ts for the generated
+index.d.ts.
+- Normalized formatting in packages/server/openapi.v3.yaml (folded
+descriptions, spacing).
+
+&lt;sup&gt;Written for commit d0cfbde45a3c4a7048fd3e2329202b65d9a594df.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1715&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+---------
+
+Co-authored-by: greptile-apps[bot] &lt;165735046+greptile-apps[bot]@users.noreply.github.com&gt;
+
+- Speed up turbo, package.json scripts, and CI configuration (#1712)
+
+# why
+
+# what changed
+
+# test plan
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Speed up builds and tests by upgrading Turborepo, tightening cache keys,
+and refactoring scripts to run from compiled dist (ESM/CJS). CI is
+faster and more reliable, with ESM-first SEA builds for the server.
+
+- **Refactors**
+- Upgrade Turborepo to 2.8.10 and rewrite turbo.json with explicit
+inputs/outputs for better caching.
+- Stronger Turbo cache keys in CI (lockfiles + workspace + package.json
++ turbo.json + commit), workflow-scoped concurrency, and a 60s session
+create timeout.
+- Standardized CI via a composite setup action; build now runs before
+lint.
+- Build/test scripts resolve the repo root via fileURLToPath; tests run
+from compiled dist; add Vitest config for CJS; CJS builds include
+sourcemaps.
+- Server: ESM-first SEA build and split server build into dist vs SEA
+steps with a new build:server:dist script.
+- Unified test scripts across packages; top-level test runs all suites,
+and evals tests support source or dist CLI via --cli.
+
+- **Migration**
+  - Use Node 20.19+ or 22.12+ (enforced in core).
+  - Run pnpm install to pick up the Turbo upgrade.
+- Build before tests: pnpm -w build. For SEA tests, also run pnpm -w
+--filter=@browserbasehq/stagehand-server run build:sea:esm.
+
+&lt;sup&gt;Written for commit 843857c13fc4a3975c18b0e44002ae9f55e4dd66.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1712&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+---------
+
+Co-authored-by: cubic-dev-ai[bot] &lt;191113872+cubic-dev-ai[bot]@users.noreply.github.com&gt;
+
+- Fix supervisor and supervisorClient behavior to support usage in SEA binary (#1711)
+
+# why
+
+# what changed
+
+# test plan
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Make the shutdown supervisor work inside the SEA server binary and
+improve cleanup reliability. Use a stdin lifeline and a CLI/SEA
+entrypoint so local Chrome and Browserbase sessions are cleaned up when
+the parent dies or Chrome exits.
+
+- **Bug Fixes**
+- Supervisor uses stdin as the lifeline; no IPC or “ready” handshake;
+idempotent cleanup.
+- Added Stagehand CLI and SEA entrypoint to run the supervisor via
+--supervisor and a single --supervisor-config JSON arg (includes
+parentPid).
+- SupervisorClient re-execs the SEA binary in SEA or uses the CLI
+outside SEA; spawns with stdin as the lifeline.
+- Safer kill flow: SIGTERM then SIGKILL (7s), treat only ESRCH as
+“gone,” and never re-kill once confirmed dead; PID polling triggers
+cleanup when Chrome exits.
+  - Browserbase cleanup requests session release on shutdown when used.
+- Added SEA integration tests covering local Chrome cleanup, supervisor
+lifecycle, and Browserbase session release.
+
+- **Migration**
+- Removed keepAlive from ShutdownSupervisorConfig; only start the
+supervisor when keepAlive=false.
+- ShutdownSupervisorHandle no longer exposes ready; there is no
+handshake—start and continue.
+
+&lt;sup&gt;Written for commit bd88f281ce7447d2e5da9498dddf225b1369419e.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1711&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- Fix flaky tests and library timing behavior (#1713)
+
+# why
+
+# what changed
+
+# test plan
+
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Stabilizes multi-click and iframe tests and hardens timing in the
+library. Uses event-based double-click checks, increases CI timeouts,
+and simplifies the Playwright config.
+
+- **Bug Fixes**
+- Double-click tests use an inline data-URL fixture and verify
+click/dblclick with detail=2 for determinism.
+- waitForChildFrame matches the expected child URL and probes frames
+(href + readyState) with clearer debug and errors.
+- Click events are dispatched in a pipelined burst to reduce inter-click
+jitter for multi-clicks.
+- First top-level page wait is 5s locally and 30s in CI (override via
+STAGEHAND_FIRST_TOP_LEVEL_PAGE_TIMEOUT_MS).
+
+- **Refactors**
+- Simplified Playwright testDir resolution with import.meta.url and
+removed the env reporter.
+- Example script adds explicit 30s action timeout and ensures Stagehand
+closes in a finally block.
+
+&lt;sup&gt;Written for commit 1dda0bf0e129ff550b2a5ddaab5dfcba6f7dce36.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1713&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- Multi-region stagehand api support (#1673)
+
+# why
+Server-side multi-region support enabled for all Browserbase regions:
+- `us-west-2` (default)
+- `us-east-1`
+- `eu-central-1`
+- `ap-southeast-1`
+
+# what changed
+Added multi-region routing to the Stagehand API client so requests use
+the endpoint that matches the Browserbase session’s region. Updates
+OpenAPI and docs, adds tests, and fixes STAGEHAND_API_URL handling.
+### **New Features**
+- Route API calls by session region via
+REGION_API_URLS/getApiUrlForRegion; supports us‑west‑2 (default),
+us‑east‑1, eu‑central‑1, ap‑southeast‑1.
+- Store the session region in the client; remove the non–us‑west‑2
+restriction.
+- Add BrowserbaseRegion schema/type; unit tests for region→URL and /v1
+suffix; integration tests verify non‑default regions return available:
+true.
+  - OpenAPI adds regional servers and shared BrowserbaseRegion schema.
+- Docs: add region/endpoint table, setup examples, mismatch error
+guidance, and the disableAPI option.
+
+### **Bug Fixes**
+  - Ensure STAGEHAND_API_URL resolves to exactly one /v1.
+  - Update SDK error messages to reference disableAPI.
+- Fix OpenAPI table rendering by removing blank lines between markdown
+table rows.
+
+# test plan
+
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Adds multi-region routing to the Stagehand API client so requests use
+the API that matches the Browserbase session’s region. Updates v3
+OpenAPI/docs and tests; honors and normalizes STAGEHAND_API_URL; v2 docs
+changes remain reverted.
+
+- New Features
+- Route API calls by session region (us-west-2 default, us-east-1,
+eu-central-1, ap-southeast-1); removed the us‑west‑2‑only restriction.
+- Add REGION_API_URLS/getApiUrlForRegion and store session region; v3
+OpenAPI adds regional servers and a shared BrowserbaseRegion schema;
+docs add region table, mismatch guidance, and disableAPI examples.
+
+- Bug Fixes
+- Normalize STAGEHAND_API_URL to include exactly one /v1;
+getApiUrlForRegion always returns a /v1 URL; SDK error text references
+disableAPI.
+- Fix OpenAPI rendering (literal scalar description, quoted versions)
+and preserve table formatting in generated YAML.
+- Tests: add unit and integration coverage for regions; use try/finally
+to prevent session leaks; remove unused env scaffolding; use
+LOCAL_BROWSER_BODY in multiRegion tests for CI stability.
+
+&lt;sup&gt;Written for commit cbdaf178fb35d1658b56a00697c2b06cb953a295.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1673&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+---------
+
+Co-authored-by: Chromie &lt;miguel@browserbase.com&gt;
+Co-authored-by: Chromie Bot &lt;chromie@browserbase.com&gt;
+Co-authored-by: Claude Opus 4.5 &lt;noreply@anthropic.com&gt;
+
+- Fix `executionModel` propagation on agent (#1698)
+
+# why
+When passing an `executionModel` to agent (for LLM-powered tools -- act,
+extract...) from a different provider than the one for the model
+provided in the Stagehand constructor, or in the `AgentConfig`, API keys
+are not propagating properly and causing errors in non-local
+environments
+
+The root cause is the execution model was being passed as a string, and
+its respective API key doesn&#39;t propagate if explicitly defined.
+Unnoticeable if the API key for each provider is exported or in `.env`,
+since we automatically pull when none is specified. This issue doesn&#39;t
+express itself if the different models share the same provider.
+
+# what changed
+
+# test plan
+
+
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Fix executionModel propagation by accepting either a string or
+AgentModelConfig across agent tools and the handler, and normalizing
+model names for correct resolution, API key usage, and telemetry.
+
+- **Refactors**
+- Added extractModelName; used in resolveModel and telemetry model
+logging.
+- Updated act, extract, fillForm tools, tool options, and V3AgentHandler
+to accept executionModel: string | AgentModelConfig.
+- In V3, pass executionModel (or fallback to model) directly to the
+handler and use extractModelName for the logged model.
+- Added tests covering tool propagation, fallback logic, and model utils
+(extractModelName, resolveModel).
+
+&lt;sup&gt;Written for commit 0417e07ebbecacc91ed27c08248404114a3e19ca.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1698&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+---------
+
+Co-authored-by: tkattkat &lt;tkat@tkat.net&gt;
+
+- [fix]: Add GLM to prompt-based JSON fallback for structured outputs (#1706)
+
+GLM-4-Flash (Zhipu AI) doesn&#39;t support OpenAI&#39;s native structured
+outputs, causing 500s on extract. Refactors the per-model boolean checks
+into an extensible pattern list and adds &#34;glm&#34; to it.
+
+# why
+
+# what changed
+
+# test plan
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Added GLM models to the prompt-based JSON fallback for structured
+outputs to prevent 500s on extract for GLM-4-Flash. Addresses STG-1470
+and includes a changeset for a patch release.
+
+- **Refactors**
+- Replace per-model flags with an extensible pattern list (deepseek,
+kimi, glm) to trigger prompt-based JSON fallback when response_model is
+used.
+
+&lt;sup&gt;Written for commit 9ac8d7f991575e0d1a4bbea85b40dd86d621ff4b.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1706&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- Add webtailbench to external benchmarks (#1688)
+
+- [fix]: expose error `cause` in `UnderstudyCommandException` (#1705)
+
+# why
+- to make the error more informative &amp; actionable
+# what changed
+- moved `UnderstudyCommandException` into `sdkErrors.ts`
+- added `cause` param
+- updated callsites in `actHandlerUtils.ts` to include cause   
+# test plan
+- added unit tests in `understudy-command-exception.test.ts`
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Expose the original error as the cause in UnderstudyCommandException to
+preserve stack traces and context during Understudy actions, with
+type-safe handling for non-Error values. Addresses Linear STG-1310.
+
+- **Bug Fixes**
+  - Add cause to UnderstudyCommandException (extends StagehandError).
+- Pass original error as cause across handlers; safely compute
+message/stack for non-Error values.
+- Prevent double-wrapping by rethrowing existing
+UnderstudyCommandException in performUnderstudyMethod.
+- Expose UnderstudyCommandException in the public API and add unit tests
+for name, message, cause, and stack.
+
+&lt;sup&gt;Written for commit e2047d6456c6f07dcbbf5816a11da5f0c687ab6c.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1705&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- [chore]: rm duplicate test runs (#1704)
+
+# why
+- for now, we only really need to run tests on pull requests. rerunning
+on merge to main is redundant
+# what changed
+- reverted the CI trigger to only run on pull requests
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Run tests only on pull requests to prevent duplicate CI runs on merges
+to main. This reduces CI noise and usage.
+
+Updated the GitHub Actions workflow to remove the main push trigger,
+drop main-specific test logic, simplify doc-only skip rules, and run e2e
+jobs only for PRs from this repo.
+
+&lt;sup&gt;Written for commit 592ad4441c3d2f5d9ccda9f53c4b678fca27ab90.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1704&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- [chore]: re add registry-url to `release.yml` (#1703)
+
+# why
+- to fix alpha releases which were failing 
+# what changed
+- this PR adds back the the registry-url config to the `setup-node`
+step, which is required for trusted publishing
+
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Restores npm registry config and updates the Node setup step to v6 for
+Trusted Publishing, fixing failing alpha releases.
+
+- **Bug Fixes**
+- Configure Trusted Publishing: set registry-url via setup-node v6 with
+Node 20.x and upgrade npm to latest.
+  - Set checkout fetch-depth to 0 to include full git history.
+
+&lt;sup&gt;Written for commit 90123dac483dde9c890c8d754179945ae2bb16a6.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1703&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- [fix]: resolve `supervisor.js` via `import.meta.url` (#1702)
+
+# why
+- the `supervisorClient` was unable to find the `supervisor.js` file
+after we migrated to esm
+- the old code preferred `__dirname` over `import.meta.url`, but tsx
+polyfills `__dirname` in esm mode and it can resolve to the wrong
+directory
+# what changed
+- use `import.meta.url` instead of `__dirname`
+
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Fixes supervisor script resolution in ESM by using import.meta.url,
+preventing failures when __dirname is polyfilled by tsx.
+
+- **Bug Fixes**
+  - Resolve supervisor.js using import.meta.url instead of __dirname.
+- Improve missing-script error message to include the searched
+directory.
+
+&lt;sup&gt;Written for commit 42c84bdfa92d22bb8de700931eebc45b2733d813.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1702&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- [chore]: add `.js` to the end of all imports (#1700)
+
+# why
+
+- removes the need to append .js to all imports during esm build process
+- aligns us with the default standard for esm / esbuild js projects that
+also need to support cjs
+- this allows us to seamlessly support ESM, CJS, and TSX with no
+remapping needed
+
+# what changed
+
+# test plan
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Standardized all internal imports and re-exports to include .js
+extensions to enable native ESM resolution, while keeping CJS and TS
+working without path remapping. Updated examples to use explicit
+index.js entrypoints and environment-driven config for easier local
+runs.
+
+- **Refactors**
+- Appended .js to all relative imports and barrel exports across core,
+v3 agent, DOM runtimes/locator scripts, caches, handlers, external
+clients, and index files.
+- Switched examples to ../lib/v3/index.js, fixed nested re-export paths,
+and added env-based config (BROWSERBASE_API_KEY, BROWSERBASE_PROJECT_ID,
+MODEL_API_KEY) passed into Stagehand/model.
+  - Updated dotenv to ^17.3.1 in dev deps. No public API changes.
+
+- **Migration**
+  - Most users importing from package entry points: no changes.
+- If importing internal files locally (e.g., examples or custom
+integrations), include .js in paths and prefer index.js for directories.
+
+&lt;sup&gt;Written for commit d1d0547daafca47a06a8aa9124d7081c68042270.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1700&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- Fix: undefined def when using structured outputs in agent with zod pi… (#1695)
+
+# why
+
+There is currently a bug isolated specifically to people using zod
+pinned to v3 with structured output in agent resulting in a zod error
+&#34;undefined def&#34;
+
+# what changed
+
+We now ensure any output schema passed in is correctly normalized to v3
+or v4 depending on what version is being used through our zodcompat
+factory
+
+# test plan
+
+tested the failing scenario to make sure it is addressed 
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Fixes the “undefined def” error when agents use structured outputs with
+Zod pinned to v3 by building the “done” tool schema with the same Zod
+version as the user’s schema.
+
+- **Bug Fixes**
+- Use getZFactory to create schemas with the user’s Zod version (v3 or
+v4).
+- Build the base done schema via the factory and safely extend with
+outputSchema.
+- Generate output instructions using StagehandZodSchema types to avoid
+v3/v4 mixing.
+  - Add changeset to publish a patch release.
+
+&lt;sup&gt;Written for commit 07538ad15225c307cd64b257af81605dd23a4e5c.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1695&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- [docs]: add missing CUA models to docs (#1693)
+
+## Summary
+- Added 5 missing CUA models to all documentation pages: `anthropic/claude-opus-4-5-20251101`, `anthropic/claude-opus-4-6`, `google/gemini-3-flash-preview`, `google/gemini-3-pro-preview`, and `microsoft/fara-7b`
+- Updated provider mentions from &#34;Google, Anthropic, and OpenAI&#34; to include Microsoft across all CUA-related docs
+- Organized model lists alphabetically by provider for consistency
+
+The codebase (`AVAILABLE_CUA_MODELS` in `agent.ts`) supports 12 CUA models but the docs only listed 7. This brings the docs in sync with the source of truth.
+
+## Test plan
+- [ ] Verify the models page renders the updated accordion table correctly
+- [ ] Verify the agent reference page lists all 12 models
+- [ ] Verify the computer-use best practices page mentions Microsoft
+- [ ] Verify the agent basics page mentions Microsoft
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Added five missing CUA models—anthropic/claude-opus-4-5-20251101, anthropic/claude-opus-4-6, google/gemini-3-flash-preview, google/gemini-3-pro-preview, and microsoft/fara-7b—and updated provider mentions to include Microsoft. This syncs all CUA docs with the 12 models supported in the codebase and alphabetizes lists by provider.
+
+&lt;sup&gt;Written for commit d1d5f3d727bd4ecc1c868ebfd911dd95a0c16257. Summary will update on new commits. &lt;a href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1693&#34;&gt;Review in cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- [chore]: add dotenv to dev deps (#1699)
+
+# why
+- so that `dotenv` is installed with `pnpm i`
+# what changed
+- added `dotenv` to dev dependencies
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Added dotenv 16.4.5 to devDependencies so it installs with pnpm i. This
+enables .env loading in local dev scripts without manual installation.
+
+&lt;sup&gt;Written for commit 53f8c54776eaefa5aab7a8c755ce37d84ae5f2e9.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1699&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- [STG-1232] Speed up PR Github Actions checks, add code coverage, fix e2e bb tests running not running in bb mode, remove tsup, generate unified re-used ESM and CJS builds with sourcemaps and types, switch CI to new Evals CLI (#1632)
+
+# why
+
+- unit tests, e2e integration tests, and evals were taking 10~15 minutes
+per pr
+- finding the specific failing eval or test was tedious and required
+reading tons of log output
+- we weren&#39;t leveraging pnpm or turbo caches or github action&#39;s native
+chromium install
+- tests were flaky because CDP would randomly fail to connect when
+github actions runner was overloaded
+- e2e bb tests were not actually running against bb, so it was
+previously just double-running e2e:local and reporting it as bb
+- tsup has been deprecated for a while and should be replaced by esbuild
+
+# what changed
+
+- parallelized all CI tests and broke out evals and tests into
+individual matrix jobs
+- created unified node+pnpm+turbo setup action that all other actions
+call
+- verified vanilla chromium is able to launch inside all the e2e local
+jobs before running any of our own code to catch resource contention
+flakyness
+- add proper esm and csj builds with sourcemaps and types for aligned
+coverage
+- remove tsup dependency
+- switch to new evals cli
+- add coverage reporting
+- fix some flaky tests needed to get everything passing reliably
+
+&lt;img width=&#34;1635&#34; height=&#34;609&#34; alt=&#34;Screenshot 2026-01-26 at 1 04 04 PM&#34;
+src=&#34;https://github.com/user-attachments/assets/24bb2ea9-e182-4cb3-9856-6a77efe921b7&#34;
+/&gt;
+
+
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Speeds up CI and makes tests stable by running Vitest/Playwright/Evals
+on the built ESM dist with cached artifacts, verified runner Chromium,
+weighted Browserbase routing, and merged coverage. Publishes a unified
+ESM+CJS SDK with sourcemaps/types and SEA binaries from ESM; fixes
+Browserbase e2e, switches to the new Evals CLI, and adds flaky‑test
+reporting, addressing Linear STG‑1232.
+
+- **New Features**
+- CI: split pnpm/Turbo caches; composite actions (setup/caches, Chromium
+launch check, region selection, CTRF/V8 uploads); reuse artifacts; use
+Actions Chromium via CHROME_PATH with --no-sandbox; unique CTRF reports;
+V8 coverage normalization/merge with cancellation safety; push triggers
+enabled.
+- Tests: run from dist/esm; env reporter; true Browserbase runs with
+weighted/randomized regions; hard timeouts for LLM and session
+create/CDP connect; faster multi‑click dispatch; higher timeouts and
+targeted skips; cleanup helpers; fixes for init‑script,
+wait‑for‑selector, and screenshot reliability.
+- Build/SDK/SEA: export map (ESM import + CJS require) with
+sourcemaps/types; SEA binaries built from ESM with sourcemaps and plain
+logs in CI; removed tsup and dotenv; AISdk/CustomOpenAI moved to lib and
+exported; getAISDKLanguageModel added; replay metrics now include
+method/parameters/result/timestamps/cost.
+
+- **Migration**
+- Set STAGEHAND_BROWSER_TARGET=local|browserbase, STAGEHAND_ENV
+(replaces TEST_ENV), CHROME_PATH; tune LLM_MAX_MS,
+BROWSERBASE_SESSION_CREATE_MAX_MS, BROWSERBASE_CDP_CONNECT_MAX_MS;
+optionally set BROWSERBASE_REGION_DISTRIBUTION.
+- Remove dotenv; set env vars directly and import
+@browserbasehq/stagehand via the export map (avoid dist paths).
+
+&lt;sup&gt;Written for commit 5c76fecf6b9016f4ad5273d4143c3fe747b5d06f.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1632&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+
+
+
+
+
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Ships an ESM‑first SDK with a CJS entry, unified sourcemaps, and types.
+CI runs Vitest/Playwright and the new Evals CLI against the built ESM
+dist using the runner’s Chromium (launch‑verified), with region‑weighted
+Browserbase routing, normalized V8 coverage, unique CTRF artifacts, and
+more stable tests (timeouts, Browserbase skips, understudy click/API
+fixes).
+
+Speed up CI by running Vitest and Playwright tests in parallel matrices,
+add V8/CTRF coverage, and stabilize Browserbase/LLM flows with hard
+timeouts and better cleanup. Server integration tests now use the
+runner’s Chromium for reliability and are folded into the main CI.
+
+- **Refactors**
+- Parallelized core unit tests via discover-core-tests/core-unit-tests
+(Vitest matrix, fail-fast).
+- Parallelized E2E via discover-e2e-tests (Playwright local +
+Browserbase) gated on core changes; weighted Browserbase region
+selection; verify Chromium/CDP before tests; local uses runner Chromium
+via CHROME_PATH and --no-sandbox; Playwright can emit JUnit when
+CTRF_JUNIT_PATH is set.
+- Unified Lint &amp; Build with Turbo caching and shared artifacts;
+tests/evals download and reuse; prepare script skips build in CI; SEA
+builds support sourcemaps.
+- Enforced configurable timeouts and parallelism via env (LLM_MAX_MS,
+BROWSERBASE_CDP_CONNECT_MAX_MS, BROWSERBASE_SESSION_CREATE_MAX_MS,
+LOCAL_SESSION_LIMIT_PER_E2E_TEST,
+BROWSERBASE_SESSION_LIMIT_PER_E2E_TEST, EVAL_*); added LLM and
+Browserbase hard timeouts; improved click event dispatch to reduce
+remote flakiness.
+- Explicitly close Browserbase sessions in tests and evals to free
+capacity.
+- Added composite actions: setup-node-pnpm-turbo,
+verify-chromium-launch, select-browserbase-region, publish-ctrf-report
+(JUnit→CTRF and evals), upload-v8-coverage.
+- Renamed TEST_ENV to STAGEHAND_ENV across E2E; added an env reporter
+for CI logs; removed the standalone stagehand-server tests workflow and
+ran server tests in the unified CI with Node’s test runner and GitHub
+Actions Chromium.
+
+
+- **New Features**
+- Build/Exports: ESM in dist/esm and CJS in dist/cjs via export map;
+types from ESM; SEA binaries built from dist with sourcemaps; server SEA
+job targets CJS; new build/test/coverage scripts; Node loader maps
+package imports to dist/esm; ESM‑safe pathing (fileURLToPath);
+ESLint/Prettier tweaks; dotenv removed.
+- CI: Composite actions (setup-node-pnpm-turbo, verify-chromium-launch,
+select-browserbase-region, upload-ctrf-report, upload-v8-coverage); uses
+runner Chromium via CHROME_PATH with --no-sandbox and launch checks;
+weighted Browserbase region selection; unique CTRF artifacts; V8
+coverage normalized/merged with debug logs and graceful cancellation;
+Playwright/Vitest discover tests in dist/esm; push/PR triggers enabled.
+- Tests &amp; API: Vitest/Playwright run on dist/esm; new env reporter and
+closeV3 helper; tighter multi‑click CDP dispatch; higher timeouts and
+targeted skips (e.g., console on Browserbase) reduce flakiness; local
+launches honor CHROME_PATH; replay metrics now include
+parameters/result/timestamps/cost with parser fixes; AISdk/CustomOpenAI
+clients moved to lib/v3/external_clients and exported; env‑driven hard
+timeouts for LLM ops and Browserbase session create/CDP connect;
+understudy API usage fixes.
+
+- **Migration**
+- Set STAGEHAND_BROWSER_TARGET=local|browserbase and CHROME_PATH; tune
+LLM_MAX_MS, BROWSERBASE_SESSION_CREATE_MAX_MS, and
+BROWSERBASE_CDP_CONNECT_MAX_MS; optionally set
+BROWSERBASE_REGION_DISTRIBUTION.
+  - dotenv support is removed; set env vars explicitly in dev and CI.
+- Import @browserbasehq/stagehand via the export map; do not reference
+dist paths or prior tsup outputs.
+
+&lt;sup&gt;Written for commit 8119145426a4e6e5cb614dee5b3f2d8fe41a65e9.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1632&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- [docs]: correct Python dict syntax for cdp_url in browser config (#1684)
+
+## Summary
+- Fixes invalid Python syntax in the &#34;Connecting to your local browser&#34;
+docs example
+- The `cdp_url` was written using keyword argument syntax
+(`cdp_url=&#34;...&#34;`) inside a dictionary literal `{}`, which is a syntax
+error in Python
+- Changed to proper dictionary syntax (`&#34;cdp_url&#34;: &#34;...&#34;`)
+
+Fixes #1288
+
+## Test plan
+- [x] Verify the corrected code example is valid Python syntax
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Fixes invalid Python dictionary syntax in the local browser
+configuration docs by changing cdp_url=&#34;...&#34; to &#34;cdp_url&#34;: &#34;...&#34;. This
+removes the syntax error so the example runs when copy-pasted.
+
+&lt;sup&gt;Written for commit c6bf3686b2f40d4d46c0d01b84870ba565fa6c11.
+Summary will update on new commits. &lt;a
+href=&#34;https://cubic.dev/pr/browserbase/stagehand/pull/1684&#34;&gt;Review in
+cubic&lt;/a&gt;&lt;/sup&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;</div>
+</div>
+
+<a href="../project/browserbase_stagehand.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

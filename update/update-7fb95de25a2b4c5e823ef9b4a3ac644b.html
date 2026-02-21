@@ -1,0 +1,1261 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (96 commits) - airweave-ai/airweave - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (96 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/airweave-ai_airweave.html">airweave-ai/airweave</a> /
+    Updates in main (96 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/airweave-ai_airweave.html">airweave-ai/airweave</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-02-21 03:09 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/airweave-ai/airweave/commits/main" target="_blank">https://github.com/airweave-ai/airweave/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление значительно перестраивает ключевые архитектурные компоненты, вводя унифицированный `BaseContext` для согласованного управления контекстом и разделяя `SyncContext` на неизменяемые данные и активные сервисы. Была реализована новая крупная функция «Agentic Search», предлагающая расширенный поиск на основе ИИ с возможностями планирования, оценки и синтеза результатов. Система биллинга была переработана с использованием доменных репозиториев, а для повышения наблюдаемости и надежности добавлены обширные метрики Prometheus и настраиваемые проверки работоспособности. Эти изменения, наряду с миграцией на Pydantic V2 и новыми коннекторами данных, демонстрируют широкий шаг к большей модульности, тестируемости и расширенному набору функций.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- refactor(ctx): introduce base context (#1443)
+
+* refactor(ctx): introduce base context
+
+Introduces a BaseContext to provide a unified context for various
+operations, including API requests, sync processes, and cleanup tasks.
+This refactoring reduces code duplication and improves consistency by
+centralizing organization and user identity management.
+
+* fix: restore clobbered CRUD files, apply only import rename
+
+Four CRUD files were accidentally overwritten with wrong content
+during the BaseContext migration. Restored originals from main and
+applied only the intended change: ApiContext → BaseContext import.
+
+* fix: restore source builder — was accidentally refactored
+
+SourceContextBuilder was modified by a subagent despite instructions
+not to touch it. Restored original from main. The InfraContext shim
+in SyncContextBuilder._build_source() bridges the gap.
+
+* refactor(sync): split SyncContext into frozen data + SyncRuntime services
+
+SyncContext is now a true sibling to ApiContext — frozen data only
+(IDs, schemas, config, entity_map, source_short_name). No services.
+
+New SyncRuntime dataclass holds live services (source, cursor,
+destinations, entity_tracker, state_publisher, guard_rail).
+
+- Factory builds services directly, assembles SyncRuntime
+- SyncContextBuilder builds data-only SyncContext
+- Orchestrator holds both, passes runtime through pipeline
+- Handlers get services via constructor injection (guard_rail)
+  or runtime parameter (entity_tracker, state_publisher, cursor)
+
+* fix(tests): add mock_runtime to tests after SyncContext/SyncRuntime split
+
+Tests for DestinationHandler, ChunkEmbedProcessor, and CleanupService
+now pass mock_runtime where methods expect it.
+
+* docs: update cursor rules for BaseContext + SyncRuntime refactor
+
+- crud-layer.mdc: ApiContext → BaseContext as the CRUD type
+- api-layer.mdc: document ApiContext inherits from BaseContext
+- sync-architecture.mdc: document SyncContext/SyncRuntime split,
+  flat structure, builder responsibilities
+
+* fix: forward runtime through EntityPipeline internal calls
+
+_prepare_entities now passes runtime to hash_computer.compute_for_batch.
+cleanup_orphaned_entities and cleanup_temp_files accept runtime param.
+Also replaced loose ApiContext constructions in billing, organization,
+source_connection_service_helpers with BaseContext.
+
+* refactor: move user to ApiContext, make logger init=False on BaseContext
+
+BaseContext now has zero __init__ defaults (only `organization`), so
+subclasses can freely add required fields without dataclass ordering
+conflicts. Logger is auto-derived in __post_init__ and overridable
+post-construction. User identity lives exclusively on ApiContext.
+
+* fix: make analytics.track_event() accept ctx for automatic identity injection
+
+Restructured signature: (event_name, properties, *, ctx, distinct_id, groups).
+When ctx is passed, delegates to its pre-configured ContextualAnalyticsService
+for distinct_id, groups, and header enrichment. Fixes broken calls that were
+passing properties dict as distinct_id.
+
+* fix: make logger a kw_only field on BaseContext instead of init=False
+
+logger=field(default=None, kw_only=True) lets callers pass logger= in
+the constructor while still allowing subclasses to add required
+positional fields without dataclass ordering conflicts.
+
+* fix: update business_events to use BaseContext, remove ctx.user references
+
+Type-hint ctx as BaseContext (user lives on ApiContext only). Use
+organization.id as distinct_id and access organization.name directly
+instead of defensive getattr.
+
+* fix: stringify org id for PostHog distinct_id, remove stale ctx.user ref
+
+* fix: add billing fakes to test_container fixture
+
+Container gained billing_service, billing_webhook, and payment_gateway
+from the billing domain merge but the root conftest was not updated.
+
+* feat: add fake sync record service fixture
+
+Introduces a fixture for the fake sync record service.
+
+This provides a convenient way to use the fake sync record service in tests.
+
+- Merge pull request #1445 from airweave-ai/refactor/sync-lifecycle-service
+
+[code blue] API facing sync lifecycle
+
+- fix source connection tests
+
+- chore: add stale issue/PR workflow (#1457)
+
+Add a GitHub Actions workflow that automatically
+marks issues and pull requests as stale after 90
+days of inactivity and closes them after a further
+30 days. Items labeled `security`, `priority:critical`,
+`blocked`, or `on hold` are exempt.
+
+- fix: remove magic string for cron schedules
+
+- refactor: proxy sync lifecycle methods via source connection service
+
+- Merge pull request #1456 from airweave-ai/ci/label-sync-workflow
+
+ci: add label-sync workflow and config
+
+- fix: billing testing
+
+- [code blue] sync lifecycle service
+
+- Merge pull request #1455 from airweave-ai/refactor/remove-dead-apis
+
+chore: remove dead APIs
+
+- Refactor: Billing (#1439)
+
+* refactor(billing): add domain repositories, operations, and fakes
+
+- domains/billing/repository.py: OrganizationBillingRepository (get, create, update)
+  and BillingPeriodRepository (get, update) with protocols, wrapping the crud layer
+- domains/billing/operations.py: BillingOperations with create_billing_period
+  (multi-entity orchestration: period + usage in a UnitOfWork)
+- domains/billing/fakes/: in-memory fakes for both repositories
+- domains/organizations/repository.py: OrganizationRepository with get_by_id,
+  wrapping crud.organization.get
+- domains/organizations/fakes/: in-memory fake for OrganizationRepository
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* refactor(billing): wire service and webhook_handler to domain repositories
+
+- service.py: replace all crud.organization_billing, crud.organization, and
+  billing_transactions calls with _billing_repo, _org_repo, _period_repo,
+  and _billing_ops instances
+- webhook_handler.py: same treatment — zero crud imports remain
+- delete billing/transactions.py (no remaining references)
+- remove dead code from crud_billing_period.py (get_by_organization,
+  get_by_stripe_subscription, get_by_stripe_invoice, complete_active_periods)
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* refactor(billing): NullPaymentGateway no-op split and organization_service DI
+
+- Split NullPaymentGateway into no-op infrastructure methods (create/delete
+  customer, lookups) and error-raising user-facing methods (checkout, subscriptions)
+- Refactor organization_service to use conditional gateway import instead of
+  STRIPE_ENABLED guards throughout the code
+- Guard admin enterprise endpoints against None customer returns
+- Remove redundant STRIPE_ENABLED check from guard_rail_service
+- Remove dead STRIPE_ENABLED guard from StripePaymentGateway.__init__
+- Add missing docstrings to satisfy ruff D102/D107 rules
+- Fix pre-existing E501/D205/D415/D417 lint issues in admin.py
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* refactor(billing): move system context to ApiContext.for_system classmethod
+
+- Add ApiContext.for_system() classmethod for creating internal/background
+  operation contexts, replacing the standalone create_billing_system_context
+- Refactor webhook handler to resolve org context once in _process_event
+  and pass it to all handlers, eliminating 6 duplicate org lookup + context
+  creation blocks
+- Update admin.py to use ApiContext.for_system() directly
+- Delete domains/billing/context.py (no longer needed)
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* refactor(billing): paymentgatewayprotocol no longer needs to be part of the container
+
+* test(billing): add 124 unit tests for billing domain using fakes
+
+Tests cover BillingService, BillingWebhookProcessor, and pure functions
+in types.py using fake implementations (no DB, no Stripe API). Includes
+NullPaymentGateway behavior tests to verify service handles None returns
+and BillingNotAvailableError raises correctly when Stripe is disabled.
+
+Also renames webhook_handler.py → webhook_processor.py and updates the
+container factory import.
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* Update backend/airweave/core/organization_service.py
+
+Co-authored-by: cubic-dev-ai[bot] &lt;191113872+cubic-dev-ai[bot]@users.noreply.github.com&gt;
+
+* refactor: abstract billing operations through repository protocols
+
+- Add get/create to BillingPeriodRepositoryProtocol, removing direct
+  crud.* calls from operations.py
+- Extract usage into its own domain (domains/usage/) with
+  UsageRepositoryProtocol
+- Make stripe_subscription_id required on create_billing_period (every
+  caller already passes it)
+- Remove dead contextual_logger param (ctx.logger used throughout)
+- Remove vacuous truthiness check on required payment_gateway dep
+- Clean up dead imports (Any, ContextualLogger, module logger)
+
+* fix: wire required repos into BillingOperations in organization_service
+
+BillingOperations now requires billing_repo, period_repo, and
+usage_repo. Update the module-level construction to pass them.
+
+---------
+
+Co-authored-by: Daan Manneke &lt;daan@airweave.ai&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+Co-authored-by: Rauf Akdemir &lt;rauf@neena.io&gt;
+Co-authored-by: cubic-dev-ai[bot] &lt;191113872+cubic-dev-ai[bot]@users.noreply.github.com&gt;
+
+- chore: remove dead APIs
+
+- ci: add label-sync workflow and config
+
+Add a declarative label configuration in
+`.github/labels.yml` that serves as the single source
+of truth for repository labels. Categories cover type,
+area, connector, priority, size, and status.
+
+The accompanying workflow (`.github/workflows/labels.yml`)
+runs EndBug/label-sync on pushes to the config file and
+on manual dispatch, with `delete-other-labels: true` to
+keep labels in sync. Both actions are pinned to full
+commit SHAs to harden against supply-chain attacks:
+`actions/checkout` at v6.0.2 and `EndBug/label-sync`
+at v2.3.3.
+
+- Merge pull request #1454 from airweave-ai/refactor/temporal-domain-services
+
+[code blue] temporal: workflows and scheduling
+
+- refactor: extract temporal domain services (Protocol + DI)
+
+Add TemporalService and TemporalScheduleService as protocol-backed,
+dependency-injected replacements for the old core/temporal_service.py
+and platform/temporal/schedule_service.py singletons.
+
+Includes protocols, implementations, fakes, 47 table-driven tests,
+and container/factory wiring.
+
+- Merge pull request #1431 from airweave-ai/feat/prometheus-http-metrics
+
+feat: add Prometheus metrics layer
+
+- fix: strict types for new protocols
+
+Replace bare `dict`, `list[tuple]`, and `Any` with
+precise annotations across all protocols, services,
+and fakes introduced on this branch.
+
+Key changes: `dict[str, Any]` on credential encryption,
+`TypedDict` return shapes on worker metrics protocol,
+`dict[str, str]` on OAuth template/config params, and
+concrete model types on fake repository stores.
+
+- Merge pull request #1453 from airweave-ai/feat/source-connection-repos
+
+feat: add sync domain repositories with protocols, fakes, and DI wiring
+
+- feat: add sync domain repositories with protocols, fakes, and DI wiring
+
+Extract repository layer from the sync lifecycle refactor to unblock
+dependent work. Adds SyncRepository, SyncCursorRepository, expands
+SyncJobRepository, and adds get_by_sync_id + ScheduleInfo typing to
+source_connections. All repos are wired into the DI container with
+matching fakes and conftest fixtures.
+
+- ENG-27: Implement `coda` connector (#1452)
+
+Co-authored-by: Rauf Akdemir &lt;rauf@neena.io&gt;
+
+- refactor: co-locate unit tests with source
+
+Move 9 test files from `tests/unit/` into `&lt;module&gt;/tests/`
+directories beside the code they exercise, matching the
+convention used by the rest of the codebase. Two multi-module
+files (`test_http_metrics.py`, `test_db_pool_metrics.py`) are
+split so each piece lands next to its subject. Pytest already
+discovers co-located tests via `testpaths`.
+
+- fix: strict types for metrics branch
+
+Replace every `pool: Any` with a new `DbPool` structural
+protocol, type `metrics_lifespan` params and return, add
+strict `Callable` and return annotations on the streaming
+metrics iterator, parameterise bare `dict`/`list` returns,
+and add `TYPE_CHECKING` return types on new conftest
+fixtures.
+
+- refactor: extract metrics lifecycle
+
+Move `host`/`port` from `start()` into the constructor so
+the factory wires static config at build time. Add a
+`metrics_lifespan` async context manager that handles
+`app.state` wiring, startup, and teardown — replacing the
+15-line inline block in `main.py` with a single
+`async with`.
+
+- refactor: drop unnecessary lazy imports
+
+Python 3.11 supports PEP 604 unions natively, so
+`from __future__ import annotations` served no purpose
+in these files. Four `TYPE_CHECKING` guards protected
+imports that follow the correct dependency direction
+(api/search/platform → core) and can safely be top-level.
+
+Also removes a redundant inline `import time` in
+`api/middleware.py` that shadowed the module-level one.
+
+- refactor: consolidate metrics adapters
+
+Five per-domain adapter packages (`http_metrics/`,
+`db_pool_metrics/`, etc.) each had `__init__`, `fake`, and
+`prometheus` modules — 15 files across 5 directories.
+Merge into `adapters/metrics/` with one module per domain
+that co-locates the Prometheus and fake implementations.
+
+Similarly, five individual protocol files collapse into
+`core/protocols/metrics.py`.
+
+- fix: explicit protocol bases, top-level imports
+
+Adapter classes satisfied their protocols structurally but
+never listed the protocol in their bases. Adding the explicit
+inheritance enables IDE go-to-implementation, mypy checking,
+and makes the contract visible at a glance across all 12
+adapter/service classes.
+
+The lazy imports inside `_create_metrics_service()` and
+`MetricsService.start()` had no circular-dependency
+justification — the imported modules are leaf adapters that
+only depend on `prometheus_client` and protocols. Moving them
+to module level keeps the import graph transparent and avoids
+hiding dependencies inside function bodies. The now-redundant
+`TYPE_CHECKING` guard in `metrics_service.py` is removed.
+
+- refactor: inject worker metrics adapters
+
+The old `prometheus_metrics.py` module exposed gauges and an
+`update_worker_metrics()` function as module-level globals,
+forcing the control server and its tests to patch imports.
+
+Replace with a `WorkerMetrics` protocol backed by two adapters
+(`PrometheusWorkerMetrics` for production, `FakeWorkerMetrics`
+for tests) and frozen `WorkerMetricsSnapshot` value objects that
+replace the 11-parameter function signature. Wire dependencies
+in `TemporalWorker.__init__` and inject them into
+`WorkerControlServer`, eliminating all `mock.patch` calls for
+metrics in the control-server test suite.
+
+- refactor: rename ApiMetricsServer
+
+Drop the `Api` prefix from `ApiMetricsServer` since the
+class lives in `airweave.api`, which already provides the
+process-scoping context. The compound name read as &#34;server
+for API-metrics&#34; rather than the intended meaning. Also
+rename the module `metrics_server.py` to `metrics.py` and
+the settings `API_METRICS_PORT`/`API_METRICS_HOST` to
+`METRICS_PORT`/`METRICS_HOST` for consistency.
+
+- refactor: unify metrics behind facade
+
+The Container carried four separate metrics fields and
+main.py orchestrated two background services manually.
+Introduce `MetricsService` as a single facade that owns
+the adapters, the sidecar server, and the DB pool sampler,
+reducing the Container surface and simplifying lifespan.
+
+Move `AgenticSearchMetrics` protocol into the agentic
+search domain and derive pool-size constants from
+`Settings` properties instead of module-level globals.
+
+- feat: add DB pool Prometheus gauges
+
+The HTTP metrics endpoint now exposes five connection pool
+gauges (`airweave_db_pool_size`, `checked_out`, `checked_in`,
+`overflow`, `max_overflow`) so operators can correlate
+query latency spikes with pool exhaustion without reaching
+for engine-level logging.
+
+A `DbPoolSampler` asyncio task polls the SQLAlchemy pool
+every five seconds and pushes snapshots through a
+`DbPoolMetrics` protocol, keeping the sampler decoupled
+from Prometheus internals. The adapter, protocol, fake,
+and container wiring follow the same pattern established
+by the `http_metrics` and `agentic_search_metrics` layers.
+
+- feat: ENG-2095: Implement `document360` connector (#1444)
+
+* ENG-2095: Implement `document360` connector
+
+* fix: add missing blank lines between config classes (ruff formatting)
+
+---------
+
+Co-authored-by: Rauf Akdemir &lt;rauf@neena.io&gt;
+
+- refactor: extract MetricsRenderer protocol
+
+Split `generate()` and `content_type` out of `HttpMetrics`
+into a dedicated `MetricsRenderer` protocol so the metrics
+collection interface stays backend-agnostic. The
+`ApiMetricsServer` now depends on the renderer rather than
+`HttpMetrics` directly, and a shared `CollectorRegistry`
+feeds both HTTP and agentic-search metric families into a
+single `/metrics` endpoint.
+
+A couple of follow-ups are included: parametrize the
+skip-paths test to cover all six `_METRICS_SKIP_PATHS`
+entries, guard the `finally` block in
+`AgenticSearchAgent.run()` against metrics failures, and
+add missing fake-import lines to the container docstring.
+
+- feat: add agentic search metrics
+
+Introduce `AgenticSearchMetrics` protocol with a
+Prometheus adapter and a no-op fake, wired through
+the DI container.  The middleware records
+`requests_total`, `errors_total`, and a
+`duration_seconds` histogram for `/agentic-search`.
+
+`inc_search_requests` runs in a `finally` block so
+every request is counted, enabling the standard
+`rate(errors) / rate(requests)` pattern.
+
+- feat: add Prometheus HTTP metrics
+
+Wire a `/metrics` sidecar through `ApiMetricsServer`
+and a per-request Starlette middleware that records
+`requests_total`, `responses_total`, `errors_total`,
+`request_duration_seconds`, and `response_body_bytes`.
+
+Add `API_METRICS_HOST` (default `0.0.0.0`) so local
+dev can bind to `127.0.0.1`.  Include lifecycle tests,
+`.coveragerc` exclusion for bare-ellipsis stubs, and
+clarifying comments in the middleware and `main.py`.
+
+- feat: ENG-2096: Implement `fireflies` connector (#1399)
+
+* ENG-2096: Implement `fireflies` connector
+
+* Address review
+
+* fix: add Fireflies transcript entity
+
+Adds the FirefliesTranscriptEntity to the list of entities
+associated with the &#34;fireflies&#34; source. This enables the
+ingestion and processing of transcript data from Fireflies.
+
+Relates to ENG-2096
+
+---------
+
+Co-authored-by: Rauf Akdemir &lt;rauf@neena.io&gt;
+
+- Merge pull request #1430 from airweave-ai/refactor/oauth2service
+
+refactor(oauth): OAuth2Service and OAuth1Service
+
+- feat: ENG-2093: Implement `apollo.io` connector (#1434)
+
+- feat: ENG-2097: Implement `freshdesk` connector (#1412)
+
+* feat: ENG-2097: Implement `freshdesk` connector
+
+* Fix `freshdesk`-related tests
+
+- refactor(oauth): add injectable OAuth1Service in domains/oauth with container wiring
+
+- refactor: extract CredentialEncryptor protocol + Fernet adapter out of oauth domain into core/adapters
+
+- Fix type annotations and remove defensive getattr/hasattr in OAuth2Service
+
+- refactor(oauth): inject repos, encryptor, and settings into OAuth2Service
+
+Replace direct crud/credentials/settings imports with protocol-based
+dependency injection. Add domain-specific repository protocols, real
+implementations, fakes, and 81 table-driven tests.
+
+- Merge pull request #1437 from airweave-ai/refactor/source-connections-service
+
+[code blue] refactor: source connections service - get() and list()
+
+- [code blue] source connections: remove unused service and helper methods
+
+- [code blue] refactor: source connections service split
+
+- fix: account for Svix cache TTL in E2E tests (#1448)
+
+Adds a sleep to account for the Svix endpoint cache TTL in the E2E tests.
+
+This ensures that newly created subscriptions are visible to the
+delivery worker by waiting for the cache to expire before triggering a sync.
+
+- Merge pull request #1433 from airweave-ai/feat/health-probes
+
+feat: add liveness and readiness health probes
+
+- Merge pull request #1446 from airweave-ai/feat/collection-repo
+
+[code blue] collections repo
+
+- [code blue] collections repo
+
+- refactor: inherit health protocols
+
+The concrete health-probe classes and their test fakes
+relied on structural subtyping alone. Adding explicit
+base classes (`HealthProbe`, `HealthServiceProtocol`)
+makes the relationship visible to readers and to static
+analysis tools without changing any runtime behaviour.
+
+- refactor: remove `TEMPORAL_ENABLED` flag
+
+Temporal is a core infrastructure dependency and every
+call-site already has try/except handling for a missing
+server.  The flag was a legacy toggle from when Temporal
+support was experimental — both docker-compose files and
+`.env.example` already defaulted it to true, so the only
+effect of the `False` default in code was silently
+disabling functionality when the env var was forgotten.
+
+Removing the flag simplifies configuration and makes
+Temporal assumed-on.  Schedule initialisation, the health
+probe, and the connectivity check now run unconditionally,
+relying on existing error handling to degrade gracefully
+when the server is unreachable.
+
+- feat: make health probes configurable
+
+Operators can now tune probe behaviour via two env vars
+without code changes: `HEALTH_CHECK_TIMEOUT` sets the
+per-probe timeout (default 5 s) and
+`HEALTH_CRITICAL_PROBES` is a comma-separated list of
+probe names that gate HTTP 503 (default `postgres`).
+
+Probe registration is driven by existing infra flags —
+Temporal is only registered when `TEMPORAL_ENABLED` is
+true, rather than appearing as &#34;skipped&#34;. Defaults
+reproduce the previous behaviour exactly.
+
+- refactor: promote test probe stubs to fakes
+
+The four inline stub classes in `test_health.py` are
+reusable across any test that needs to wire up the
+health orchestrator. Move them into `core/health/fakes.py`
+alongside `FakeHealthService` so future tests can import
+them directly instead of re-inventing disposable stubs.
+
+- refactor: co-locate health into sub-package
+
+The health protocols, service, and fakes were spread across
+`core/protocols/health*.py`, `core/health_service.py`, and
+`core/fakes/`. Since both the protocol and orchestrator live
+in the same architectural layer, they belong together.
+
+Move everything into `core/health/` (protocols, service,
+fakes) and delete the now-empty `core/fakes/` directory.
+Update factory imports and conftest fixtures accordingly.
+
+- refactor: move health probes into DI
+
+Replace the function-based `check_readiness` approach
+and `app.state` flags with a `HealthService` class
+wired through the DI container. Probe setup moves from
+the lifespan handler into the container factory, and
+the readiness endpoint now receives its dependency via
+`Inject(HealthServiceProtocol)`.
+
+Naming follows the codebase convention where protocol
+classes carry an `XxxProtocol` suffix and concrete
+implementations use the bare name:
+`HealthServiceProtocol` (protocol), `HealthService`
+(concrete).
+
+- feat: add liveness and readiness health probes
+
+The existing `GET /health` returns a static response
+without checking dependencies. Kubernetes needs
+separate probes: a cheap liveness signal and a
+readiness gate that verifies Postgres before the pod
+accepts traffic.
+
+Probes implement a `HealthProbe` protocol and live
+in `adapters/health/`. The orchestrator in
+`core/health` runs them concurrently with timeouts,
+distinguishing critical (Postgres, gates 503) from
+informational (Redis, Temporal, reported only). A
+dedicated single-slot DB engine isolates the
+readiness check from the application pool.
+
+The Temporal probe accepts a callable that resolves
+the client lazily, since `TemporalClient._client`
+is `None` until the first `get_client()` call. The
+endpoint returns the Pydantic model directly via
+the `response: Response` pattern, keeping
+`response_model` serialization intact.
+
+Unit tests cover the orchestrator (critical vs
+informational gating, timeouts, shutdown, error
+sanitization) and all three adapters.
+
+- Merge pull request #1440 from airweave-ai/refactor/analytics-event-subscriber
+
+refactor: implement analytics adapter for posthog
+
+- Merge pull request #1438 from airweave-ai/fix/deprecation-warnings
+
+chore: address ~60 deprecation warnings across backend
+
+- refactor: remove lazy imports, hasattr, and TYPE_CHECKING from analytics adapter
+
+- chore: please ruff
+
+- fix: use 32+ byte JWT test secrets
+
+HS256 requires keys of at least 32 bytes. The short test
+strings triggered `InsecureKeyLengthWarning` from PyJWT.
+
+- fix: use MagicMock for synchronous mock objects
+
+`AsyncMock` wraps every attribute access in a coroutine, so
+calling a synchronous method like `db.add()` or pipeline
+`zadd()` on an `AsyncMock` emits a &#34;coroutine was never
+awaited&#34; warning. Use `MagicMock` as the base and only assign
+`AsyncMock` to the methods that are actually awaited.
+
+- fix: rename TestRunner to avoid pytest collection
+
+Pytest tries to collect any class whose name starts with
+`Test`. Rename `TestRunner` to `E2ERunner` so pytest does
+not emit a `PytestCollectionWarning` for it.
+
+- fix: rename schema fields that shadow BaseModel
+
+Pydantic `BaseModel` has a `.schema()` class method; fields
+named `schema` shadow it and emit a `UserWarning`. Rename the
+Python attribute to `schema_name` (Vespa types) or `db_schema`
+(database auth configs) and add `Field(alias=&#34;schema&#34;)` with
+`populate_by_name=True` so the JSON interface stays identical.
+
+- fix: access model_fields on class, not instance
+
+`self.model_fields` triggers a Pydantic deprecation warning
+because `model_fields` is a class-level mapping, not an
+instance attribute. Use `self.__class__.model_fields` to
+access it without the warning.
+
+- fix: replace max_items with max_length
+
+Pydantic V2 renamed the list-length constraint from
+`max_items` to `max_length`. The old name still works
+but emits a deprecation warning.
+
+- refactor: replace @validator with @field_validator
+
+Migrate eight `@validator` decorators in `config.py` to the
+V2 `@field_validator` API. Each `pre=True` becomes
+`mode=&#34;before&#34;`, and `@classmethod` is added where missing.
+
+Pydantic V2 still honours the old decorator but emits
+deprecation warnings that will become errors in V3.
+
+- refactor: replace class Config with model_config
+
+Migrate all Pydantic V1-style `class Config:` inner classes
+to V2-style `model_config = ConfigDict(...)` assignments.
+
+The old pattern still works in Pydantic V2 but emits
+`PydanticDeprecatedSince20` warnings and will break in V3.
+This covers ~45 classes across 20+ schema files, plus the
+API context, search state, Vespa types, auth schemas, and
+the admin endpoint.
+
+- Merge pull request #1428 from airweave-ai/refactor/sc1_response_builder
+
+refactor(source_connections): extract ResponseBuilder with typed stats and domain repos
+
+- refactor(response_builder): hoist imports, extract DB query to repo, remove hasattr via explicit overrides
+
+- add code blue deprecation notes
+
+- source connections: type response builder
+
+- fix(source_connections): pass federated_search through in build_list_item
+
+- refactor(source_connections): extract ResponseBuilder with typed stats and domain repos
+
+- Merge pull request #1432 from airweave-ai/chore/add-airweave-logo
+
+chore: add colored icon with backplate
+
+- add colored icon with backplate
+
+- Merge pull request #1429 from airweave-ai/docs/webhook-adjustments
+
+feat(docs): webhook adjustments
+
+- Add video demo for webhook setup and update sample application description
+
+- Update webhook documentation: modify event payload structure and enhance filter types
+
+- Enhance webhook documentation: add video demo and improve text clarity
+
+- Merge pull request #1426 from airweave-ai/feat/source-lifecycle-module
+
+[code blue] source lifecycle module
+
+- source lifecycle: type credentials
+
+- refactor: move protocols, repositories, and fakes from core/adapters into owning domain directories
+
+- remove fileservice from lifecycle module
+
+- explicitly implement protocol
+
+- fix(sources): consistent return type from _handle_auth_config_credentials
+
+Refresh-token path was returning a raw dict while no-refresh path
+returned a Pydantic model. Re-validate through model_validate so
+both paths return the same type. Pre-existing issue, fixed in both
+lifecycle.py and source_factory_utils.py.
+
+- code blue deprecation warninga
+
+- refactor(sources): replace untyped dicts with SourceConnectionData/AuthConfig dataclasses and split adapter fakes
+
+- [code blue] source lifecycle module
+
+- Merge pull request #1427 from airweave-ai/fix-vespa-query-builder-test
+
+Fix `vespa.QueryBuilder` test failure related to `presentation.summary` parameter
+
+- Fix `vespa.QueryBuilder` test failure related to `presentation.summary` parameter
+
+ref: https://github.com/airweave-ai/airweave/blob/f205df418109ad5980b8cae19f07bed3a6171393/backend/airweave/platform/destinations/vespa/query_builder.py#L158-L159
+
+(from the https://github.com/airweave-ai/airweave/pull/1372)
+
+Since we don&#39;t explicitly set `presentation.summary` YQL query parameter anymore,
+it makes sense to test this behaviour instead.
+
+- Merge pull request #1425 from airweave-ai/fix/agentic-search-embedding-model
+
+fix(embedding-model): wrong model choice
+
+- fix(embedding-model): wrong model choice
+
+- feat: webhook verification, health status and other improvements (#1416)
+
+* feat(demo): airweave webhook receiver demo app
+
+* feat(webhooks): add endpoint verification and health status tracking
+
+- Implemented `verify_endpoint` method in `WebhookAdmin` and `SvixAdapter` for testing endpoint reachability.
+- Enhanced webhook subscription model to include health status based on recent delivery attempts.
+- Updated frontend components to display health status of webhook subscriptions.
+- Added error handling for endpoint verification during subscription creation.
+
+* fix(webhook-demo): escape HTML in JSON match highlights
+
+* refactor(webhook-demo): improve signature verification logging
+
+- Updated logging in the `verify_signature` function to provide more meaningful output.
+- Replaced detailed signature and secret prints with counts and lengths for better security and clarity.
+
+* feat(webhooks): enhance event type handling and message summary
+
+- Updated `EventTypeBadge` to include new event types: `created`, `updated`, and `deleted`.
+- Improved `getMessageSummary` function to handle source connection and collection events more effectively.
+- Expanded `EVENT_TYPES_CONFIG` to categorize new event types for better organization and clarity.
+
+* feat(webhooks): add configurable webhook endpoint verification
+
+- Introduced `WEBHOOK_VERIFY_ENDPOINTS` setting to control endpoint verification during subscription creation.
+- Updated webhook subscription logic to conditionally verify endpoints based on the new setting.
+- Modified testing environment to disable webhook verification for easier testing with fake URLs.
+
+* feat(tests): work on delivery verification
+
+* feat(webhooks): implement e2e webhook delivery tests
+
+* feat(webhooks): misc improvements and test suite
+
+* fix(webhooks): remove unused jwt import from e2e tests
+
+Fixes ModuleNotFoundError in CI — jwt was imported but never used.
+
+---------
+
+Co-authored-by: Rauf Akdemir &lt;rauf@neena.io&gt;
+
+- fix(sources): replace KeyError with typed SourceNotFoundError and add exception base classes (#1420)
+
+- Feat: Agentic search (#1372)
+
+* feat(agentic-search): Create structure of planner, builder, judge and synthesizer with agent that ties it together.
+
+* feat(agentic-search): implement endpoint, builder, openai client, planner
+
+* feat(agentic-search): streaming endpoint that shows reasoning. Judge LLM that determines if we should continue searching. Snippet of where the agent found the result. Search history creation.
+
+* feat: add spotlight search module with Pydantic schemas
+
+Add new spotlight search module with comprehensive schema definitions
+for agentic search functionality including plans, state management,
+filters, evaluations, and search results.
+
+* feat(spotlight): add database interface and refine schemas
+
+- Add SpotlightDatabaseInterface protocol with methods for:
+  - get_collection_by_readable_id
+  - get_source_connections_in_collection
+  - get_source_by_short_name
+  - get_entity_definitions_of_source
+  - get_entity_type_count_of_source_connection
+- Add tokenizer external module placeholder for context window management
+- Update collection_metadata schema with collection_id fields
+- Fix state schema: rename results to search_results, make history optional
+- Fix response schema imports to use relative imports
+- Improve agentic_search documentation on textual representation
+
+* feat(agentic-search): agent notes
+
+* feat(agentic-search): endpoint and services container that initialize external tools using config. Also add builders
+
+* feat(agentic-search): implement psql database following interface, implement collection metadata builder
+
+* feat(agentic-search): typo
+
+* feat(agentic-search): need internal definition of collection, sc and source so that the database can return that format
+
+* feat(agentic-search): state builder
+
+* feat(spotlight): add LLM infrastructure with registry, interfaces, and config
+
+- Add model registry with LLMProvider, ModelName, TokenizerEncoding enums
+- Add ModelSpec dataclass with context window, rate limits, tokenizer encoding
+- Add SpotlightTokenizerInterface protocol (count_tokens + encoding)
+- Add SpotlightLLMInterface protocol (model_spec + structured_output)
+- Update config with LLM_PROVIDER, LLM_MODEL, TOKENIZER_IMPL settings
+- Update services to wire tokenizer and LLM from config
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* refactor(spotlight): split registry per external tool and simplify config
+
+- Move tokenizer specs to external/tokenizer/registry.py
+- Keep model specs in external/llm/registry.py (imports from tokenizer)
+- Remove TokenizerImpl from config (derived from model automatically)
+- Add SUPPORTED_ENCODINGS mapping with validation
+- Each external tool now owns its domain
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(spotlight): implement Cerebras LLM provider with rate limiting
+
+- Add CerebrasLLM implementation with structured output support
+- Add LLMRateLimiter with sliding window for RPM/TPM limits
+- Add ReasoningConfig to ModelSpec for model-specific reasoning params
+- Add api_model_name to ModelSpec for API calls
+- Fix filename typo: cerabras.py -&gt; cerebras.py
+- Pass tokenizer to LLM for accurate token counting
+- Services now wires tokenizer -&gt; LLM dependency
+
+Features:
+- Exponential backoff retry on transient errors
+- Schema normalization for Cerebras strict mode compatibility
+- TCP warming for reduced TTFT on first request
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(spotlight): implement TikToken tokenizer for accurate token counting
+
+Implements the SpotlightTokenizerInterface using OpenAI&#39;s tiktoken library
+for fast, local BPE tokenization. This enables accurate token counting for
+rate limiting in the Cerebras LLM provider.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(spotlight): implement planner with token budget management
+
+- Add SpotlightPlanner that builds prompts from static context, collection
+  metadata, user query, and history with automatic token budget management
+- Add to_md() methods to plan, evaluation, and search result summary schemas
+  for composable markdown rendering (history composes these)
+- Add field descriptions to collection metadata (extracted from entity schemas)
+- Add initialization logging to SpotlightServices showing provider, model,
+  tokenizer, context window, and max output tokens
+- Update planner task context with concrete token guidance for result limits
+- Populate airweave_overview.md and planner_task.md context files
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(spotlight): implement dense and sparse embedders with consistent registry pattern
+
+- Add OpenAI dense embedder with Matryoshka dimension support
+- Add FastEmbed sparse embedder (Qdrant/bm25) for keyword search
+- Add SpotlightEmbedder orchestrator in core to coordinate embedding calls
+- Implement model registry pattern for all external tools (LLM, tokenizer, dense/sparse embedders)
+- Move all model/encoding enums to config for explicit user choice
+- Add validation: tokenizer must match LLM requirements, vector_size must fit model
+- Fetch vector_size from database at startup for early embedder configuration
+- Rename ModelSpec to LLMModelSpec, tokenizer fields to required_tokenizer_*
+- Share rate limiter across requests via module-level singleton
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(spotlight): add Vespa vector database interface and filter schema
+
+- Add SpotlightVectorDBInterface protocol with compile_query and execute_query
+- Implement VespaVectorDB client with query compilation (YQL generation)
+- Add SpotlightFilterableField enum with schema-enforced filterable fields
+- Update filter schema to use dot notation for nested fields
+- Rename Vespa ranking profiles to match retrieval strategy values
+- Update planner docs to clarify filterable vs searchable fields
+- Add breadcrumb struct fields to filterable fields list
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(spotlight): implement Vespa query execution and result conversion
+
+- Implement execute_query() method with result parsing and error handling
+- Add _convert_hits_to_results() for Vespa hit to SpotlightSearchResult mapping
+- Fix filter_translator to use &#39;contains&#39; with single quotes for Vespa string matching
+- Add to_md() methods across schemas for markdown rendering in agent history
+- Use Vespa default summary (includes all fields from child schemas like url)
+- Remove unused custom &#39;full&#39; document-summary from base_entity.sd
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(spotlight): implement evaluator with budget-managed results and history
+
+Add SpotlightEvaluator to assess search results and decide whether to
+continue searching. Includes budget management for both search results
+and history in evaluator prompts, with equal budget split.
+
+Key changes:
+- Add SpotlightEvaluator with token budget management
+- Add SpotlightSearchResults container with to_md_with_budget
+- Add relevance_score to SpotlightSearchResult
+- Rename SpotlightIteration to SpotlightHistoryIteration
+- Centralize history budget logic in SpotlightHistory class
+- Update agent loop with history management
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(spotlight): small prompt updates
+
+* feat(spotlight): small prompt update 2
+
+* feat(spotlight): implement composer for final answer generation
+
+Add SpotlightComposer that synthesizes search results into a clear,
+well-cited answer. The composer uses the full search context (plan,
+query, evaluation, history) to generate answers with simple entity_id
+citations.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(spotlight): add SpotlightCompiledQuery schema to exclude embeddings from logs
+
+Introduces a DB-agnostic compiled query schema that separates the raw
+executable query (with embeddings) from a display version (without embeddings).
+This prevents token explosion in prompts and history caused by large embedding
+vectors.
+
+- Add SpotlightCompiledQuery with vector_db, display, and private _raw attr
+- Update VectorDBInterface to use the new schema
+- Update VespaVectorDB to produce display version without input.query params
+- Update state, history, evaluator, and composer to use compiled_query.to_md()
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(spotlight): add user filter and mode support to search request
+
+Add deterministic user filters that are always applied alongside
+LLM-generated filters. The plan stays clean (LLM filters only) for
+history context, while a complete plan (combined filters) is built
+for query execution via SpotlightCompletePlanBuilder.
+
+- Add filter and mode fields to SpotlightRequest and SpotlightState
+- Add SpotlightCompletePlanBuilder for combining plan + user filters
+- Add format_filter_groups_md utility for readable filter rendering
+- Add SpotlightEvaluation.render_md classmethod (handles None case)
+- Rename SpotlightHistory.build_history_section to render_md
+- Update planner/evaluator/composer task prompts with user filter guidance
+- Handle direct mode in composer (no evaluation available)
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(spotlight): add streaming SSE endpoint with typed progress events
+
+Add a streaming search endpoint that emits real-time progress events
+via Redis PubSub as the agent plans, searches, and evaluates. Events
+give users transparency into the agent&#39;s reasoning process.
+
+- Add 5 typed event schemas (planning, searching, evaluating, done, error)
+- Add SpotlightEmitter protocol with Logging, PubSub, and NoOp implementations
+- Add POST /{id}/spotlight/search/stream endpoint with SSE
+- Add step-level timing instrumentation to agent (logged at end of run)
+- Update existing endpoint to pass LoggingEmitter to agent
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(spotlight): delete agentic search poc
+
+* feat(spotlight): prompt iteration
+
+* feat(spotlight): prompt update
+
+* feat(spotlight): inner monologue instead of reasoning
+
+* feat(spotlight): snapshot sources are now fully impersonating the original source, but that disables it from being re-synced
+
+* fix(spotlight): Cerebras strict mode compatibility and resilience
+
+- Add additionalProperties: false to all object nodes in JSON schema normalization
+- Set temperature=0.3 for reduced but not eliminated run-to-run variation
+- Retry empty responses (treat as transient TimeoutError instead of fatal RuntimeError)
+- Extract schema normalization into separate methods to reduce complexity
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(spotlight): compact result format and full result briefs
+
+- Remove source_fields JSON blob from evaluator/composer results (to_md)
+- Strip query params from long S3 URLs in result rendering
+- Move full rendering to to_full_md() for debugging
+- Remove artificial top_n=10 cap on result briefs — include all results
+- Add parent breadcrumb entity_id to result brief rendering
+- Add evaluator visibility warning when not all results were seen
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(spotlight): improve planner, evaluator, and composer prompts
+
+- Planner: semantic as default strategy, progressive filter hierarchy with zoom-in rules,
+  query variations with point-of-view diversity, breadcrumb filter guidance,
+  generous limits, consolidation pass instructions
+- Evaluator: directness as most important criterion, stagnation-based stopping (10+ iters),
+  answer_found field documentation
+- Composer: use findings from ALL iterations, consolidation pass awareness
+- Overview: chunking explanation for search context
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(spotlight): consolidation pass, error handling, and agent improvements
+
+- Add answer_found field to evaluator schema for clean consolidation trigger
+- Implement consolidation pass: when evaluator stops without answer, run one more
+  targeted search to surface best available results for the composer
+- Graceful search error handling: catch compile/execute errors, record in state,
+  surface to evaluator and planner via history
+- Add limit cap (le=200) to prevent LLM from generating absurd values
+- Add evaluator_results_shown and search_error to history iterations
+- Add is_consolidation flag to state, events, and planner prompt
+- Composer: skip evaluation requirement for consolidation, show consolidation notice
+- Remove duplicate logging from planner, evaluator, and composer
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(spotlight): schema and config updates for agentic search
+
+- Update spotlight schemas, config, and builder exports
+- Remove deprecated search_result_summary schema
+- Update Vespa schema and app configuration
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(spotlight): public api tests for endpoint and filters
+
+* feat(spotlight): up timeout for filters and handle cerebras errors
+
+* feat(agentic-search): renaming spotlight to agentic search
+
+* feat(agentic-search): don&#39;t query the deleted summary
+
+* feat(agentic-search): limit parameter for users, agent can decide to return less
+
+* feat(agentic-search): enable the user to select the llm used b t
+
+* feat(vespa): add fast-search attributes for name, breadcrumb name, and chunk_index
+
+Enables fast attribute access for fields used in agentic search filtering
+and matching, improving query performance.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(agentic-search): add feature flag gating and is_streaming parameter
+
+Gate agentic search endpoints behind AGENTIC_SEARCH feature flag and pass
+is_streaming to agent.run() so analytics can distinguish streaming requests.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(agentic-search): add PostHog analytics, tune log levels, rename source_fields
+
+- Add agentic_search_analytics module with per-iteration summaries,
+  context window metrics, and cumulative token tracking
+- Track cumulative prompt/completion tokens in CerebrasLLM
+- Tune verbose agent/planner/evaluator/composer logs from info to debug
+- Rename source_fields to raw_source_fields in agentic search schema
+  to distinguish from regular search and clarify these are raw source data
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* fix(tests): update auth method from direct to fast in E2E smoke tests
+
+Align test assertions with renamed auth method identifier.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(scripts): add agentic search streaming CLI tool
+
+Terminal visualizer for SSE events from the agentic search stream endpoint,
+useful for debugging and demoing the plan-search-evaluate loop.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* fix(agentic-search): emit error event to pubsub when streaming search fails
+
+Services.create() was outside the try/except in _run_search(), so errors
+like a missing API key were silently swallowed, leaving the SSE client
+hanging forever. Now all exceptions emit an AgenticSearchErrorEvent to
+pubsub so the client always receives an error response.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* feat(agentic-search): implement UI
+
+* feat: enable agentic_search feature flag in e2e test setup
+
+Add a session-scoped fixture that enables the agentic_search org
+feature flag via the admin API at test startup, so agentic search
+tests no longer get 403.
+
+* fix: revert stale auth method rename and remove unused eslint-disable
+
+Align test assertions with main: auth method is &#34;direct&#34;, not &#34;fast&#34;.
+Remove unused eslint-disable directive in FilterBuilderModal.
+
+* fix(tests): fail hard when filter test data is not searchable after retries
+
+Replace soft warnings with pytest.fail() so setup failures surface
+immediately instead of cascading as 0-result assertions across all
+filter tests. Use regular /search for agentic search filter setup
+verification to avoid LLM dependency during data readiness checks.
+
+* fix(tests): verify Stripe data is searchable before yielding fixture
+
+Add /search verification loop after sync completion in
+module_source_connection_stripe to handle Vespa indexing lag.
+Fail hard instead of silently proceeding with un-indexed data.
+
+* fix: correct timeout exemption path for agentic search
+
+The exempt path was &#39;/search/agentic&#39; but the actual route is
+&#39;/collections/{id}/agentic-search&#39;. The substring never matched,
+so agentic search was being killed by the 60s request timeout.
+
+* feat(agentic-search): refactor LLM fallback, clean up UI, add feature flag
+
+Backend:
+- Unify LLM registry and fallback chain: single MODEL_REGISTRY with all
+  providers, developer-configured LLM_FALLBACK_CHAIN in config.py
+- Remove user-facing model selection (request schema, endpoint, tests)
+- Explicit protocol implementation for BaseLLM and FallbackChainLLM
+- Add fallback analytics tracking (provider used, fallback rate, per-provider counts)
+- Fix Source.output_entity_definitions attribute mismatch and query-by-name
+- Fix entity_pipeline stale _short_name reference
+
+Frontend:
+- Rename search modes: &#34;Agentic Search&#34; (default) / &#34;Classic Search&#34;
+- Move mode toggle outside search box to prevent text overlap
+- Code snippets now show non-streaming POST endpoint
+- Lazy-load heavy deps (react-markdown, react-syntax-highlighter) in
+  EntityResultCard for faster Entities tab rendering
+- Simplify agentic search trace: show only reasoning + retrieval info
+- Gate Agentic Search UI behind AGENTIC_SEARCH feature flag
+- Install missing @radix-ui/react-popover dependency
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* fix(source): short name reference
+
+---------
+
+Co-authored-by: Daan Manneke &lt;daan@airweave.ai&gt;
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+Co-authored-by: Rauf Akdemir &lt;rauf@neena.io&gt;</div>
+</div>
+
+<a href="../project/airweave-ai_airweave.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
