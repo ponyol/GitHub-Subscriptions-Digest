@@ -1,0 +1,1139 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in master (36 commits) - milvus-io/milvus - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in master (36 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/milvus-io_milvus.html">milvus-io/milvus</a> /
+    Updates in master (36 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/milvus-io_milvus.html">milvus-io/milvus</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-02-28 02:57 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/milvus-io/milvus/commits/master" target="_blank">https://github.com/milvus-io/milvus/commits/master</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This update delivers significant performance improvements, including memory optimizations for data loading, faster JSON parsing, and enhanced Go search paths. It also introduces new capabilities like manual refresh for external collections, Storage V2 support for delta logs, and increased default vector field limits. Crucially, the release includes extensive new test coverage for nullable vector fields and `scipy.sparse` integration, alongside critical bug fixes for data consistency and memory leaks.
+
+---
+
+**Russian translation:**
+
+Это обновление обеспечивает значительные улучшения производительности, включая оптимизацию памяти при загрузке данных, ускоренный разбор JSON и улучшенные пути поиска Go. Оно также представляет новые возможности, такие как ручное обновление для внешних коллекций, поддержка Storage V2 для дельта-логов и увеличенные лимиты по умолчанию для векторных полей. Что особенно важно, релиз включает обширное новое тестовое покрытие для векторных полей с возможностью NULL-значений и интеграции `scipy.sparse`, наряду с критическими исправлениями ошибок для обеспечения согласованности данных и устранения утечек памяти.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- test: Add scipy.sparse insert tests and hybrid search coverage for add_field (#47885)
+
+## Summary
+
+- Add E2E test coverage for **scipy.sparse** sparse vector input (insert
++ search)
+- Add **hybrid search** step to existing add_vector_field test for issue
+#47873 coverage
+
+**Related issue**: #47884
+
+### Changes
+
+**test_milvus_client_insert.py** (+118 lines):
+- `test_milvus_client_insert_sparse_vector_scipy` [L1]: direct CSR
+format (`csr_matrix`, `csr_array`) insert + search
+- `test_milvus_client_insert_sparse_vector_scipy_to_csr` [L2]: non-CSR
+formats (`csc_matrix`, `coo_matrix`, `dok_matrix`, `lil_matrix`,
+`coo_array`) converted via `.tocsr()` then insert + search
+
+**test_add_field_feature.py** (+19 lines):
+- Added hybrid search step (original + new nullable vector fields) to
+existing `test_milvus_client_add_vector_field`
+- Regression coverage for issue #47873 (HybridSearch on newly added
+nullable vector fields after release+load)
+
+### Test Plan
+
+- [x] All 7 scipy.sparse format tests passed on standalone
+(10.104.17.152), ~5s each
+- [x] Hybrid search test passed on standalone (10.104.17.152) and
+distributed (10.104.21.212)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: yanliang567 &lt;82361606+yanliang567@users.noreply.github.com&gt;
+
+- test: Add null vector coverage to chaos tests (#47868)
+
+## Summary
+
+Add nullable vector field validation to the chaos test framework via
+three independent checkers, following the existing
+one-operation-per-checker pattern.
+
+**Related issue**: #47867
+
+### Changes (v2, addressing review feedback)
+
+**Removed** (per review):
+- Reverted all modifications to existing `SearchChecker`,
+`QueryChecker`, `AddFieldChecker`
+- Removed `TestNullVectorDataPersistence` from
+`test_data_persistence.py` — persistence verification is covered by
+checkers
+
+**New independent checkers (`chaos/checker.py`)**:
+
+| Checker | Op Enum | Responsibility | Frequency |
+|---|---|---|---|
+| `NullVectorSearchChecker` | `null_vector_search` | Search on nullable
+vector fields, NaN distance detection with accumulation threshold (3
+consecutive) | `WAIT_PER_OP / 10` |
+| `NullVectorQueryChecker` | `null_vector_query` | Query nullable vector
+fields, validate null/non-null ratio, fail on all-null (data corruption)
+| `WAIT_PER_OP / 10` |
+| `AddVectorFieldChecker` | `add_vector_field` | Add nullable
+FLOAT_VECTOR + HNSW index + insert + query verification, with vector
+field limit guard | `WAIT_PER_OP * 6` |
+
+**Review feedback addressed**:
+- Each checker has independent stats and frequency (no sampling bias)
+- NaN detection uses accumulation threshold (`NAN_THRESHOLD=3`) to avoid
+false positives from transient errors or zero-norm vectors
+- `AddVectorFieldChecker` checks vector field limit dynamically via
+`describe_collection` (no hardcoded `MAX_FIELD_NUM`)
+- Query results are properly validated (no `result = True` hardcode)
+
+**pytest.ini**: disable locust plugin (`-p no:locust`) to fix `--host`
+option conflict
+
+### Test Plan
+
+- [x] `checker.py` syntax verified
+- [x] New checkers follow existing patterns (TensorSearchChecker,
+JsonQueryChecker, GeoQueryChecker)
+- [x] No modifications to existing checkers
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: yanliang567 &lt;82361606+yanliang567@users.noreply.github.com&gt;
+
+- fix: eliminate memory accumulation in ManifestGroupTranslator::get_cells() (#47904)
+
+Related to #47858
+
+ManifestGroupTranslator::get_cells() previously called
+chunk_reader_-&gt;get_chunks() with ALL needed row group indices at once,
+loading every row group into memory simultaneously. This caused memory
+spikes proportional to the total size of all requested cells.
+
+Refactor LoadCellBatchAsync into a generic streaming loader that accepts
+a pluggable BatchReaderFactory, enabling both ManifestGroupTranslator
+(ChunkReader-based) and GroupChunkTranslator (file-based) to share the
+same channel-based streaming infrastructure.
+
+Key changes:
+- Add BatchReaderFactory / SequentialRowGroupReader abstractions to
+memory_planner.h, allowing LoadCellBatchAsync to work with any row-group
+data source
+- Add MakeFileReaderFactory() that encapsulates FileRowGroupReader
+creation, replacing the old file-path-based LoadCellBatchAsync overload
+- ManifestGroupTranslator now loads per-batch via
+chunk_reader_-&gt;get_chunks(rg_indices, 1) instead of one bulk
+get_chunks() for all cells, streaming results through channel
+- ManifestGroupTranslator::load_group_chunk() changed from RecordBatch
+to Table input to match the unified CellLoadResult format
+- GroupChunkTranslator updated to use MakeFileReaderFactory + generic
+LoadCellBatchAsync (no behavioral change)
+
+Peak memory during get_cells() drops from O(all_requested_cells) to
+O(single_cell).
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- enhance: replace fmt.Sprint(paramtable.GetNodeID()) with paramtable.GetStringNodeID() (#47789)
+
+issue: #47790
+
+
+Replace 131 occurrences of fmt.Sprint(paramtable.GetNodeID()) with the
+existing paramtable.GetStringNodeID() across 40 files. This avoids
+redundant fmt.Sprint allocations on every call since GetStringNodeID()
+uses the more efficient strconv.FormatInt. In the search hot path alone,
+this eliminates 3+ string allocations per segment per query.
+
+Signed-off-by: lyang24 &lt;lanqingy93@gmail.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix: memory leak in broadcasterScheduler.AddTask due to uncanceled MergeContext (#47911)
+
+issue: #47908
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- enhance: support different replica numbers on secondary CDC cluster (#47780)
+
+## Summary
+- Add `use_local_replica_config` flag to `AlterLoadConfigMessageHeader`
+so the secondary CDC cluster can use its own
+`ClusterLevelLoadReplicaNumber` / `ClusterLevelLoadResourceGroups`
+instead of blindly applying the primary&#39;s replica config
+- Secondary&#39;s `ReplicateService` sets the flag on every replicated
+`AlterLoadConfigMessage`; `LoadCollectionJob` reads local config when
+flag is set
+- Use `generateReplicas` for idempotent replica generation, ensuring WAL
+replay does not create duplicate replicas
+- Default to 1 replica in `__default_resource_group` when local config
+is not explicitly set (instead of falling back to primary&#39;s config)
+
+## Test plan
+- [x] Unit test: replicated AlterLoadConfig gets
+`UseLocalReplicaConfig=true`
+- [x] Unit test: local config overrides primary config when set
+- [x] Unit test: defaults to 1 replica in `__default_resource_group`
+when local config not set
+- [x] Unit test: flag=false uses primary config directly
+- [x] Unit test: `getLocalReplicaConfig` first load, idempotent replay,
+not set, no RGs, alloc error
+
+issue: #47779
+
+---------
+
+Signed-off-by: bigsheeper &lt;yihao.dai@zilliz.com&gt;
+
+- fix: use per-command safe.directory for git in Makefile (#47916)
+
+## Summary
+- Fix `GetVersion` returning `unknown-YYYYMMDD-` instead of
+`master-YYYYMMDD-&lt;commit&gt;` when building inside containers (e.g. via
+`builder.sh`)
+- Replace `git config --global --add safe.directory &#39;*&#39;` with a
+per-command `-c safe.directory=&#39;*&#39;` approach that doesn&#39;t pollute
+`~/.gitconfig`
+- Remove stale `safe.directory` setup from `print-build-info` and
+`print-gpu-build-info` targets
+
+## Root Cause
+PR #47822 introduced `MILVUS_VERSION` using `:=` (immediate evaluation).
+The `safe.directory` config was set in `print-build-info` target (line
+253), but `MILVUS_VERSION` on line 250 is evaluated first during
+Makefile parsing. So all git commands (`GIT_BRANCH`, `GIT_COMMIT`) fail
+silently inside the builder container where `.git` is owned by a
+different user.
+
+## Fix
+Define `GIT := git -c safe.directory=&#39;*&#39;` and use `$(GIT)` for all git
+shell calls. This:
+1. Ensures `safe.directory` is effective for every git command at parse
+time
+2. Never modifies `~/.gitconfig` (no `--global --add` accumulation)
+3. Scopes the security bypass to this Makefile only, not all repos on
+the machine
+
+issue: #47822
+
+## Test plan
+- [ ] Build milvus inside builder container via `builder.sh`, verify
+`GetVersion` returns `master-YYYYMMDD-&lt;commit&gt;`
+- [ ] Verify `~/.gitconfig` is not modified after `make build-go`
+- [ ] Run `make print-build-info` and confirm correct output
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: yanliang567 &lt;82361606+yanliang567@users.noreply.github.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix: Use physical time for entity-level TTL filtering (#47518)
+
+## Problem
+In strong consistency mode, when query_timestamp is significantly older
+than current physical time (e.g., replaying old data with
+guaranteeTimestamp from the past), entity-level TTL filtering
+incorrectly used query_timestamp instead of current physical time. This
+caused:
+- Valid data to be incorrectly filtered as &#34;expired&#34;
+- Zero search/query results even when data should be visible
+
+## Root Cause
+The TTL filter expression (`ttl_field &gt; physical_us OR ttl_field IS
+NULL`) was using physical time derived from query_timestamp, which could
+be hours or days old in strong consistency scenarios. Entity TTL should
+always use current physical time, not query timestamp.
+
+## Solution
+1. **C++ Core Changes**:
+- Add `physical_time_us_` parameter to QueryContext (defaults to
+query_timestamp)
+   - Pass physical_time_us through Search/Retrieve API chain:
+* QueryContext constructor → Search/Retrieve C API → segment
+implementation
+- CreateTTLFieldFilterExpression now uses
+QueryContext::get_physical_time_us()
+   - Add ExecuteQueryExpr overload with physical_time_us for testing
+
+2. **Go Layer Changes**:
+   - Extract physical time from guaranteeTimestamp in query tasks:
+     * query_task.go: Search operations
+     * query_stream_task.go: Streaming search operations
+- Use tsoutil.ParseHybridTs() to convert TSO timestamp to physical time
+- Pass physical_time_us to C++ Search/Retrieve calls via
+plan.go/segment.go
+
+3. **Testing**:
+   - EntityTTLTest.cpp: Core TTL filtering with physical_time_us
+- EntityTTLEdgeCaseTest.cpp: Edge cases (no TTL field, zero
+physical_time_us)
+   - Tests verify QueryContext stores/returns physical_time_us correctly
+- Tests validate TTL filtering uses physical_time_us, not
+query_timestamp
+
+## Behavior
+- **Before**: TTL filter used query_timestamp (old in strong
+consistency)
+- **After**: TTL filter uses current physical time (from
+guaranteeTimestamp)
+- **Backward compatible**: When physical_time_us=0, falls back to
+query_timestamp
+
+## Technical Details
+- TSO timestamp conversion: `tsoutil.ParseHybridTs(timestamp)` →
+physical_ms
+- Physical time in microseconds: `physical_us = physical_ms * 1000`
+- TTL expression unchanged: `ttl_field &gt; physical_us OR ttl_field IS
+NULL`
+
+Fixes #47413
+
+---------
+
+Signed-off-by: Cai Zhang &lt;cai.zhang@zilliz.com&gt;
+
+- enhance: replace rapidjson with simdjson-ondemand and abseil with std-lib in C++ source (#47853)
+
+Related to #46199
+
+## Summary
+- Replace direct usage of `rapidjson` with `simdjson` ondemand in
+`Json.h` `ExtractSubJson()` function
+- Replace `abseil` time library (`absl::Time`, `absl::CivilSecond`) with
+standard C `&lt;ctime&gt;` (`struct tm`, `gmtime_r`, `timegm`) in
+`TimestamptzArithCompareExpr.cpp`
+- Remove `nlohmann/json.hpp` include from `Json.h`, reducing
+preprocessor cost across 265 translation units
+- Conan packages for rapidjson/abseil remain in `conanfile.py` as
+transitive dependencies for folly, grpc, etc.
+
+## Performance impact
+
+| Change | Path type | Perf delta | Matters? |
+|--------|-----------|------------|----------|
+| `rapidjson` → `simdjson` ondemand (`ExtractSubJson`) | **Hot** —
+per-row, per-query for dynamic fields | **~2x faster** | **Yes —
+performance win** |
+| `abseil time` → `gmtime_r`/`timegm` (TimestamptzArithCompare) | Warm —
+per-row, but rare query pattern (calendar interval arithmetic) |
+~Neutral (&lt;5%) | No |
+
+### ExtractSubJson: rapidjson → simdjson ondemand
+
+`ExtractSubJson()` is called from `SegmentGrowingImpl::bulk_subscript`
+and `ChunkedSegmentSealedImpl::BulkRawJsonAt` — per-row during query
+result assembly for collections with dynamic fields.
+
+The old implementation parsed the full JSON with rapidjson, constructed
+a new Document with selected keys, and re-serialized via
+`Writer::Accept()`. The new implementation uses simdjson ondemand to
+iterate fields once, matching keys via `unescaped_key()` and extracting
+raw JSON text via `raw_json()` — no re-parsing, no re-serialization.
+
+Benchmark (C++, arm64, `-O2`):
+```
+Small JSON (41B, 3 keys → extract 2):
+  rapidjson:         659 ns/op
+  simdjson-ondemand: 323 ns/op  (2.0x faster)
+  nlohmann:         1616 ns/op  (2.5x slower — rejected alternative)
+
+Medium JSON (186B, nested objects):
+  rapidjson:        1559 ns/op
+  simdjson-ondemand: 486 ns/op  (3.2x faster)
+```
+
+### abseil → std::tm detail
+
+Both `gmtime_r`/`timegm` and abseil&#39;s `ToCivilSecond`/`FromCivil`
+perform the same epoch↔calendar decomposition. `gmtime_r` is a single
+call into optimized glibc. Abseil adds timezone object dispatch overhead
+even for UTC. The difference is &lt;5% and only applies to the uncommon
+`timestamptz + INTERVAL &#39;N month/year&#39;` query pattern.
+
+## Test plan
+- [x] CI build passes
+- [x] CI code-check passes
+- [ ] Unit tests pass
+- [ ] Integration tests pass
+- [ ] E2E tests pass
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: Li Liu &lt;li.liu@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix: update IndexMeta in PutOrRef for existing collections (#47869)
+
+issue: #47873 
+relate: #45993 
+
+#47829 changed Reopen to succeed instead of failing fast, which makes
+PutOrRef more likely to find existing collections whose IndexMeta was
+never updated, causing &#34;field is not loaded&#34; errors on new vector
+fields.
+
+Add CCollection.UpdateIndexMeta() and call it in PutOrRef to keep
+IndexMeta in sync with schema updates.
+
+---------
+
+Signed-off-by: marcelo-cjl &lt;marcelo.chen@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix: avoid current working directory in library search path (#47818)
+
+On Linux, setenv.sh accidentally sets LD_LIBRARY_PATH and RPATH to look
+up shared objects in the current working directory first if nothing
+explicitly set an LD_LIBRARY_PATH already, because an empty path on
+either variable is interpreted as the current working directory. This
+results in races during parallel builds (e.g. tools invoked by Conan
+finding corrupt shared libraries, because said libraries are currently
+compiled and written out by another process in the build). Since the
+LD_LIBRARY_PATH is also used as the RPATH, the compiled Milvus binary
+also looks up shared objects in the current working directory,
+potentially picking up unintended versions of a shared object.
+
+Fix this and similar &#34;empty path&#34; problems for other environment
+variables on Linux, macOS, and Windows by placing the path separator
+only if there are pre-existing paths.
+
+issue: #47828
+
+Signed-off-by: Markus Boehme &lt;markus.boehme@chainguard.dev&gt;
+
+- enhance: remove unused Python test dependencies (#47854)
+
+Related to #46199
+
+## Summary
+- Remove unused Python test dependencies: `ndg-httpsclient`,
+`pyopenssl`, `pyasn1`, `pytest-parallel`, `timeout-decorator`
+- Restore `pytest-assume==2.4.3` and `Unidecode==1.3.8` (actively used
+in test code)
+- Clean up dead `timeout_decorator` import and commented-out code in
+`collection_wrapper.py`
+
+## Performance impact
+
+No production performance impact. All changes are in
+`tests/python_client/` — test dependencies and test utility code only.
+Milvus has no Python in its runtime (Go + C++ only).
+
+| Change | Scope | Impact |
+|--------|-------|--------|
+| Remove 5 unused pip packages | Test `requirements.txt` | Faster test
+env setup (~5 fewer packages to install) |
+| Remove dead `timeout_decorator` import + commented-out code |
+`collection_wrapper.py` | Cleaner test code, no behavior change |
+
+## Test plan
+- [ ] CI E2E tests pass (Python test suite runs successfully with
+updated dependencies)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: Li Liu &lt;li.liu@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- enhance: remove unused Go dependencies (ansi, fastjson, grpc/examples, sizedwaitgroup) (#47852)
+
+Related to #46199
+
+## Summary
+
+Remove 5 unused or misused Go dependencies to reduce module bloat and
+consolidate overlapping libraries:
+
+- **`mgutz/ansi`** → replaced with inline ANSI escape codes (only used
+for 3 color constants in migration console)
+- **`valyala/fastjson`** → replaced with `tidwall/gjson` (only 1 file
+used fastjson; gjson is already used in 22+ files)
+- **`google.golang.org/grpc/examples`** → replaced with existing
+`rootcoordpb` (test file pulled in entire grpc examples repo for a mock
+server)
+- **`remeh/sizedwaitgroup`** → replaced with `chan` semaphore +
+`sync.WaitGroup` (only 2 files, trivial pattern)
+- **`pkg/errors`** → replaced with `cockroachdb/errors` (the project
+standard; `pkg/errors` was used in 1 file)
+
+## Behavior change: DeleteLog.Parse() fail-fast on missing fields
+
+The `fastjson` → `gjson` migration adds explicit `Exists()` validation
+for `ts`, `pk`, and `pkType` fields in the JSON parsing branch.
+Previously, both fastjson and gjson would silently return zero values
+for missing fields, causing `dl.Pk` to remain nil and panicking
+downstream. The new code fails fast with a descriptive error at parse
+time. This is a defensive improvement (the original code had identical
+silent-failure behavior).
+
+## Performance impact
+
+| Change | Path type | Perf delta | Matters? |
+|--------|-----------|------------|----------|
+| `pkg/errors` → `cockroachdb/errors` | Cold (offline CLI tool
+`config-docs-generator`) | Negligible | No |
+| `mgutz/ansi` → inline ANSI codes | Cold (offline CLI tool
+`migration/console`) | Marginally faster (eliminates map lookup) | No |
+| `fastjson` → `gjson` (`DeleteLog.Parse`) | Warm — old-format deltalog
+deserialization only | **~2.5x slower** per JSON parse (143ns→361ns) |
+**No** — see below |
+| `grpc/examples` → `rootcoordpb` | Test only (`client_test.go`) | None
+| No |
+| `sizedwaitgroup` → chan+WaitGroup | Test only (`wal_test.go`,
+`test_framework.go`) | None | No |
+
+### fastjson → gjson regression detail
+
+`DeleteLog.Parse()` is called per-row during deltalog deserialization,
+but **only for the legacy single-field format**. The new multi-field
+parquet format (`newDeltalogMultiFieldReader`) reads pk/ts as separate
+Arrow columns and bypasses `Parse()` entirely. Legacy deltalogs are
+rewritten to parquet format during compaction, so this is a dying code
+path. Additionally, deltalog loading is I/O-bound — the JSON parse cost
+(~361ns/row) is negligible compared to disk read and Arrow
+deserialization overhead.
+
+Benchmark (Go 1.24, arm64):
+```
+BenchmarkFastjsonSmall-4       8,315,624    143.1 ns/op    0 B/op   0 allocs/op
+BenchmarkGjsonOptimized-4      3,321,613    361.4 ns/op   96 B/op   1 allocs/op
+```
+
+## Test plan
+
+- [x] CI build passes
+- [x] CI code-check passes
+- [ ] CI ut-go passes
+- [ ] CI e2e passes
+- [x] Boundary test cases added (bare number, missing pkType/ts/pk)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: Li Liu &lt;li.liu@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- enhance: auto warmup for the big tenant collection (#47630)
+
+issue: #47371
+
+---------
+
+Signed-off-by: chasingegg &lt;chao.gao@zilliz.com&gt;
+
+- fix: correct vector/scalar index path format in copy segment utils (#47832)
+
+## Summary
+- Fix `generateTargetIndexPath` vector/scalar index offsets — the
+function assumed path format `index_files/{collID}/{partID}/{segID}/...`
+but actual format from `BuildSegmentIndexFilePaths` is
+`index_files/{buildID}/{indexVersion}/{partID}/{segID}/{fileKey}` (no
+collectionID)
+- Fix `BinlogTypeBM25` constant from `&#34;bm25_log&#34;` to `&#34;bm25_stats&#34;` to
+match `common.SegmentBm25LogPath`
+- Replace hardcoded log type strings with defined constants, use
+`strings.Join` instead of `path.Join`
+- Add 15 new test functions covering error paths, edge cases, and all
+index type variations
+
+issue: #47658
+
+## Test plan
+- [x] `go vet` passes
+- [ ] Unit tests pass (`go test -tags dynamic,test`)
+- [ ] CI green
+
+---------
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- doc: add -gcflags=&#34;all=-N -l&#34; to test instructions in CLAUDE.md (#47875)
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- enhance: make GetVersion return docker-image-tag style version string (#47822)
+
+## Summary
+
+- Make `GetVersion` API return version strings consistent with Docker
+image tags, replacing the hardcoded semver
+- Assemble `MilvusVersion` in Makefile via `git describe --exact-match
+--tags` (release) or `branch-date-commit` (dev), inject via ldflags
+- Both `detail=False` (`GetVersion` RPC) and `detail=True` (`Connect`
+RPC `server_info.build_tags`) return the new format
+
+| Scenario | Before | After |
+|----------|--------|-------|
+| Release (tag v2.6.11) | `2.6.11` | `2.6.11` |
+| Dev (master branch) | `2.6.11` | `master-20260224-2d14975d18` |
+| Feature branch | `2.6.11` | `feature-xxx-20260224-2d14975d18` |
+
+Banner still displays semver via `common.Version.String()` — unchanged.
+
+issue: #47823
+
+## Test plan
+
+- [x] Makefile dry-run verified: `MilvusVersion` correctly injected in
+all 4 ldflags targets
+- [x] Tag scenario verified: `v2.6.11` → `2.6.11` (v prefix stripped)
+- [x] Dev scenario verified:
+`feature/getversion-docker-tag-format-20260224-2d14975d18`
+- [x] Go syntax verified: `gofmt` and `go vet` pass
+- [ ] Full `make build-go` (requires C++ env)
+- [ ] E2E: `client.get_server_version()` and
+`client.get_server_version(detail=True)`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: yanliang567 &lt;82361606+yanliang567@users.noreply.github.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- enhance: increase default maxVectorFieldNum from 4 to 10 (#47866)
+
+## Summary
+- Increase the default `maxVectorFieldNum` from **4** to **10** to
+accommodate the growing variety of vector types (dense, sparse,
+function-based) supported by Milvus
+- Update related test constants and hardcoded values in both Go and
+Python test suites
+
+## Changes
+- `configs/milvus.yaml`: default config value 4 → 10
+- `pkg/util/paramtable/component_param.go`: Go param default &#34;4&#34; → &#34;10&#34;
+- `tests/go_client/common/consts.go`: Go test constant 4 → 10
+- `tests/python_client/common/common_type.py`: Python test constant 4 →
+10
+- `tests/python_client/milvus_client/test_milvus_client_collection.py`:
+replace hardcoded &#34;4&#34; in error message with constant reference
+
+Closes #47402
+
+## Test plan
+- [x] Verify collection creation with up to 10 vector fields succeeds
+- [x] Verify collection creation with 11+ vector fields fails with
+proper error message
+- [x] Run existing Go integration tests (`tests/go_client`)
+- [x] Run existing Python client tests (`tests/python_client`)
+
+Signed-off-by: zhuwenxing &lt;wenxing.zhu@zilliz.com&gt;
+
+- feat: add Storage V2 support to delta logs (#45279)
+
+See: #39173
+
+feat: add manifest-based deltalog storage
+    
+This change integrates deltalog storage into the segment manifest for
+V2/V3
+storage format, replacing the separate FieldBinlog-based approach.
+    
+Key changes:
+    
+**New Infrastructure:**
+- Add `transaction.go` with FFI wrapper for loon deltalog transaction
+APIs (loon_transaction_begin, loon_transaction_add_delta_log,
+loon_transaction_commit)
+- Add `AddDeltaLogsToManifest()` to append deltalogs to existing
+manifests
+    
+**Compaction Layer:**
+- L0 compactor now detects V1/V2 format from segment&#39;s manifest field
+- L0 compaction results update manifest path instead of FieldBinlog for
+V2
+- Added `ComposeDeleteFromManifest()` for reading deltalogs from
+manifests
+    
+**Writer Layer:**
+- `BulkPackWriterV3.writeDelta()` writes deltalogs via manifest
+transaction
+- Simplified `BulkPackWriter.writeDelta()` to use
+`storage.BuildDeleteRecord()`
+- Removed unused `writeDeltaInternal` helper function
+    
+**Reader Layer:**
+- `NewDeltalogReader()` supports both V1 (FieldBinlog) and V2 (packed)
+formats
+- `NewDeltalogReaderFromManifest()` reads deltalogs from segment
+manifest
+- Import binlog reader uses V1/V2 fallback for reading deltalogs
+
+Signed-off-by: Ted Xu &lt;ted.xu@zilliz.com&gt;
+
+- enhance: refactor WithClusterLevelBroadcast to use external channel list and add FlushAll integration test (#47656)
+
+issue: #47647
+
+Refactor the cluster-level broadcast mechanism to decouple the message
+package from the channel registration lifecycle:
+
+- Replace internal provider pattern with opaque ClusterChannels type
+passed externally to WithClusterLevelBroadcast()
+- Add channel package singleton (syncutil.Future) exposing
+GetClusterChannels() and GetPChannelNames() blocking accessors
+- Add PChannel() interface to MutableMessage/ImmutableMessage for
+deriving physical channel from virtual channel
+- Validate non-control-channel entries are physical channels using
+funcutil.IsPhysicalChannel and use funcutil.IsOnPhysicalChannel for
+control channel matching
+- Move control channel substitution logic into WithClusterLevelBroadcast
+to simplify callers (datacoord, coordinator, assignment service)
+- Add lock interceptor unit tests and cluster broadcast test coverage
+- Add integration test for FlushAll with streaming node restart to
+verify data integrity across node lifecycle
+
+---------
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- feat: [ExternalTable Part3] Support manual refresh for external collections (#47492)
+
+design doc:
+https://github.com/milvus-io/milvus-design-docs/blob/main/design_docs/20260105-external_table.md
+
+issue: #45881
+
+This change introduces manual refresh capability for external
+collections, allowing users to trigger on-demand data synchronization
+from external sources. It replaces the legacy update mechanism with a
+more robust job-task hierarchy and persistent state management.
+
+Key changes:
+- Add RefreshExternalCollection, GetRefreshExternalCollectionProgress,
+  and ListRefreshExternalCollectionJobs APIs across Client, Proxy,
+  and DataCoord
+- Implement ExternalCollectionRefreshManager to manage refresh jobs
+  with a 1:N Job-Task hierarchy
+- Add ExternalCollectionRefreshMeta for persistent storage of jobs and
+  tasks in the metastore
+- Add ExternalCollectionRefreshChecker for task state management and
+  worker assignment
+- Implement ExternalCollectionRefreshInspector for periodic job
+  cleanup
+- Use WAL Broadcast mechanism for distributed consistency and
+  idempotency
+- Replace legacy external_collection_inspector and update tasks with
+  the new refresh-based implementation
+- Add comprehensive unit tests for refresh job lifecycle and state
+  transitions
+  
+design doc:
+https://github.com/milvus-io/milvus-design-docs/blob/main/design_docs/20260105-external_table.md
+
+---------
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- doc: add .claude/ to .gitignore (#47871)
+
+## Summary
+- Add `.claude/` to `.gitignore` to prevent Claude Code runtime files
+(settings.local.json, memory/, projects/) from being accidentally
+committed
+
+Signed-off-by: Li Liu &lt;li.liu@zilliz.com&gt;
+
+- doc: add CLAUDE.md for AI-assisted development (#47862)
+
+## Summary
+- Add `CLAUDE.md` with project-specific instructions for Claude Code
+(architecture, testing, code conventions, commit guidelines)
+- Remove `claude.md` from `.gitignore` to allow tracking
+
+Signed-off-by: Li Liu &lt;li.liu@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- test: Add GROUP BY on nullable field tests to verify fix for issue #47350 (#47856)
+
+## Summary
+
+Add 4 test cases to `TestQueryAggregationSharedV2` covering GROUP BY on
+nullable fields, verifying the fix for #47350 (PR #47445).
+
+**Related issue**: #47350
+
+### Changes
+
+**Schema additions** to the shared collection:
+- `c10_nullable_varchar`: VARCHAR (nullable, 7 unique values + ~15%
+NULL)
+- `c11_nullable_int16`: INT16 (nullable, 5 unique values + ~15% NULL)
+
+**New tests:**
+
+| Test | What it verifies |
+|------|-----------------|
+| `test_group_by_nullable_varchar_field` | GROUP BY nullable VARCHAR
+returns actual values (not all NULL) + aggregation correctness |
+| `test_group_by_nullable_int16_field` | GROUP BY nullable INT16 returns
+actual values + aggregation correctness |
+| `test_multi_column_group_by_with_nullable_field` | Multi-column GROUP
+BY with one nullable column |
+| `test_search_group_by_nullable_field` | Search with GROUP BY on
+nullable field returns actual group values |
+
+### Test Plan
+
+- [x] All 4 new tests passed against Milvus 2.6.6
+- [x] All 28 existing tests still pass (0 regressions)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: yanliang567 &lt;82361606+yanliang567@users.noreply.github.com&gt;
+
+- fix: eliminate ArrowTable memory accumulation in GroupChunkTranslator::get_cells() (#47859)
+
+Related to #47858
+
+The previous implementation collected all row group ArrowTables into an
+unordered_map before processing any cell, causing peak memory usage
+proportional to the total decoded size of all requested row groups.
+Tables were held until get_cells() returned, so already-processed cells
+could not release their memory early.
+
+Two changes address this:
+
+1. Cell boundaries now align to file boundaries — each cell&#39;s row groups
+come entirely from one file, simplifying IO batch construction and
+removing cross-file reader coordination.
+
+2. Replace LoadWithStrategyAsync with LoadCellBatchAsync, which groups
+cells into IO-merged batches by (file, offset) continuity, reads row
+groups sequentially within each batch, and pushes each completed cell to
+a channel immediately. The consumer loop calls load_group_chunk() on
+each cell as it arrives, so only a bounded number of ArrowTables exist
+in memory at any time.
+
+Files changed:
+- GroupCTMeta.h: add cell_row_group_ranges_ vector,
+get_row_group_range() now does table lookup instead of arithmetic
+- GroupChunkTranslator.cpp: constructor builds cells per-file;
+get_cells() uses LoadCellBatchAsync + streaming pop-and-convert loop
+- ManifestGroupTranslator.cpp: populate cell_row_group_ranges_ for
+single data source
+- memory_planner.h/cpp: add CellSpec, CellLoadResult, CellReaderChannel
+types and LoadCellBatchAsync(); remove LoadWithStrategyAsync() (no
+remaining callers)
+- GroupChunkTranslatorTest.cpp: update expected cell count to per-file
+ceil; use get_row_group_range() for byte size validation
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- fix: handle NaN vs None comparison in output field value check for nullable fields (#47841)
+
+## Summary
+
+- Fix `output_field_value_check` in `param_check.py` to handle NaN vs
+None comparison for nullable fields
+- When nullable fields contain `None` values, `pandas.DataFrame`
+converts them to `NaN`. The check function then fails comparing `NaN`
+(from DataFrame) with `None` (from Milvus search results). This fix
+treats both as equivalent null values.
+- Remove resolved issue reference comments (`#47065`)
+
+**Related issue**: #47065
+
+### Changes
+
+**Modified Files:**
+- `tests/python_client/check/param_check.py`: Add NaN/None equivalence
+check before asserting output field values
+- `tests/python_client/milvus_client/test_add_field_feature.py`: Remove
+resolved `#47065` comment
+- `tests/python_client/milvus_client/test_milvus_client_collection.py`:
+Remove resolved `#47065` comment
+
+### Test Plan
+
+- [x]
+`test_search_by_pk_with_output_fields_and_consistency_level[Strong/Session/Bounded/Eventually]`
+- 4 previously failing tests now PASS
+- [x] All 98 search_by_pk tests: 93 passed + 4 fixed + 1 skipped
+- [x] 13 null/nullable vector related tests all PASS
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: yanliang567 &lt;82361606+yanliang567@users.noreply.github.com&gt;
+
+- test: fix snapshot checker row count mismatch in chaos test (#47826)
+
+## Summary
+- Split snapshot testing into two checkers to fix row count mismatch
+failures in chaos tests
+- **SnapshotChecker** (`Op.snapshot`): lightweight, shares collection
+with other checkers, only verifies snapshot create/restore operations
+succeed
+- **SnapshotRestoreChecker** (`Op.restore_snapshot`): uses independent
+collection with internal DML operations, verifies data correctness (row
+count + PK) after restore
+- Removed `_snapshot_lock` from `Checker` class and all DML checkers
+(Insert/Upsert/Delete) to eliminate coupling
+
+## Root Cause
+The `SnapshotRestoreChecker` shared a collection with other concurrent
+checkers and relied on a global `_snapshot_lock` to prevent data
+modifications during snapshot creation. However, some code paths (e.g.,
+`Checker.insert_data()` base method,
+`DeleteChecker.update_delete_expr()` refill logic) bypassed the lock,
+causing row count mismatches after restore. The delta was exactly 3000
+(`DELTA_PER_INS`).
+
+Failure log: `expected=158188, actual=155188` (delta=3000)
+
+ref:
+https://qa-jenkins.milvus.io/blue/organizations/jenkins/chaos-test-cron/detail/chaos-test-cron/23943/pipeline
+
+## Test plan
+- [ ] Run chaos-test-cron pipeline and verify `Op.snapshot` (shared
+collection) passes
+- [ ] Verify `Op.restore_snapshot` (independent collection) passes with
+no row count mismatch
+- [ ] Confirm other checkers (insert/upsert/delete) are not impacted by
+lock removal
+
+Signed-off-by: zhuwenxing &lt;wenxing.zhu@zilliz.com&gt;
+
+- test: Add comprehensive test coverage for nullable vector field functionality (#47847)
+
+## Summary
+
+Add 6 new test cases to `test_milvus_client_collection.py` covering gaps
+in nullable vector field test coverage, identified after verifying fixes
+for #47065 and #47197.
+
+**Related issue**: #47846
+
+### New Test Cases
+
+| Test | Level | Coverage |
+|------|-------|----------|
+| `test_milvus_client_search_all_null_vectors` | L1 | Search on 100%
+null vectors (sealed + growing) |
+| `test_milvus_client_search_iterator_null_vector` | L1 | Search
+iterator with all-null and mixed data |
+| `test_milvus_client_query_iterator_null_vector` | L1 | Query iterator
+returns all rows including null vectors |
+| `test_milvus_client_upsert_null_vector_transitions` | L1 |
+Non-null↔null transitions via upsert |
+| `test_milvus_client_multi_vector_output_null` | L1 | Multi-vector
+output with nullable field |
+| `test_milvus_client_compact_with_null_vector` | L2 | Data integrity
+after compaction with null vectors |
+
+### Test Plan
+
+- [x] All 6 tests passed against Milvus 2.6.6 (10.104.17.170)
+- [x] No regressions in existing null vector tests
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: yanliang567 &lt;82361606+yanliang567@users.noreply.github.com&gt;
+
+- test: add row-based nullable pointer field tests for Go SDK (#47830)
+
+Related to #47712
+
+Enable the skipped TestNullableRows now that the SDK supports pointer
+types (*string, *int32, etc.) for nullable columns in row-based inserts.
+Add NullableVarcharRow/NullableScalarRow structs and generators, plus
+tests covering all scalar types, all-null/all-valid edge cases, and
+row-based upsert with nullable pointers.
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- enhance: support replace field data and indexes in LoadDiff framework (#47829)
+
+Related to #46358
+
+When Reopen() triggers LoadDiff, fields or indexes may need replacement
+rather than first-time loading (e.g., field moves between column groups,
+index_id changes for an already-indexed field, or default-filled field
+gets actual data). Previously, safety assertions may cause reopen
+failure.
+
+This change:
+- Adds `is_replace` flag to load methods (load_field_data_common,
+LoadVecIndex, LoadScalarIndex, LoadIndex) to distinguish first-load from
+replacement, restoring safety assertions for the first-load path
+- Splits LoadDiff into separate to_load/to_replace lists (indexes,
+binlogs, column_groups) so callers explicitly indicate intent
+- Updates ComputeDiffIndexes/Binlogs/ColumnGroups to classify items into
+to_load vs to_replace based on current segment state
+- Handles default-filled fields: fields previously filled with default
+values are correctly classified as to_replace when actual data arrives
+- Adds unit tests for all replace scenarios
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix: Changed the mock functions to match the actual signature (#47836)
+
+Related to #47773
+
+Problem: MetaCache.RemoveDatabase has signature func(ctx context.Context
+, database string) (no return value), but the mockey mocks were using
+  func(...) error (returning an error).
+
+Fix: Changed the mock functions to match the actual signature:
+- Line 2527: func(ctx context.Context, dbName string) error { return nil
+} → func(ctx context.Context, dbName string) {}
+- Line 2556: func(m *MetaCache, ctx context.Context, dbName string)
+error { return nil } → func(m *MetaCache, ctx context.Context, dbName
+string) {}
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- enhance: Go search path optimizations for improved QPS (#47734)
+
+issue: #47827
+
+Key optimizations:
+- O(1) task lookup in scheduler via unissuedTasksIndex map 
+- Channel→indexed slice in searchSegments, eliminating channel
+alloc/sync
+- Single segment fast path skipping errgroup/goroutine overhead 
+- Single channel fast path in LB policy 
+- Shallow copy SearchRequest instead of proto.Clone deep copy 
+- Pipeline.String()→p.name in debug log to avoid eager evaluation 
+- TimeRecorder: fix double time.Now(), pre-compute logLabel, IsRecording
+guard
+- Batch 2D array allocation for resultOffsets in search reduce 
+- Pre-allocate Scores/Topks slices with nq*topk capacity 
+- Replace fmt.Sprint(nodeID) with paramtable.GetStringNodeID() on hot
+paths
+- Eliminate fmt.Sprintf in CtxElapse calls, use static strings
+
+Signed-off-by: Li Liu &lt;li.liu@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix: partial update default update static field when fields name are the same (#47725)
+
+## Summary
+- After schema evolution (adding a static column that previously existed
+as a dynamic field in `$meta`), partial update (`upsert` with
+`partial_update=True`) fails with: `dynamic field name cannot include
+the static field name`
+- Root cause: during partial update, `queryPreExecute()` fetches
+existing data where `$meta` still contains the old dynamic key. After
+merging, `verifyDynamicFieldData()` rejects it because the key now
+matches a static field name
+- Fix: after the merge step in `queryPreExecute()`, strip any keys from
+`$meta` JSON that conflict with current static field names
+
+## Test plan
+- [x] Added Go unit test
+`TestUpsertTask_queryPreExecute_CleanUpMetaAfterSchemaEvolution`
+- [x] Added Python e2e test
+`test_milvus_client_partial_update_after_schema_evolution_dynamic_to_static`
+
+issue: #47717
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: Eric Hou &lt;eric.hou@zilliz.com&gt;
+Co-authored-by: Eric Hou &lt;eric.hou@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- enhance: use correct tag string for autoindex formatter (#47820)
+
+Signed-off-by: chasingegg &lt;chao.gao@zilliz.com&gt;
+
+- enhance: implement BatchUpdateManifest RPC for batch segment manifestversion updates (#47773)
+
+Related to #46358
+
+Add a new BatchUpdateManifest API that allows updating manifest versions
+for multiple segments in a single request. The update is broadcast via
+the streaming WAL to ensure consistency across the cluster. This
+includes the proto definitions, proxy task, datacoord service handler,
+meta operator, streaming message type registration, and associated
+tests.
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- fix: Subsystem is missed in metrics FlushedSegmentFileNum (#45586)
+
+#45585
+
+Signed-off-by: Xiaowei Shi &lt;shallwe.shih@gmail.com&gt;</div>
+</div>
+
+<a href="../project/milvus-io_milvus.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
