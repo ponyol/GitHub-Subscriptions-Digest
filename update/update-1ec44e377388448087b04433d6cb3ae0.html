@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (14 commits) - exo-explore/exo - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (14 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/exo-explore_exo.html">exo-explore/exo</a> /
+    Updates in main (14 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/exo-explore_exo.html">exo-explore/exo</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-03-13 14:55 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/exo-explore/exo/commits/main" target="_blank">https://github.com/exo-explore/exo/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление включает значительные улучшения стабильности и новые функции, повышающие как надежность системы, так и удобство использования. Устранены критические проблемы, такие как зависание метрик Macmon, `ZeroDivisionError` в статистике MLX, повреждение UTF-8 в потоковых ответах и сбои тензорного параллелизма из-за несоответствия заголовков KV. Среди новых функций — непрерывная пакетизация, отображение частичного прогресса загрузки на приборной панели, мобильные боковые панели, автоматическая синхронизация ревизий MLX и отслеживание энергопотребления в бенчмарках.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- use structured concurrency in download coordinator (#1722)
+
+identical to #1721 but a little safer imo. 
+
+
+## manual testing
+ran a few downloads, cancelled non-master, cancelled master -- no errors
+reported.
+
+- Add step logo condition to FamilyLogos component (#1676)
+
+## Motivation
+
+&lt;!-- Why is this change needed? What problem does it solve? --&gt;
+&lt;!-- If it fixes an open issue, please link to the issue here --&gt;
+This was to fix a small issue which was that the StepFun logo was not
+included in the sidebar, and I also noticed it from an open issue:
+- #1662 
+
+## Changes
+
+&lt;!-- Describe what you changed in detail --&gt;
+I added a condition to the FamilyLogos where if the family is &#34;step&#34;
+then the logo will be included in the sidebar.
+
+## Test Plan
+Open exo, go choose a model, and scroll down the sidebar until you see
+the step logo, which should be there.
+
+### Manual Testing
+&lt;!-- Hardware: (e.g., MacBook Pro M1 Max 32GB, Mac Mini M2 16GB,
+connected via Thunderbolt 4) --&gt;
+&lt;!-- What you did: --&gt;
+&lt;!-- - --&gt;
+Check for the step logo in the sidebar.
+
+- fix: shield macmon cleanup from cancellation to prevent orphaned process (#1714)
+
+## Summary
+
+Fixes a bug where macmon metrics (GPU usage, temperature, power, RAM)
+freeze permanently in the dashboard while non-macmon metrics (disk
+usage) continue updating normally.
+
+**Root cause: asyncio subprocess pipe transport flow control stall**
+
+Observed on a 2-node Mac Studio M3 Ultra cluster (Python 3.13.12, anyio
+4.11.0, macOS with kqueue) running EXO.app for ~36 hours. Diagnostics
+confirmed:
+
+1. **Only macmon monitoring is stuck** — disk metrics from the same
+InfoGatherer continue updating, proving the Worker, EventRouter, and API
+pipelines are healthy
+2. **macmon IS producing data** — its stdout pipe is full at exactly
+65536 bytes (64KB OS buffer), and macmon is blocked on write at 0% CPU
+3. **The pipe read-end FD is still open** — the exo process holds it,
+but asyncio isn&#39;t reading from it
+4. **The stale GPU value (0.21) is wrong** — should be ~1.0 (matching
+the other node under identical load)
+
+This is consistent with asyncio&#39;s subprocess pipe transport getting
+stuck in flow control: `pause_reading()` is called when the internal
+buffer exceeds the high-water mark, but `resume_reading()` is never
+called, permanently deregistering the FD from kqueue. The `receive()`
+coroutine waits forever for data asyncio will never deliver.
+
+```
+$ lsof -p &lt;macmon_pid&gt;
+macmon  74691  FD=1  PIPE  SIZE=65536  -&gt;0x5ae78ecf376ccd0e  # full pipe
+
+$ lsof -p &lt;exo_pid&gt; | grep &lt;pipe_id&gt;
+exo     74689  FD=47  PIPE  SIZE=65536  -&gt;0xd129da474c1340f7  # read end held open, not consumed
+```
+
+Note: anyio 4.11&#39;s `Process.aclose()` already uses
+`CancelScope(shield=True)` for cleanup during cancellation — this is NOT
+an election cleanup issue (confirmed by @ciaranbor&#39;s testing).
+
+**Fix:** Replace the `async for` iteration with an explicit `receive()`
+inside `fail_after()`. If macmon produces no output for 10× its
+configured interval (minimum 30s), `TimeoutError` fires, `open_process`
+cleanup kills macmon and tears down the stale transport, and the loop
+restarts with a fresh subprocess and fresh asyncio transport.
+
+## Test plan
+
+- [x] All 246 existing tests pass
+- [ ] Verify macmon restarts after simulated pipe stall (e.g., `SIGSTOP`
+macmon, wait for timeout, confirm restart and metrics resume)
+- [ ] Long-running soak test on multi-node cluster to confirm the fix
+prevents recurrence
+
+- Extract mlx revision from uv lock (#1715)
+
+## Motivation
+
+The MLX version and git revision in nix/mlx.nix were hardcoded and had
+to be manually kept in sync with uv.lock
+
+## Changes
+
+- flake.nix: Extract MLX git rev from uv.lock&#39;s source.git URL and pass
+as uvLockMlxRev
+- nix/mlx.nix: Use uvLockMlxVersion and uvLockMlxRev instead of
+hardcoded values; remove version mismatch assertion
+
+## Why It Works
+
+uv.lock is already the source of truth — now Nix reads both version and
+rev from it directly. The pinned fetchFromGitHub hash still guards
+against unexpected changes.
+
+- fix: guard against ZeroDivisionError in mlx_lm stats (#1707)
+
+## Problem
+
+Running short completions (like `max_tokens=1` health check probes) can
+finish so fast that `mlx_lm`&#39;s internal `generation_time` rounds to
+zero. When that happens, `BatchGenerator.stats()` in
+`mlx_lm/generate.py` divides `generation_tokens / generation_time` and
+throws a `ZeroDivisionError`, which kills the runner process.
+
+EXO already handles this on its side — lines 289-293 in
+`batch_generate.py` guard the TPS calculation with `if
+generation_elapsed &gt; 0`. But the call to `self._exo_gen.stats()` on line
+294 goes into mlx_lm&#39;s *separate* timing code, which doesn&#39;t have the
+same guard. Two different timers, only one is protected.
+
+In my case, this was triggered by health check probes (content: `&#34;a&#34;`,
+`max_tokens=1`). The generation completed in sub-microsecond time,
+`generation_time` was exactly `0`, and the runner crashed. Since the
+health check command stays in the queue and retries after recovery, it
+created an infinite crash loop — every ~15 seconds the runner would load
+the model, get the same health check, and die again.
+
+## Fix
+
+Wrap `self._exo_gen.stats()` in a `try/except ZeroDivisionError`. If it
+throws, set `mlx_stats` to `None` and fall back to `0.0` for
+`prompt_tps`. The only fields EXO reads from `mlx_stats` are
+`prompt_tps` and `prompt_time` — losing them on a sub-microsecond
+generation has no practical impact.
+
+## Traceback
+
+```
+File &#34;batch_generate.py&#34;, line 294, in step
+    mlx_stats = self._exo_gen.stats()
+File &#34;mlx_lm/generate.py&#34;, line 1224, in stats
+    self._stats.generation_tokens / self._stats.generation_time
+ZeroDivisionError: division by zero
+```
+
+- fix: show partial download progress on initial dashboard load (#1706)
+
+## Summary
+
+- Dashboard now shows partial download progress for models that were
+partially downloaded in a previous session, instead of showing 0%
+- Both `getModelDownloadStatus()` and `getInstanceDownloadStatus()` now
+handle `DownloadPending` entries that carry non-zero
+`downloaded`/`total` bytes
+
+Fixes #1042
+
+## Root cause
+
+When exo restarts with partially downloaded models, the
+`DownloadCoordinator` emits `DownloadPending` events (because
+`downloaded_this_session` is 0, even though real bytes exist on disk).
+The main page dashboard only checked for `DownloadOngoing` entries, so
+these partially downloaded models showed as 0%.
+
+The dedicated `/downloads` page already handled this correctly — it
+renders `DownloadPending` entries with a progress bar when `downloaded &gt;
+0`. This fix brings the same behavior to the main page.
+
+## Changes
+
+For both `getModelDownloadStatus()` and `getInstanceDownloadStatus()` in
+`+page.svelte`:
+- Accept `DownloadPending` in addition to `DownloadOngoing`
+- For `DownloadPending` entries with `downloaded &gt; 0` or `total &gt; 0`,
+synthesize a `DownloadProgress` object from the top-level fields (with
+`speed: 0` and `etaMs: 0` since no active download is in progress)
+- Skip `DownloadPending` entries where both `downloaded` and `total` are
+0 (truly pending, not yet started)
+
+## Test plan
+
+- [ ] Partially download a model, quit exo, relaunch — dashboard should
+show partial progress instead of 0%
+- [ ] Fully downloaded models still show as complete
+- [ ] Active downloads still show real-time progress with speed/ETA
+- [ ] Models never downloaded show as not started (not falsely showing
+progress)
+- [ ] Dashboard builds without errors (`cd dashboard &amp;&amp; npm run build`)
+
+---------
+
+Co-authored-by: Evan &lt;evanev7@gmail.com&gt;
+
+- Normalise Responses API tool call format (#1704)
+
+## Motivation
+
+The responses API often does not provide tool args nested under a
+&#34;function&#34; field. Since we follow the chat completions format of tools
+in the backend (for MLX chat templates), we need to normalise to this
+format.
+
+## Test Plan
+
+### Manual Testing
+Works on n8n!
+&lt;img width=&#34;3442&#34; height=&#34;2076&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/9e11d679-0102-4d83-9a8e-b0a7a5898708&#34;
+/&gt;
+
+- fix: validate num_key_value_heads in tensor sharding placement (#1669)
+
+## Problem
+
+Models with fewer KV heads than nodes crash during tensor parallelism.
+For example, Qwen3.5 MoE models have only 2 KV heads — trying to shard
+across 4 nodes produces empty tensors and a reshape error at runtime.
+
+The placement system already validates `hidden_size % num_nodes == 0`
+but doesn&#39;t check KV heads, so it creates configurations that look valid
+but blow up when the worker tries to split the attention heads.
+
+Affected models include Qwen3.5-35B-A3B, Qwen3.5-122B-A10B,
+Qwen3.5-397B-A17B, Qwen3-Next-80B-A3B, and Qwen3-Coder-Next (all have 2
+KV heads).
+
+## Changes
+
+**Placement validation** (`src/exo/master/placement.py`):
+- Combined KV heads divisibility check with the existing hidden_size
+filter in a single pass
+- Cycles where `num_key_value_heads % len(cycle) != 0` are now excluded
+for tensor sharding
+- Error message includes both constraints when no valid cycle is found
+
+**Model card schema** (`src/exo/shared/models/model_cards.py`):
+- Added optional `num_key_value_heads` field to `ModelCard` and
+`ConfigData`
+- Extracted from HuggingFace `config.json` (handles both top-level and
+`text_config` nesting)
+- Passed through in `fetch_from_hf()` for dynamically fetched cards
+
+**All 68 inference model cards**
+(`resources/inference_model_cards/*.toml`):
+- Populated `num_key_value_heads` from each model&#39;s HuggingFace config
+
+**Utility script** (`scripts/fetch_kv_heads.py`):
+- Fetches `num_key_value_heads` from HuggingFace and updates TOML cards
+- `--missing`: only fills in cards that don&#39;t have the field yet
+- `--all`: re-fetches and overwrites everything
+- Uses tomlkit for safe TOML editing and ThreadPoolExecutor for parallel
+fetches
+
+## Behavior
+
+- Instance previews no longer show tensor options for models that can&#39;t
+split their KV heads across the cluster size
+- `place_instance()` rejects with a clear error instead of crash-looping
+- Pipeline parallelism is unaffected
+- 2-node tensor still works for 2-KV-head models (2 ÷ 2 = 1)
+- Field is optional — existing custom cards without it continue to work
+(validation is skipped when `None`)
+
+- fix: use StreamingDetokenizer in batch generator to fix emoji/UTF-8 corruption (#1691)
+
+## Problem
+
+Emojis and other multi-byte UTF-8 characters are rendered as `\ufffd`
+(Unicode Replacement Character) in batch streaming responses.
+
+Byte-level BPE tokenizers (like Qwen&#39;s) can split multi-byte UTF-8
+characters (e.g. a 4-byte emoji) across multiple tokens. The batch
+generator decodes each token independently with
+`tokenizer.decode([token_id])`, which produces U+FFFD for partial byte
+sequences.
+
+The sequential generator doesn&#39;t have this problem — it uses
+`stream_generate()` from mlx_lm, which internally uses
+`StreamingDetokenizer` to buffer incomplete bytes.
+
+## Fix
+
+Use `StreamingDetokenizer` in the batch generator, matching the
+sequential path:
+
+- Each `_EngineTask` gets its own `StreamingDetokenizer` instance
+- `add_token()` buffers tokens, holding back incomplete UTF-8 byte
+sequences until they form valid characters
+- `last_segment` returns only complete, valid text
+- `finalize()` flushes any remaining buffered bytes when generation
+completes
+
+Empty text segments during buffering are harmless — they&#39;re already
+handled correctly by the downstream streaming pipeline.
+
+---------
+
+Co-authored-by: Ryuichi Leo Takashige &lt;leo@exolabs.net&gt;
+
+- Include power usage in bench responses (#1692)
+
+## Motivation
+
+Add power/energy usage tracking to /bench API responses.
+
+## Changes
+
+- New PowerSampler class that periodically samples sys_power from each
+node during inference
+- New PowerUsage / NodePowerStats API types
+- Integrated into both bench chat completion and bench image generation
+endpoints
+
+## Why It Works
+
+Runs concurrently via anyio.create_task_group, reads from existing
+state.node_system heartbeat data — no new plumbing needed. Energy =
+avg_power × elapsed_time.
+
+## Test Plan
+
+### Manual Testing
+
+Run a /bench request and verify power_usage appears in the response.
+
+### Automated Testing
+
+7 async tests covering single/multi-node, energy math, dynamic power
+changes, empty state, and lifecycle.
+
+- Add support for Nemotron sharding (#1693)
+
+### Automated Testing
+tested logits match
+
+- Fix stale state.runners (#1684)
+
+## Motivation
+
+When a runner shuts down, there&#39;s no mechanism to remove it from
+state.runners, causing stale state to accumulate.
+
+## Changes
+
+- apply.py: apply_runner_status_updated now handles RunnerShutdown
+status by removing the runner from state instead of adding/updating it.
+Removed the separate apply_runner_deleted function entirely.
+- events.py: Removed the RunnerDeleted event type — runner cleanup is
+now handled via RunnerStatusUpdated with a RunnerShutdown status.
+- Tests: New test_apply_runner_deleted.py with 2 tests: verifying
+RunnerShutdown removes the runner, and that a normal status update adds
+it.
+
+## Why It Works
+
+Instead of a separate RunnerDeleted event and coordinating its emission
+from master/placement, runner cleanup is handled naturally through the
+existing RunnerStatusUpdated path — a RunnerShutdown status signals
+removal. This is simpler and requires no changes to master or placement
+logic.
+
+## Test Plan
+
+### Automated Testing
+
+2 new unit tests covering RunnerShutdown removal and normal runner
+status addition
+
+- feat(dashboard): add mobile drawer support for sidebars (#1677)
+
+## Summary
+
+- Adds mobile-friendly drawer UI for the chat sidebar and model family
+sidebar
+- Introduces responsive header navigation with mobile-specific toggle
+buttons
+- Uses slide-in drawer overlay pattern on small screens instead of
+collapsible sidebars
+- Stores mobile drawer state in app store for consistent state
+management
+
+## Testing
+
+Tested on desktop (responsive mode) and mobile viewport widths. Sidebars
+now slide in as drawers on small screens with proper z-index layering
+and close-on-outside-click behavior.
+
+- Implement continuous batching (#1642)
+
+## Motivation
+
+Following the changes made in #1632 !
+Closes #1020
+
+## Changes
+
+&lt;!-- Describe what you changed in detail --&gt;
+
+## Why It Works
+
+&lt;!-- Explain why your approach solves the problem --&gt;
+
+## Test Plan
+
+### Manual Testing
+&lt;!-- Hardware: (e.g., MacBook Pro M1 Max 32GB, Mac Mini M2 16GB,
+connected via Thunderbolt 4) --&gt;
+&lt;!-- What you did: --&gt;
+&lt;!-- - --&gt;
+
+### Automated Testing
+&lt;!-- Describe changes to automated tests, or how existing tests cover
+this change --&gt;
+&lt;!-- - --&gt;
+
+---------
+
+Co-authored-by: Evan Quiney &lt;evanev7@gmail.com&gt;</div>
+</div>
+
+<a href="../project/exo-explore_exo.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

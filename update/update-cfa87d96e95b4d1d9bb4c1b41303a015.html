@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (26 commits) - facebookresearch/faiss - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (26 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a> /
+    Updates in main (26 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-03-14 02:32 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/facebookresearch/faiss/commits/main" target="_blank">https://github.com/facebookresearch/faiss/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Этот выпуск FAISS значительно повышает надежность и производительность поиска. Введено множество новых проверок для предотвращения сбоев и повреждения данных при десериализации индексов из ненадежных входных данных. Также проведена масштабная реструктуризация для оптимизации агрегации статистики в бинарном HNSW с использованием редукций OpenMP и унификации алгоритмов поиска FastScan в рамках новой системы диспетчеризации SIMD, что улучшило параллелизм и эффективность.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Re-enable backwards compatibility tests for rabitq now that 1.14.1 released (#4924)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4924
+
+Re enable
+
+Reviewed By: alibeklfc
+
+Differential Revision: D96502381
+
+fbshipit-source-id: 8d688874056fcba409b278e38d92f61de3ee5065
+
+- Validate n_per_block and block_size in BlockInvertedLists deserialization (#4919)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4919
+
+`BlockInvertedListsIOHook::read()` reads `n_per_block` and `block_size`
+from untrusted input without validation.  Both values are used as
+divisors in subsequent operations:
+
+- `n_per_block` is a divisor in `resize()` and `add_entries()`
+  (`(new_size + n_per_block - 1) / n_per_block`).  A zero value
+  causes a floating point exception (divide-by-zero / SIGFPE).
+
+- `block_size` is used in a modulo operation in `add_entries()`
+  (`o % block_size`).  A zero value also causes SIGFPE.
+
+Add `FAISS_THROW_IF_NOT_FMT` guards rejecting zero values for both
+fields during deserialization, before they can reach any arithmetic.
+
+Reviewed By: mnorris11
+
+Differential Revision: D96346135
+
+fbshipit-source-id: c55c614d98574b5b86f5b0f2b0e79d9c3ec215a1
+
+- Validate id_map size matches ntotal in IndexBinaryIDMap deserialization (#4917)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4917
+
+Add a check in the `IBMp`/`IBM2` deserialization path that rejects
+input where `id_map.size() != ntotal`.  Without this validation,
+a crafted index with a mismatched `id_map` would silently deserialize,
+and subsequent `search()` or `reconstruct()` calls would use an
+inconsistent ID mapping.  For `IndexBinaryIDMap2`, the downstream
+`construct_rev_map()` call would also build a corrupted reverse map.
+
+Reviewed By: mnorris11
+
+Differential Revision: D96333421
+
+fbshipit-source-id: d24b7a8db97265c09804b6ae64485b5a2fc413dc
+
+- Validate per-entry ilsz in read_binary_multi_hash_map (#4916)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4916
+
+In `read_binary_multi_hash_map()`, individual `ilsz` values are read
+from the untrusted bitstring buffer and used to control an inner loop
+that calls `BitstringReader::read()`. The existing buffer-size check
+validates total expected bits assuming `sum(ilsz) == ntotal`, but
+crafted `ilsz` values can violate this invariant and cause the reader
+to consume bits past the end of the buffer.
+
+Add a running `total_ids` counter and reject any `ilsz` that would
+push the cumulative ID count past `ntotal`, throwing a descriptive
+`FaissException` before the overrun occurs.
+
+Reviewed By: mnorris11
+
+Differential Revision: D96329613
+
+fbshipit-source-id: 06c013b7b7fdf2fb6ecd0d9f03c9f8583f507d8c
+
+- Refactor binary HNSW stats to use OpenMP reduction instead of destructor sync (#4910)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4910
+
+## Problem
+
+Follow-up to the previous fix (replacing `#pragma omp critical` with `#pragma omp atomic` in `FlatHammingDis::~FlatHammingDis`). This commit implements the architecturally correct fix by matching the pattern already used in the float HNSW path (`IndexHNSW.cpp`).
+
+The previous approach had two issues:
+1. Stats accumulation in a destructor is fragile — the timing and frequency of destructor calls depends on the caller&#39;s object lifetime management, not on the search algorithm
+2. `FlatHammingDis` maintained a redundant `ndis` counter (incremented on every `operator()` call) that duplicated what `HNSW::search()` already tracks internally via its returned `HNSWStats`
+
+## Changes
+
+### `IndexBinaryHNSW::search()` — use `#pragma omp for reduction`
+- Capture the `HNSWStats` returned by `hnsw.search()` per query
+- Accumulate `n1, n2, ndis, nhops` via `#pragma omp for reduction(+: ...)`, which uses lock-free per-thread copies merged at barrier — zero contention
+- Call `hnsw_stats.combine()` once, single-threaded, after the parallel region
+- This exactly matches the pattern in `hnsw_search()` in `IndexHNSW.cpp` (lines 259-291)
+
+### `FlatHammingDis` — remove stats accumulation entirely
+- Remove `size_t ndis` field (redundant with `HNSW::search()` internal tracking)
+- Remove `ndis++` from `operator()` (eliminates per-distance-computation overhead)
+- Remove destructor (no stats to accumulate → no sync needed)
+
+### `IndexBinaryHNSWCagra::search()` — fix missing stats aggregation
+- The `base_level_only` path&#39;s second parallel block (`search_level_0`) accumulated stats into a per-thread `HNSWStats search_stats` but never aggregated it into `hnsw_stats` — this was a pre-existing bug where stats were silently lost
+- Added `#pragma omp critical { hnsw_stats.combine(search_stats); }` once per thread at the end of the parallel block, matching `IndexHNSW::search_level_0_wrapper()` (line 461)
+
+## Performance Impact
+- **Zero lock contention** in the main `IndexBinaryHNSW::search()` path (reduction is lock-free)
+- Removes per-distance-computation `ndis++` overhead from `FlatHammingDis::operator()`
+- `IndexBinaryHNSWCagra` path: `#pragma omp critical` once per thread (acceptable, matches float HNSW)
+- No change to search results — only stats accumulation mechanism changes
+
+Reviewed By: mnorris11
+
+Differential Revision: D95911440
+
+fbshipit-source-id: 7cc4d849609e4cbd19b3340e6fb8fddc29ea57d3
+
+- Fix MSVC OpenMP build: use idx_t instead of size_t in parallel for loop (#4922)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4922
+
+MSVC&#39;s OpenMP 2.0 implementation requires signed integral loop variables
+(error C3016). The loop variable in compute_residuals was declared as
+size_t (unsigned), causing the Windows nightly conda build to fail.
+
+Change it to idx_t (int64_t), which is signed and consistent with the
+rest of the FAISS codebase. See D23234967 for historical precedent.
+
+Introduced by D86234690 (PR #4654).
+
+Reviewed By: junjieqi
+
+Differential Revision: D96355226
+
+fbshipit-source-id: bc84ac927985e4f4aeee345e2e24a9f5fb3b2503
+
+- move distances implementation into SIMD specific compile units (#4906)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4906
+
+The main objective is to move the IVFFlat scanning code inside SIMD compile units, so that the loop over codes runs inside SIMD code.
+
+Unfortunately, I could not instant
+iate all the implementations with with_MetricType, hence the macro to define them.
+
+Reviewed By: algoriddle
+
+Differential Revision: D95936389
+
+fbshipit-source-id: ae0515fcdcd7c880f329014b264b9dd05065f1c6
+
+- Delete old pq4_accumulate_loop files (replaced by dispatching.h) (#4905)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4905
+
+Now that all search paths use FastScanCodeScanner (via dispatching.h),
+the old pq4_accumulate_loop and pq4_accumulate_loop_qbs free functions
+have no callers. Delete pq4_fast_scan_search_1.cpp and
+pq4_fast_scan_search_qbs.cpp entirely. Relocate the remaining utility
+functions (pq4_qbs_to_nq, pq4_preferred_qbs, accumulate_to_mem) to
+pq4_fast_scan.cpp. Remove dead declarations from pq4_fast_scan.h.
+
+This completes the code deduplication: dispatching.h uses shared helpers
+from accumulate_loops.h and decompose_qbs.h, and no duplicate
+implementations remain.
+
+Reviewed By: mdouze
+
+Differential Revision: D96131176
+
+fbshipit-source-id: e020d7cf405497bbbbbc1698630e228553b851f3
+
+- Switch all search paths to FastScanCodeScanner and remove make_knn_handler (#4904)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4904
+
+Now that every make_knn_scanner() returns a real scanner (never nullptr),
+switch all callers to use scanners directly and remove make_knn_handler.
+
+Add impl param to make_knn_scanner and its factory so heap vs reservoir
+selection respects the implem setting. Switch IndexFastScan
+search_implem_12/14, IndexIVFFastScan search_dispatch_implem/range_search,
+and IndexIVFPQFastScan scan_codes to scanner-only paths. Add range scanner
+factories (make_range_scanner, make_partial_range_scanner). Remove
+make_knn_handler from all classes. Change search_implem_10/12 scanner
+param from pointer to reference.
+
+Reviewed By: mdouze
+
+Differential Revision: D96116555
+
+fbshipit-source-id: 977c24180d67bf90f7c151ac4ca6fe4e2d5e1f92
+
+- Wire RaBitQ search through FastScanCodeScanner dispatch (#4903)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4903
+
+Add make_knn_scanner() virtual to IndexFastScan and IndexIVFFastScan
+that returns a SIMD-dispatched FastScanCodeScanner. Override in
+RaBitQ classes to produce rabitq-specific scanners via per-SIMD TU
+factories (rabitq_dispatching.h). Move RaBitQ handler method bodies
+into headers, add context pointer, and update rabitq_result_handler.h
+for SL template param. Wire IVFRaBitQFastScanScanner::scan_codes to
+use the new scanner. Update build files and SWIG ignores.
+
+Callers (search_implem_12/14, search_dispatch_implem) are unchanged
+and still use make_knn_handler.
+
+Reviewed By: mdouze
+
+Differential Revision: D96116557
+
+fbshipit-source-id: 9ead718ab863f9bc63953c8f9e7958d32ed896f2
+
+- Add FastScanCodeScanner dispatch boundary with per-SIMD TUs (#4897)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4897
+
+Add `FastScanCodeScanner`, a virtual base that bundles handler + kernel
+behind the SIMD dispatch boundary. In DD mode, `SINGLE_SIMD_LEVEL = NONE`
+so the existing fast scan code path uses emulated SIMD types. The new
+scanner provides per-SIMD translation units (AVX2, AVX512, ARM_NEON)
+compiled with the correct ISA flags, and a factory function
+(`make_fast_scan_knn_scanner`) that uses `DISPATCH_SIMDLevel` to select
+the right TU at runtime.
+
+This follows the proven `THE_LEVEL_TO_DISPATCH` pattern from the scalar
+quantizer per-SIMD TUs (`sq-dispatch.h`). Each per-SIMD TU includes
+`dispatching.h` which provides:
+- `ScannerMixIn&lt;Handler&gt;`: wraps a concrete handler and calls accumulation
+  kernels (both search_1 multi-BB and QBS paths)
+- Factory specialization `make_fast_scan_scanner_impl&lt;SL&gt;()` with
+  combinatorial dispatch over `is_max × with_id_map × handler_type`
+  (SingleResultHandler for k=1, HeapHandler for k≤20, ReservoirHandler
+  for k&gt;20)
+
+New files:
+- `impl/fast_scan/dispatching.h` — dispatch template header
+- `impl/fast_scan/impl-avx2.cpp` — AVX2 per-SIMD TU
+- `impl/fast_scan/impl-avx512.cpp` — AVX512 per-SIMD TU
+- `impl/fast_scan/impl-neon.cpp` — ARM NEON TU (with ARM_SVE forwarding)
+
+Modified files:
+- `impl/fast_scan/pq4_fast_scan.h` — FastScanCodeScanner base + factory decl
+- `impl/fast_scan/pq4_fast_scan.cpp` — NONE specialization + dispatch wrapper
+- `xplat.bzl` / `CMakeLists.txt` — register SIMD files and header
+
+Note: RaBitQ handler is not wired through FastScanCodeScanner in this
+diff. That comes in later diffs when callers are switched.
+
+Reviewed By: mdouze
+
+Differential Revision: D95950483
+
+fbshipit-source-id: 03841671f59c0d99de7d0c7408a64e7a8383a8e7
+
+- Fix OpenMP critical section contention in IndexBinaryHNSW search (#4909)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4909
+
+## Problem
+
+We recently found **87% of CPU** was being wasted on OpenMP lock contention in `FlatHammingDis::~FlatHammingDis`, not on useful computation.
+
+The flame graph breakdown:
+- 88.2% CPU in `openmp_worker` threads
+- 87.2% in `FlatHammingDis::~FlatHammingDis` → `__kmpc_critical_with_hint` → `__kmp_acquire_queuing_lock` → `__sched_yield` (84% CPU spinning/yielding on lock)
+
+## Root Cause
+
+The `FlatHammingDis` destructor used `#pragma omp critical` to accumulate a single `size_t` counter (`hnsw_stats.ndis += ndis`). Unnamed `#pragma omp critical` sections share a **global serialization lock** — when all OpenMP threads exit the `#pragma omp parallel` block in `IndexBinaryHNSW::search()` simultaneously, they ALL enter the destructor at the same time, serializing on that single lock.
+
+With N threads, this means N sequential lock acquisitions where each thread spins/yields waiting for its turn. This is O(N) serialization at the end of every search call.
+
+In `IndexBinaryHNSWCagra::search()` with `base_level_only=true`, the situation is even worse: `FlatHammingDis` is created and destroyed **per query iteration** inside `#pragma omp parallel for`, causing `n × num_threads` critical section entries.
+
+## Fix
+
+Replace `#pragma omp critical` with `#pragma omp atomic`. Since `hnsw_stats.ndis += ndis` is a simple `size_t` addition, `#pragma omp atomic` compiles to a single hardware atomic instruction (`lock xadd` on x86-64) — orders of magnitude faster than a mutex-based critical section, with effectively zero contention.
+
+For reference, the float HNSW path in `IndexHNSW.cpp` already uses the correct pattern: `#pragma omp for reduction(+: n1, n2, ndis, nhops)` with a single-threaded `hnsw_stats.combine()` call outside the parallel region.
+
+## Impact
+
+- Eliminates ~87% CPU waste from lock contention in binary HNSW search
+- Affects all users of `IndexBinaryHNSW::search()` and `IndexBinaryHNSWCagra::search()`
+- No change to search results or statistics accuracy — `#pragma omp atomic` provides the same correctness guarantees as `#pragma omp critical` for a single `+=` operation
+
+Reviewed By: mnorris11
+
+Differential Revision: D95910991
+
+fbshipit-source-id: f14b81b95c7b9f9bd7299a319cc2578fe8af3844
+
+- Add sentinels to index format enums. (#4907)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4907
+
+The sentinels will be used to detect drift between index formats
+and test coverage.
+
+The MetricType enum is handled differently since it is discontiguous.
+The metric_type_count() method computes the count of enum entries which
+is likely to change should additional types be added.
+
+Reviewed By: mnorris11
+
+Differential Revision: D96032245
+
+fbshipit-source-id: 06acb4f79091a9aafec4a2a3890c94ed43f3da2e
+
+- Support limits on index deserialization loops — useful for tests (#4902)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4902
+
+When enabled, throw a FAISS exception when index deserialization loops
+driven by read data fields (nlist, nsplits, VT chain length, nhash, etc.)
+exceed a configured limit.  This can be set by input validation tests to
+prevent wasting time on pathological, OOM inducting, inputs.
+
+Default: 0 (no limit).
+
+Reviewed By: mnorris11
+
+Differential Revision: D96016580
+
+fbshipit-source-id: 8a04fdfe5b1d9aecaf1a7156215045be011014e5
+
+- fix: decouple coarse quantizer from cuvs index reset (#4885)
+
+Summary:
+* Summary. This pull request decouples the coarse quantizer from the cuVS index reset logic. It resolves a todo found in the GpuIndexIVFFlat.cu file.
+* Problem. In the previous implementation, calling reset on a cuVS enabled index would destroy the entire cuvs index object. This action unintentionally wiped out the trained centroids. To compensate for this, a temporary fix was in place within the train function to re-upload centroids if the index was already marked as trained.
+* Solution. The reset implementation in CuvsIVFFlat.cu has been updated to use the dedicated reset index helper from the cuVS library. This API clears only the inverted lists and leaves the trained centroids untouched. Consequently, the redundant logic and the TODO comment in GpuIndexIVFFlat.cu have been removed.
+* Testing. The changes were validated using the standard test suite.
+  * Environment: A100 GPU with CUDA 12.6 and cuVS.
+  * Result: 302 tests passed, 0 failed.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4885
+
+Reviewed By: trang-nm-nguyen
+
+Differential Revision: D96046499
+
+Pulled By: limqiying
+
+fbshipit-source-id: 6fe14007cf2e4dffbd4da21e8120a16f1e84766e
+
+- Parallelize compute_residuals in IndexIVFPQ (#4654)
+
+Summary:
+Add OpenMP parallelization to compute_residuals function.
+  This addresses the TODO comment about parallelization.
+
+  Changes:
+  - Add #pragma omp parallel for to residual computation loop
+  - Use if(n &gt; 1000) to avoid overhead for small batches
+  - Each iteration is independent and thread-safe
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4654
+
+Reviewed By: mnorris11
+
+Differential Revision: D86234690
+
+Pulled By: limqiying
+
+fbshipit-source-id: 49c5ede2890d52a1d69705a72ada190df299e5d5
+
+- Extract RaBitQ result handler to impl/fast_scan/ (#4895)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4895
+
+Move IVFRaBitQHeapHandler from a nested class inside IndexIVFRaBitQFastScan
+to a standalone template in impl/fast_scan/rabitq_result_handler.h. Add SL
+template parameter for future DD support. A using alias in the index class
+preserves source compatibility.
+
+Pure refactor — no behavior change.
+
+Reviewed By: mdouze
+
+Differential Revision: D95950482
+
+fbshipit-source-id: 9e5d101e8392e5b0fc53c6f475d4ea46b69ba5ff
+
+- Additional input validation for index deserialization (#4899)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4899
+
+Add bounds checks when reading index data from untrusted
+byte streams. Five new FAISS_THROW_IF_NOT_FMT guards reject
+invalid values early during deserialization:
+
+- ProductAdditiveQuantizer: nsplits must be &gt; 0
+- ScalarQuantizer: qtype must be within the valid
+  QuantizerType enum range
+- NSG: R (max out-degree) must be &gt; 0
+- IndexPreTransform: VectorTransform chain length must
+  be &gt;= 0
+- IndexBinaryMultiHash: nhash must be &gt; 0
+
+Each check includes a descriptive error message with the
+offending value. Without these checks, invalid data could
+cause undefined behavior such as zero-size allocations,
+out-of-range enum casts, or negative loop bounds.
+
+Reviewed By: mnorris11
+
+Differential Revision: D95968069
+
+fbshipit-source-id: b9a3e88a01d3427614fa0e027fb233f11ee8cf2e
+
+- Extract PQ4 kernels to includable headers in impl/pq_4bit/ (#4868)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4868
+
+Move kernel templates from .cpp anonymous namespaces into includable headers,
+parameterized on SIMDLevel SL. No behavior change — existing .cpp files include
+the headers and instantiate with defaults.
+
+New headers:
+- kernels_simd256.h: multi-BB kernel (from search_1.cpp) + single-BB QBS
+  256-bit kernel (from search_qbs.cpp non-AVX512 path)
+- kernels_simd512.h: AVX512 nq1/nqx kernels + dispatcher (from search_qbs.cpp)
+- decompose_qbs.h: unified kernel_accumulate_block&lt;NQ, SL&gt; that replaces
+  #ifndef __AVX512F__ with if constexpr on SL, plus QBS decomposition logic
+
+Template param order: &lt;int NQ, SIMDLevel SL, class ResultHandler, class Scaler&gt;
+to enable ergonomic SL propagation via kernel_accumulate_block&lt;Q1, SL&gt;(...).
+
+~900 lines moved (code motion), ~100 lines changed. Pure refactor.
+
+Reviewed By: mdouze, mnorris11
+
+Differential Revision: D95392155
+
+fbshipit-source-id: 4020ff66847152aada7271629b05f636f1bc3dc3
+
+- Add defaulted SIMDLevel template parameter to handler and scaler types (#4867)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4867
+
+Templatize the result handler hierarchy and scaler types on SIMDLevel SL,
+defaulted to SINGLE_SIMD_LEVEL_256. This allows per-SIMD TUs to instantiate
+handlers and scalers with explicit SIMD levels (e.g., AVX2) for native
+dispatch.
+
+Result handlers: ResultHandlerCompare, SingleResultHandler, HeapHandler,
+ReservoirHandler, RangeHandler, PartialRangeHandler — all gain SL parameter.
+
+Scalers: DummyScaler templatized on SL. 512-bit methods use SL directly
+(removing #ifdef __AVX512F__ guard — safe because template bodies only
+instantiated when called). NormTableScaler stays non-template (public API).
+
+FixedStorageHandler: add SL parameter, remove SIMDResultHandler base class
+(never used polymorphically), remove final/virtual.
+
+Pure refactor. All existing callers use defaults and compile unchanged.
+
+Reviewed By: mdouze
+
+Differential Revision: D95392149
+
+fbshipit-source-id: f4f05332b84d220d9d8e82b08afb4b7219c301a1
+
+- Additional binary index input validation (#4898)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4898
+
+ - read_binary_hash_invlists(): Protect against negative values that cause
+   out of bounds reads after conversion from int to size_t.
+ - read_binary_hash_invlists() and read_index_binary_up(): Prevent silent
+   corruption of the deserialized index by ensuring BitstringReader::read()
+   has a valid, positive value for nbit.
+
+Reviewed By: mnorris11
+
+Differential Revision: D95839908
+
+fbshipit-source-id: 86cfac4b1ff2df8b1834222b8cadebe083539217
+
+- Fix cloning for IVFFlatPanorama (#4887)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4887
+
+Has to be checked before IVFFlat, otherwise deserialize will give an IVFFlat rather than IVFFlatPanorama.
+
+Reviewed By: alibeklfc
+
+Differential Revision: D95647196
+
+fbshipit-source-id: fe38144c5276fe85e1206013301f0b159acf1df7
+
+- convert simdlib in distances_simd.cpp (#4884)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4884
+
+Templatize fvec_sub, fvec_add, and compute_PQ_dis_tables_dsub2 on SIMDLevel.
+
+Move these 256-bit simdlib-based functions from distances_simd.cpp into a new header simd_impl/distances_simdlib256.h, templatized on THE_SIMDLEVEL. Add with_simd_level_256bit() to simd_dispatch.h that maps AVX512-&gt;AVX2 and ARM_SVE-&gt;ARM_NEON using simd256_level_selector. Dispatch wrappers use with_simd_level_256bit with lambdas.
+
+Reviewed By: algoriddle
+
+Differential Revision: D95570445
+
+fbshipit-source-id: 557b6546e9526c40a44f7165584e96a9e39a3b89
+
+- Templatize simdlib types on SIMDLevel (#4866)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4866
+
+Templatize all simd wrapper types (simd16uint16, simd32uint8, simd8float32,
+etc.) on SIMDLevel. This is the foundation for PQ4 fast scan Dynamic Dispatch.
+
+Primary templates are declared in simdlib.h. Each platform header provides
+explicit specializations:
+- simdlib_avx2.h: simd16uint16&lt;AVX2&gt;, simd32uint8&lt;AVX2&gt;, etc.
+- simdlib_avx512.h: simd32uint16&lt;AVX512&gt;, simd64uint8&lt;AVX512&gt;, etc.
+- simdlib_neon.h: simd16uint16&lt;ARM_NEON&gt;, etc.
+- simdlib_emulated.h: simd16uint16&lt;NONE&gt;, etc. (always included)
+- simdlib_ppc64.h: simd16uint16&lt;NONE&gt;, etc. (PPC-optimized scalar)
+
+SINGLE_SIMD_LEVEL (inline constexpr in simd_levels.h) resolves to NONE in DD
+mode and to the compiled-in level in static mode. SINGLE_SIMD_LEVEL_256 maps
+through simd256_level_selector for 256-bit types (AVX512-&gt;AVX2, SVE-&gt;NEON).
+Code without explicit SL context uses these. This is migration scaffolding —
+subsequent diffs will replace SINGLE_SIMD_LEVEL usages with proper SL dispatch.
+
+simd_result_handlers.h is no longer %include&#39;d by SWIG (the templatized types
+are unparseable by SWIG). make_knn_handler methods are %ignore&#39;d. The Python
+API does not use these internal SIMD handler types.
+
+Pre-existing bug fixes bundled with this refactor:
+- simdlib_avx512.h: simd512bit::bin() stack buffer overflow (char[257] -&gt; char[513])
+- simdlib_avx2.h: simd256bit constructor used aligned _mm256_load_si256 instead
+  of unaligned _mm256_loadu_si256
+- All platform headers: simd16uint16/simd32uint8 operator+=/operator-= returned
+  by value instead of by reference
+
+Static builds: zero performance change. Template specializations produce
+identical layout, ABI, and codegen as the old plain structs.
+
+Reviewed By: mdouze
+
+Differential Revision: D95392150
+
+fbshipit-source-id: 435b643f96a7e08d777796390066964d99295f63
+
+- Validate dynamic_casts during index load (#4883)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4883
+
+Explicitly verify the results of dynamic_cast and throw desriptive
+exceptions when the casts fail.
+
+Of the 6 sites addressed here, 5 of them are defensive (e.g. against
+a future code change that breaks a current invariant). The sixth, which
+casts to IndexPQ*, actually protects against corrupted/mallicious input
+that embeds an unexpected or malformed index type.
+
+Reviewed By: mnorris11
+
+Differential Revision: D95479168
+
+fbshipit-source-id: e74269ce3d18a6a0583e17e32d352f771d437934
+
+- Improve exception safety for the &#39;own_fields&#39;/allocation pattern (#4864)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4864
+
+FAISS index data structures use C compatible types and thus cannot
+embed RAII types like std::unique_ptr to trivially ensure exception
+safety. For this reason, allocations within constructors must be performed
+within the body of constructors where RAII types and other exception
+handling tools are available.
+
+This diff makes a pass through the index types to clean up the
+&#34;own_fields&#34; allocation pattern. &#34;own_fields&#34; and the pointer it guards
+are now both initialized to safe (false/nullptr) values at the definition
+site and only updated within the constructor body when further exceptions
+in the constructor are no longer possible. This also fixes a few cases
+where these fields had indeterminent state or actually wrong state when
+an exception is thrown.
+
+There are a few cases that perform the strange looking operation
+&#39;std::make_unique().release()&#39;. This is functionally equivalent to just
+calling new, but hopefully encourages the continued use of std::unique_ptr
+should the constructor logic change to introduce vectors for exceptions to
+be thrown.
+
+Reviewed By: mnorris11
+
+Differential Revision: D95294213
+
+fbshipit-source-id: 773d382ed7eedbb81717a15d604f3e2ca33b376b</div>
+</div>
+
+<a href="../project/facebookresearch_faiss.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
