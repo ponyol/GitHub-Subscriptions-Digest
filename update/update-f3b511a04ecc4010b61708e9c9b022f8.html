@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (18 commits) - googleworkspace/cli - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (18 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/googleworkspace_cli.html">googleworkspace/cli</a> /
+    Updates in main (18 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/googleworkspace_cli.html">googleworkspace/cli</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-03-18 20:56 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/googleworkspace/cli/commits/main" target="_blank">https://github.com/googleworkspace/cli/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление значительно расширяет функциональность Gmail, добавляя автоматическое заполнение имени отправителя в поле &#34;From&#34;, улучшенную логику ответа всем и надежную обработку вложений с использованием библиотеки `mail-builder`. Ключевые системные улучшения включают корректное завершение работы процессов `+watch` и `+subscribe` при получении сигнала SIGTERM. Выпуск также уделяет особое внимание безопасности за счет всесторонней очистки вывода stderr, строгой проверки пользовательского ввода (предотвращая использование опасных символов и обход пути) и безопасных атомарных файловых операций, а также интегрирует поддержку Google Meet в команду `calendar +insert`.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- chore: release versions (#553)
+
+- ci: Add CI validation for changeset package names and update style guide with new sections and `AGENTS.md` reference. (#552)
+
+- feat: handle SIGTERM in +watch and +subscribe for clean shutdown (#550)
+
+* feat: handle SIGTERM in +watch and +subscribe for clean shutdown
+
+Add shared shutdown_signal() helper that merges SIGINT and SIGTERM
+into a single future. Replace tokio::signal::ctrl_c() in both watch
+and subscribe pull loops so they exit cleanly under Kubernetes,
+Docker, and systemd.
+
+On non-Unix platforms, only SIGINT (Ctrl+C) is handled.
+
+* fix: register SIGTERM handler once via persistent background task
+
+Use OnceLock + tokio::sync::Notify so the signal handler stays active
+for the process lifetime. Eliminates the race window between loop
+iterations where a SIGTERM would bypass the handler.
+
+* fix: graceful fallback when SIGTERM registration fails
+
+Replace expect() with match: if signal(SIGTERM) fails, log a warning
+and fall back to SIGINT-only. Prevents silent task death that would
+hang all shutdown_signal() callers indefinitely.
+
+* fix: prevent spurious shutdown from ignored ctrl_c errors
+
+Use Ok(_) pattern matching in select! branches and expect() for
+standalone ctrl_c().await calls. Previously .ok() silently swallowed
+errors, causing notify_waiters() to fire immediately.
+
+* fix: handle ctrl_c error in select! to avoid losing SIGINT branch
+
+Bind the full Result from ctrl_c() and expect() on it instead of
+pattern matching Ok(_), which silently dropped the branch on Err.
+
+---------
+
+Co-authored-by: jpoehnelt-bot &lt;jpoehnelt-bot@users.noreply.github.com&gt;
+
+- chore: release versions (#547)
+
+- feat(gmail): auto-populate From display name + fix reply-all to own message (#530)
+
+* feat(gmail): auto-populate From with display name from send-as settings
+
+Fetch the user&#39;s send-as identities via /users/me/settings/sendAs to set
+the From header with a display name in all mail helpers, matching Gmail
+web client behavior. The gmail.modify scope already covers this endpoint.
+
+Three resolution cases:
+- No --from: use the default send-as identity (display name + email)
+- --from with bare email: enrich from send-as list if the alias exists
+- --from with display name: use as-is, skip the API call
+
+For Workspace accounts where the primary address inherits its display
+name from the organization directory (sendAs returns empty displayName),
+falls back to the People API to fetch the profile name. This requires
+the userinfo.profile scope, which is now included in the identity scopes
+that auth login always requests. Degrades gracefully with a tip if the
+scope hasn&#39;t been granted yet.
+
+Introduces build_api_error, a shared helper that parses Google API JSON
+error responses (extracting message, reason, and enable URL), matching
+the executor&#39;s handle_error_response pattern. Used by all four Gmail API
+functions. All error messages printed to stderr are sanitized via
+sanitize_for_terminal.
+
+In +send, auth uses the discovery doc scopes rather than hardcoding
+gmail.modify, preserving compatibility with narrower send-only OAuth
+setups. In reply-all, the profile endpoint is always called for
+self-email dedup since the primary address may differ from the send-as
+alias.
+
+* fix(gmail): handle reply-all to own message correctly
+
+When replying-all to a message you sent, the original sender (you) was
+excluded from To, leaving it empty and producing an error. Gmail web
+handles this by using the original To recipients as reply targets.
+
+Detect self-reply by checking if the original From matches the user&#39;s
+primary email or send-as alias, then swap the candidate logic:
+- Self-reply: To = original To, CC = original CC
+- Normal reply: To = Reply-To or From, CC = original To + CC
+
+- fix(gmail): remove duplicate attachment arg on +send (#532)
+
+The +send subcommand defined its own &#34;attachment&#34; arg in addition to the
+&#34;attach&#34; arg already provided by common_mail_args. Since parse_attachments
+reads &#34;attach&#34;, the duplicate &#34;attachment&#34; arg was dead — +send --attachment
+was silently accepted by clap but the value was never read.
+
+- refactor: consolidate output hygiene into output.rs (#527)
+
+* refactor: consolidate output hygiene into output.rs
+
+Introduce src/output.rs that consolidates:
+- sanitize_for_terminal (upgraded: now also strips bidi overrides,
+  zero-width chars, directional isolates, line/paragraph separators)
+- reject_dangerous_chars (renamed from reject_control_chars)
+- is_dangerous_unicode predicate
+- colorize + stderr_supports_color (NO_COLOR + TTY detection)
+- status/warn/info stderr helpers (auto-sanitize)
+
+Migrate existing callers via re-exports from error.rs and validate.rs.
+
+Fix watch.rs:
+- Sanitize raw API error body in eprintln (was high-risk injection vector)
+- Replace 3 inline ANSI escape codes with colorize() for NO_COLOR support
+
+Fix triage.rs:
+- Sanitize user --query string in no_messages_msg output
+
+* refactor: remove re-export indirection, import directly from output
+
+Update all 10 caller files to import sanitize_for_terminal directly
+from crate::output instead of going through crate::error re-exports.
+Remove pub(crate) re-exports from error.rs and validate.rs.
+
+* fix: use char::is_control() in reject_dangerous_chars for C1 coverage
+
+Address PR review: the manual (c as u32) &lt; 0x20 check missed
+C1 control characters (U+0080-U+009F), including CSI (U+009B) which
+can inject terminal escape sequences. Using char::is_control() covers
+both C0 and C1 ranges.
+
+Add test for CSI rejection.
+
+* fix: validate ansi_color in colorize() to prevent injection
+
+Defense-in-depth: only emit ANSI escape codes when ansi_color
+contains exclusively ASCII digits. Falls back to plain text if
+an invalid color code is passed.
+
+---------
+
+Co-authored-by: jpoehnelt-bot &lt;jpoehnelt-bot@users.noreply.github.com&gt;
+
+- feat(gmail): Gmail helpers rollup — mail-builder, --attachment, +read (#526)
+
+* refactor(gmail): replace hand-rolled email construction with mail-builder
+
+Replace custom MessageBuilder, RFC 2047 encoding, header sanitization,
+and address encoding (including #482) with the mail-builder crate
+(Stalwart Labs, 0 runtime deps). Each command builds a
+mail_builder::MessageBuilder directly.
+
+Introduce structured types throughout:
+- Mailbox type (parsed display name + email) replaces raw string passing
+- sanitize_control_chars strips ASCII control characters (CRLF, null,
+  tab, etc.) at the parse boundary — defense-in-depth for mail-builder&#39;s
+  structured header types, superseding sanitize_header_value,
+  sanitize_component, and encode_address_header from #482
+- OriginalMessage fields use Option&lt;T&gt; instead of empty-string sentinels
+- parse_original_message returns Result with validation (threadId, From,
+  Message-ID)
+- Pre-parsed Config types (SendConfig, ForwardConfig, ReplyConfig) with
+  Vec&lt;Mailbox&gt; — parse at the boundary, not downstream
+- parse_forward_args and parse_send_args return Result with --to
+  validation, consistent with parse_reply_args
+- parse_optional_mailboxes helper normalizes Some(vec![]) to None for
+  optional address fields (--cc, --bcc, --from)
+- Envelope types borrow from Config + OriginalMessage with lifetimes
+- Message IDs stored bare (no angle brackets), parsed once at boundary
+- References stored as Vec&lt;String&gt; instead of space-separated string
+- ThreadingHeaders bundles In-Reply-To + References with debug_assert
+  for bare-ID convention
+- Shared CLI arg builders (common_mail_args, common_reply_args)
+  eliminate duplicated --cc/--bcc/--html/--dry-run definitions
+
+Additional improvements:
+- finalize_message returns Result instead of panicking via .expect()
+- Mailbox::parse_list filters empty-email entries (trailing comma edge
+  case)
+- format_email_link percent-encodes mailto hrefs to prevent parameter
+  injection
+- Forward date handling: omits Date line when absent instead of showing
+  empty &#34;Date: &#34;
+- Dry-run auth: log skipped auth as diagnostic instead of silently
+  discarding errors
+- Restore --html tips in after_help strings (gmail_quote CSS, cid:
+  image warnings, HTML fragment advice) lost in release PR #434
+- Update execute_method call for upload_content_type parameter (#429)
+
+Delete: MessageBuilder, encode_header_value, sanitize_header_value,
+encode_address_header, sanitize_component, extract_email,
+extract_display_name, split_mailbox_list, build_references.
+
+* feat(gmail): add --from flag to +send for send-as alias support
+
+Consistent with +reply, +reply-all, and +forward which already support
+--from. Uses the same parse_optional_mailboxes path and
+apply_optional_headers plumbing.
+
+* fix: quote display names with RFC 2822 special characters in +reply
+
+When replying to emails from corporate senders with display names like
+&#34;Anderson, Rich (CORP)&#34; &lt;email@adp.com&gt;, the +reply command fails with
+&#34;Invalid To header&#34; (400) from the Gmail API.
+
+The root cause: encode_address_header() strips quotes from the display
+name via extract_display_name(), then reconstructs the address without
+re-quoting. When the display name contains RFC 2822 special characters
+(commas, parentheses), the unquoted form is ambiguous — commas split
+it into multiple malformed mailboxes and parentheses are interpreted
+as RFC 2822 comments.
+
+Fix: re-quote the display name when it contains any RFC 2822 special
+characters, using a single-pass character iterator that preserves
+already-escaped sequences and escapes bare quotes/backslashes.
+
+Fixes #512
+
+* feat(gmail): add --attachment flag, +read helper, and mail-builder migration
+
+Consolidates PRs #491, #513, #517, and #502 into a single rollup:
+
+- Migrate message construction to mail-builder crate (RFC-compliant MIME)
+- Add --from flag to +send for send-as alias support
+- Add --attachment flag to +send with MIME auto-detection and path validation
+- Add +read helper for extracting message body/headers (text, HTML, JSON)
+- Serialize support for OriginalMessage and Mailbox types
+- Display name quoting handled natively by mail-builder
+
+* chore: regenerate skills [skip ci]
+
+* fix: use validate_safe_file_path for attachment path validation
+
+Addresses Gemini review: validate_safe_dir_path hardcodes &#39;--dir&#39; in
+error messages. validate_safe_file_path accepts the flag name, so errors
+now correctly reference &#39;--attachment&#39;.
+
+* refactor: make OriginalMessage.thread_id optional
+
+The Gmail API does not guarantee threadId on all message resources
+(e.g. drafts). Making it Option&lt;String&gt; prevents parse failures on
+valid messages and avoids requiring thread_id in helpers like +read
+that don&#39;t use it.
+
+* fix: use canonicalized path for attachment file operations (TOCTOU)
+
+validate_safe_file_path returns a canonicalized PathBuf. Use it for
+exists/is_file checks and downstream file reads instead of the original
+un-resolved path to prevent time-of-check/time-of-use races.
+
+* feat(gmail): add --attach flag for file attachments
+
+Add -a/--attach to +send, +reply, +reply-all, and +forward. Can be
+specified multiple times for multiple attachments. MIME type is auto-
+detected via mime_guess2. Closes #247.
+
+Send via the Gmail API upload endpoint (multipart/related with
+message/rfc822 media type) instead of base64-encoding into a JSON raw
+field. This raises the size limit from ~5MB (metadata-only endpoint) to
+35MB (upload endpoint, per discovery document).
+
+Introduce UploadSource enum in the executor to consolidate upload_path,
+upload_content_type, and upload_bytes into a single type-safe parameter.
+File and Bytes variants make the two upload strategies (from disk vs.
+from memory) mutually exclusive by construction.
+
+Validates attachment paths (control characters, regular file, non-empty)
+and total size (25MB raw limit, accounting for base64 expansion of
+attachments within the MIME message against the 35MB API limit). Size
+check uses actual bytes read to avoid TOCTOU race.
+
+* chore: update changeset and fix integration with malob&#39;s attachment impl
+
+Update changeset to reflect combined work. Fix thread_id type mismatches
+in new tests from cherry-pick. Fix upload_path scope in main.rs. Make
+reject_control_chars pub(crate) for attachment validation.
+
+Co-authored-by: Malo Bourgon &lt;mbourgon@gmail.com&gt;
+
+* chore: regenerate skills [skip ci]
+
+* fix: restore MIME sanitization and terminal escape protection in executor
+
+Restore two security features accidentally lost during the UploadSource
+refactor:
+
+1. resolve_upload_mime: restructure from early-returns to collect-then-
+   sanitize pattern — strips control chars from user-supplied MIME types
+   to prevent CRLF header injection.
+
+2. Model Armor error path: restore sanitize_for_terminal on error messages
+   to prevent terminal escape sequence injection from API responses.
+
+Co-authored-by: Malo Bourgon &lt;mbourgon@gmail.com&gt;
+
+* chore: remove duplicate changeset from cherry-pick
+
+gmail-attach-flag.md duplicated content already in gmail-helpers-rollup.md.
+Both were marked minor, which would cause a double version bump.
+
+* fix: add path traversal protection to attachment validation
+
+Replace reject_control_chars with validate_safe_file_path in
+parse_attachments. All file operations (metadata, read, filename
+extraction, MIME detection) now use the canonicalized path, preventing
+path traversal attacks (e.g. ../../.ssh/id_rsa) and closing TOCTOU gaps.
+
+Update tests to use CWD-relative temp directories (tempdir_in(&#34;.&#34;))
+since validate_safe_file_path rejects paths outside the working directory.
+
+Co-authored-by: Malo Bourgon &lt;mbourgon@gmail.com&gt;
+
+* refactor: deduplicate terminal sanitizer in read.rs
+
+Replace the local sanitize_terminal_output function with the existing
+crate::error::sanitize_for_terminal via import alias. This eliminates
+code duplication and provides consistent sanitization across the codebase.
+
+The crate-wide sanitizer also correctly strips CR (carriage return) which
+can be abused for terminal overwrite attacks.
+
+---------
+
+Co-authored-by: Malo Bourgon &lt;mbourgon@gmail.com&gt;
+Co-authored-by: Rich Anderson &lt;richanderson00@gmail.com&gt;
+Co-authored-by: jpoehnelt-bot &lt;jpoehnelt-bot@users.noreply.github.com&gt;
+Co-authored-by: googleworkspace-bot &lt;googleworkspace-bot@users.noreply.github.com&gt;
+
+- chore: release versions (#522)
+
+- fix: stderr/output hygiene rollup (#525)
+
+* fix: stderr/output hygiene rollup — diagnostics to stderr, colored labels, auth propagation
+
+Component 1 (PR #485): Route triage &#39;no messages&#39; and modelarmor error
+bodies to stderr so stdout stays machine-readable.
+
+Component 2 (PR #466): Add colored error[variant]: labels to stderr
+on TTY, respecting NO_COLOR. Replace emoji hint with colorized text.
+
+Component 3 (PR #446): Propagate auth errors as GwsError::Auth in
+calendar, chat, docs, drive, script, sheets helpers instead of
+silently proceeding unauthenticated. dry-run bypass preserved.
+
+* fix: deduplicate accessNotConfigured stderr output
+
+Use if/else so that accessNotConfigured errors get the specialized
+hint guidance instead of redundantly printing both the generic summary
+and the hint. Non-accessNotConfigured Api errors and all other variants
+still get the generic error[variant]: summary line.
+
+* test: remove misleading model_armor_post error format test
+
+model_armor_post function. A proper integration test would require
+HTTP mocking (e.g. mockito/wiremock) which is out of scope for this PR.
+
+* refactor: deduplicate error printing else branches
+
+Use early return in accessNotConfigured branch so the generic
+eprintln! only appears once, eliminating the duplicated else blocks.
+
+* security: sanitize error messages before printing to stderr
+
+Add sanitize_for_terminal() to strip control characters (ANSI escape
+sequences, bell, backspace, etc.) from error messages before printing
+to stderr, preventing terminal escape injection from API responses.
+Newlines and tabs are preserved for readability.
+
+The function is pub(crate) so it can be reused by other modules that
+print untrusted content to stderr.
+
+* fix: sanitize all stderr error output across codebase
+
+Apply sanitize_for_terminal() to all 16 remaining eprintln sites
+that print unsanitized error strings to stderr. This prevents
+terminal escape sequence injection through error messages.
+
+Files updated:
+- workflows.rs (4 sites)
+- watch.rs (2 sites)
+- gmail/mod.rs (3 sites)
+- executor.rs (1 site)
+- subscribe.rs (1 site)
+- token_storage.rs (2 sites)
+- credential_store.rs (2 sites)
+- setup.rs (1 site)
+- generate_skills.rs (1 site)
+
+Also fixes clippy: map_err -&gt; inspect_err where closure only logs.
+
+---------
+
+Co-authored-by: jpoehnelt-bot &lt;jpoehnelt-bot@users.noreply.github.com&gt;
+
+- fix(security): cap Retry-After sleep, sanitize upload mimeType, and validate --upload/--output paths (#523)
+
+* fix(security): cap Retry-After sleep, sanitize upload mimeType, and validate --upload/--output paths
+
+- Cap Retry-After header at 60s to prevent hostile servers from hanging the CLI
+- Extract compute_retry_delay() with saturating_pow for safe exponential backoff
+- Sanitize mimeType by stripping control characters to prevent MIME header injection
+- Add validate_safe_file_path() for --upload and --output path validation
+- Gate --upload/--output through path validation in main.rs before any I/O
+
+Consolidates security fixes from PRs #448 and #447.
+
+* chore: regenerate skills [skip ci]
+
+* fix: resolve mimeType sanitization bypass and document TOCTOU caveat
+
+- Restructure resolve_upload_mime() using or_else chain so all code paths
+  go through control-char stripping (early returns were bypassing it)
+- Document TOCTOU limitation in validate_safe_file_path() as known caveat
+
+* fix: use canonicalized paths for I/O and normalize .. in non-existent suffix
+
+Address review comments:
+- main.rs: use canonicalized path from validate_safe_file_path for I/O
+  instead of discarding it (closes TOCTOU gap)
+- validate.rs: add normalize_dotdot() to resolve .. components in
+  non-existent suffix (prevents traversal via doesnt_exist/../../etc/passwd)
+- Add regression test for non-existent prefix traversal bypass
+
+---------
+
+Co-authored-by: jpoehnelt-bot &lt;jpoehnelt-bot@users.noreply.github.com&gt;
+Co-authored-by: googleworkspace-bot &lt;googleworkspace-bot@users.noreply.github.com&gt;
+
+- chore: sync skills with Discovery API (#524)
+
+* chore: regenerate skills from Discovery API
+
+* chore: regenerate skills [skip ci]
+
+---------
+
+Co-authored-by: jpoehnelt &lt;3392975+jpoehnelt@users.noreply.github.com&gt;
+Co-authored-by: googleworkspace-bot &lt;googleworkspace-bot@users.noreply.github.com&gt;
+
+- style: cargo fmt
+
+- fix(validate): reject dangerous Unicode characters in input validation (#484)
+
+* fix(validate): reject dangerous Unicode characters in input validation
+
+Extend reject_control_chars() and validate_resource_name() to reject
+zero-width chars (U+200B, U+200C, U+200D, U+FEFF), bidi overrides
+(U+202A-U+202E), Unicode line/paragraph separators (U+2028, U+2029),
+and directional isolates (U+2066-U+2069). These multi-byte codepoints
+were silently passing the previous ASCII-range byte check, creating
+a potential injection vector when the CLI is driven by LLM agents.
+Adds 20 new tests covering all rejected categories plus documented
+intentional pass-throughs (homoglyphs, overlong names).
+
+* refactor(validate): replace slice const with is_rejected_unicode() fn using matches!
+
+Switch from a REJECTED_UNICODE_CHARS &amp;[char] constant + .contains() (O(M)
+linear scan per character) to an is_rejected_unicode(c: char) -&gt; bool helper
+that uses the matches! macro with char ranges. This gives O(1) per character
+and reads more clearly at call sites via .any(is_rejected_unicode).
+
+* perf(validate): combine ASCII and Unicode checks into a single pass
+
+Address review feedback: replace the two-iteration approach (one byte
+scan + one char scan) in reject_control_chars with a single char loop,
+and merge the separate is_control / is_rejected_unicode guards in
+validate_resource_name into one any() call. Avoids iterating the input
+string twice, closing the O(N*M) concern raised by the reviewer.
+
+- style: cargo fmt
+
+- feat: support google meet video conferencing in calendar +insert (#506)
+
+* feat: support google meet video conferencing in calendar +insert (#461, #419)
+
+* feat: add unit tests for google meet and align dependencies
+
+* chore: add changeset for google meet support
+
+* style: cargo fmt
+
+* chore: address PR feedback - restore ratatui 0.30.0 and clarify help text
+
+* test: use robust assertions for google meet insert
+
+* feat: make Google Meet requestId deterministic for idempotency
+
+* fix: restore dependencies and make Google Meet requestId seed more robust
+
+* fix: use JSON serialization for robust Google Meet requestId seed
+
+* fix: improve error handling for Google Meet requestId seed serialization
+
+* fix: ensure idempotency key seed structure matches request body
+
+* fix: align seed_payload attendees structure with actual request body
+
+- docs: fix Environment Variables table formatting in README (#490)
+
+* docs: fix Environment Variables table formatting in README
+
+Remove blank line that was breaking the markdown table into two separate tables.
+
+Co-Authored-By: Claude Sonnet 4.5 &lt;noreply@anthropic.com&gt;
+
+* chore: trigger CLA recheck
+
+---------
+
+Co-authored-by: Claude Sonnet 4.5 &lt;noreply@anthropic.com&gt;
+
+- fix(security): eliminate TOCTOU race condition in atomic writes (#500)
+
+- Use tempfile::NamedTempFile for synchronous atomic_write to ensure 0600 permissions at creation.
+- Use tokio::fs::OpenOptions with mode(0o600) for asynchronous atomic_write_async.
+- Remove redundant set_permissions calls in oauth_config.rs and credential_store.rs.
+- Ensure tempfile is a regular dependency (was dev-dependency).
+- Add tests to verify file permissions on Unix systems.
+
+Fixes #401</div>
+</div>
+
+<a href="../project/googleworkspace_cli.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
