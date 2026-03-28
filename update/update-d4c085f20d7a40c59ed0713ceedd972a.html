@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (100 commits) - osaurus-ai/osaurus - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (100 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/osaurus-ai_osaurus.html">osaurus-ai/osaurus</a> /
+    Updates in main (100 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/osaurus-ai_osaurus.html">osaurus-ai/osaurus</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-03-28 02:54 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/osaurus-ai/osaurus/commits/main" target="_blank">https://github.com/osaurus-ai/osaurus/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление значительно повышает производительность за счет снижения потребления GPU, внедрения двухфазного префилла для гибридных моделей (Qwen3.5) и многоуровневого KV-кэша с O(1) потоковым декодированием, что резко сокращает время до первого токена (TTFT). Также улучшена интеграция инструментов, включая переключатель &#34;Disable Tools&#34; и детерминированный порядок, что в сочетании с другими исправлениями повышает повторное использование KV-кэша за счет предотвращения расхождения промптов. Кроме того, выпуск включает различные улучшения качества кода, доработки пользовательского интерфейса, такие как индикатор прогресса префилла, и основные архитектурные обновления для надежности локального вывода и совместимости со Swift 6.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Merge pull request #735 from vernonstinebaker/feat/disable-tools-toggle
+
+feat: add Disable Tools toggle to chat configuration
+
+- Update appcast and notes for 0.15.7
+
+- Merge pull request #740 from osaurus-ai/chore/fix-warnings-2
+
+fix warnings and code format
+
+- fix warnings and code format
+
+- Merge pull request #738 from osaurus-ai/enhancement/reduce-gpu-usage-1
+
+several optimizations for bringing down GPU usage
+
+- Merge pull request #737 from vernonstinebaker/perf/two-phase-prefill
+
+perf: two-phase prefill for hybrid SSM/transformer models (Qwen3.5)
+
+- Merge pull request #736 from vernonstinebaker/perf/kv-cache-tiered-store
+
+perf: tiered KV cache store, O(1) streaming decode, eval fix
+
+- Merge pull request #734 from vernonstinebaker/perf/preflight-memoization
+
+perf: memoize preflight capability search results per session
+
+- Merge pull request #733 from vernonstinebaker/perf/tool-registry-sort
+
+perf: sort alwaysLoadedSpecs() for deterministic tool ordering
+
+- Merge pull request #732 from vernonstinebaker/fix/swift-jinja-2.3.3
+
+chore: bump swift-jinja 2.3.2 → 2.3.3
+
+- Merge pull request #739 from osaurus-ai/bugfix/plugin-fixes
+
+fixed issue with plugin installation and notification crash
+
+- fixed issue with plugin installation and notification crash
+
+- several optimizations for bringing down GPU usage
+
+- perf: two-phase prefill for hybrid SSM/transformer models (Qwen3.5)
+
+Hybrid models (Qwen3.5-9B, Qwen3.5-27B) have 24 MambaCache layers that
+are not trimmable. The chat template appends a generation-prefix token
+sequence (e.g. &#39;&lt;|im_start|&gt;assistant\n&lt;think&gt;\n&#39;) after the last user
+turn. This prefix is present in the cache from the prior turn but absent
+in the prompt for the next turn, causing commonPrefix to diverge ~5
+tokens before cacheOffset. toTrim = 5 &gt; 0, MambaCache.isTrimmable =
+false → full re-prefill every turn (~76s on Qwen3.5-9B).
+
+Fix: split prefill into two phases separated at the stable boundary
+(last user message, before gen-prefix):
+
+  Phase 1: process all tokens up to stableBoundary with model.prepare()
+  (resets precomputedPositionIds / ropeDeltas for VLMs, prevents
+  position-state corruption in subsequent turns).
+
+  Snapshot: deep-copy cache at stableBoundary and return it alongside
+  the final prompt tokens as GenerationResult.snapshotCache / .snapshotTokens.
+
+  Phase 2: process remaining tokens (gen-prefix) then begin generation.
+
+ModelRuntime stores the stable-boundary snapshot instead of the full-
+prompt snapshot so the next turn&#39;s common-prefix hits exactly at
+cacheOffset with toTrim == 0.
+
+Guard: useTwoPhase requires existingCache != nil to skip Phase 1 on
+the first turn (avoids doubling peak RAM with the initial system-prompt
+prefill). On T1 the single-phase path runs; two-phase activates from T2.
+
+Generation loop uses a manual AsyncStream instead of TokenIterator.init
+because TokenIterator.init calls model.prepare() which would overwrite
+the Phase-1 position state.
+
+Benchmark on M4 Pro 64GB (3-turn, non-trivial prompts):
+  Qwen3.5-9B-MLX-4bit  T2 TTFT: 76 000ms → 3 689ms (~20x improvement)
+  Qwen3.5-27B-4bit     T2 TTFT: ~120 000ms → 8 490ms (~14x improvement)
+  Non-hybrid models (Phi-4, GLM-4) unaffected (single-phase trim path).
+
+- perf: tiered KV cache store, O(1) streaming decode, eval fix
+
+KVCacheStore gains a two-tier (hot RAM / cold SSD) architecture.
+Hot entries are kept up to a model-size-derived RAM budget; entries
+that are evicted from RAM are serialised to SSD in a background task
+and rehydrated on the next turn. Access order is maintained by an
+O(1) doubly-linked LRU list so eviction is never O(n).
+
+StreamAccumulator gains an O(1) sliding-window decode path: instead of
+re-decoding the entire token history on every new token (O(n²) total),
+only the net-new suffix is decoded per step (O(n) total). os_signpost
+intervals bracket each accumulate() call for easy Instruments profiling.
+
+ModelRuntime gains three correctness fixes:
+1. eval() is called on cache arrays in storeSessionCache and
+   buildPrefixCache. TokenIterator leaves MLX graph nodes in the cache
+   that cause the engine to re-walk the full computation graph on the
+   next turn; forcing materialisation here makes subsequent reads O(1).
+2. buildPrefixCache / generateEventStream use the new GenerationResult
+   struct returned by MLXGenerationEngine (removes positional tuple).
+3. Cache snapshot moved to pre-generation (immediately after prefill,
+   before any tokens are generated), replacing the post-generation
+   wrapWithCacheStore approach. A post-generation snapshot offsets the
+   cache by (promptTokens + generatedIds), causing the common-prefix to
+   diverge on the next turn and requiring trim; the pre-generation
+   snapshot eliminates that divergence for both single- and two-phase
+   paths.
+
+KVCacheStoreTests adds coverage for deepCopyCache (KVCacheSimple,
+RotatingKVCache, MambaCache, mixed types, no-op on missing session) and
+fixes a latent crash in RotatingKVCache deep-copy when state is empty.
+
+- feat: add Disable Tools toggle to chat configuration
+
+Adds a disableTools flag to ChatConfiguration that bypasses all tool
+injection (built-in specs, preflight RAG results, and context snippets)
+so the raw message is sent directly to the model.
+
+This keeps the system-prompt token sequence stable across turns, which
+is a prerequisite for KV-cache reuse: any variation in injected tool
+specs causes prompt divergence and forces a full re-prefill.
+
+Use case: osaurus acting as a plain LLM backend for an external agent
+(e.g. Claude via API) where the caller manages its own tool routing.
+
+Also fixes maxToolAttempts clamp in ConfigurationView from max 10 → 50,
+matching the UI allowed range and the default value of 15.
+
+- perf: memoize preflight capability search results per session
+
+Running PreflightCapabilitySearch on every turn is expensive and
+produces non-deterministic tool lists, which invalidates KV-cache
+reuse: any change in the injected tool specs causes prompt divergence
+early in the sequence, forcing a full re-prefill.
+
+Add a session-scoped in-memory cache (PluginHostContext) so the tool
+set is computed once per session and reused on subsequent turns.
+ChatWindowManager calls invalidatePreflightCache when a window closes
+to release the entry and avoid stale tool definitions on new sessions.
+
+- perf: sort alwaysLoadedSpecs() for deterministic tool ordering
+
+Without a stable sort, the order of tool specs returned by
+alwaysLoadedSpecs() varies between calls depending on Set / Dictionary
+iteration order. Any change in tool ordering shifts the serialised system
+prompt, causing prompt divergence before the first user token and forcing
+a full KV-cache re-prefill on every turn.
+
+A one-line .sorted { $0.name &lt; $1.name } makes the list order
+deterministic, keeping the prompt byte-for-byte identical across turns.
+
+- fix: bump swift-jinja to 2.3.3 for correct tojson key ordering
+
+Version 2.3.2 produced non-deterministic JSON key ordering in the tojson
+Jinja filter. This caused spurious prompt divergence across turns for any
+model whose chat template serialises tool specs via tojson, forcing full
+re-prefill on every turn instead of reusing the KV cache.
+
+2.3.3 sorts keys lexicographically, making the serialised output stable.
+
+- Merge pull request #731 from vernonstinebaker/fix/preflight-topk-test-expectations
+
+fix(tests): update PreflightCapabilitySearch topKValues expectations after #730
+
+- fix(tests): update topKValues expectations to match upstream #730 changes
+
+- Merge pull request #730 from osaurus-ai/chore/improve-capability-search
+
+improve capability search
+
+- fix warnings
+
+- improve capability search
+
+- Update appcast and notes for 0.15.6
+
+- Merge pull request #729 from osaurus-ai/chore/cli-fixes-2
+
+updated tools dev and local plugin access
+
+- updated tools dev and local plugin access
+
+- Merge pull request #714 from vernonstinebaker/fix/qwen-tool-call-xml
+
+fix(tools): delegate MLX tool-call parsing to upstream ToolCallProcessor
+
+- Merge pull request #727 from vernonstinebaker/chore/swift6-xcode26-fixes
+
+chore: fix Swift 6 / Xcode 26.4 strict concurrency build errors
+
+- fix(tools): delegate MLX tool-call parsing to upstream ToolCallProcessor
+
+Replace osaurus&#39;s hand-rolled ToolDetection with delegation to
+ToolCallProcessor from mlx-swift-lm / MLXLMCommon. This makes tool-call
+parsing correct for all model families automatically as mlx-swift-lm
+adds support for them (Gemma, LFM2, Mistral, GLM4, Kimi K2, etc.),
+without requiring changes in osaurus.
+
+Changes:
+- StreamAccumulator: delegate entirely to ToolCallProcessor; feed tokens
+  via processChunk(), detect completion via toolCalls.count growth,
+  flush on stop-sequence and EOS via processEOS()
+- MLXGenerationEngine: include ToolCallFormat as 6th return value so
+  the format auto-detected by mlx-swift-lm flows through to the accumulator
+- ModelRuntime: remove Qwen-specific stop sequence (ToolCallProcessor
+  handles format-specific delimiters internally); wire toolCallFormat and
+  capturedToolsSpec through to StreamAccumulator
+- ToolDetection.swift renamed to RemoteToolDetection.swift: the hand-rolled
+  JSON/XML scanner is now only used by RemoteProviderService as a fallback
+  for remote/proxy providers that stream tool calls inline in text content
+  rather than the structured tool_calls field; MLX local inference no
+  longer uses it
+- Tests: ToolDetectionTests rewritten for new architecture; two tests
+  updated to reflect streaming-first (not backwards-scan) behavior;
+  StreamAccumulatorTests and ModelRuntimeFallbackTests updated accordingly;
+  PluginTests: add artifact_handler: nil for new Capabilities field
+
+- chore: fix Swift 6 / Xcode 26.4 strict concurrency build errors
+
+Xcode 26.4 enforces Swift 6 strict concurrency checking more aggressively
+than 16.x, exposing build failures in two dependencies and three source
+files that were previously only warnings or silent.
+
+Dependency updates:
+- swift-sdk 0.10.x → from: &#34;0.12.0&#34;: fixes NetworkTransport data race
+  (upstream PR #206). Also adds annotations/metadata fields to
+  Tool.Content cases that required call-site pattern updates.
+- FluidAudio 0.12.1 → from: &#34;0.12.6&#34;: AsrManager converted to actor,
+  fixing StreamingAsrManager sending-risk data race errors.
+
+Source fixes:
+- MCPProviderTool.swift: update .text/.image/.audio/.resource pattern
+  matches for new MCP SDK 0.12 tuple labels (annotations:, _meta:)
+- MCPProviderManager.swift: same .text pattern match update
+- WorkEngine.swift: add Sendable to WorkEngineDelegate so the delegate
+  can be sent across actor boundaries without data races
+- HostAPIBridgeServer.swift: explicit capture list [plugin] in
+  Task { @MainActor in } closure to satisfy Swift 6 sendability checker
+
+- Update appcast and notes for 0.15.5
+
+- Merge pull request #726 from osaurus-ai/chore/cli-fixes
+
+resolve sym link for tool cli build
+
+- resolve sym link
+
+- Merge pull request #717 from vernonstinebaker/perf/phase2-lazy-prefix-cache
+
+perf(PrefixCache): lazy load prefix cache in background to drastically unblock TTFT
+
+- Merge pull request #724 from RaajeevChandran/enhancement/improve-scroll-performance-in-model-picker
+
+improved scroll performance in model picker
+
+- Merge pull request #725 from vernonstinebaker/fix/prefill-shimmer-geom-reader
+
+fix(TypingIndicator): fix shimmer overflow into &#34;Processing prompt…&#34; text
+
+- fix(TypingIndicator): replace GeometryReader shimmer with gradient UnitPoint animation
+
+PrefillShimmerBar used a GeometryReader + pixel offset to sweep a
+fixed-width block across the bar, which caused the animated block to
+render outside the 80pt frame and bleed into the adjacent
+&#34;Processing prompt…&#34; text.
+
+Replace the approach in both the private PrefillShimmerBar (now deleted)
+and the shared IndeterminateShimmerProgress with animated LinearGradient
+UnitPoints. Animating startPoint/endPoint in unit-coordinate space keeps
+the sweep naturally bounded by the shape it fills — no GeometryReader,
+no pixel math, no .clipped() workaround needed.
+
+- Delete PrefillShimmerBar entirely; TypingIndicator now uses the
+  shared IndeterminateShimmerProgress(color:height:) instead
+- Rewrite IndeterminateShimmerProgress: GeometryReader + ZStack +
+  .offset replaced by a background RoundedRectangle with an .overlay
+  whose LinearGradient animates phase ± 0.4 in UnitPoint x-coordinates
+
+- perf(PrefixCache): lazy load prefix cache in background explicitly unblocking TTFT on cold conversations
+
+- improved scroll performance in model picker
+
+- Update appcast and notes for 0.15.4
+
+- Merge pull request #723 from osaurus-ai/chore/tools-dev-cli
+
+improve plugin dev experience
+
+- improve plugin dev experience
+
+- Merge pull request #722 from osaurus-ai/chore/host-api-updates
+
+Host API updates - added preflight and artifact handler
+
+- added artifact handler
+
+- added host API updates
+
+- Update appcast and notes for 0.15.3
+
+- Merge pull request #721 from osaurus-ai/bugfix/tool-indexing-fixes
+
+fixed default tool indexing issues
+
+- fixed default tool indexing issue
+
+- Merge pull request #720 from osaurus-ai/bugfix/missing-remote-providers
+
+fixed issue with missing remote providers for work and host api
+
+- fixed issue with missing remote providers for work and host api
+
+- Update appcast and notes for 0.15.2
+
+- Merge pull request #712 from vernonstinebaker/fix/chat-engine-misc-fixes
+
+Fix ChatEngine remote services isolation, bookmark fallback, and config trimming
+
+- Merge pull request #711 from vernonstinebaker/feat/mlx-generation-engine
+
+Rewrite StreamAccumulator as pull-based AsyncSequence for reliable local inference
+
+- Merge pull request #710 from vernonstinebaker/feat/prefill-progress-ui
+
+Add prefill progress bar and auto-expand thinking block during streaming
+
+- Merge pull request #701 from RaajeevChandran/enhancement/voice-input-stop-mode
+
+added manual transcription stop mode
+
+- Merge pull request #719 from osaurus-ai/chore/ui-improvements-2
+
+Orb Improvements (run from shader, check your CPU)
+
+- use metal for orb shader
+
+- fix content width
+
+- Merge pull request #718 from osaurus-ai/bugfix/fixed-xai-issue
+
+fixed 400 issue with xAI API with missing tool params
+
+- fixed 400 issue with xAI API with missing tool params
+
+- perf(KVCacheStore): make saveToDisk async to unblock inference thread
+
+SSD writes (savePromptCache) are synchronous and can take 50ms+ for large
+caches on slow storage. Running them on the ModelRuntime actor blocked
+subsequent token generation calls during eviction.
+
+Now uses Task.detached(priority: .background) and sets ssdPath optimistically
+before the write so duplicate saves are avoided. Adds lastSaveTask property
+for test observability, and a test that asserts saveToDisk returns in &lt;50ms.
+
+- fix(TypingIndicator): use theme-aware colors for PrefillShimmerBar
+
+PrefillShimmerBar used hardcoded Color.white which was invisible on light
+backgrounds. Replace with theme.tertiaryText for the track and
+theme.accentColor for the shimmer highlight.
+
+- fix: restore typing indicator for all models during prefill
+
+The typing indicator was inside the thinkingEnabled guard, so non-thinking
+models lost all visual feedback during prefill. Split the two concerns:
+- Typing indicator emitted unconditionally during prefill (all models)
+- Thinking placeholder block only emitted when thinkingEnabled is true
+
+- fix: only show prefill thinking placeholder when thinking is enabled
+
+The empty thinking block emitted during prefill (before the first token
+arrives) was appearing for every model regardless of whether thinking was
+active. Add thinkingEnabled: Bool to generateBlocks and BlockMemoizer.blocks,
+and guard the placeholder behind it. ChatView passes thinkingEnabled based on
+activeModelOptions[&#34;disableThinking&#34;] == false, so the placeholder only
+appears for sessions where the user has explicitly enabled thinking.
+
+- fix(ThinkingBlockView): manual-only expand; fix row remeasure on expand/stream
+
+- Remove all auto-expand/auto-collapse logic from ThinkingBlockView.
+  The block now only opens/closes when the user clicks the chevron.
+- scheduleStreamingHeightUpdate: call layoutSubtreeIfNeeded on the cell
+  before noteHeightOfRows so the hosting view&#39;s SwiftUI layout pass has
+  committed the new streamingContentHeight before the table re-measures.
+- subscribeToExpandedStore: defer the first noteVisibleRowHeightsChanged
+  by 50ms (past the current run-loop tick) so SwiftUI has processed the
+  state change before the table asks for the new intrinsic size.
+
+- fix(ThinkingBlockView): use concrete height during streaming for NSHostingView
+
+NSHostingView in an NSTableView cell cannot measure unconstrained SwiftUI
+containers — maxHeight: nil collapses to zero, so the row never grows during
+streaming. Fix: compute a concrete streamingContentHeight from character count
+and baseWidth, and use plain Text (no ScrollView) while streaming so the table
+can correctly remeasure the row. After streaming, restore the ScrollView with
+the 300pt cap.
+
+- Fix ChatEngine remote services isolation, DirectoryPickerService bookmark fallback, and config trimming
+
+ChatEngine / ChatView:
+- Remote services are now captured on @MainActor at construction time
+  (ChatSession.chatEngineFactory creates a ChatEngine with a snapshot of
+  RemoteProviderManager.shared.connectedServices()) rather than fetching
+  them async inside the actor on every request. Removes the
+  getRemoteProviderServices() helper and its MainActor.run hop.
+- chatEngineFactory closure is now @MainActor (was @Sendable) since it is
+  only ever called from ChatSession which is @MainActor.
+- Move debugLog utility to Utils/DebugLog.swift (per architecture guidelines);
+  remove definition from ChatView.swift.
+
+DirectoryPickerService:
+- Add a fallback bookmark resolution without the security scope option.
+  On non-sandboxed builds, security-scoped bookmarks can become stale
+  after a volume remount; the fallback allows the URL to be resolved
+  from the bookmark data alone.
+
+ConfigurationView:
+- Trim whitespace before converting genMaxKVSize and genPrefillStepSize
+  text fields to Int. Empty/whitespace-only strings now produce nil
+  instead of 0.
+
+MLXService:
+- Minor formatting fix (extra braces around early return).
+
+- Rewrite StreamAccumulator as pull-based AsyncSequence for reliable local inference
+
+Root cause: the previous Task-based producer pattern was unreliable in
+xcrun xctest and any context where unstructured Tasks may not be scheduled.
+
+Key changes:
+
+StreamAccumulator (full rewrite):
+- Now an AsyncSequence/AsyncIteratorProtocol; all processing happens
+  synchronously inside Iterator.next() — no background Task spawned
+- Incremental decoding: accumulates token IDs and calls tokenizer.decode()
+  on the full list each time, then diffs against the previous decoded string
+  to extract the new chunk (correct for BPE tokenizers)
+- Stop-sequence lookahead buffer: holds back up to maxStopLen-1 chars at the
+  tail to avoid emitting stop sequences as content
+- onGeneratedTokenIds callback: fired on natural stream completion with
+  the full list of generated token IDs (used for KV cache persistence)
+- prefillWillStartAsync / prefillDidFinishAsync hooks for progress UI
+- asAsyncThrowingStream() bridge for callers that require that type
+
+MLXGenerationEngine:
+- Uses generateTokenTask instead of generate() for true incremental output
+- effectiveCacheOffset() free function computes the largest KV offset
+  across hybrid-model cache layers (handles ArraysCache offset=0 correctly)
+
+ModelRuntime:
+- Calls prefillWillStartAsync before starting generation
+- Uses .asAsyncThrowingStream() on the accumulator
+- wrapWithCacheStore stores promptTokens + generatedTokenIds
+
+Package.swift:
+- Adds Tokenizers dependency (required by StreamAccumulator for decoding)
+
+Scheme:
+- Adds OsaurusCoreTests to BuildActionEntries so build-for-testing
+  produces the test bundle (was previously only in TestAction)
+
+Tests:
+- MLXGenerationEngineTests: 6 tests for effectiveCacheOffset edge cases
+- StreamAccumulatorTests: 12 tests (basic emission, stop sequences,
+  prefill hooks, tool detection, incremental decode, callbacks)
+- WorkExecutionEngineTests: remove stale issue: parameter
+
+- Add prefill progress bar and auto-expand thinking block during streaming
+
+TypingIndicator:
+- Shows a shimmer progress bar during the prefill phase (before first token)
+  using InferenceProgressState.prefillTokenCount for a live token counter
+- Includes an elapsed timer (updates every 0.5s) so users see time passing
+- Progress bar pulses with a shimmer animation until generation starts
+
+ContentBlock:
+- Injects an empty streaming thinking block during prefill so the thinking
+  block container appears immediately (before any &lt;think&gt; tokens arrive),
+  giving users a visual anchor while the model processes their prompt
+
+ThinkingBlockView:
+- Auto-expands when streaming starts and content arrives
+- Auto-collapses once streaming finishes (thinking complete)
+- Hides character count hint when block is empty
+
+- Update appcast and notes for 0.15.1
+
+- Merge pull request #706 from TheSwanFactory/feat/mcpb-bundle-cli
+
+feat: Add MCPB bundle loading CLI command
+
+- Merge pull request #709 from vernonstinebaker/feat/inference-progress-state
+
+Add InferenceProgressManager for tracking MLX prefill/generation progress
+
+- Merge pull request #708 from vernonstinebaker/fix/kvcache-hybrid-model-validation
+
+Fix isValidCache to accept hybrid (Mamba+KVCacheSimple) model caches
+
+- fix: plugins didn&#39;t load secrets for agents properly
+
+The Telegram plugin couldn&#39;t access webhook secret during initialization.
+
+This PR solves the problem by loading config for all agents during init
+
+- fix: plugins didn&#39;t load secrets for agents properly
+
+- fix: build in XCode was failling
+
+- Add InferenceProgressManager for tracking MLX prefill/generation progress
+
+- Fix isValidCache to accept hybrid (Mamba+KVCacheSimple) model caches
+
+Qwen3.5-27B and other hybrid models interleave ArraysCache (Mamba) layers
+with KVCacheSimple layers. Previously allSatisfy { offset &gt; 0 } rejected
+valid restored caches because ArraysCache.offset is always 0.
+
+New rule: cache is valid when all layers have non-empty state AND at least
+one non-ArraysCache layer has a positive offset. Adds a debug-only
+_testIsValidCache helper and 6 unit tests covering the new behaviour.
+
+- Merge branch &#39;main&#39; into enhancement/voice-input-stop-mode
+
+- improved waveform to accurately animate voice input
+
+- Update appcast and notes for 0.15.0
+
+- Merge pull request #704 from osaurus-ai/feature/context-management-system
+
+Improved Context Management System - new concept: methods
+
+- updated preflight indicator
+
+- updated documentation
+
+- added configurable options for capability search
+
+- updated stream preview and context budget
+
+- updated stream preview logic
+
+- fix: Support Claude Desktop MCPB format in addition to standard format
+
+Updated MCPBundleManifest to handle both:
+- Standard MCPB format (mcpVersion + entry object)
+- Claude Desktop format (manifest_version + server.mcp_config)
+
+This enables loading production bundles like Quilt MCP which use
+the Claude Desktop integration format. Tested successfully with
+quilt-mcp-0.22.0.mcpb which now loads and launches correctly.
+
+- adjust thinking option
+
+- feat: Add MCPB bundle loading CLI command (MVP)
+
+- updated context budget logic
+
+- updated sandbox tools
+
+- updated MCP logic
+
+- simplified method creation
+
+- updated rag implementation
+
+- simplified codebase significantly
+
+- updated changes
+
+- Merge pull request #702 from RaajeevChandran/bugfix/spaces-fullscreen-visibility-menu-bar
+
+ensure menu bar panel and windows are visible over full screen apps
+
+- Merge pull request #703 from RaajeevChandran/enhancement/smart-window-toggle-for-global-hotkey
+
+smart toggle logic for global chat hotkey</div>
+</div>
+
+<a href="../project/osaurus-ai_osaurus.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (11 commits) - kagent-dev/kagent - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (11 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/kagent-dev_kagent.html">kagent-dev/kagent</a> /
+    Updates in main (11 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/kagent-dev_kagent.html">kagent-dev/kagent</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-03-28 02:22 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/kagent-dev/kagent/commits/main" target="_blank">https://github.com/kagent-dev/kagent/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Этот выпуск включает значительные обновления, в том числе серьезную переработку встроенного развертывания PostgreSQL для повышения безопасности, надежности и гибкости конфигурации, что является ломающим изменением. Также удалена зависимость от `litellm`, вместо которой теперь используются SDK, специфичные для провайдеров, для поддержки различных моделей ИИ, таких как Ollama, Gemini и Bedrock. Среди ключевых новых функций — настраиваемый RBAC с областью видимости по пространствам имен в Helm-чартах, возможность применять глобальные метки по умолчанию ко всем подам агентов и поиск токена субъекта из состояния сессии.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- agentsts: allow subject token lookup from session state (#1559)
+
+Runtimes like Vertex do not pass along the HTTP headers to
+ADK plugins, and instead we need to rely on passing custom
+metadata such as application specific state via the session
+state. This change allows retrieving the subject token using
+a callback function that defaults to extracting it from the
+Authorization header in the session state.
+
+Signed-off-by: Shashank Ram &lt;shashank.ram@solo.io&gt;
+
+- add support for imagePullSecrets in postgres deployment (#1552)
+
+Signed-off-by: Dmitri Dolguikh &lt;dmitri@appliedlogic.ca&gt;
+
+- feat(helm): support namespaced RBAC in charts (#1549)
+
+Close #1546 
+
+- Adds a helm value to configure whether to use cluster scoped or
+namespaced RBAC for getter and writer roles
+- Render controller roles to `Role/RoleBinding` or
+`ClusterRole/ClusterRoleBinding` conditionally
+- Updated helm unit tests, tested manually by impersonating the service
+accounts
+- Limitation: When controller is not using cluster scoped role, either
+manually set `controller.watchNamespaces` or it is defaulted to the
+namespace accessible by the role.
+
+---------
+
+Signed-off-by: Jet Chiang &lt;pokyuen.jetchiang-ext@solo.io&gt;
+
+- feat(kagent-adk): remove litellm as dependency from kagent-adk (#1540)
+
+Removes `litellm` as a dependency from kagent. `litellm` is now replaced
+with provider specific sdks.
+
+### Testing
+**ollama**
+1. deploy ollama
+```bash
+kubectl apply -f - &lt;&lt;EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: kagent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      containers:
+      - name: ollama
+        image: ollama/ollama:latest
+        ports:
+        - containerPort: 11434
+        resources:
+          requests:
+            memory: &#34;2Gi&#34;
+          limits:
+            memory: &#34;4Gi&#34;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: kagent
+spec:
+  selector:
+    app: ollama
+  ports:
+  - port: 11434
+    targetPort: 11434
+EOF
+```
+2. Pull a small model into the ollama deployment - `kubectl -n kagent
+exec -it deploy/ollama -- ollama pull llama3.2:1b`
+3. create model config an agent
+```bash
+kubectl apply -f - &lt;&lt;EOF
+apiVersion: kagent.dev/v1alpha2
+kind: ModelConfig
+metadata:
+  name: ollama-test-config
+  namespace: kagent
+spec:
+  provider: Ollama
+  model: llama3.2:1b
+  ollama:
+    host: &#34;http://ollama:11434&#34;
+    options:
+      num_ctx: &#34;2048&#34;
+      temperature: &#34;0.7&#34;
+      top_k: &#34;40&#34;
+---
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: ollama-test
+  namespace: kagent
+spec:
+  type: Declarative
+  description: &#34;Ollama native SDK test&#34;
+  declarative:
+    modelConfig: ollama-test-config
+    systemMessage: &#34;You are a helpful assistant. Answer concisely.&#34;
+EOF
+```
+4. Port forward UI and test agent. `kubectl port-forward -n kagent
+svc/kagent-ui 3000:8080`
+&lt;img width=&#34;1722&#34; height=&#34;692&#34; alt=&#34;Screenshot 2026-03-25 at 7 21 20 PM&#34;
+src=&#34;https://github.com/user-attachments/assets/ca061c4c-0202-4a05-8968-92da4b9bf0a1&#34;
+/&gt;
+5. Test memory recall by pulling an embedding model `kubectl -n kagent
+exec -it deploy/ollama -- ollama pull nomic-embed-text`
+6. Create the embedding model config an ollama memory test agent
+```bash
+kubectl apply -f - &lt;&lt;EOF
+apiVersion: kagent.dev/v1alpha2
+kind: ModelConfig
+metadata:
+  name: ollama-embedding-config
+  namespace: kagent
+spec:
+  provider: Ollama
+  model: nomic-embed-text
+  ollama:
+    host: &#34;http://ollama:11434&#34;
+---
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: memory-ollama-test
+  namespace: kagent
+spec:
+  type: Declarative
+  description: &#34;Memory with Ollama embedding&#34;
+  declarative:
+    modelConfig: ollama-test-config    # chat model from Step 3
+    systemMessage: &#34;You are a helpful assistant with memory.&#34;
+    memory:
+      modelConfig: ollama-embedding-config
+EOF
+```
+7. Test in the UI.
+&lt;img width=&#34;1719&#34; height=&#34;981&#34; alt=&#34;Screenshot 2026-03-26 at 2 54 04 PM&#34;
+src=&#34;https://github.com/user-attachments/assets/d91306ec-f381-40bb-a3ea-4c4d4e5d631a&#34;
+/&gt;
+
+
+**embedding - google**
+1. Create secret and model config
+```bash
+kubectl apply -f - &lt;&lt;EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gemini-api-key-secret
+  namespace: kagent
+type: Opaque
+data:
+  GOOGLE_API_KEY: &lt;your_api_key&gt;
+---
+apiVersion: kagent.dev/v1alpha2
+kind: ModelConfig
+metadata:
+  name: gemini-2-flash-config
+  namespace: kagent
+spec:
+  model: gemini-2.0-flash
+  provider: Gemini
+  apiKeySecret: gemini-api-key-secret
+  apiKeySecretKey: GOOGLE_API_KEY
+  gemini: {}
+---
+apiVersion: kagent.dev/v1alpha2
+kind: ModelConfig
+metadata:
+  name: gemini-embedding-config
+  namespace: kagent
+spec:
+  model: gemini-embedding-001
+  provider: Gemini
+  apiKeySecret: gemini-api-key-secret
+  apiKeySecretKey: GOOGLE_API_KEY
+  gemini: {}
+EOF
+```
+2. Create Agent
+```bash
+kubectl apply -f - &lt;&lt;EOF
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: memory-openai-test
+  namespace: kagent
+spec:
+  type: Declarative
+  description: &#34;Memory with Gemini embedding&#34;
+  declarative:
+    modelConfig: gemini-2-flash-config
+    systemMessage: &#34;You are a helpful assistant with memory.&#34;
+    memory:
+      modelConfig: gemini-embedding-config
+EOF
+```
+3. Port forward UI and test agent. `kubectl port-forward -n kagent
+svc/kagent-ui 3000:8080`
+&lt;img width=&#34;1727&#34; height=&#34;700&#34; alt=&#34;Screenshot 2026-03-25 at 7 20 18 PM&#34;
+src=&#34;https://github.com/user-attachments/assets/f4f45a05-da6c-4593-9c8b-f369bfae51af&#34;
+/&gt;
+
+**bedrock**
+1. Create aws-credentials
+```bash
+kubectl -n kagent create secret generic aws-credentials \
+  --from-literal=AWS_ACCESS_KEY_ID=&#34;$AWS_ACCESS_KEY_ID&#34; \
+  --from-literal=AWS_SECRET_ACCESS_KEY=&#34;$AWS_SECRET_ACCESS_KEY&#34; \
+  --from-literal=AWS_DEFAULT_REGION=&#34;&lt;your_region&gt;&#34; \
+  --from-literal=AWS_SESSION_TOKEN=&#34;$AWS_SESSION_TOKEN&#34; \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+2. Create model config and agent
+```yaml
+apiVersion: kagent.dev/v1alpha2
+kind: ModelConfig
+metadata:
+  name: bedrock-model-config
+  namespace: kagent
+spec:
+  model: us.anthropic.claude-haiku-4-5-20251001-v1:0
+  provider: Bedrock
+  bedrock:
+    region: us-east-1
+---
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: bedrock-test
+  namespace: kagent
+spec:
+  type: Declarative
+  description: &#34;Bedrock Converse API test&#34;
+  declarative:
+    systemMessage: &#34;You are a helpful assistant. Answer concisely.&#34;
+    modelConfig: bedrock-model-config
+    deployment:
+      env:
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef:
+            name: aws-credentials
+            key: AWS_ACCESS_KEY_ID
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: aws-credentials
+            key: AWS_SECRET_ACCESS_KEY
+      - name: AWS_DEFAULT_REGION
+        valueFrom:
+          secretKeyRef:
+            name: aws-credentials
+            key: AWS_DEFAULT_REGION
+      - name: AWS_SESSION_TOKEN
+        valueFrom:
+          secretKeyRef:
+            name: aws-credentials
+            key: AWS_SESSION_TOKEN
+```
+&lt;img width=&#34;1727&#34; height=&#34;987&#34; alt=&#34;Screenshot 2026-03-26 at 2 20 21 PM&#34;
+src=&#34;https://github.com/user-attachments/assets/cda35fb3-a732-4b98-8519-709f766a6bf8&#34;
+/&gt;
+
+---------
+
+Signed-off-by: JM Huibonhoa &lt;jm.huibonhoa@solo.io&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- Add postgres service account (#1545)
+
+## Description
+
+The bundled PostgreSQL deployment was missing a `ServiceAccount`. Unlike
+the controller and UI components, which each have a dedicated
+`ServiceAccount` and reference it via `serviceAccountName` in their pod
+specs, the PostgreSQL pod was running without one, falling back to the
+`default` service account in the namespace.
+
+Running pods against the `default` service account is a security best
+practice violation. It conflates identity across unrelated workloads and
+makes it harder to scope RBAC or audit pod-level API access. Each
+component should have a dedicated, least-privilege identity.
+
+---------
+
+Signed-off-by: Jeremy Alvis &lt;jeremy.alvis@solo.io&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- Avoid unnecessary re-renders in react (#1537)
+
+I found that with very long chat sessions, typing into the chat message
+box became intolerably laggy.
+
+This memoized the array of messages to avoid re-renders, and enables the
+react compiler so that it can automatically avoid re-renders.
+
+Signed-off-by: Dobes Vandermeer &lt;dobes.vandermeer@newsela.com&gt;
+
+Signed-off-by: Dobes Vandermeer &lt;dobes.vandermeer@newsela.com&gt;
+
+- update github.com/modelcontextprotocol/go-sdk to v1.4.1 (#1548)
+
+Signed-off-by: Dmitri Dolguikh &lt;dmitri@appliedlogic.ca&gt;
+
+- chore: langgraph kebab agent for ci (#1547)
+
+Avoids using real sample agent in CI
+
+Signed-off-by: Jet Chiang &lt;pokyuen.jetchiang-ext@solo.io&gt;
+
+- feat: add --default-agent-pod-labels flag for global agent pod labels (#1534)
+
+## Summary
+- Adds a new `--default-agent-pod-labels` CLI flag /
+`DEFAULT_AGENT_POD_LABELS` env var that applies a set of labels to all
+agent pod templates created by kagent
+- Labels are specified as comma-separated `key=value` pairs (e.g.
+`team=platform,environment=production`)
+- Fully wired through Helm via `controller.agentDeployment.podLabels`
+map in values.yaml
+- Label precedence: built-in defaults → global default labels →
+per-agent `spec.deployment.labels`
+
+## Test plan
+- [x] Unit tests for `ParseLabels` (8 cases covering valid input, edge
+cases, and errors)
+- [x] Unit test for `DEFAULT_AGENT_POD_LABELS` env var loading
+- [x] Existing translator golden tests pass
+- [x] 4 new Helm unit tests (labels set, empty, not configured, single
+label)
+- [x] Deployed to Kind cluster with `podLabels: {team: platform,
+environment: production}` — verified all 11 agent pod templates contain
+both labels
+- [x] `kubectl get pods -l team=platform` returns all agent pods
+
+Comment left by Claude on behalf of @EItanya
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Rework bundled postgres helm and templates (#1527)
+
+# Description
+Follow-up to: https://github.com/kagent-dev/kagent/pull/1503
+
+&gt; [!WARNING]
+&gt; If you are using a vector enabled DB for your external database, set
+`database.postgres.vectorEnabled` to `true` as the default value has
+changed to `false` in order to use the official `Postgres` image instead
+of the `pgvector` image for the bundled database.
+&gt;
+&gt; If you were using the bundled PostgreSQL and want to keep the data,
+read the mitigation section below. A direct upgrade will initialize a
+fresh database.
+
+This PR reworks how kagent&#39;s bundled PostgreSQL is configured and
+deployed. The main goals are:
+
+- **Security:** credentials are now stored in a Kubernetes Secret
+instead of a ConfigMap
+- **Reliability:** the bundled pod now has liveness/readiness probes, a
+`Recreate` strategy, non-root security context, and a correctly
+configured `PGDATA` path that survives restarts
+- **Flexibility:** `bundled.enabled` and `url`/`urlFile` are now
+independent — you can keep the bundled pod running while pointing the
+controller at an external database, which makes migration easier
+- **Clarity:** the bundled instance is more explicitly scoped to
+dev/eval use; the image is switched to standard `postgres:18` in the
+helm chart and the toggle is an explicit flag rather than an implicit
+side effect of leaving `url` empty. The local make target deploys
+`pgvector:pg18-trixie` for developing against a vector enabled database.
+
+Note that this is a breaking change from the bundled Postgres added
+earlier this week.
+
+### What changed in the helm chart for the bundled image:
+
+| | Before | After |
+|---|---|---|
+| Image | `pgvector/pgvector:pg18-trixie` |
+`docker.io/library/postgres:18` |
+| Username | `postgres` | `kagent` (hardcoded) |
+| Database | `postgres` | `kagent` (hardcoded) |
+| Mount path | `/var/lib/postgresql` | `/var/lib/postgresql/data` |
+| PGDATA | `/var/lib/postgresql/data` (default) |
+`/var/lib/postgresql/data/pgdata` (explicit) |
+| Password storage | ConfigMap (plaintext) | Secret (base64) |
+| Toggle | implicit (empty `url`/`urlFile`) |
+`database.postgres.bundled.enabled` (default: `true`) |
+
+Restarts and helm upgrades preserve data in the bundled Postgres
+instance correctly once on the new chart.
+
+### Mitigation
+
+The bundled PostgreSQL is intended for local development. If you don&#39;t
+need to keep existing data, just upgrade — the new chart initializes a
+fresh database at a different path on the existing PVC and will not
+touch the old data directory.
+
+If you want to keep existing local data, you&#39;ll need to back up first
+and restore after upgrading.
+
+Backup (run before upgrading):
+
+```bash
+kubectl exec -n kagent deployment/kagent-postgresql -- \
+  pg_dump -U postgres postgres &gt; kagent-backup.sql
+```
+
+Restore (run after upgrading):
+**Note** The helm chart by default uses the `Postgres` image without
+vector support whereas the `helm install` make target overwrites the
+image to use the `pgvector` image.
+
+Restoring when overwriting the bundled image to use the `pgvector`
+image:
+```bash
+PGPOD=$(kubectl get pod -n kagent -l app.kubernetes.io/component=database -o name | head -1)
+kubectl exec -i -n kagent $PGPOD -- psql -U kagent -d kagent &lt; kagent-backup.sql
+```
+
+### Database configuration reference
+
+`bundled.enabled` and `url`/`urlFile` are independent controls:
+
+- **`database.postgres.bundled.enabled`** controls whether the bundled
+PostgreSQL pod and its PVC are deployed. It has no effect on which
+database the controller connects to.
+- **`database.postgres.url` / `database.postgres.urlFile`** control what
+the controller connects to. When either is set, the controller uses it.
+When both are empty, the controller connects to the bundled instance.
+
+This means you can have the bundled pod running while the controller
+points at an external database — useful for migrating data from the
+bundled Postgres to an external Postgres.
+
+**Connection precedence (controller only):** `urlFile` &gt; `url` &gt; bundled
+connection string.
+
+| Scenario | `bundled.enabled` | `url` / `urlFile` | Bundled pod
+deployed? | Controller connects to |
+|---|---|---|---|---|
+| Default (dev/eval) | `true` | unset | yes | bundled |
+| External DB, no bundled pod | `false` | set | no | external |
+| External DB, bundled pod kept running | `true` | set | yes | external
+|
+| Bundled disabled, no external set | `false` | unset | no | nothing
+(misconfigured) |
+
+**urlFile** is recommended when your connection string contains
+credentials — it keeps secrets out of Helm values and the Kubernetes
+Deployment spec:
+
+```yaml
+database:
+  postgres:
+    urlFile: /var/secrets/db-url   # path inside the controller container
+```
+
+Mount the secret yourself via `controller.volumes` /
+`controller.volumeMounts`:
+
+```yaml
+controller:
+  volumes:
+    - name: db-secret
+      secret:
+        secretName: my-postgres-url-secret
+  volumeMounts:
+    - name: db-secret
+      mountPath: /var/secrets
+      readOnly: true
+```
+
+**url** is suitable when credentials are already managed externally
+(e.g. injected by a secrets manager at deploy time):
+
+```yaml
+database:
+  postgres:
+    url: &#34;postgres://user:pass@db.example.com:5432/kagent?sslmode=require&#34;
+```
+
+**bundled** deploys a single-replica PostgreSQL pod with a
+PersistentVolumeClaim. Not suitable for production — no replication, no
+backups, data is lost if the PVC is deleted:
+
+```yaml
+database:
+  postgres:
+    bundled:
+      enabled: true          # default
+      storage: 500Mi
+      image:
+        registry: docker.io
+        repository: library
+        name: postgres
+        tag: &#34;18&#34;
+```
+
+---------
+
+Signed-off-by: Jeremy Alvis &lt;jeremy.alvis@solo.io&gt;
+
+- code spaces (#1515)
+
+Signed-off-by: Dmytro Rashko &lt;dmitriy.rashko@amdocs.com&gt;
+Signed-off-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+Co-authored-by: Copilot Autofix powered by AI &lt;175728472+Copilot@users.noreply.github.com&gt;</div>
+</div>
+
+<a href="../project/kagent-dev_kagent.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

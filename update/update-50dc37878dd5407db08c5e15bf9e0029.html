@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (25 commits) - exo-explore/exo - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (25 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/exo-explore_exo.html">exo-explore/exo</a> /
+    Updates in main (25 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/exo-explore_exo.html">exo-explore/exo</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-03-27 11:47 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/exo-explore/exo/commits/main" target="_blank">https://github.com/exo-explore/exo/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Этот релиз EXO сосредоточен на значительном повышении стабильности, производительности и удобства использования. Исправлены критические проблемы, такие как зависания узлов при перевыборах мастера, условия гонки при добавлении пользовательских моделей и специфические ошибки для DeepSeek V3.2 и Qwen3.5. Среди ключевых новых функций — гибкое управление хранилищем моделей в нескольких каталогах, статическое обнаружение пиров для различных сетевых сред и возможность отмены генерации изображений, что дополняется улучшением производительности пакетной обработки и логирования.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- chore: bump exo-version with release version (#1807)
+
+our pyproject.toml version was 0.3.68 - update to .69 in line with
+release!!
+
+- Fix custom model add requiring two attempts + enlarge sidebar buttons (#1805)
+
+## Motivation
+
+Adding a custom model from the Hub tab shows &#34;Added&#34; toast but the model
+doesn&#39;t appear in the All tab. You have to add it a second time for it
+to work. Also, the &#34;All&#34; button in the model picker sidebar is too small
+to read comfortably.
+
+## Changes
+
+**Race condition fix (`src/exo/api/main.py`):**
+- Call `add_to_card_cache(card)` directly in `add_custom_model()` after
+sending the `ForwarderCommand`, before the API response returns
+
+**Sidebar sizing
+(`dashboard/src/lib/components/FamilySidebar.svelte`):**
+- Increased sidebar min-width from 72/64px to 80/72px
+- Increased &#34;All&#34; icon from `w-5 h-5` to `w-6 h-6`
+- Increased all sidebar labels from 9px to 11px
+
+## Why It Works
+
+`POST /models/add` sends a `ForwarderCommand(AddCustomModelCard)` and
+returns immediately. The frontend then calls `GET /models` which reads
+from `_card_cache`. But the cache was only updated by the worker event
+handler after the event round-trips through the master — a race the
+frontend almost always loses. By updating the cache directly in the API
+handler, `GET /models` immediately reflects the new model. The worker&#39;s
+later `add_to_card_cache` call is idempotent (dict key assignment).
+
+## Test Plan
+
+### Manual Testing
+&lt;!-- Hardware: any Mac --&gt;
+- Open model picker → Hub tab → add a custom model → verify it appears
+in All tab on the first attempt
+- Verify sidebar &#34;All&#34; button and other labels are visually larger and
+readable
+
+### Automated Testing
+- `uv run basedpyright` passes with 0 errors
+- `uv run ruff check` passes
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Rework model storage directory management (for external storage) (#1765)
+
+## Motivation
+
+Replace confusing EXO_MODELS_DIR/EXO_MODELS_PATH with clearer
+multi-directory support, enabling automatic download spillover across
+volumes.
+
+## Changes
+
+- EXO_MODELS_DIRS: colon-separated writable dirs (default always
+prepended, first with enough space wins)
+- EXO_MODELS_READ_ONLY_DIRS: colon-separated read-only dirs (protected
+from deletion)
+- select_download_dir(): picks writable dir by free space
+- resolve_existing_model(): unified lookup across all dirs
+- is_read_only_model_dir(): path-based read-only detection instead of
+hardcoded flag
+- Updated coordinator, worker, model cards, tests
+
+## Why It Works
+
+Default dir always included so zero-config behavior is unchanged. Disk
+space checked at download time for automatic spillover. Read-only status
+derived from path, not hardcoded.
+
+## Test Plan
+
+### Manual Testing
+
+- No env vars set → identical behavior
+- EXO_MODELS_DIRS=/Volumes/SSD/models → downloads to external storage
+- EXO_MODELS_READ_ONLY_DIRS=/mnt/nfs → models found, deletion blocked
+
+### Automated Testing
+
+- 4 new tests in test_xdg_paths.py (prepend, default-only, overlap,
+empty read-only)
+- Existing tests updated to patch new constants
+
+- [Fix]  Node hang on reelection (#1801)
+
+## Motivation
+
+During master reelection, `_elect_loop` called `worker.shutdown()` (fire
+&amp; forget) then immediately created and started a new Worker.
+
+This caused the old runner subprocess&#39;s Metal/GPU teardown to race with
+the new worker&#39;s startup, resulting in `IOConnectUnmapMemory failed:
+kr=0xe00002bc` errors and a full node hang requiring `^C`. Same issue
+existed for `DownloadCoordinator`.
+
+## Changes
+
+- Added `anyio.Event`-based `_stopped` signal to `Worker` and
+`DownloadCoordinator`, set at the end of their `run()` finally blocks
+- Added `wait_stopped()` async method to both classes
+- Updated `_elect_loop` to `await wait_stopped()` after calling
+`shutdown()` on the old Worker and DownloadCoordinator before creating
+replacements
+
+## Why It Works
+
+The old Worker&#39;s task group contains the RunnerSupervisor tasks, whose
+finally blocks join the runner subprocess (with 5s timeout + SIGTERM +
+SIGKILL escalation). By awaiting `wait_stopped()`, we guarantee the old
+runner process has fully exited — including GPU memory cleanup — before
+a new Worker can start and potentially access the GPU. This eliminates
+the race without changing the shutdown mechanics themselves.
+
+## Test Plan
+
+### Manual Testing
+Hardware: M4 Pro Mac Mini 24GB + M3 Ultra Mac Studio 96GB, connected via
+Thunderbolt
+
+**Repro steps:**
+1. Start exo on two nodes with a model sharded across both (e.g.
+`Josiefied-Qwen3-14B-abliterated-v3-4bit`)
+2. Wait for &#34;runner ready&#34; on both
+3. `kill -9` the master node
+4. Observe the surviving node&#39;s re-election behavior
+
+**Before fix (original crash):**
+```
+[ 11:02:39.0896AM ] Runner supervisor shutting down
+[ 11:02:39.0905AM ] bye from the runner
+[ 11:02:39.1052AM ] Stopping Worker
+IOConnectUnmapMemory failed: kr=0xe00002bc
+IOConnectUnmapMemory failed: kr=0xe00002bc
+IOConnectUnmapMemory failed: kr=0xe00002bc
+IOConnectUnmapMemory failed: kr=0xe00002bc
+^C[ 11:03:45 ] ← hung for over a minute, required manual kill
+```
+
+**After fix (clean re-election):**
+```
+[ 12:15:22.4703PM ] runner loaded
+[ 12:15:24.1672PM ] runner ready
+[ 12:15:33.5393PM ] Waiting for other campaign to finish
+[ 12:15:36.5409PM ] Node elected Master
+[ 12:15:36.5413PM ] Unpausing API
+```
+No `IOConnectUnmapMemory` errors, no hang, no `^C` needed.
+
+### Automated Testing
+- No existing tests cover the `_elect_loop` re-election path; this is an
+integration-level flow requiring a live router/election/worker stack
+- All existing tests pass (307/308, 1 pre-existing Rust binding failure)
+- basedpyright: 0 errors, ruff: all checks passed
+
+---------
+
+Co-authored-by: Evan &lt;evanev7@gmail.com&gt;
+
+- Don&#39;t download original/ and metal/ folders from HF (#1800)
+
+## Motivation
+
+&lt;!-- Why is this change needed? What problem does it solve? --&gt;
+&lt;!-- If it fixes an open issue, please link to the issue here --&gt;
+
+## Changes
+
+&lt;!-- Describe what you changed in detail --&gt;
+
+## Why It Works
+
+&lt;!-- Explain why your approach solves the problem --&gt;
+
+## Test Plan
+
+### Manual Testing
+&lt;!-- Hardware: (e.g., MacBook Pro M1 Max 32GB, Mac Mini M2 16GB,
+connected via Thunderbolt 4) --&gt;
+&lt;!-- What you did: --&gt;
+&lt;!-- - --&gt;
+
+### Automated Testing
+&lt;!-- Describe changes to automated tests, or how existing tests cover
+this change --&gt;
+&lt;!-- - --&gt;
+
+- fix: enable macmon if preflight fails (#1799)
+
+missed in #1747, issue #1798.
+
+### the issue
+
+we didn&#39;t set the memory poll rate after failling the macmon preflight,
+only after failing the followups - as we never ran macmon if preflight
+failed, we never hit the followup errors etc.
+
+### testing
+
+requires testing on an m5 pro, but the core issue is solved.
+
+- Fix macOS build bundling wrong macmon binary (#1797)
+
+## Motivation
+
+PR #1747 fixed macmon support for M5 Pro/Max by pinning the
+`swiftraccoon/macmon` fork in `flake.nix`. This works when running from
+source (via Nix) but the distributed macOS `.app` build was still broken
+on M5 Pro/Max because it was bundling the wrong macmon.
+
+The error on M5 Pro/Max:
+```
+macmon preflight failed with return code -6: thread &#39;main&#39; panicked at src/sources.rs:394:41
+```
+
+## Changes
+
+- Removed `macmon` from `brew install` in `build-app.yml` — this was
+installing the upstream `vladkens/macmon` which doesn&#39;t support M5
+Pro/Max
+- Added a new step that resolves the pinned macmon fork from the Nix dev
+shell (same `swiftraccoon/macmon` at rev `9154d23` already defined in
+`flake.nix`) and adds it to `$GITHUB_PATH`
+- Added a safety `brew uninstall macmon` to ensure no Homebrew macmon
+can shadow the pinned version
+
+## Why It Works
+
+PyInstaller bundles macmon via `shutil.which(&#34;macmon&#34;)`. Previously this
+found the Homebrew (upstream) binary. Now it finds the Nix-overlayed
+fork that has M5 Pro/Max support, because `$GITHUB_PATH` prepends the
+Nix store path before the PyInstaller step runs.
+
+## Test Plan
+
+### Manual Testing
+&lt;!-- Hardware: M5 Pro --&gt;
+- Trigger a macOS build and verify the bundled macmon is the pinned fork
+- Run the built `.app` on M5 Pro/Max and confirm macmon preflight
+succeeds
+
+### Automated Testing
+- Existing CI build workflow will validate that the macmon binary is
+found and bundled correctly
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Prefer higher % downloaded nodes for API placement previews (#1795)
+
+Follow up to https://github.com/exo-explore/exo/pull/1767
+
+Same thing for placement previews through API
+
+- Support image generation cancellation (#1774)
+
+## Motivation
+
+Support cancelling image generation, similar to existing support for
+cancelling text generation
+
+## Changes
+
+- Dashboard (app.svelte.ts): Wire up AbortController for both
+generateImage and editImage API calls. On abort, show &#34;Cancelled&#34;
+instead of an error. Clean up the controller in finally.
+- Pipeline runner (pipeline/runner.py): Introduce a cancel_checker
+callback and NaN-sentinel cancellation protocol for distributed
+diffusion:
+  - _check_cancellation() - only rank 0 polls the cancel callback
+- _send() - replaces data with NaN sentinels when cancelling, so
+downstream ranks detect cancellation via _recv_and_check()
+  - _recv() / _recv_like() wrappers that eval and check for NaN sentinel
+  - After cancellation, drains any pending ring recv to prevent deadlock
+  - Skips partial image yields and final decode when cancelled
+- Image runner (runner/image_models/runner.py): Deduplicate the
+ImageGeneration and ImageEdits match arms into a shared
+_run_image_task() method. Thread a cancel_checker closure (backed by the
+existing cancel_receiver + cancelled_tasks set) into generate_image().
+- Plumbing (distributed_model.py, generate.py): Pass cancel_checker
+through the call chain.
+
+## Why It Works
+
+- Rank 0 is the only node that knows about task-level cancellation. When
+it detects cancellation, it sends NaN tensors instead of real data.
+Higher-order ranks detect the NaN sentinel on recv, set their own
+_cancelling flag, and propagate NaN forward
+- A drain step after the loop prevents the deadlock case where the last
+rank already sent patches that the first would never consume.
+- For single-node mode, the loop simply breaks immediately on
+cancellation.
+
+## Test Plan
+
+### Automated Testing
+
+New tests in src/exo/worker/tests/unittests/test_image
+
+- fix: DeepSeek V3.2 warmup crash and tool calling + add catalog cards (#1769)
+
+## Summary
+
+DeepSeek V3.2 (`DeepseekV32ForCausalLM`) is already supported by exo&#39;s
+inference engine (architecture whitelisted in `model_cards.py`, DSML
+encoding added in #1548), but **doesn&#39;t work out of the box** due to two
+bugs:
+
+### Bug 1: `warmup_inference` passes empty model ID
+
+`warmup_inference()` in `generate.py` accepts `model_id: ModelId` as a
+parameter but creates `TextGenerationTaskParams(model=ModelId(&#34;&#34;), ...)`
+instead of using it. Since `_needs_dsml_encoding()` checks
+`&#34;deepseek-v3.2&#34; in task_params.model.lower()`, the empty string never
+matches → falls back to `tokenizer.apply_chat_template()` →
+**ValueError** because V3.2 has no Jinja chat template.
+
+**Fix:** `model=ModelId(&#34;&#34;)` → `model=model_id` (one line).
+
+### Bug 2: `_needs_dsml_encoding` limited to tool calling
+
+`_needs_dsml_encoding()` returns `True` only when `task_params.tools` is
+present or tool messages exist in `chat_template_messages`. For warmup
+and regular chat requests without tools → `return False` → Jinja
+fallback → **ValueError**.
+
+Unlike V3.1 (which has a `.jinja` chat template file that transformers
+picks up automatically), V3.2 **has no Jinja template at all** — it uses
+Python-based DSML encoding for all message types.
+
+**Fix:** For V3.2, always return `True` — DSML encoding handles all
+message types.
+
+### Catalog cards
+
+Added inference model cards for:
+- `mlx-community/DeepSeek-V3.2-8bit`
+- `mlx-community/DeepSeek-V3.2-4bit`
+
+Parameters taken from model `config.json` on HuggingFace, storage sizes
+from HF API. Capabilities include `thinking_toggle` (related: #1456).
+
+## Notes
+
+- The model ID string matching approach (`&#34;deepseek-v3.2&#34; in
+model.lower()`) is acknowledged tech debt — see #1371 for the planned
+architecture-based approach.
+
+## Test plan
+
+- [x] Start exo with DeepSeek V3.2 model → warmup should complete
+without crash
+- [x] Send a regular chat message (no tools) → should get a response
+- [x] Send a chat message with tools → should work as before
+- [x] V3.2 cards should appear in the dashboard model catalog
+
+---------
+
+Co-authored-by: user &lt;user@m1.note&gt;
+Co-authored-by: Ryuichi Leo Takashige &lt;leo@exolabs.net&gt;
+Co-authored-by: Evan &lt;evanev7@gmail.com&gt;
+
+- Fix occasional warmup bugs by using mlx_generate (#1794)
+
+## Motivation
+
+Warmup occasionally had issues; e.g. #1748 and #1793 because we were
+using a standard stream_generate, all of which are issues that are
+resolved in the wrapper function mlx_generate.
+
+- Feat/static peer discovery (#1690)
+
+**Enabling peers to be discovered in environments where mDNS is
+unavailable (SSH sessions, headless servers, Docker).**
+
+## Motivation
+Exo discovers peers exclusively via mDNS, which works great on a local
+network but breaks once you move beyond a single L2 broadcast domain:
+
+- SSH sessions on macOS — TCC blocks mDNS multicast from non-GUI
+sessions (#1488)
+- Headless servers/rack machines — #1682 (&#34;DGX Spark does not find other
+nodes&#34;)
+- Docker Compose — mDNS is often unavailable across container networks;
+e.g. #1462 (E2E test framework) needs an alternative
+
+Related works: 
+#1488 (working implementation made by @AlexCheema and closed because SSH
+had a GUI workaround),
+#1023 (Headscale WAN then closed due to merge conflicts), 
+#1656 (discovery cleanup, open). 
+
+This PR introduces an optional bootstrap mechanism for peer discovery
+while leaving the existing mDNS behavior unchanged.
+
+## Changes
+Adds two new CLI flags:
+
+- `--bootstrap-peers` (env: `EXO_BOOTSTRAP_PEERS`) — comma-separated
+libp2p multiaddrs to dial on startup and retry periodically
+- `--libp2p-port` — fixed TCP port for libp2p to listen on (default:
+OS-assigned). Required when bootstrap peers, so other nodes know which
+port to dial.
+
+8 files: 
+- `rust/networking/src/discovery.rs`: Store bootstrap addrs, dial in
+existing retry loop
+- `rust/networking/src/swarm.rs`: Thread `bootstrap_peers` parameter to
+`Behaviour`
+- `rust/networking/examples/chatroom.rs`: Updated call site for new
+create_swarm signature
+- `rust/networking/tests/bootstrap_peers.rs`: Integration tests
+- `rust/exo_pyo3_bindings/src/networking.rs`: Accept optional
+`bootstrap_peers` in PyO3 constructor
+- `rust/exo_pyo3_bindings/exo_pyo3_bindings.pyi` : Update type stub 
+- `src/exo/routing/router.py`: Pass peers to `NetworkingHandle` 
+- `src/exo/main.py` : `--bootstrap-peers` CLI arg +
+`EXO_BOOTSTRAP_PEERS` env var
+
+## Why It Works
+
+Bootstrap peers are dialed in the existing retry loop — the same path
+taken by peers when mDNS-discovered. The swarm handles connection, Noise
+handshake, and gossipsub mesh joining from there.
+
+PeerId is intentionally not required in the multiaddr, the Noise
+handshake discovers it.
+
+Docker Compose example:
+
+```yaml
+services:
+  exo-1:
+    environment:
+      EXO_BOOTSTRAP_PEERS: &#34;/ip4/exo-2/tcp/30000&#34;
+  exo-2:
+    environment:
+      EXO_BOOTSTRAP_PEERS: &#34;/ip4/exo-1/tcp/30000&#34;
+```
+
+## Test Plan
+
+### Manual Testing
+&lt;details&gt;
+&lt;summary&gt;Docker Compose config&lt;/summary&gt;
+
+```
+services:
+  exo-node1:
+    build:
+      context: .
+      dockerfile: Dockerfile.bootstrap-test
+    container_name: exo-bootstrap-node1
+    hostname: exo-node1
+    command: [&#34;-q&#34;, &#34;--libp2p-port&#34;, &#34;30000&#34;, &#34;--bootstrap-peers&#34;, &#34;/ip4/172.30.20.3/tcp/30000&#34;]
+    environment:
+      - EXO_LIBP2P_NAMESPACE=bootstrap-test
+    ports:
+      - &#34;52415:52415&#34;
+    networks:
+      bootstrap-net:
+        ipv4_address: 172.30.20.2
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+
+  exo-node2:
+    build:
+      context: .
+      dockerfile: Dockerfile.bootstrap-test
+    container_name: exo-bootstrap-node2
+    hostname: exo-node2
+    command: [&#34;-q&#34;, &#34;--libp2p-port&#34;, &#34;30000&#34;, &#34;--bootstrap-peers&#34;, &#34;/ip4/172.30.20.2/tcp/30000&#34;]
+    environment:
+      - EXO_LIBP2P_NAMESPACE=bootstrap-test
+    ports:
+      - &#34;52416:52415&#34;
+    networks:
+      bootstrap-net:
+        ipv4_address: 172.30.20.3
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+
+networks:
+  bootstrap-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.20.0/24
+```
+&lt;/details&gt; 
+
+Two containers on a bridge network (`172.30.20.0/24`), fixed IPs,
+`--libp2p-port 30000`, cross-referencing `--bootstrap-peers`.
+
+Both nodes found each other and established a connection then ran the
+election protocol.
+
+### Automated Testing
+
+4 Rust integration tests in `rust/networking/tests/bootstrap_peers.rs`
+(`cargo test -p networking`):
+
+| Test | What it verifies | Result |
+|------|-----------------|--------|
+| `two_nodes_connect_via_bootstrap_peers` | Node B discovers Node A via
+bootstrap addr (real TCP connection) | PASS |
+| `create_swarm_with_empty_bootstrap_peers` | Backward compatibility —
+no bootstrap peers works | PASS |
+| `create_swarm_ignores_invalid_bootstrap_addrs` | Invalid multiaddrs
+silently filtered | PASS |
+| `create_swarm_with_fixed_port` | `listen_port` parameter works | PASS
+|
+
+All 4 pass. The connection test takes ~6s
+
+---------
+
+Signed-off-by: DeepZima &lt;deepzima@outlook.com&gt;
+Co-authored-by: Evan &lt;evanev7@gmail.com&gt;
+
+- Update dependencies including mlx 0.31.2 (#1789)
+
+Update mlx fork to 0.31.2 and mflux to 0.17.2
+
+- Rename Nemotron to NVIDIA in model picker with logo (#1790)
+
+## Motivation
+
+The Nemotron model family in the model picker sidebar was displaying as
+&#34;Nemotron&#34; with a generic checkmark icon. Since these models are
+NVIDIA&#39;s Nemotron models, the category should be branded as &#34;NVIDIA&#34;
+with the official NVIDIA logo, consistent with how other families are
+branded (e.g., &#34;llama&#34; → &#34;Meta&#34;, &#34;gpt-oss&#34; → &#34;OpenAI&#34;).
+
+## Changes
+
+- **FamilySidebar.svelte**: Added `nemotron: &#34;NVIDIA&#34;` to the
+`familyNames` mapping so the sidebar displays &#34;NVIDIA&#34; instead of
+&#34;Nemotron&#34;
+- **FamilyLogos.svelte**: Added the NVIDIA &#34;eye&#34; logo as an inline SVG
+for the `nemotron` family, matching the `viewBox=&#34;0 0 24 24&#34;` /
+`fill=&#34;currentColor&#34;` pattern used by all other brand logos
+- **ModelPickerModal.svelte**: Added `&#34;nemotron&#34;` to the `familyOrder`
+array so NVIDIA appears in a consistent position in the sidebar
+
+## Why It Works
+
+The model picker derives categories from the `family` field in TOML
+model cards. Nemotron models already have `family = &#34;nemotron&#34;`, but the
+three UI components (display name, logo, sort order) lacked explicit
+entries for it, causing fallback behavior (auto-capitalized name,
+checkmark icon, alphabetical sorting). Adding explicit entries for all
+three aligns NVIDIA with the existing brand pattern.
+
+## Test Plan
+
+### Manual Testing
+&lt;!-- Hardware: N/A - dashboard UI change only --&gt;
+- Built dashboard successfully (`npm run build`)
+- Verified the NVIDIA logo renders in the sidebar alongside existing
+brand logos
+
+### Automated Testing
+- No test changes needed — this is a purely cosmetic dashboard change
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Fix enable thinking (#1786)
+
+## Motivation
+
+Minor regression from #1746 
+
+## Why It Works
+
+Pass thinking properly
+
+## Test Plan
+
+### Manual Testing
+Works, it thinks
+
+- override macmon in flake (#1747)
+
+updates macmon to an upstream fork that fixes m5 max issues.
+might see if the upstream version gets merged before we release.
+
+---------
+
+Co-authored-by: Alex Cheema &lt;alexcheema123@gmail.com&gt;
+
+- send error finish reason on failing to parse a tool call (#1785)
+
+a simplification of #1757 which is now stale
+
+- Prevent Qwen3.5 looping by using mlx lm fork (#1784)
+
+## Motivation
+
+Move back to an MLX LM to improve the Qwen 3.5 experience. 
+
+## Test Plan
+
+### Manual Testing
+Seems to loop less from testing, no speed regressions.
+
+- Add HF_ENDPOINT in the app settings (#1783)
+
+## Motivation
+Some users (primarily in China) are unable to access HuggingFace.co. HF
+supports the HF_ENDPOINT env variable, and we also support it, but there
+is no way to easily do that from the app currently.
+
+## Test Plan
+
+### Manual Testing
+
+hf-mirror works
+empty field works
+google.com endpoint fails
+
+- fix warmup consistency for slow machines (#1748)
+
+a fix from pr #1643 which is now stale - should make prefill more
+consistent on very slow machines
+
+## testing
+qwen-3.5-35b-a3b loads normally
+gpt-oss-120b-mxfp4-q8 loads normally
+
+- Improve batch performance and stats reporting (#1777)
+
+## Motivation
+
+Batch generation reports incorrect statistics, as mlx lm never clears
+the original stats, meaning they get polluted over time.
+The dashboard also seems considerably slower than bench statistics.
+We also have a large discrepancy between B=1 batch generating and
+mlx_generate.
+Extracting logprobs is massively expensive, causing up to a 25% slowdown
+compared to pure batching.
+```
+[ 12:02:01.1240AM | INFO    ] step overhead: 3.49ms (next=12.49ms total=15.99ms)
+[ 12:02:02.1600AM | INFO    ] step overhead: 3.23ms (next=13.01ms total=16.24ms)
+[ 12:02:03.2228AM | INFO    ] step overhead: 3.28ms (next=13.38ms total=16.66ms)
+[ 12:02:04.2798AM | INFO    ] step overhead: 3.25ms (next=12.84ms total=16.10ms)
+[ 12:02:05.3152AM | INFO    ] step overhead: 3.18ms (next=12.61ms total=15.79ms)
+[ 12:02:06.3522AM | INFO    ] step overhead: 3.41ms (next=12.83ms total=16.25ms)
+[ 12:02:07.3987AM | INFO    ] step overhead: 3.38ms (next=13.14ms total=16.52ms)
+[ 12:02:08.4537AM | INFO    ] step overhead: 1.84ms (next=19.44ms total=21.28ms)
+```
+
+## Changes
+
+1. Report stats ourselves instead of using mlx lm&#39;s stats for batch
+generation (they use perf_counter anyway).
+2. Adjust exo bench to match
+3. Improve logprobs extraction speed by 10x, improving tps for dashboard
+&amp; any requests for logprobs
+4. Use an SSE comment to align the speed to the real numbers at the end
+of generation
+5. Patch mlx for several optimizations given our assumptions and use
+cases (e.g. use vllm style RoPE).
+6. Switch MLX LM version to latest main, including support for Nemotron
+Super and some Qwen3.5 fixes.
+
+## Why It Works
+1. Exo bench no longer reports polluted stats
+2. Exo bench now handles the reported per-request stats rather than the
+aggregate stats
+3. The decode speed now jumps back to a real number at the end of the
+generation
+4. Large batch speedup for rotating KV cache models + 1:1 matching cache
+with vllm
+
+## Test Plan
+
+### Manual Testing
+Needs testing on OpenCode and CC
+Needs eval testing
+
+### Automated Testing
+Only going to show the performance optimization difference after the
+accurate reporting:
+
+**GPT OSS 20B MXFP4 Q8 (large change)**
+Before:
+&lt;img width=&#34;2466&#34; height=&#34;1534&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/88b50637-fca2-4db4-9413-b9eee6e2057e&#34;
+/&gt;
+&lt;img width=&#34;2410&#34; height=&#34;1240&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/21e5c76a-2f5f-44d2-8953-121b3ebdbd68&#34;
+/&gt;
+
+
+After:
+&lt;img width=&#34;2476&#34; height=&#34;1472&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/fec5cfbd-fff8-430a-b12e-a329410107a2&#34;
+/&gt;
+&lt;img width=&#34;2454&#34; height=&#34;1236&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/0400344b-a4a6-42c0-a9dd-4ee91ade714a&#34;
+/&gt;
+
+
+
+**Qwen 3.5 35B A3B 8bit (No change)**
+Before:
+&lt;img width=&#34;2414&#34; height=&#34;1396&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/e75f0b38-df5d-49fd-ab90-bc1667d981b3&#34;
+/&gt;
+
+
+After:
+&lt;img width=&#34;2346&#34; height=&#34;1234&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/eabfb59c-851f-4d88-b927-e1e699a75cc6&#34;
+/&gt;
+
+
+**Llama 3.2 1B Instruct 4bit (small change)**
+Before:
+&lt;img width=&#34;2516&#34; height=&#34;1220&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/c2873655-acff-4536-8263-fb8aea33db80&#34;
+/&gt;
+
+After:
+&lt;img width=&#34;2566&#34; height=&#34;1370&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/15f95c75-1c2f-4474-85a2-88c4d0a32543&#34;
+/&gt;
+
+- Fix first start in offline mode crash (#1782)
+
+## Motivation
+
+Running exo in offline mode on a machine where a model has never been
+downloaded causes a crash
+
+## Changes
+
+- `download_shard` now catches `FileNotFoundError` from
+`fetch_file_list_with_cache` and returns a `not_started` progress
+instead of propagating the exception
+
+## Why It Works
+
+A status query should never crash its caller. By returning
+`not_started`, the coordinator&#39;s existing offline guard (`if
+self.offline:` at line 198) is reached and emits a graceful
+`DownloadFailed` event. This also eliminates the warning spam on startup
+where the status iterator catches the same exception for every
+predefined model.
+
+## Test Plan
+
+### Manual Testing
+- Start exo with `--offline` on a machine with no cached models, request
+a model via the API — should get a graceful failure instead of a crash
+
+- Sync custom model cards across nodes (#1768)
+
+## Motivation
+
+Custom model cards were only saved locally on the node that handled the
+API request.
+
+## Changes
+
+- Added AddCustomModelCard and DeleteCustomModelCard commands
+- Added CustomModelCardAdded and CustomModelCardDeleted events
+- Added custom_model_cards field to cluster State
+- Master handles new commands by emitting corresponding events
+- Workers persist model cards to disk and update the in-memory cache on
+event receipt
+- Separated fetch_from_hf (pure fetch) from disk persistence (now
+handled by event-sourcing layer)
+- Exposed add_to_card_cache() helper for the worker to update the cache
+
+## Why It Works
+
+- Follows the existing event-sourcing pattern: API → Command → Master →
+Event → all Workers
+- Every node applies the same events, so custom model cards are
+consistent across the cluster
+
+## Test Plan
+
+### Manual Testing
+
+Add/delete a custom model via the API on one node, verify it
+appears/disappears on all nodes
+
+### Automated Testing
+
+Existing tests cover apply() logic; new event types follow the same
+discriminated-union pattern
+
+- Prefer higher model download % for placement (#1767)
+
+## Motivation
+
+When placing a model instance across the cluster, the master previously
+only considered available RAM. This meant it could pick a node that
+hasn&#39;t downloaded the model yet, even when another node already has it
+(or is further along in downloading it).
+
+## Changes
+
+- Added download_status parameter to place_instance() in placement.py
+- Added _get_node_download_fraction() to compute 0.0–1.0 download
+progress per node/model
+- Added _cycle_download_score() to sum download fractions across a
+cycle&#39;s nodes
+- Cycle selection now uses a (download_score, available_ram) tuple key —
+download progress is the primary sort, RAM is the tiebreaker
+- Passed self.state.downloads into place_instance() from master/main.py
+
+## Why It Works
+
+Python&#39;s tuple comparison gives download progress strict priority over
+RAM, so a node with the model already downloaded will always be
+preferred over one with more free RAM but no download.
+
+## Test Plan
+
+### Automated Testing
+
+3 new tests cover: completed download preferred, higher partial progress
+preferred, failed download not preferred over no-download node
+
+- improve logging: add dates to verbose stderr, match file log level to verbosity (#1772)
+
+## Summary
+
+- **Add ISO date to verbose stderr format**: when running with `-v`, the
+stderr timestamp changes from `HH:mm:ss.SSS` to `YYYY-MM-DD
+HH:mm:ss.SSS`, matching the file log format. This makes it possible to
+correlate entries across days when stderr is captured by launchd,
+systemd, Docker, or file redirection.
+- **File log respects verbosity**: `exo.log` now uses DEBUG level when
+`-v` is passed, so the persistent log has the same detail as stderr.
+Previously it was always INFO regardless of verbosity.
+- **Startup banner with PID**: adds a visual separator and process ID to
+the startup message, making it easy to identify session boundaries in
+long-running logs (e.g. `grep &#34;Starting EXO&#34;`).
+
+The non-verbose (default) stderr format is unchanged — end-user terminal
+experience is not affected.
+
+## Motivation
+
+When exo runs as a service (launchd, systemd, Docker), stderr is
+typically captured to a file. Without calendar dates in the timestamp,
+it is impossible to tell which day a log entry belongs to. This caused
+misidentification of log entries during a multi-day RDMA debugging
+session on a 4-node cluster.
+
+The file log (`exo.log`) already had dates and rotation, but only
+captured INFO level — missing the DEBUG output needed for postmortem
+analysis.
+
+## Test plan
+
+- [x] `basedpyright` — 0 errors, 0 warnings, 0 notes
+- [x] `ruff check` — all checks passed
+- [x] `pytest` — 249 passed, 1 skipped
+
+Co-authored-by: user &lt;user@m1.note&gt;</div>
+</div>
+
+<a href="../project/exo-explore_exo.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
