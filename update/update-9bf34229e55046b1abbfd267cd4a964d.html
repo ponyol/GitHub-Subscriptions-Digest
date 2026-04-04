@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (30 commits) - facebookresearch/faiss - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (30 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a> /
+    Updates in main (30 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-04-03 22:08 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/facebookresearch/faiss/commits/main" target="_blank">https://github.com/facebookresearch/faiss/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>These updates for Faiss primarily focus on enhancing library robustness and security through extensive deserialization validation across various index types (e.g., HNSW, SVS, Quantizers, FastScan), preventing crashes and undefined behavior from malformed data. Additionally, several components were refactored for runtime SIMD dispatch to improve performance and build flexibility, alongside specific bug fixes and Python API updates.
+
+Russian:
+Данные обновления для Faiss в основном направлены на повышение надежности и безопасности библиотеки за счет обширной валидации десериализации для различных типов индексов (например, HNSW, SVS, квантайзеров, FastScan), предотвращая сбои и неопределенное поведение от некорректных данных. Кроме того, несколько компонентов были переработаны для динамической диспетчеризации SIMD для улучшения производительности и гибкости сборки, а также внесены конкретные исправления ошибок и обновления Python API.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Add unit tests for HNSW deserialization validation (#5033)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5033
+
+Add test coverage for `validate_HNSW()` checks in `index_read.cpp` that
+were previously untested.  These validations were introduced in D92907607
+(Feb 2026) but had no dedicated unit tests.
+
+Five new tests in `test_read_index_deserialize.cpp`:
+
+1. **`HNSWNeighborNegativeId`**:
+   Neighbor ID of -5 (not the -1 sentinel) is rejected during deserialization.
+
+2. **`HNSWNeighborIdTooLarge`**:
+   Neighbor ID &gt;= ntotal is rejected during deserialization.
+
+3. **`HNSWEntryPointOutOfRange`**:
+   Entry point &gt;= ntotal is rejected during deserialization.
+
+4. **`HNSWValidNeighborsSearchWorks`**:
+   A hand-crafted HNSW with valid neighbor data deserializes and searches
+   correctly, confirming the happy path through `validate_HNSW()`.
+
+5. **`BinaryHNSWNeighborNegativeId`**:
+   Same as (1) for the binary HNSW index path (`IBHf` fourcc).
+
+A `push_hnsw_with_neighbors()` helper is added to construct serialized
+HNSW graphs with explicit neighbor data for use by these and future tests.
+
+Reviewed By: mnorris11
+
+Differential Revision: D99334840
+
+fbshipit-source-id: 6bb38eb78ea20f7215eb0046de7398d07f14ac35
+
+- Fix deadly signal in to_svs_metric() for unsupported metrics (#5032)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5032
+
+Convert supported metric type assert to throw in `to_svs_metric()` to
+better support tests that expect exceptions when processing invalid input.
+
+There are two vectors that reach `to_svs_metric()` with an unsupported
+metric:
+
+1. **Deserialization** (`deserialize_impl()`):
+   A invalid binary index with fourcc `&#34;IBFf&#34;`
+   (IndexBinaryFromFloat) wrapping an SVS float index (`&#34;ISVF&#34;`,
+   `&#34;ILVQ&#34;`, etc.) can carry any valid `MetricType` in the
+   serialized stream. When the metric is not L2 or INNER_PRODUCT,
+   `to_svs_metric()` is called with the unsupported value during
+   `deserialize_impl()`.
+
+2. **Programmatic construction** (`create_impl()`):
+   Creating an SVS index (e.g., `IndexSVSFlat`) with an unsupported
+   metric and calling `add()` triggers `create_impl()` which calls
+   `to_svs_metric()`. This is a user-error path.
+
+Reviewed By: mnorris11
+
+Differential Revision: D99336458
+
+fbshipit-source-id: ee5449b72e957a5e7eb77f651471f84c34e5c122
+
+- Fix IndexSVSVamana null-deref in deserialize_impl (#5029)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5029
+
+1. **Null pointer dereference in `deserialize_impl`**:
+   `IndexSVSVamana::deserialize_impl()` and `IndexSVSFlat::deserialize_impl()`
+   called `impl-&gt;load(...)` as a member function on a null `impl` pointer,
+   causing a SIGSEGV. The `load` function is actually a static factory method
+   (like `build` and `destroy`), so it should be called as
+   `ClassName::load(&amp;impl, ...)` instead. This matches the pattern used in
+   `IndexSVSVamanaLeanVec::deserialize_training_data()` which correctly calls
+   `svs_runtime::LeanVecTrainingData::load(&amp;tdata, in)`.
+
+2. **Added post-load validation**:
+   Added `FAISS_THROW_IF_NOT_MSG(impl, ...)` after `load()` returns to ensure
+   the impl pointer was actually populated.
+
+3. **Added tests**:
+   Added deserialization tests that provide invalid SVS stream data and verify
+   the load fails with a FaissException rather than crashing.
+
+Reviewed By: mnorris11
+
+Differential Revision: D99117347
+
+fbshipit-source-id: 3165048d06dc5ab66fcf83ecba3a144605c5732f
+
+- Cap ZnSphereCodecRec decode cache size (#5028)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5028
+
+The ZnSphereCodecRec constructor builds a decode cache by calling
+decode() for every lattice point at the cache level.  The number of
+lattice points grows as O(r2^(dim/2)), so moderate r2 values with
+higher dimensions cause excessive CPU usage.
+
+The existing nv_cum memory cap (2^27 uint64_t entries) does not catch
+this because nv_cum grows as O(r2^2) -- the decode cache is the
+binding constraint for these inputs.
+
+**Fix: Add decode cache size check in ZnSphereCodecRec constructor**:
+Track cumulative decode cache entries within the existing decode
+cache loop.  Cap at 2^27 total floats (~512 MB), aligned with
+the nv_cum memory cap which also uses 2^27 entries.  This bounds
+both memory and computation for all callers, not just
+deserialization.
+
+Reviewed By: mnorris11
+
+Differential Revision: D99166802
+
+fbshipit-source-id: 442ba2f5ea6b46309e3598b97953cf4c38fa443a
+
+- Add missing input validation to IndexFlat::range_search and compute_distance_subset (#5038)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5038
+
+Add missing input validation checks to two IndexFlat methods in fbcode/faiss/IndexFlat.cpp:
+
+1. IndexFlat::range_search(): Added a null-pointer check for the RangeSearchResult* result parameter using FAISS_THROW_IF_NOT_MSG(result, &#34;RangeSearchResult object must not be null&#34;). Without this check, passing a null result pointer leads to a segfault deep in the range search implementation.
+
+2. IndexFlat::compute_distance_subset(): Added FAISS_THROW_IF_NOT(k &gt; 0) to validate that the number of requested distances is positive. This is consistent with the existing validation in IndexFlat::search() and Index::search_and_reconstruct(), both of which already check k &gt; 0.
+
+Rationale:
+- IndexFlat::search() already validates k &gt; 0, but its sibling methods range_search() and compute_distance_subset() had no input validation at all.
+- IndexIVF methods have comprehensive validation (k &gt; 0, nprobe &gt; 0, invlists checks), demonstrating the project&#39;s intent to validate inputs early.
+- These checks convert silent undefined behavior / segfaults into clear, actionable error messages with no performance overhead on valid inputs.
+
+Reviewed By: mnorris11
+
+Differential Revision: D99447820
+
+fbshipit-source-id: cc0a337f086bb2fe59796882d1961764ecb508a0
+
+- Validate IndexIDMap id_map size during deserialization (#5024)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5024
+
+Fixes a null-deref crash in `IndexIDMap2::construct_rev_map()` when
+deserializing a crafted index where `id_map.size() != ntotal`.
+
+1. **Validation in index_read.cpp**:
+   Added a `FAISS_THROW_IF_NOT_FMT` check after reading the `id_map`
+   vector in the `IxMp`/`IxM2` deserialization path, verifying that
+   `id_map.size() == ntotal` before `construct_rev_map()` is called.
+   The binary index path (`IBMp`/`IBM2`) already had this check.
+
+2. **Test in test_read_index_deserialize.cpp**:
+   Added `IndexIDMap2IdMapSizeMismatch` test that constructs a serialized
+   `IndexIDMap2` with `ntotal=2` but `id_map` containing 5 entries, and
+   verifies deserialization throws with the expected error message.
+
+Reviewed By: mnorris11
+
+Differential Revision: D99138339
+
+fbshipit-source-id: cfcc5a4daf83bb6fbda324d15f946340eee259c0
+
+- Validate AdditiveQuantizer dimension consistency during deserialization (#5023)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5023
+
+Add deserialization-time validation to catch AdditiveQuantizer dimension
+mismatches that would cause crashes during search operations.
+
+1. **AQ dimension vs index dimension cross-check**:
+   Added `validate_aq_dimension_match()` helper that verifies `aq.d == idx.d`
+   for all AdditiveQuantizer-based index types. Without this check, a
+   corrupted index where AQ.d != Index.d causes `compute_LUT()` to read
+   codebooks out of bounds (query vectors are sized for Index.d while
+   codebooks are laid out for AQ.d).
+
+2. **Coverage across all AQ index types**:
+   - IndexResidualQuantizer (IxRq/IxRQ)
+   - IndexLocalSearchQuantizer (IxLS)
+   - IndexProductResidualQuantizer (IxPR)
+   - IndexProductLocalSearchQuantizer (IxPL)
+   - ResidualCoarseQuantizer (ImRQ)
+   - IndexAdditiveQuantizerFastScan (IRfs/ILfs/IPRf/IPLf)
+   - IndexIVFAdditiveQuantizerFastScan (IVLf/IVRf/NPLf/NPRf)
+   - IndexIVFAdditiveQuantizer (IwLS/IwRQ/IwPL/IwPR)
+
+Reviewed By: mnorris11
+
+Differential Revision: D99137777
+
+fbshipit-source-id: bb4201f32b1268d66907f9a3f34eff869c80dc9c
+
+- HNSW SIMD dispatch (#5015)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5015
+
+Extract `HNSW::MinimaxHeap` into a standalone `faiss::MinimaxHeap` struct in a new `impl/hnsw/` subdirectory, and convert `pop_min` to use FAISS SIMD dynamic dispatch.
+
+### Changes
+
+**New files:**
+- `impl/hnsw/MinimaxHeap.h` — Standalone `faiss::MinimaxHeap` struct (no longer nested in `HNSW`). Trivial methods (`max`, `size`, `clear`) inlined. Declares `template&lt;SIMDLevel&gt; pop_min_tpl` and runtime-dispatched `pop_min`.
+- `impl/hnsw/MinimaxHeap.cpp` — `push`, `count_below`, scalar `pop_min_tpl&lt;NONE&gt;`, and `pop_min` dispatch wrapper using `with_selected_simd_levels`.
+- `impl/hnsw/avx2.cpp` — `pop_min_tpl&lt;AVX2&gt;` specialization, guarded by `COMPILE_SIMD_AVX2`.
+- `impl/hnsw/avx512.cpp` — `pop_min_tpl&lt;AVX512&gt;` specialization, guarded by `COMPILE_SIMD_AVX512`.
+- `impl/hnsw/.nobuck` — Prevents autodeps from generating a BUCK file (sources are part of top-level faiss target).
+
+**Modified files:**
+- `impl/HNSW.h` — Includes new header, removed nested struct, free functions use `MinimaxHeap&amp;`.
+- `impl/HNSW.cpp` — Removed all `MinimaxHeap` implementations.
+- `IndexHNSW.cpp` — Removed stale `using MinimaxHeap = HNSW::MinimaxHeap` alias.
+- `tests/test_hnsw.cpp` — Updated `faiss::HNSW::MinimaxHeap` → `faiss::MinimaxHeap`.
+- `CMakeLists.txt` — Added new source/header files and SIMD file registrations.
+- `xplat.bzl` — Added new source/header files and SIMD_FILES entries.
+
+Reviewed By: algoriddle
+
+Differential Revision: D98920170
+
+fbshipit-source-id: 7c4d04e7eb6647b359efb2fa2f86c9f2a084d189
+
+- close the loop on ivf rabitq fast scan filter integration (#5026)
+
+Summary:
+The change wires IDSelector through the IVF RaBitQ fast-scan path and applies filtering in the custom handler
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5026
+
+Reviewed By: mnorris11
+
+Differential Revision: D99310065
+
+Pulled By: alibeklfc
+
+fbshipit-source-id: 87d65086d4d1e333add2dbef3a944aa05f6b818b
+
+- Fix AVX512_SPR build failure for 512-bit SIMD types (#5030)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5030
+
+The `faiss_avx512_spr` CMake target fails to compile because 512-bit SIMD
+type aliases (`simd32uint16`, `simd64uint8`, etc.) resolve to empty primary
+templates when `SINGLE_SIMD_LEVEL = AVX512_SPR`. Only `AVX512` and `NONE`
+have explicit template specializations.
+
+This adds `simd512_level_selector` (analogous to existing
+`simd256_level_selector`) that maps `AVX512_SPR -&gt; AVX512` for 512-bit
+types. This is correct because AVX512_SPR uses the same 512-bit integer
+SIMD instructions as AVX512 — SPR-specific gains come from separate
+instruction sets (BF16, FP16, VNNI) used in different code paths.
+
+Changes:
+- `simd_levels.h`: Add `simd512_level_selector` and `SINGLE_SIMD_LEVEL_512`
+- `simdlib_dispatch.h`: Route 512-bit aliases through `SINGLE_SIMD_LEVEL_512`;
+  also check `COMPILE_SIMD_AVX512_SPR` in include guard
+- `LookupTableScaler.h`: Use `simd512_level_selector` for 512-bit types in
+  `DummyScaler` and `NormTableScaler`
+
+Reviewed By: mnorris11
+
+Differential Revision: D99306837
+
+fbshipit-source-id: 49e71415c155b9328dc76ff0cd492f718060ff1e
+
+- SVS 0.3.0 (#4999)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4999
+
+Reviewed By: subhadeepkaran
+
+Differential Revision: D98740733
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 631a3f9c88a0b7fa456954e38dc9ddfc2f1c5dd2
+
+- reuse unpack buffer in multibit IVFRaBitQFastScan refinement (#5003)
+
+Summary:
+This removes two pieces of avoidable overhead from multibit `IndexIVFRaBitQFastScan` refinement.
+
+  In `compute_full_multibit_distance()`, we were allocating a temporary unpack buffer and reacquiring the current list codes for every refined candidate. The handler already has the list pointer, so this patch just reuses that and keeps a reusable unpack buffer on
+  the handler.
+
+  I only measured this on multibit workloads. On my AVX2 machine (`d=128`, `METRIC_L2`), the gain is small but consistent:
+  - `127us -&gt; 126us`
+  - `1335us -&gt; 1292us`
+  - `6414us -&gt; 6084us`
+  - `17955us -&gt; 16800us`
+
+  No change to 1-bit logic or search semantics.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5003
+
+Reviewed By: mnorris11
+
+Differential Revision: D98806563
+
+Pulled By: alibeklfc
+
+fbshipit-source-id: 8ae878d0f027bf2e534fed78e2fc33aa1f69e64c
+
+- Harden ScalarQuantizer deserialization validation (#5020)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5020
+
+The prior deserialization validation for training data in
+`read_ScalarQuantizer` skipped size checks when `trained` was empty,
+allowing inconsistent index state to be materialized.
+
+This diff hardens `read_ScalarQuantizer` in three ways:
+
+1. **Trained size validation**:
+   Replace the `if (!ivsc-&gt;trained.empty())` guard with two-branch
+   validation. For qtypes that require training data
+   (UNIFORM/NON_UNIFORM), an empty `trained` vector is only accepted
+   when the index header has `is_trained == false` (a legitimate
+   untrained index). When `is_trained == true`, the trained vector
+   must match the expected size. Qtypes that need no training (fp16,
+   bf16, 8bit_direct*) still require `trained.size() == 0`.
+
+2. **Dimension cross-validation**:
+   Validate that `ScalarQuantizer::d` matches `Index::d` from the index
+   header. A mismatch indicates a corrupted file and could cause the
+   trained size check to accept a wrong size.
+
+3. **is_trained consistency**:
+   When training data is present, validate that the index header
+   `is_trained` flag is true. A false flag with valid training data
+   indicates file corruption.
+
+To support these cross-validations, `read_ScalarQuantizer` now takes
+a `const Index&amp;` parameter for access to the index header fields.
+
+Untrained indices (created via `index_factory` but not yet trained)
+are legitimately serialized with `is_trained=false` and an empty
+`trained` vector. The existing `FAISS_THROW_IF_NOT(is_trained)` guards
+in `IndexScalarQuantizer::search()` and related methods already prevent
+querying such indices, so no additional query-time validation is needed.
+
+Reviewed By: mnorris11
+
+Differential Revision: D98924927
+
+fbshipit-source-id: cbb9906e031c871cb8d2baa7bb9cb9d2c6834e03
+
+- Validate qbs at deserialization time in FastScan index formats (#5019)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5019
+
+The `qbs` field (query block size) is an `int` read from serialized
+FastScan index files. A negative value causes `pq4_qbs_to_nq()` to loop
+infinitely at search time because arithmetic right shift on a signed `int`
+preserves the sign bit, preventing the loop variable from reaching zero.
+
+Validate `qbs &gt;= 0` immediately after reading it during deserialization in
+all three affected index formats:
+- `IndexPQFastScan` (fourcc &#34;IPfs&#34;)
+- `IndexAdditiveQuantizerFastScan` (fourccs &#34;IRfs&#34;, &#34;ILfs&#34;, &#34;IPLf&#34;, &#34;IPRf&#34;)
+- `IndexIVFAdditiveQuantizerFastScan` (fourccs &#34;IVRf&#34;, &#34;IVLf&#34;, &#34;NPLf&#34;, &#34;NPRf&#34;)
+
+This catches malformed or adversarial index files at load time with a clean
+`FaissException`, rather than hanging during search.
+
+`IndexIVFPQFastScan` and `IndexIVFRaBitQFastScan` are not affected because
+they only serialize `qbs2`, which is `size_t` (unsigned).
+
+Reviewed By: mnorris11
+
+Differential Revision: D98815835
+
+fbshipit-source-id: 40c5f39c84bcc553b7031c601832ef2c7d0a4d64
+
+- Validate IndexBinaryHash b &lt;= code_size*8 during deserialization (#5011)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5011
+
+Add a deserialization-time check in `read_index_binary` that rejects
+`IndexBinaryHash` data where `b` exceeds `code_size * 8`.  Without
+this validation, a malformed index can cause `BitstringReader::read()`
+to access past the allocated code buffer during search, resulting in a
+heap-buffer-overflow.
+
+Reviewed By: mnorris11
+
+Differential Revision: D98811392
+
+fbshipit-source-id: 6847bce77be6edb66d87bd28a770c2af615868d3
+
+- Validate IndexFastScan quantizer state during deserialization (#5009)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5009
+
+Add deserialization-time validation for all three FastScan index types
+(IndexPQFastScan, IndexAdditiveQuantizerFastScan, IndexRaBitQFastScan)
+in `index_read.cpp`. A crafted or corrupted index file could previously
+supply invalid quantizer parameters that would cause crashes or undefined
+behavior when the index was later used for search.
+
+The following checks are added at deserialization time for each FastScan
+variant:
+
+1. **M &gt; 0 and ksub &gt; 0**:
+   These quantizer dimensions are used as divisors and loop bounds in
+   `compute_float_LUT` and search kernels.  Zero values would cause
+   division-by-zero or empty allocations followed by out-of-bounds access.
+
+2. **bbs &gt; 0 and bbs % 32 == 0**:
+   The block batch size (`bbs`) is used as a divisor (e.g. `ntotal2 /
+   bbs`) in search and is assumed to be aligned to 32 by the SIMD packing
+   logic. A zero value causes division-by-zero; a misaligned value causes
+   incorrect memory access patterns.
+
+3. **ksub * M and ksub * M2 overflow**:
+   These products are used to size lookup tables and scoring buffers. A
+   corrupted file could set M2 to a huge value, causing `size_t` overflow
+   and subsequent under-sized allocations with out-of-bounds writes. The
+   existing `mul_no_overflow` helper is used to detect this.
+
+Reviewed By: mnorris11
+
+Differential Revision: D98787875
+
+fbshipit-source-id: 76656f1c1bea4afe2d268dbd46af5a6b3a7b5932
+
+- Validate codebooks size at deserialization time in read_AdditiveQuantizer (#5008)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5008
+
+Add deserialization-time validation in `index_read.cpp` for
+AdditiveQuantizer-based indices, catching corrupt or malicious index
+files early rather than crashing during search.
+
+1. **Codebooks divisibility check in `read_AdditiveQuantizer`**:
+   `codebooks.size()` must be a positive multiple of
+   `total_codebook_size`. This catches obvious corruption without
+   needing the effective dimension.
+
+2. **`validate_codebooks_size` helper**:
+   Checks `codebooks.size() &gt;= effective_d * total_codebook_size`.
+   Called from `read_ResidualQuantizer` and `read_LocalSearchQuantizer`
+   with `d`, and from `read_ProductAdditiveQuantizer` with
+   `d / nsplits`.
+
+3. **`d &gt; 0` validation**:
+   Reject zero dimension in `read_AdditiveQuantizer`.
+
+4. **ProductAdditiveQuantizer checks**:
+   - `d % nsplits == 0` in `read_ProductAdditiveQuantizer`
+   - Sub-quantizer `d == d_sub` in `read_ProductResidualQuantizer`
+     and `read_ProductLocalSearchQuantizer`
+
+Existing tests updated to write correctly-sized codebooks so they
+continue to reach their intended validation points.
+
+Reviewed By: mnorris11
+
+Differential Revision: D98767295
+
+fbshipit-source-id: 95d8debbbb0f3822bae087a546a573e5c2c3c9dd
+
+- Update Python type stubs: fix class hierarchy and add missing base classes (#5004)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5004
+
+This diff was automatically generated by myclaw_faiss_monitor
+
+Updates the PEP 561 type stubs for the faiss Python package to fix
+incorrect class inheritance and add missing intermediate base classes
+that are exposed via SWIG but were not reflected in the type stubs.
+
+Changes:
+- Add IndexFlatCodes base class, fix IndexFlat/IndexLSH/IndexPQ/
+  IndexScalarQuantizer to inherit from it instead of Index
+- Add IndexAdditiveQuantizer hierarchy: base class +
+  IndexResidualQuantizer, IndexLocalSearchQuantizer
+- Add AdditiveCoarseQuantizer base, fix ResidualCoarseQuantizer and
+  LocalSearchCoarseQuantizer inheritance
+- Add IndexAdditiveQuantizerFastScan + IndexResidualQuantizerFastScan,
+  IndexLocalSearchQuantizerFastScan
+- Add IndexIVFAdditiveQuantizer base, fix all IVF AQ variants
+- Add IndexIVFAdditiveQuantizerFastScan base, fix all IVF FastScan
+  AQ variants
+- Fix Product variants (IndexProductResidualQuantizer etc.) to use
+  correct parent and attribute names (prq/plsq not rq/lsq)
+- Fix IndexRowwiseMinMax hierarchy: add IndexRowwiseMinMaxBase,
+  correct constructors to take Index* not (d, metric)
+- Add SearchParametersResidualCoarseQuantizer
+- Add ResidualCoarseQuantizer.beam_factor and set_beam_factor()
+
+Reviewed By: mnorris11
+
+Differential Revision: D98661189
+
+fbshipit-source-id: d00971363594885adddbcace61ced6a4e28aa1cb
+
+- Convert rabitq_simd.h to runtime SIMD dispatch (#4912)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4912
+
+Convert RaBitQ SIMD primitives from compile-time #ifdef cascades to the
+DD template specialization pattern.
+
+- Replace inline SIMD functions in rabitq_simd.h with template&lt;SIMDLevel&gt;
+  declarations and NONE (scalar) specializations
+- Create rabitq_avx2.cpp with AVX2+SSE4.1 specializations for
+  bitwise_and_dot_product, bitwise_xor_dot_product, popcount, and
+  compute_inner_product (including BMI2 bitplane kernel)
+- Create rabitq_avx512.cpp with AVX512 specializations (falls back to
+  AVX2 bitplane kernel for compute_inner_product with ex_bits &gt;= 2)
+- Add AVX512_SPR forwarding to AVX512 for all four functions
+- Create rabitq_neon.cpp forwarding ARM_NEON/ARM_SVE to NONE
+- Wrap calls in RaBitQuantizer.cpp and RaBitQUtils.cpp with
+  with_simd_level dispatch
+- Add -mbmi2 to AVX2 and AVX512 SIMD flags (required by _pext_u64 in
+  bitplane kernel; BMI2 is present on all Haswell+ CPUs)
+- Register new SIMD files in xplat.bzl and CMakeLists.txt
+
+Reviewed By: mdouze
+
+Differential Revision: D96298743
+
+fbshipit-source-id: 1941bf099664ba2d3d1c1245d5c06d1775614955
+
+- Convert distances_fused/ to runtime SIMD dispatch (#4911)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4911
+
+Convert the fused L2+top1 kernel in distances_fused/ from compile-time
+#ifdef __AVX512F__/__AVX2__/__aarch64__ guards to the DD template
+specialization pattern.
+
+- Replace #ifdef dispatch in distances_fused.cpp with with_simd_level
+- Convert avx512.cpp to COMPILE_SIMD_AVX512 guard with template&lt;&gt;
+  exhaustive_L2sqr_fused_cmax&lt;SIMDLevel::AVX512&gt; specialization
+- Convert simdlib_based.cpp to COMPILE_SIMD_AVX2/COMPILE_SIMD_ARM_NEON
+  guards with separate AVX2 and ARM_NEON specializations
+- Add simdlib_based_neon.cpp as thin ARM NEON compilation wrapper
+- Add NONE specialization that returns false (no fused kernel)
+- Add ARM_SVE forwarding to ARM_NEON, AVX512_SPR forwarding to AVX512
+- Hoist fused kernel call in distances.cpp out of #ifdef chain so it
+  is always attempted (enables fused kernel in DD mode)
+- Move avx512.cpp and simdlib_based.cpp from FAISS_SRC to SIMD file
+  registries in xplat.bzl and CMakeLists.txt
+
+Reviewed By: mdouze
+
+Differential Revision: D96298745
+
+fbshipit-source-id: 4a221030ad37e50bd476b3ae5f734f728c5dea5c
+
+- read-heap-buffer-overflow (size 32) in float faiss::fvec_norm_L2sqr&lt;&gt;()
+
+Reviewed By: limqiying
+
+Differential Revision: D98879864
+
+fbshipit-source-id: f2feb635c7a77d7ba7e232d47ff6ac5d452b65cf
+
+- Fix OSX arm64 nightly: bump libopenblas from 0.3.30 to 0.3.32 (#5006)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5006
+
+🤖 This diff was automatically generated by myclaw_faiss_monitor
+
+The OSX arm64 nightly build has been failing since Mar 27 due to a
+conda dependency conflict: the recipe pins libopenblas=0.3.30 (with
+specific build hash) on osx, but also requires openblas=0.3.32 on
+non-x86_64 platforms. Since libopenblas 0.3.30 constrains
+openblas&gt;=0.3.30,&lt;0.3.31, conda cannot resolve the dependency.
+
+Fix: bump all 6 libopenblas pins on osx from 0.3.30 to 0.3.32 to
+match the openblas version, and drop the specific build hash pin.
+
+Reviewed By: mnorris11
+
+Differential Revision: D98718117
+
+fbshipit-source-id: 1c3725a01e7d7552074fb849dfd6d1b0d66faf97
+
+- large-malloc (15023964028 bytes) in __sanitizer::RunMallocHooks() (#5018)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5018
+
+Reviewed By: limqiying
+
+Differential Revision: D98882078
+
+fbshipit-source-id: 3c2b1904cb5d41f4f4dbd9a0b8147bad00acf5f8
+
+- Validate VectorTransform dimensions during deserialization (#5007)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5007
+
+Add input validation to VectorTransform deserialization to defend against
+invalid or malicious serialized data:
+
+1. **Negative dimension checks**:
+   Reject `d_in &lt; 0` or `d_out &lt; 0` immediately after reading, before
+   any allocations depend on these values.
+
+2. **Byte limit check on `d_in * d_out`**:
+   Use `mul_no_overflow` to safely compute the product and verify it
+   does not exceed the deserialization vector byte limit. This prevents
+   allocation of excessively large matrices from corrupt data. The
+   existing per-type-specific `d_out &gt; 0` check in HadamardRotation is
+   removed as redundant (the power-of-2 check already implies `d_out &gt; 0`).
+
+3. **IndexIVFIndependentQuantizer dimension consistency**:
+   When an `IndexIVFIndependentQuantizer` has a VectorTransform, validate
+   that `vt-&gt;d_in == indep-&gt;d` and `vt-&gt;d_out == index_ivf-&gt;d`. A mismatch
+   indicates a corrupt or tampered index file and would cause incorrect
+   behavior at query time.
+
+Reviewed By: mnorris11
+
+Differential Revision: D98683628
+
+fbshipit-source-id: 0101ee1aa956c346b614d26569c20d6b442210b4
+
+- facebook-unused-include-check in distances_simd.cpp (#5013)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5013
+
+Reviewed By: limqiying
+
+Differential Revision: D98645816
+
+fbshipit-source-id: 3ac1a12ad504c3fd03f358f62a2c0b5fd2175e13
+
+- facebook-unused-include-check in partition.cpp (#5012)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5012
+
+Reviewed By: limqiying
+
+Differential Revision: D98647966
+
+fbshipit-source-id: 9aeeb57fcf1d8cb02405818eeb19f4d32cb5779e
+
+- out-of-memory in __gnu_cxx::new_allocator&lt;&gt;::allocate() (#5014)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5014
+
+Reviewed By: limqiying
+
+Differential Revision: D97447001
+
+fbshipit-source-id: 9177de15ddbce8cd6de0c22b0a525c06b8457145
+
+- Fix avx512_result_handlers build on aarch64 (#4965)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4965
+
+The avx512_result_handlers targets fail to build on aarch64 because they
+unconditionally pass `-mavx512f` and use x86-specific intrinsics. This diff:
+
+1. Adds `select()` in the BUCK file so `-mavx512f` is only applied on x86_64.
+2. Wraps all source files with `#if defined(__x86_64__)` guards as defense-in-depth.
+
+Reviewed By: mnorris11
+
+Differential Revision: D97347249
+
+fbshipit-source-id: 32bcc27b3486849ca1568cc5e4beb747adff43a6
+
+- Update Python type stubs (__init__.pyi) to match current API (#4998)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4998
+
+🤖 This diff was automatically generated by myclaw_faiss_monitor
+
+Updates the PEP 561 type stubs for the faiss Python package to reflect
+API changes since the initial stubs were added in D94139717.
+
+Changes:
+- Fix wrong RaBitQ constructor signatures (IndexRaBitQ, IndexIVFRaBitQ)
+  to match actual C++ constructors (removed nonexistent M, nbit, trained
+  params, renamed attribute from rq to rabitq)
+- Add missing Panorama index classes: IndexFlatPanorama,
+  IndexFlatL2Panorama, IndexFlatIPPanorama, IndexHNSWFlatPanorama,
+  IndexIVFFlatPanorama, IndexRefinePanorama
+- Add RaBitQ FastScan classes: IndexRaBitQFastScan,
+  IndexIVFRaBitQFastScan
+- Add RaBitQ search parameter classes: RaBitQSearchParameters,
+  IVFRaBitQSearchParameters
+- Add HadamardRotation VectorTransform
+- Add IndexQINCo class, fix IndexNeuralNetCodec constructor signature
+- Fix IndexRandom constructor (add missing ntotal, metric params)
+- Add new ClusteringParameters fields (init_method,
+  afkmc2_chain_length, early_stop_threshold)
+- Add deserialization safety functions (get/set_deserialization_loop_limit,
+  get/set_deserialization_vector_byte_limit)
+
+Reviewed By: mnorris11
+
+Differential Revision: D98439353
+
+fbshipit-source-id: c6b8908d85bb3edaae30613e7e89074034678a7b
+
+- Add deserialization vector limit enforcement for ResidualCoarseQuantizer (#4997)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4997
+
+Collectively validate ntotal, beam_factor, and max_beam_size during
+deserialization to ensure allocation limits are honored, even when
+those allocations occur in search context (ResidualCoarseQuantizer::search()).
+
+Specifically, search() allocates O(beam_size * M * n) int32_t elements where
+beam_size is derived from min(k * beam_factor, ntotal). With an adversarial
+ntotal of 2^60 or a beam_factor of 1e10, these allocations exceed max_size()
+and throw an uncaught std::length_error, terminating the process.
+
+This diff adds three layers of protection:
+
+1. read_ResidualQuantizer(): Validates max_beam_size &gt; 0 and that
+   max_beam_size * M * sizeof(int32_t) fits within the configurable
+   deserialization vector byte limit.
+
+2. ResidualCoarseQuantizer (&#34;ImRQ&#34;) deserialization path:
+   Validates beam_factor &lt;= 1000 to prevent int overflow in beam_size
+   computation, and validates ntotal * M * sizeof(int32_t) against the
+   byte limit since search() can allocate O(ntotal * M) when beam_size
+   is capped to ntotal.
+   Why 1000? The default beam_size is 4 (expand candidate serarch by 4x).
+   A value of even 1000 makes no practical sense as in most cases it will
+   be equivalent to an exhaustive search (beam_size = -1), but is sufficient
+   to prevent overflow.
+
+3. ResidualCoarseQuantizer::search():
+   Replaces bare arithmetic with mul_no_overflow() for the codes and
+   beam_distances allocations, so any overflow throws a catchable
+   FaissException instead of silently wrapping and causing undefined
+   behavior.
+
+Reviewed By: mnorris11
+
+Differential Revision: D98169828
+
+fbshipit-source-id: a8cd067ebb0fcb3ca25bed80a6d2ccc0cdbc0a32</div>
+</div>
+
+<a href="../project/facebookresearch_faiss.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

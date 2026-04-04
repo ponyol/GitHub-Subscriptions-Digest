@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (8 commits) - microsoft/onnxruntime-genai - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (8 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/microsoft_onnxruntime-genai.html">microsoft/onnxruntime-genai</a> /
+    Updates in main (8 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/microsoft_onnxruntime-genai.html">microsoft/onnxruntime-genai</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-04-04 01:19 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/microsoft/onnxruntime-genai/commits/main" target="_blank">https://github.com/microsoft/onnxruntime-genai/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Обновление включает ряд ключевых улучшений: исправлены проблемы конвейера зрения Qwen VL и вызова инструментов TRT-RTX, добавлена поддержка экспорта гибридных декодеров Qwen3.5 и полностью исполняемых на NPU моделей QNN. Повышена производительность за счет восстановления кэширования компилятора в CI-конвейерах со стабильными ключами, а также рефакторинга выделения рекуррентного состояния для лучшей совместимости с устройствами и захвата графа CUDA. Кроме того, интегрирована система Silero VAD в Nemotron Streaming ASR для эффективного пропуска фрагментов аудио с тишиной, что сокращает задержки и вычислительные ресурсы.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Fix vision pipeline EP hardcoding and pixel_values rank mismatch for Qwen VL models (#2060)
+
+This PR fixes two issues in the Qwen VL vision pipeline:
+
+### 1. Hardcoded QNN execution provider for vision attention
+
+The vision pipeline unconditionally used `QNNExecutionProvider` when
+`run_on_cpu` was `false` for the `vision_attn` stage, ignoring the
+`session_options.provider_options` specified in `genai_config.json`.
+
+The fix reads session options from the vision pipeline config (same
+mechanism used by decoder pipeline stages) and passes them to
+`QwenVisionPipeline`, replacing the hardcoded QNN setup.
+
+### 2. pixel_values rank mismatch
+
+PR #2050 changed `num_patches` indexing from `pixel_shape[1]` to
+`pixel_shape[0]`, assuming rank 2 input `[num_patches, channels]`. This
+broke models whose `patch_embed` expects rank 3 `[1, num_patches,
+channels]` (e.g., FARA-7B VitisAI).
+
+The fix dynamically queries the `patch_embed` model&#39;s expected input
+rank and adjusts the tensor shape accordingly — prepending or stripping
+batch dimensions as needed. This preserves multi-image support for
+standard Qwen models (rank 2) while also supporting models exported with
+a batch dimension (rank 3).
+
+- Fix tool calling for TRT-RTX models (#2048)
+
+### Description
+
+This PR fixes a bug with using grammars for tool calling when running
+TRT-RTX models. It also addresses the following issues:
+
+- https://github.com/microsoft/Foundry-Local/issues/363
+- https://github.com/microsoft/Foundry-Local/issues/523
+
+### Motivation and Context
+
+Previously, tool calling failed inside both ORT GenAI and Foundry Local
+for TRT-RTX models.
+
+---------
+
+Co-authored-by: Hudson Cooper &lt;hncooper96@gmail.com&gt;
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+Co-authored-by: copilot-swe-agent[bot] &lt;198982749+Copilot@users.noreply.github.com&gt;
+Co-authored-by: Baiju Meswani &lt;bmeswani@microsoft.com&gt;
+
+- Speed up CI pipelines (#2052)
+
+Restores compiler caching to two CI pipelines (macOS arm64 with
+**ccache** and Windows CUDA x64 with **sccache**) to speed up repeated
+builds, especially on PR re-runs, bot-triggered retries, and branch
+pushes where CMake inputs haven&#39;t changed.
+
+Also fixes a cache key bug from PR review: the primary key previously
+included `${{ github.sha }}`, forcing a new cache entry on every commit
+and never getting a hit from the primary key. The key is now derived
+from `hashFiles(&#39;**/CMakePresets.json&#39;, &#39;**/CMakeLists.txt&#39;)` so the
+cache is reused across commits that don&#39;t change build inputs.
+
+---
+
+## macOS arm64 — ccache
+
+**What changed:**
+- Install `ccache` via Homebrew before the CMake configure step
+- Restore/save the ccache directory with `actions/cache@v4`
+- Pass `-DCMAKE_C_COMPILER_LAUNCHER=ccache
+-DCMAKE_CXX_COMPILER_LAUNCHER=ccache` to CMake
+- Print `ccache --show-stats` after the build
+
+**Measured build times** (GitHub Actions, `macos-latest` ARM64 runner):
+
+| Scenario | CMake build step | Total job |
+|---|---|---|
+| Without ccache (baseline) | ~64 min | ~2h 24 min |
+| With ccache — **cold** (first run, no prior cache) | ~78 min | ~1h 50
+min |
+| With ccache — **warm** (re-run / unchanged CMake inputs) | ~8–15 min
+(estimated) | ~1h 10 min (estimated) |
+
+&gt; Cold builds take slightly longer than baseline because ccache writes
+new entries to disk while also compiling. The payoff is on the next run:
+warm re-runs are expected to be ~5–8× faster on the CMake build step,
+saving ~50 min per PR re-run on macOS.
+
+**Cache key** (stable, does not bloat on every commit):
+```yaml
+key: ccache-macos-arm64-${{ hashFiles(&#39;**/CMakePresets.json&#39;, &#39;**/CMakeLists.txt&#39;) }}
+restore-keys: |
+  ccache-macos-arm64-
+```
+
+---
+
+## Windows CUDA x64 — sccache
+
+**What changed:**
+- Download `sccache` v0.9.0 binary from GitHub releases
+- Restore the sccache directory with `actions/cache/restore@v4` (split
+restore/save so cache is written before test steps that may fail)
+- Pass `-DCMAKE_C_COMPILER_LAUNCHER=sccache
+-DCMAKE_CXX_COMPILER_LAUNCHER=sccache` to CMake
+- Print `sccache --show-stats` after the build
+- Save cache inline (`actions/cache/save@v4`), skipped on full key hit
+
+**Cache key** (stable):
+```yaml
+key: sccache-win-cuda-${{ hashFiles(&#39;**/CMakePresets.json&#39;, &#39;**/CMakeLists.txt&#39;) }}
+restore-keys: |
+  sccache-win-cuda-
+```
+
+---
+
+## Cache key fix (PR feedback)
+
+**Before:**
+```yaml
+# macOS — unique every commit, relies on restore-keys every time
+key: ccache-macos-arm64-${{ github.ref }}-${{ github.sha }}
+
+# Windows — unique every commit
+key: sccache-win-cuda-${{ github.sha }}
+```
+
+**After:**
+```yaml
+# macOS — stable, only changes when CMake config files change
+key: ccache-macos-arm64-${{ hashFiles(&#39;**/CMakePresets.json&#39;, &#39;**/CMakeLists.txt&#39;) }}
+
+# Windows — stable
+key: sccache-win-cuda-${{ hashFiles(&#39;**/CMakePresets.json&#39;, &#39;**/CMakeLists.txt&#39;) }}
+```
+
+---
+
+## Checklist
+
+- [x] Fix Windows WinML CI: correct binaryDir and build config
+- [x] Add ccache to macOS arm64 CI workflow
+- [x] Add sccache to Windows CUDA x64 CI workflow
+- [x] Fix cache key stability: replace `${{ github.sha }}` with
+`hashFiles(...)` in both primary keys to avoid per-commit cache bloat
+
+---------
+
+Co-authored-by: copilot-swe-agent[bot] &lt;198982749+Copilot@users.noreply.github.com&gt;
+Co-authored-by: kunal-vaishnavi &lt;115581922+kunal-vaishnavi@users.noreply.github.com&gt;
+Co-authored-by: Kunal Vaishnavi &lt;kvaishnavi@microsoft.com&gt;
+
+- Allocate recurrent state via device allocator to enable CUDA graph capture (#2057)
+
+This pull request refactors the `RecurrentState` implementation to
+simplify tensor memory management and improve device compatibility. The
+main change is moving away from manual memory allocation and alignment
+for state tensors, instead using the device&#39;s allocator directly for all
+tensor allocations. This makes the code cleaner and ensures that tensors
+are always allocated in the correct memory space. Additionally, the code
+now includes explicit zero-initialization for state tensors to ensure
+proper reset behavior.
+
+**Memory management and allocation improvements:**
+* Replaced manual allocation and alignment of contiguous memory blocks
+for state tensors (`past_block_`, `present_block_`, etc.) with direct
+allocation of each tensor using the device&#39;s allocator
+(`OrtValue::CreateTensor`). This removes the need for custom byte offset
+calculations and alignment logic.
+[[1]](diffhunk://#diff-b1c111b3b3b54cd6c983b851715f3e073b1331c1464b255bfe697e6fabe81337L90-R106)
+[[2]](diffhunk://#diff-b1c111b3b3b54cd6c983b851715f3e073b1331c1464b255bfe697e6fabe81337L169-R172)
+[[3]](diffhunk://#diff-0684b0daefd911bd4e5114b4f14d4d261fbcf5367c77138b2491698b0058dd64L43-L53)
+* Removed the use of custom `OrtMemoryInfo` and raw pointer-based tensor
+views, further simplifying the memory management logic.
+[[1]](diffhunk://#diff-b1c111b3b3b54cd6c983b851715f3e073b1331c1464b255bfe697e6fabe81337L90-R106)
+[[2]](diffhunk://#diff-0684b0daefd911bd4e5114b4f14d4d261fbcf5367c77138b2491698b0058dd64L43-L53)
+
+**Device compatibility and initialization:**
+* Added a `ZeroStates` helper method to explicitly zero-initialize all
+state tensors after allocation and during state rewind, ensuring clean
+state resets regardless of device or allocator.
+[[1]](diffhunk://#diff-b1c111b3b3b54cd6c983b851715f3e073b1331c1464b255bfe697e6fabe81337L90-R106)
+[[2]](diffhunk://#diff-b1c111b3b3b54cd6c983b851715f3e073b1331c1464b255bfe697e6fabe81337L169-R172)
+[[3]](diffhunk://#diff-0684b0daefd911bd4e5114b4f14d4d261fbcf5367c77138b2491698b0058dd64R22-R23)
+
+**Code cleanup:**
+* Removed unnecessary `#include &lt;cstring&gt;` as manual memory operations
+are no longer used.
+* Deleted now-unused member variables related to manual memory
+allocation and alignment.
+
+These changes make the codebase more robust, device-agnostic, and easier
+to maintain.
+
+- Add support for QNN stateful models (#2012)
+
+This PR enhances support for QNN stateful models that execute entirely
+on Qualcomm&#39;s Neural Processing Unit (NPU), including attention
+operations and internal KV cache management. This significant
+improvement eliminates previous limitations where certain operations
+would fall back to CPU execution, resulting in performance bottlenecks.
+
+The implementation identifies QNN stateful models through the
+`genie_model=True` provider option. For these models:
+- The ONNX Runtime GenAI framework delegates KV cache management
+entirely to the QNN backend
+- The model architecture is optimized to return logits only for the last
+token in the sequence
+
+- Add Qwen3.5 hybrid decoder export support (GatedDeltaNet + Attention) (#2043)
+
+This PR adds support for exporting Qwen3.5 hybrid decoder models to ONNX
+via the
+onnxruntime-genai model builder. Qwen3.5 uses a novel hybrid
+architecture that
+alternates between standard attention layers (with KV cache) and
+GatedDeltaNet
+linear attention layers (with conv_state + recurrent_state).
+
+## Architecture
+
+Qwen3.5 has two layer types controlled by `full_attention_interval`:
+- **Full attention** (every 4th layer): Doubled Q projection (Q + output
+gate),
+per-head QK OffsetRMSNorm, partial interleaved mRoPE, opset 23 Attention
+op
+- **Linear attention** (remaining layers): GatedDeltaNet with depthwise
+causal
+  conv1d, L2-normalized Q/K, Scan-based recurrence, gated RMSNorm
+
+## Key design decisions
+
+- **Opset 23** standard-domain ops (`RMSNormalization`,
+`RotaryEmbedding`,
+  `Attention`) instead of `com.microsoft` contrib ops for portability
+- **CumSum-based causal mask** with `[B, 1, S, total_S]` shape —
+correctly
+  handles both prefill and single-token decode modes
+- **Pre-computed cos/sin cache tables** with Where-mask interleaving for
+  efficient mRoPE at runtime
+- **Hybrid cache I/O**: Per-layer KV cache for attention layers,
+  conv_state + recurrent_state for GatedDeltaNet layers
+- **SkipSimplifiedLayerNormalization** with pre-baked `weight + 1`
+offset
+  (reuses base class)
+
+## Changes
+
+### `src/python/py/models/builders/qwen.py`
+- Added `Qwen35Model` class with:
+- `_make_full_attention_layer`: Q/gate split, QK norm, mRoPE, Attention,
+gating
+- `_make_linear_attention_layer`: Conv1d, L2 norm, Scan recurrence,
+gated norm
+- `_make_causal_mask`: CumSum-based mask shared across attention layers
+  - `_make_rotary_caches`: Pre-computed cos/sin + h/w interleaving masks
+  - `_build_scan_body`: GatedDeltaNet delta rule in ONNX Scan body graph
+- `make_genai_config`: Text-only config (reuses base class via
+`super()`)
+
+### `src/python/py/models/builders/__init__.py`
+- Export `Qwen35Model`
+
+### `src/python/py/models/builder.py`
+- Dispatch `Qwen3_5ForConditionalGeneration` → `Qwen35Model`
+
+## Export command
+
+```bash
+cd src/python/py/models
+python builder.py -m &#34;Qwen/Qwen3.5-0.8B&#34; -o &lt;output_dir&gt; -p fp32 -e cpu
+python builder.py -m &#34;Qwen/Qwen3.5-0.8B&#34; -o &lt;output_dir&gt; -p int4 -e cpu
+
+- Add Silero VAD Support to Nemotron Streaming ASR (#2035)
+
+## Add Silero VAD (Voice Activity Detection) to Nemotron Streaming ASR
+
+### Summary
+
+Integrates [Silero VAD](https://github.com/snakers4/silero-vad) into the
+`StreamingProcessor` base class so that audio chunks without speech are
+automatically skipped before reaching the encoder/decoder pipeline. VAD
+is **disabled by default** and activated by adding a `&#34;vad&#34;` section to
+`genai_config.json`, or at runtime via `SetOption`/`GetOption`.
+
+### Motivation
+
+In streaming audio pipelines, many chunks contain silence or background
+noise. Without VAD, every chunk goes through the full RNNT
+encoder→decoder→joiner pipeline. By gating on speech detection, we skip
+silent chunks — saving compute and reducing end-to-end latency.
+
+### Design
+
+**Config-driven**: VAD is enabled when the `&#34;vad&#34;` section exists in
+`genai_config.json` (no separate `enabled` boolean). The `SileroVad`
+class uses GenAI&#39;s `Model::CreateSession()` and
+`Model::CreateSessionOptionsFromConfig()` to inherit provider options,
+session options, and run options from the config.
+
+**State infrastructure**: `SileroVadState` inherits from `State`, so VAD
+inference uses `State::Run()` — getting EP support, run options,
+`session_terminate`, and graph capture for free.
+
+**Consecutive silence logic**: Instead of dropping every silent chunk
+immediately (which breaks natural pauses between words/sentences), the
+processor tracks consecutive silent chunks and only starts dropping
+after `silence_duration_ms` worth of silence elapses.
+`prefix_padding_ms` sets a minimum floor of silence to always keep for
+context. Speech resets the counter.
+
+**Generic key-value API**: Following the same pattern as tokenizer
+options, all VAD settings are controlled via `SetOption`/`GetOption`
+rather than VAD-specific methods. This avoids API surface bloat and is
+extensible.
+
+**Reusable base class**: All VAD logic lives in `StreamingProcessor`
+(base class), so any future streaming processor (Whisper, etc.) gets VAD
+support by calling `InitVadFromConfig()` and `ShouldDropChunk()`.
+
+### Config
+
+Add to `genai_config.json`:
+
+    {
+      &#34;model&#34;: {
+        &#34;vad&#34;: {
+          &#34;filename&#34;: &#34;silero_vad.onnx&#34;,
+          &#34;threshold&#34;: 0.3,
+          &#34;silence_duration_ms&#34;: 3360,
+          &#34;prefix_padding_ms&#34;: 560,
+          &#34;session_options&#34;: {},
+          &#34;run_options&#34;: {}
+        }
+      }
+    }
+
+Presence of the `&#34;vad&#34;` section enables VAD. Omit the section entirely
+to disable.
+
+### API Surface
+
+All languages use the same generic `SetOption`/`GetOption` pattern on
+`StreamingProcessor`:
+
+| Key | Values | Description |
+|---|---|---|
+| `vad_enabled` | `&#34;true&#34;` / `&#34;false&#34;` | Enable/disable VAD at runtime |
+| `vad_threshold` | float as string | Speech probability threshold
+(default: `&#34;0.5&#34;`) |
+| `silence_duration_ms` | int as string | Silence duration before
+dropping chunks (default: `&#34;3360&#34;`) |
+| `prefix_padding_ms` | int as string | Minimum silence to keep for
+context (default: `&#34;560&#34;`) |
+
+C API: `OgaStreamingProcessorSetOption` /
+`OgaStreamingProcessorGetOption` (2 functions)
+
+### Changes
+
+#### Core
+- `src/config.h` / `src/config.cpp` — Added `VAD` struct to
+`Config::Model` with `filename`, `threshold`, `silence_duration_ms`,
+`prefix_padding_ms`, `sample_rate`, `session_options`, `run_options`
+- `src/models/streaming_processor.h` /
+`src/models/streaming_processor.cpp` — Base class with
+`SetOption()`/`GetOption()`, `ShouldDropChunk()`, `InitVadFromConfig()`,
+ms→chunks conversion
+- `src/models/nemotron_streaming_processor.h/.cpp` — Calls
+`InitVadFromConfig()` and `ShouldDropChunk()` from base class
+- `src/models/silero_vad.h/.cpp` — `SileroVad` class using
+`Model::CreateSession()` + `SileroVadState` inheriting from `State` for
+proper EP/run-options support
+- `src/models/model.h` — `CreateSessionOptionsFromConfig` made public
+(for VAD session creation)
+
+#### C API
+- `src/ort_genai_c.h/.cpp` — `OgaStreamingProcessorSetOption`,
+`OgaStreamingProcessorGetOption`
+
+#### C++ Wrapper
+- `src/ort_genai.h` — `SetOption()`/`GetOption()` on
+`OgaStreamingProcessor`
+
+#### Python
+- `src/python/python.cpp` — `.set_option()`, `.get_option()` on
+`StreamingProcessor`
+
+#### C#
+- `src/csharp/StreamingProcessor.cs` — `SetOption()`, `GetOption()`
+using `StringUtils`
+- `src/csharp/NativeMethods.cs` — P/Invoke declarations
+
+#### Other
+- `src/leakcheck.h` — Added `SileroVad` to leak-tracked types
+
+### Examples Updated
+
+- **Python** (`examples/python/nemotron_speech.py`) — Added
+`--enable_vad` and `--vad_threshold` flags, VAD metrics output (overhead
+%, compute saved, memory via `psutil`)
+- **C++** (`examples/c/src/nemotron_speech.cpp`) — Added `--enable_vad`
+flag
+- **C#** (`examples/csharp/NemotronSpeech/Program.cs`) — Shows VAD
+status, comments for programmatic control
+
+### Tests Added
+
+- **C++** (`test/c_api_tests.cpp`) — `StreamingASRVadSetGetOption`,
+`StreamingASRVadConsecutiveSilence`
+- **Python** (`test/python/test_onnxruntime_genai_api.py`) —
+`test_streaming_asr_vad_set_get_option`,
+`test_streaming_asr_vad_consecutive_silence`
+
+### Usage
+
+Python:
+
+    # VAD via config (genai_config.json has &#34;vad&#34; section)
+    processor = og.StreamingProcessor(model)
+
+    # Or enable programmatically
+    processor.set_option(&#34;vad_enabled&#34;, &#34;true&#34;)
+    processor.set_option(&#34;vad_threshold&#34;, &#34;0.3&#34;)
+    processor.set_option(&#34;silence_duration_ms&#34;, &#34;3360&#34;)
+
+    # Check status
+    print(processor.get_option(&#34;vad_enabled&#34;))  # &#34;true&#34;
+
+C#:
+
+    processor.SetOption(&#34;vad_enabled&#34;, &#34;true&#34;);
+    processor.SetOption(&#34;vad_threshold&#34;, &#34;0.5&#34;);
+    Console.WriteLine(processor.GetOption(&#34;vad_enabled&#34;));  // &#34;true&#34;
+
+C++:
+
+    processor-&gt;SetOption(&#34;vad_enabled&#34;, &#34;true&#34;);
+    processor-&gt;SetOption(&#34;silence_duration_ms&#34;, &#34;3360&#34;);
+    auto enabled = processor-&gt;GetOption(&#34;vad_enabled&#34;);  // &#34;true&#34;
+
+### Setup
+
+Download `silero_vad.onnx`:
+
+huggingface-cli download onnx-community/silero-vad onnx/model.onnx
+--local-dir silero-vad
+    cp silero-vad/onnx/model.onnx &lt;nemotron_model_dir&gt;/silero_vad.onnx
+
+### Dependencies
+
+- Silero VAD ONNX model (~2MB, MIT license) from
+[onnx-community/silero-vad](https://huggingface.co/onnx-community/silero-vad)
+with filepath in `genai_config.json`
+
+---------
+
+Co-authored-by: Sayan Shaw &lt;sayanshaw@microsoft.com&gt;
+
+- docs: fix formatting and syntax highlighting in documentation (#2051)
+
+Small documentation improvements for better consistency:
+
+- Fixed missing period in Python examples comment
+- Added missing syntax highlighting in C# and C examples
+- Fixed incorrect shell type for Linux/macOS section (powershell → bash)
+- Fixed markdown formatting typo in RuntimeOptions docs
+
+These changes improve readability and follow documentation best
+practices.
+
+Co-authored-by: riddles-the-one &lt;riddles.the.one@protonmail.com&gt;</div>
+</div>
+
+<a href="../project/microsoft_onnxruntime-genai.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
