@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in master (23 commits) - FalkorDB/FalkorDB - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in master (23 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/FalkorDB_FalkorDB.html">FalkorDB/FalkorDB</a> /
+    Updates in master (23 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/FalkorDB_FalkorDB.html">FalkorDB/FalkorDB</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-04-10 15:10 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/FalkorDB/FalkorDB/commits/master" target="_blank">https://github.com/FalkorDB/FalkorDB/commits/master</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This update resolves critical bugs including use-after-free issues in RDB buffer handling and batch attribute removal, and a SIGSEGV data race in schema array access. Data integrity and concurrency are enhanced through safe `uint64_t` comparators and read locks for writer queries to prevent defragmentation races. The Bolt protocol received numerous fixes covering serialization, authentication, and memory management, significantly improving its robustness. Furthermore, the release features extensive test suite enhancements, dependency updates, and Docker image security hardening.
+
+---
+
+Это обновление устраняет критические ошибки, включая проблемы use-after-free при обработке буфера RDB и пакетном удалении атрибутов, а также состояние гонки SIGSEGV при доступе к массивам схемы. Целостность данных и параллелизм улучшены за счет безопасных компараторов `uint64_t` и блокировок чтения для запросов записи, предотвращающих состояния гонки при дефрагментации. Протокол Bolt получил многочисленные исправления, охватывающие сериализацию, аутентификацию и управление памятью, что значительно повысило его надежность. Кроме того, выпуск включает значительные улучшения набора тестов, обновления зависимостей и усиление безопасности образов Docker.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix(serializer): add missing return after free on corrupted RDB buffer (#1843)
+
+* fix(serializer): add missing return after free on corrupted RDB buffer
+
+In RdbLoadDeletedNodes and RdbLoadDeletedEdges (v18, v19), a misaligned
+buffer triggers rm_free() followed by ASSERT(false). In release builds
+ASSERT compiles to a no-op, so execution falls through to use the freed
+pointer (use-after-free) and free it again (double-free).
+
+Add explicit return statements after rm_free() in all four error paths
+so the functions exit immediately regardless of build configuration.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* test(serializer): add unit tests for deleted-entity buffer validation
+
+Tests misaligned and aligned buffers for RdbLoadDeletedNodes_v19 and
+RdbLoadDeletedEdges_v19. The misaligned tests verify the early-return
+path does not cause use-after-free or double-free. The aligned tests
+verify the happy path correctly marks entities as deleted.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* test(serializer): skip misaligned buffer tests in debug builds
+
+In debug builds, ASSERT(false) intentionally crashes (NULL deref) before
+the return statement is reached, so the misaligned buffer tests can only
+exercise the early-return path in release builds. Wrap them with
+#if !RG_DEBUG guards.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(serializer): use RedisModule_Assert for malformed RDB buffers
+
+Replace silent return with RedisModule_Log + RedisModule_Assert(false) to
+notify Redis and abort on corrupted deleted-entity buffers. Also validates
+buffer count matches expected count (not just alignment).
+
+Extends fix to v17 decoder which had no validation in release builds.
+Converts unit tests to fork-based death tests to verify abort behavior.
+
+Addresses review comment: use assert+exit instead of silent return, handle
+short read / malformed RDB and notify Redis.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): use _exit in mock assert to prevent ASAN hang after fork
+
+The mock RedisModule__Assert in death tests was a no-op, letting
+exit(1) from RedisModule_Assert run ASAN atexit handlers in the
+forked child. This hangs because ASAN tries to clean up thread-local
+state that does not exist after fork(). Using _exit(1) in the mock
+bypasses atexit handlers entirely.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* removed unit test
+
+---------
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+Co-authored-by: Roi Lipman &lt;roilipman@gmail.com&gt;
+
+- fix(comparator): use safe three-way pattern for uint64_t qsort comparators (#1816)
+
+* fix(comparator): use safe three-way pattern for uint64_t qsort comparators
+
+Replace `a - b` subtraction (which truncates uint64_t to int, producing
+wrong results when the difference exceeds INT_MAX or wraps unsigned) with
+the safe `(a &gt; b) - (a &lt; b)` pattern in:
+
+- src/graph/graph_delete_edges.c: _edge_cmp NodeID comparisons
+- src/graph/tensor/tensor.c: _value_cmp entity ID comparison
+- src/value.c: SIValue_Compare T_NODE/T_EDGE entity ID comparison
+
+Closes #1813
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* test(comparator): add regression tests for uint64_t overflow in SIValue_Compare
+
+Add unit tests that exercise SIValue_Compare with T_NODE and T_EDGE
+entities having large uint64_t IDs (&gt;= 2^32) that trigger the
+truncation-to-int overflow bug. Tests verify:
+
+- IDs differing by exactly 2^32 (canonical overflow trigger)
+- Antisymmetry: cmp(a,b) and cmp(b,a) have opposite signs
+- Equality at large IDs
+- IDs differing by 2*2^32
+- Near-UINT64_MAX boundary
+- Normal small IDs as control
+
+These tests FAIL before the fix (a-b truncation) and PASS after
+applying the (a&gt;b)-(a&lt;b) pattern.
+
+Refs #1813
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+---------
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+Co-authored-by: Roi Lipman &lt;swilly22@users.noreply.github.com&gt;
+
+- test(serializer): add boundary tests for v19 buffered serializer (#1809)
+
+* test(serializer): add boundary tests for v19 buffered serializer
+
+Add 4 new tests to test_encode_decode.py to improve coverage of the
+v19 buffered serializer inline vs standalone blob boundary fix (#1795):
+
+- test_15: Parametric boundary test with node counts 63997-64001
+  bracketing the 255991/255992 byte inline/blob threshold
+- test_16: Mixed inline + standalone blob labels in a single graph
+  (small 100-node label + large 63999-node label)
+- test_17: Deleted entity ID lists at boundary (31998*8=255984 inline
+  vs 31999*8=255992 standalone blob)
+- test_18: Large string properties at boundary (255990 chars inline
+  vs 255991 chars standalone blob, accounting for null terminator)
+
+References #1779
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): skip boundary tests under ASAN/Valgrind
+
+The new boundary tests (test_15-18) create hundreds of thousands of
+nodes, which exceeds the per-class ASAN timeout (900s). Skip them
+under sanitizer/valgrind builds. The existing test_14 already covers
+one boundary point and runs under ASAN.
+
+Also removed 63999 from test_15 loop since it&#39;s redundant with test_14.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): make tearDown resilient to missing graph key
+
+When tests are skipped under ASAN/Valgrind, tearDown still runs but
+the graph key may not exist, causing graph.delete() to throw
+&#39;Invalid graph operation on empty key&#39;. Wrap in try/except to prevent
+the test process from crashing.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* refactor(test): rewrite serializer tests per review feedback
+
+Address review from swilly22:
+- Remove byte-size boundary assumptions (fragile, depends on GraphBLAS)
+- Remove VKEY_MAX_ENTITY_COUNT overrides
+- Remove SANITIZER/VALGRIND skip guards (tests are now small enough)
+- Narrow tearDown exception to only suppress &#39;empty key&#39; errors
+- 3 focused tests: varied label sizes, deletions across labels, large strings
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): also handle connection errors in tearDown
+
+The ASAN sanitizer occasionally kills the Redis server (e.g. timeout),
+causing tearDown&#39;s graph.delete() to throw ConnectionError. Suppress
+both &#39;empty key&#39; and connection errors since neither is a test failure.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* perf(test): use parameterized query for large strings
+
+Replace O(n²) REDUCE string concatenation with pre-built Python strings
+passed as query parameters. This avoids timeouts under ASAN where the
+encode_decode class shares a 900s budget with test_14 (63999 nodes).
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+---------
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+Co-authored-by: Roi Lipman &lt;swilly22@users.noreply.github.com&gt;
+
+- fix(query): protect writer match phase with READ lock against defrag race (#1834)
+
+* fix(query): protect writer match phase with READ lock against defrag race
+
+Writer queries executed the match phase (scanning entities, reading
+properties) without holding any graph lock. This allowed concurrent
+memory modifications by active defrag or GRAPH.EFFECT on the main
+thread to invalidate entity pointers mid-execution, causing heap
+corruption and SIGSEGV crashes.
+
+The fix acquires a graph READ lock for writer queries before execution
+begins, protecting the match phase. At commit time (LockForCommit),
+the READ lock is released before acquiring the GIL and WRITE lock,
+maintaining the lock ordering invariant (GIL before graph lock) to
+prevent deadlocks with main-thread write paths.
+
+Lock flow for writers:
+1. MarkWriter under GIL (no graph lock - avoids READ→GIL deadlock)
+2. Acquire READ lock (protects match phase from defrag/EFFECT)
+3. Execute query (match phase protected by READ lock)
+4. LockForCommit: release READ → acquire GIL → acquire WRITE
+5. Commit changes under WRITE lock
+6. UnlockCommit: release WRITE + GIL
+
+If commit never happens (e.g. read-only MERGE), the READ lock is
+released after execution completes, including ResultSet_Reply.
+
+Closes #1831
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* test(defrag): add concurrent writers regression test
+
+Adds test_concurrent_writers_during_defrag to exercise the race
+condition fixed in this PR: concurrent MERGE+SET writer queries
+running while active defrag is enabled with aggressive thresholds.
+
+The test verifies the server stays alive and data remains consistent,
+catching the heap corruption crash that occurred before the fix.
+
+Addresses review comment: add flow test for concurrent defrag+writes.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): remove unsupported message arg from assertEquals
+
+RLTest assertEquals does not support a third message argument
+like Python unittest. This caused a TypeError in CI.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* write query hold read lock while reading
+
+---------
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+Co-authored-by: Roi Lipman &lt;roilipman@gmail.com&gt;
+
+- fix(attributeset): fix use-after-free in batch attribute removal (#1829)
+
+AttributeSet_RemoveIdx processed removal indices from lowest to highest
+(ascending). The swap-with-last pattern copies the value at position l-1
+into the slot being removed. When l-1 itself is a removal target, the
+copied value (including any heap pointer) becomes dangling when that
+higher position is freed in a later iteration.
+
+Reverse the loop direction to process highest indices first. This ensures
+the swap source (l-1) is always a position that has already been processed
+or is not scheduled for removal, preventing use-after-free and double-free
+of heap-owning attribute values (strings, arrays, maps).
+
+Bug was introduced in commit 0ddddf039 (&#34;Reduce attribute-set memory
+consumption&#34;) which added batch removal support.
+
+Add regression test that batch-removes two and three heap-owning string
+attributes including the last slot, verifying surviving values remain
+valid and no crash occurs during cleanup.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+- fix: multiple bugs in Bolt protocol implementation (#1703)
+
+* fix: multiple bugs in Bolt protocol implementation
+
+Fixes #1702
+
+- bolt.c: use ntohl (not ntohs) for MAP32 size reading
+- bolt.c: fix bolt_reply_int to actually emit tiny ints (0xF0 is 240 unsigned, not -16)
+- bolt_api.c: bounds-check string reads in is_authenticated to prevent stack overflow
+- bolt_api.c: heap-allocate parameterized query buffer instead of fixed 4096-byte stack buffer
+- ws.c: prevent null pointer arithmetic when Connection header has no comma
+- ws.c: fix ws_write_empty_header return type (void, not uint64_t)
+- ws.c: support WebSocket payloads &gt;65535 bytes (64-bit extended length)
+- ws.h/socket.h: fix #pragma one typo → #pragma once
+- resultset_replybolt.c: remove extra bolt_reply_null in Point2D (3 fields declared, 4 written)
+- buffer.c: handle EAGAIN/EWOULDBLOCK in socket read loop instead of treating as disconnect
+- buffer.c: fix useless unsigned &gt;= 0 assert with proper a &gt;= b check
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* test: add regression tests for bolt protocol bug fixes
+
+Tests for #1702:
+- Tiny int encoding for full range -16..127 (bug #2)
+- Negative integer boundaries at int8/16/32/64 edges
+- Point2D followed by other values to detect framing corruption (bug #6)
+- Multiple Point2D values in same record
+- Large string parameters exceeding 4096 bytes (bug #4)
+- Many parameters (100) to stress buffer allocation (bug #4)
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* fix: unaligned memory access and cross-chunk RESET handling in bolt
+
+Fixes remaining items from #1702:
+
+- bolt.c: replace all unaligned pointer casts (*(int16_t*)(values+1) etc.)
+  with memcpy to eliminate undefined behavior on strict-alignment architectures
+- bolt_api.c: rewrite RESET message removal to use buffer_index_t API
+  instead of raw pointer arithmetic, fixing memory corruption when the
+  RESET message spans buffer chunk boundaries
+
+Tests:
+- test16: int16/string16/list16 serialization through the fixed write paths
+- test17: int32/int64 serialization at boundary values
+- test18: RESET handling via session close/reopen
+- test19: RESET with pipelined queries (transaction rollback)
+- test20: rapid session cycling to stress RESET under connection pooling
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* fix: harden bolt write_value, credentials, recv, and ws token parsing
+
+Address review findings from PR #1703:
+
+- bolt_api.c: replace write_value&#39;s raw char* with growable wbuf_t struct;
+  all sprintf calls replaced with vsnprintf via wbuf_printf that grows the
+  buffer as needed; string/key VLAs inside write_value replaced with heap
+  allocations; rm_realloc uses temp pointer to avoid losing original on OOM
+- bolt_api.c: replace credentials VLA (char credentials[len]) with heap
+  allocation capped at 1024 bytes to prevent attacker-controlled stack overflow
+- buffer.c: initial socket_read now checks errno for EAGAIN/EWOULDBLOCK
+  instead of treating all nread&lt;0 as disconnect, consistent with the loop read
+- ws.c: Connection header token parsing now uses strncasecmp per RFC 7230
+  (connection options are case-insensitive) and skips OWS around commas
+
+Tests:
+- test21: 50KB string parameter (forces write_value buffer growth)
+- test22: 1000-element list parameter (recursive serialization growth)
+- test23: nested map parameter (recursive map with heap-allocated keys)
+- test24: 50 params x 500-byte values (many write_value calls)
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* fix: wbuf_ensure uint32 overflow and RESET scan loop
+
+- wbuf_ensure: use uint64_t for target calculation to prevent
+  uint32 wraparound that could bypass the capacity check or cause
+  an infinite loop during doubling. Guard against doubling overflow
+  when new_cap exceeds UINT32_MAX/2.
+
+- RESET removal: save msg_start before buffer_write advances it,
+  then restart the scan from the saved position so that subsequent
+  RESET frames in the same buffer are properly removed.
+
+- Add test25/test26: exercise multiple consecutive rollbacks and
+  interleaved rollback+query patterns to cover the RESET scan fix.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix: auth prefix matching, wbuf error propagation, buffer_index_diff underflow
+
+- is_authenticated: replace strncmp with exact-length check + memcmp
+  to prevent prefix/empty-string matches (e.g. &#39;sch&#39; matching &#39;scheme&#39;)
+
+- wbuf_t: add sticky err flag; wbuf_printf returns bool and sets err
+  on failure; write_value returns bool and checks err; get_query
+  checks wb.err and returns NULL on failure; BoltRunCommand sends
+  BST_FAILURE reply on NULL query instead of dereferencing NULL
+
+- wbuf_ensure: use uint64_t for new_cap doubling loop to make
+  overflow protection explicit
+
+- buffer_index_diff: compute absolute positions in uint64_t before
+  subtracting to prevent unsigned underflow when a-&gt;offset &lt; b-&gt;offset
+  across different chunks
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix: remove invalid assertion in buffer_write for chunk-spanning writes
+
+buffer_write called buffer_index_advance which asserts
+buffer_index_length(index) &gt;= n. When buffer_write is called on the
+buffer&#39;s write pointer (the common case), buffer_index_length returns 0
+since diff(write, write) is 0, causing the assertion to fire for any
+chunk-spanning write (&gt;4096 bytes).
+
+The buffer_index_advance call was redundant — the subsequent
+buf-&gt;chunk++ and buf-&gt;offset = 0 already handle the chunk advancement.
+This was a pre-existing bug on master, never triggered because no bolt
+test had responses larger than 4096 bytes. The new test14 (8000-char
+string parameter) exposed it in the ASAN/debug build.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix: address remaining Bolt security vulnerabilities
+
+- Auth bypass: Replace PING fallback with AUTH empty-string so
+  authentication correctly fails when requirepass is configured.
+  PING always succeeds regardless of auth config, AUTH does not.
+
+- Recursion depth limit: Add WRITE_VALUE_MAX_DEPTH (128) to
+  write_value to prevent stack overflow from deeply nested Bolt
+  message parameters (maps/lists). Exceeding the limit sets the
+  error flag and returns a client error instead of crashing.
+
+- WebSocket masking overread: Replace type-punned pointer cast
+  with memcpy when loading the 8-byte offset mask from the
+  double_mask array. Fixes strict-aliasing UB. Also fix the
+  byte-by-byte fallback loop to use modular arithmetic inline
+  rather than post-increment with deferred modulo.
+
+Adds tests 27-29 covering auth, deep nesting rejection, and
+moderate nesting round-trip.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix: handle empty-password AUTH when requirepass is not set
+
+The previous commit changed PING to AUTH &#34;&#34; for the no-credentials
+path, but AUTH always returns an error when requirepass is not
+configured (&#34;ERR Client sent AUTH, but no password is set&#34;).
+This broke all bolt tests since the test server has no requirepass.
+
+Fix: distinguish the error prefix. WRONGPASS means a password IS
+required but was not provided (deny). Any other AUTH error (ERR)
+indicates no password is configured (allow).
+
+Also fix the credentials-provided path: allow len==0 empty
+credentials through to AUTH and apply the same WRONGPASS check,
+instead of rejecting len==0 outright which broke empty-password
+connections when no requirepass is set.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix: add BST_ROLLBACK to bolt TX_STREAMING state machine
+
+bolt_change_txstreaming_state handled RUN, PULL, COMMIT, DISCARD,
+RESET, and GOODBYE but not ROLLBACK. When a client sends ROLLBACK
+while in TX_STREAMING state (e.g., rolling back a transaction with
+pending results), it hits the default ASSERT(false) and crashes the
+server in debug/ASAN builds.
+
+This is a pre-existing bug on master — never triggered before because
+no test exercised ROLLBACK from TX_STREAMING state. Tests 19-26
+(RESET/rollback patterns) exposed it under ASAN.
+
+The fix adds the same BST_ROLLBACK case that already exists in
+bolt_change_txready_state: SUCCESS → BS_READY, FAILURE → BS_FAILED.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix: replace unaligned uint64_t XOR cast with memcpy and remove unused import
+
+- buffer.c: the 8-byte XOR masking loop used a direct uint64_t* cast
+  which is UB on strict-alignment architectures (ARM, RISC-V)
+- test_bolt.py: remove unused `import threading`
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* fix: use integer coordinates in test13 to avoid float32 precision mismatch
+
+The Bolt protocol serializes Point coordinates as float32 (single precision).
+When the test used fractional coordinates like -122.4194, the float64→float32→
+float64 round-trip produces -122.41940307617188, which doesn&#39;t match the
+original value. Using integer coordinates avoids this since the test&#39;s purpose
+is verifying multiple points work, not float precision.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* perf: reduce bolt test iteration counts and data sizes
+
+The bolt test suite was timing out under ASAN and on slower CI runners.
+The bugs are triggered on the first iteration; extra loops only add
+overhead without improving coverage:
+- test20: 20 session cycles → 5
+- test21: 50KB string → 8KB (still exceeds 4KB buffer chunk)
+- test22: 1000-element list → 200
+- test24: 50 large params → 15
+- test25: 10 rollbacks → 3
+- test26: 5 interleaved rollback+query → 3
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* perf: split bolt tests into 3 classes to avoid per-class timeout
+
+RLTest applies --test-timeout per class (including server startup and
+teardown). With 29 tests in a single class, the bolt suite exceeded the
+180s timeout on alpine-arm64 (379s) and the 900s timeout under ASAN
+(916s). Splitting into 3 classes gives each ~126s on alpine-arm64 and
+~305s under ASAN, comfortably within limits.
+
+- testBoltTypes: basic data type serialization (tests 01-09)
+- testBoltRegression: serialization edge cases &amp; RESET (tests 10-20)
+- testBoltStress: buffer stress, transactions &amp; auth (tests 21-29)
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* test: use float32-exact coordinates in test13 for float serialization coverage
+
+Integer-only coordinates don&#39;t exercise the float path through Point2D.
+Use values like 10.5, 20.25, -30.125 (multiples of powers of 2) which
+are exact in both float32 and float64, avoiding precision mismatch while
+still testing float serialization.
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* fix: rename bolt test classes for correct execution order
+
+RLTest runs classes alphabetically. With previous names
+(testBoltRegression → testBoltStress → testBoltTypes), when
+testBoltStress timed out during teardown it killed the server,
+causing testBoltTypes.__init__ to fail.
+
+Renamed to testBolt01_Types, testBolt02_Regression, testBolt03_Stress
+so stress tests run last. Also added __del__ methods that explicitly
+close the bolt driver to speed up server teardown.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix: close bolt driver before teardown to prevent timeout
+
+The 180s per-class timeout fires during RLTest server teardown because
+FLUSHALL blocks while bolt TCP connections are still open. Python&#39;s
+__del__ isn&#39;t called before teardown. Fix by explicitly calling
+bolt_con.close() at the end of each class&#39;s last test method, ensuring
+connections are closed before the server is torn down.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix: increase flow test timeout to 600s for bolt teardown
+
+The bolt event loop blocks the Redis server&#39;s main thread during
+teardown, preventing FLUSHALL from completing. The server can&#39;t accept
+new RESP connections while bolt TCP connections are alive. This is a
+server-side issue that requires a deeper fix in the bolt handler.
+
+Increasing the per-class timeout from 180s to 600s gives the bolt
+teardown adequate time to complete. The ASAN timeout stays at 900s.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix: pre-stop server in bolt tests to prevent teardown hang
+
+Idle bolt connections block FLUSHALL on the Redis main thread during
+RLTest teardown. The test-timeout fires, killing the entire test
+process and marking the class as failed.
+
+Add test99_cleanup() to each bolt test class that explicitly stops the
+Redis server before RLTest&#39;s takeEnvDown() runs. When isUp() returns
+False, RLTest skips the FLUSHALL and proceeds directly to cleanup.
+
+Also revert timeout from 600s back to 300s since the pre-stop
+approach eliminates the need for extended timeouts.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(bolt): revert unaligned access memcpy changes
+
+Revert memcpy-based unaligned pointer access patterns back to direct
+pointer casts in bolt.c and buffer.c. Since we only support new
+generation ARM CPUs that handle unaligned access natively, the memcpy
+indirection is unnecessary.
+
+Reverted sites:
+- bolt.c: 9 memcpy calls in bolt_reply_int16/32/64, bolt_reply_string,
+  bolt_reply_list, bolt_reply_map back to *(intN_t*)(ptr) casts
+- buffer.c: buffer_apply_mask_single masking loop back to direct
+  *(uint64_t*) XOR operations
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(bolt): address reviewer feedback — revert constants, stack alloc, memmove
+
+- Revert TINY_INT8_MIN/MAX constants in bolt.c (reviewer: AviAvni)
+- Revert credentials to stack VLA with +1 for null terminator (reviewer: AviAvni)
+- Revert RESET frame removal to original memmove approach (reviewer: AviAvni)
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(bolt): add NULL check for query allocation in get_query
+
+Prevents crash if rm_malloc fails for the query buffer.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* test(bolt): add WebSocket transport tests
+
+Tests WebSocket upgrade handshake, Bolt protocol over WS, invalid
+connection rejection, and Connection header variant parsing.
+
+Addresses review comment by AviAvni requesting WS test coverage.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): make WebSocket test31 robust against timing issues
+
+- Read HTTP response byte-by-byte to avoid consuming WS frame data
+- Add 100ms delay before sending Bolt handshake over WS
+- Guard against empty response to prevent IndexError crash
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): remove test99_cleanup from WebSocket tests
+
+testBolt04_WebSocket uses raw sockets (no bolt driver), so it doesn&#39;t
+need the pre-shutdown cleanup that prevents FLUSHALL hang from idle
+bolt connections. Removing it lets the server stay alive for
+testBolt02_Regression which runs next.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): close bolt driver instead of stopping server in test99_cleanup
+
+In ASAN mode, self.env.stop() kills the server but the port is not
+released quickly enough. The next test class&#39;s __init__ starts a new
+server that fails to bind to BOLT_PORT and dies with &#39;Redis server is
+dead&#39;. Fix by closing the bolt driver connection instead — this
+prevents idle bolt connections from blocking FLUSHALL during RLTest
+teardown while keeping the server alive for subsequent test classes.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): add retry logic for BOLT_PORT binding in ASAN mode
+
+In ASAN builds, the previous server takes extra time to release
+BOLT_PORT after env.stop(). Add retry loop (5 attempts, 2s delay)
+to _bolt_setup and testBolt04_WebSocket.__init__ so the next test
+class can wait for port availability. Also close the bolt driver
+before stopping the server in test99_cleanup to ensure clean
+shutdown order.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): revert test99_cleanup to match master pattern
+
+Remove _bolt_teardown() call before env.stop() in test99_cleanup.
+Closing the driver before stopping the server triggers ASAN leak
+reports: the server processes the disconnect, allocating temporary
+state in the worker thread, then env.stop() kills the server before
+cleanup completes. Master only calls env.stop() (no driver close),
+which avoids the leak. The retry logic in _bolt_setup handles the
+port-release race from the hard stop.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* refactor(test): merge bolt test classes into single testBolt class
+
+Master uses a single testBolt class sharing one server process.
+The 4-class split (testBolt01_Types, testBolt02_Regression,
+testBolt03_Stress, testBolt04_WebSocket) caused each class to
+start/stop its own server, producing ASAN leak reports at shutdown
+and port-release races between classes.
+
+Merging back to a single class eliminates:
+- test99_cleanup / env.stop() between classes
+- ASAN leak reports from forced server shutdown
+- BOLT_PORT binding races in ASAN builds
+- Retry logic workarounds in _bolt_setup
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): close bolt driver before WS tests to free server threads
+
+The neo4j driver&#39;s connection pool holds idle connections that consume
+all bolt thread pool threads. When the WS tests try to connect via raw
+sockets, no server thread is available to process the HTTP Upgrade
+request, causing a timeout.
+
+Close the driver before the first WS test to release pooled connections
+and free server threads.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): add delay after driver close for server thread cleanup
+
+In ASAN mode, server bolt threads need time to process GOODBYE messages
+and return to the pool after driver.close(). Without a delay, the
+immediately following WS connection attempt finds no available threads.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): add retry logic to WS connect for ASAN thread release
+
+The bolt server dedicates one thread per connection. After driver.close(),
+server threads need time to process GOODBYE and return to the pool.
+In ASAN mode this can take 10+ seconds.
+
+Add retry logic (3 attempts × 10s timeout) to _ws_connect so the test
+waits for a server thread to become available rather than failing
+immediately on the first timeout.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): merge WS upgrade and bolt handshake into single test
+
+Separate tests for WS upgrade and bolt-over-WS caused a race condition:
+closing the first WS connection didn&#39;t give the server enough time to
+clean up before the second connection attempted the bolt handshake.
+
+Merging them into test30_ws_handshake_and_bolt uses a single connection
+for both the upgrade and handshake, eliminating the race. Also adds
+retry logic to _ws_connect for robustness in ASAN mode.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): limit bolt driver pool to 1 connection
+
+The bolt server has a 4-thread pool. Each pooled driver connection holds
+one thread. With the default pool size (100), idle connections can
+exhaust all server threads, preventing WS test connections.
+
+Setting max_connection_pool_size=1 ensures only 1 thread is used by the
+driver, leaving 3 available for WS tests. This eliminates the need to
+close the driver before WS tests and avoids timing-related races.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): remove unused hashlib import and use assertGreaterEqual
+
+- Remove unused &#39;import hashlib&#39; (CodeQL finding)
+- Replace assertTrue(a &gt;= b) with assertGreaterEqual(a, b) for better
+  assertion messages
+
+Addresses review comments from github-code-quality.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): correct Bolt version proposal byte order in WS test
+
+The Bolt handshake version proposals use raw byte format
+[patch, range, minor, major], not big-endian packed fields.
+0x00070005 gave wire bytes [0x00,0x07,0x00,0x05] = minor=0,
+causing bolt_read_supported_version to reject (minor &lt; 1).
+Fixed to 0x00000705 and 0x00000105.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* refactor(test): use websocket-client library for WS bolt tests
+
+Replace hand-rolled WebSocket implementation (frame encoding/decoding,
+HTTP upgrade handshake) with the websocket-client library for test30.
+
+Keep test31 (raw TCP garbage) and test32 (custom Connection header
+variants) as raw-socket tests since they test specific server-side
+HTTP parsing edge cases that require exact control over the wire format.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+- disable yield (#1819)
+
+- rollback schema creation for failing queries (#1815)
+
+* rollback schema creation for failing queries
+
+* address pr comments
+
+- updated required redis version to 8, updated redismoduleapi header (#1376)
+
+Co-authored-by: Guy Korland &lt;gkorland@gmail.com&gt;
+
+- remove vkey logging (#1818)
+
+- Bump rojopolis/spellcheck-github-actions from 0.59.0 to 0.60.0 (#1708)
+
+Bumps [rojopolis/spellcheck-github-actions](https://github.com/rojopolis/spellcheck-github-actions) from 0.59.0 to 0.60.0.
+- [Release notes](https://github.com/rojopolis/spellcheck-github-actions/releases)
+- [Changelog](https://github.com/rojopolis/spellcheck-github-actions/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/rojopolis/spellcheck-github-actions/compare/0.59.0...0.60.0)
+
+---
+updated-dependencies:
+- dependency-name: rojopolis/spellcheck-github-actions
+  dependency-version: 0.60.0
+  dependency-type: direct:production
+  update-type: version-update:semver-minor
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+Co-authored-by: Guy Korland &lt;gkorland@gmail.com&gt;
+
+- Bump dawidd6/action-download-artifact from 19 to 20 (#1797)
+
+Bumps [dawidd6/action-download-artifact](https://github.com/dawidd6/action-download-artifact) from 19 to 20.
+- [Release notes](https://github.com/dawidd6/action-download-artifact/releases)
+- [Commits](https://github.com/dawidd6/action-download-artifact/compare/8a338493df3d275e4a7a63bcff3b8fe97e51a927...8305c0f1062bb0d184d09ef4493ecb9288447732)
+
+---
+updated-dependencies:
+- dependency-name: dawidd6/action-download-artifact
+  dependency-version: &#39;20&#39;
+  dependency-type: direct:production
+  update-type: version-update:semver-major
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+Co-authored-by: Guy Korland &lt;gkorland@gmail.com&gt;
+
+- Bump actions/download-artifact from 7.0.0 to 8.0.1 (#1798)
+
+* Bump actions/download-artifact from 7.0.0 to 8.0.1
+
+Bumps [actions/download-artifact](https://github.com/actions/download-artifact) from 7.0.0 to 8.0.1.
+- [Release notes](https://github.com/actions/download-artifact/releases)
+- [Commits](https://github.com/actions/download-artifact/compare/37930b1c2abaa49bbe596cd826c3c89aef350131...3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c)
+
+---
+updated-dependencies:
+- dependency-name: actions/download-artifact
+  dependency-version: 8.0.1
+  dependency-type: direct:production
+  update-type: version-update:semver-major
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+
+* Replace dawidd6/action-download-artifact with actions/download-artifact in release workflows
+
+Agent-Logs-Url: https://github.com/FalkorDB/FalkorDB/sessions/2cf5d77c-6f5f-490c-a536-9a118f04a4f3
+
+Co-authored-by: gkorland &lt;753206+gkorland@users.noreply.github.com&gt;
+
+* Add validation for build workflow run ID lookup
+
+Agent-Logs-Url: https://github.com/FalkorDB/FalkorDB/sessions/2cf5d77c-6f5f-490c-a536-9a118f04a4f3
+
+Co-authored-by: gkorland &lt;753206+gkorland@users.noreply.github.com&gt;
+
+* Revert release workflow changes, keep only actions/download-artifact bump
+
+Agent-Logs-Url: https://github.com/FalkorDB/FalkorDB/sessions/2e09961c-5449-43a2-951b-841c2980612f
+
+Co-authored-by: gkorland &lt;753206+gkorland@users.noreply.github.com&gt;
+
+---------
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+Co-authored-by: copilot-swe-agent[bot] &lt;198982749+Copilot@users.noreply.github.com&gt;
+Co-authored-by: gkorland &lt;753206+gkorland@users.noreply.github.com&gt;
+Co-authored-by: Guy Korland &lt;gkorland@gmail.com&gt;
+
+- chore(deps): update utf8proc to v2.11.3 (#1764)
+
+Co-authored-by: github-actions[bot] &lt;github-actions[bot]@users.noreply.github.com&gt;
+Co-authored-by: Guy Korland &lt;gkorland@gmail.com&gt;
+
+- Point LAGraph to correct GraphBLAS build (#1640)
+
+- chore(deps): update LAGraph to v1.2.1 (#1765)
+
+Co-authored-by: github-actions[bot] &lt;github-actions[bot]@users.noreply.github.com&gt;
+Co-authored-by: Gabriel Gomez &lt;133552260+GomezGab@users.noreply.github.com&gt;
+Co-authored-by: Guy Korland &lt;gkorland@gmail.com&gt;
+
+- Record the type of all writes in BufferedRedisModuleIO (#1795)
+
+* Flow test showing the bug when a buffer of a certain size is encoded
+
+* Add type writing to bufferIO
+
+* comments, cleanup, and separating the old code
+
+* minor
+
+* address AI PR comments
+
+* address AI PR comment
+
+---------
+
+Co-authored-by: Roi Lipman &lt;roilipman@gmail.com&gt;
+Co-authored-by: Roi Lipman &lt;swilly22@users.noreply.github.com&gt;
+Co-authored-by: Guy Korland &lt;gkorland@gmail.com&gt;
+
+- chore(deps): update xxHash to v0.8.3 (#1763)
+
+Co-authored-by: github-actions[bot] &lt;github-actions[bot]@users.noreply.github.com&gt;
+Co-authored-by: Guy Korland &lt;gkorland@gmail.com&gt;
+
+- ci(backport): guard job with workflow_dispatch check (#1766)
+
+Prevents the batch-backport workflow from showing as &#39;failed&#39; when
+triggered by non-dispatch events (e.g., push). The job will now
+show as &#39;skipped&#39; instead.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+- fix(docker): remove unnecessary packages to reduce CVE surface (#1800)
+
+* fix(docker): remove unnecessary packages to reduce CVE surface
+
+Remove ncurses-base, ncurses-bin, libtinfo6, bash, perl-base, login,
+and passwd from Debian runtime images. These packages are not needed by
+
+This eliminates all 3 instances of CVE-2025-69720 (HIGH - ncurses buffer
+overflow) plus several LOW CVEs from perl-base and login/passwd.
+
+Also documents Alpine variant as the recommended image for CVE-sensitive
+production deployments (zero known vulnerabilities vs Debian).
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(docker): address review comments on package removal
+
+- Wrap all dpkg purge commands with || true guards to prevent build
+  breakage if packages are absent from the base image
+- Add apt-get autoremove -y --purge after dpkg removals to clean up
+  orphaned dependencies
+- Use &#39;Debian-based&#39; instead of &#39;Debian Trixie&#39; in README to avoid
+  hardcoding a specific release codename
+- Fix README wording to not reference ncurses (which is now purged)
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+---------
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+- test(cache): add concurrent stress test for LRU cache (#1782) (#1793)
+
+* test(cache): add concurrent stress test for LRU cache (#1782)
+
+Add test_cacheConcurrency to exercise Cache_GetValue and
+Cache_SetGetValue from multiple threads simultaneously with a small
+cache (4 entries) and 20 distinct keys to force constant evictions.
+
+The test validates:
+- No crashes or use-after-free under concurrent access
+- Atomic counter is strictly positive after concurrent operations
+- All cached LRU values remain within valid bounds
+- Cache size never exceeds capacity
+
+When run under ThreadSanitizer (SAN=thread), this test will detect
+data races on cache-&gt;counter and entry-&gt;LRU — the exact bug fixed
+in PR #1781.
+
+References #1782
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): address review comments on cache concurrency test
+
+- CacheObj_New now duplicates the input string via rm_strdup to avoid
+  dangling pointers to stack-local buffers
+- CacheObj_Dup performs a deep copy of the string
+- CacheObj_Free releases the duplicated string
+- Removed unused stop_flag field from ThreadCtx
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): make free_count atomic for thread safety
+
+Addresses review comment: free_count is incremented from CacheObj_Free
+which is called concurrently by multiple threads in the stress test.
+Using atomic_int prevents the data race.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+* fix(test): address review comments on cache concurrency test
+
+- CacheObj_Dup now delegates to CacheObj_New (swilly22)
+- Change CacheObj.str from const char* to char* to reflect ownership (copilot)
+- Reset free_count in setup() for test independence (copilot)
+- Replace TEST_CHECK/TEST_CHECK_ with TEST_ASSERT (swilly22)
+- Use atomic_fetch_add for free_count increment
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+---------
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+- Fix SIGSEGV in `_GraphContext_GetLabelID` due to data race on schema arrays (#1783)
+
+* Initial plan
+
+* Fix SIGSEGV crash in _GraphContext_GetLabelID: add _schema_rwlock to protect schema arrays
+
+Agent-Logs-Url: https://github.com/FalkorDB/FalkorDB/sessions/a629268c-4885-496a-8271-de87941b1091
+
+Co-authored-by: gkorland &lt;753206+gkorland@users.noreply.github.com&gt;
+
+* make graphcontext opaque
+
+* removed num of threads count print
+
+* plug leak
+
+* timeout fork prep time
+
+* improved fork prep
+
+* include omp
+
+* use thread self
+
+* unused graphcontext
+
+* address AI comments
+
+---------
+
+Co-authored-by: copilot-swe-agent[bot] &lt;198982749+Copilot@users.noreply.github.com&gt;
+Co-authored-by: gkorland &lt;753206+gkorland@users.noreply.github.com&gt;
+Co-authored-by: Roi Lipman &lt;swilly22@users.noreply.github.com&gt;
+Co-authored-by: Roi Lipman &lt;roilipman@gmail.com&gt;
+
+- Bump docker/login-action from 4.0.0 to 4.1.0 (#1799)
+
+Bumps [docker/login-action](https://github.com/docker/login-action) from 4.0.0 to 4.1.0.
+- [Release notes](https://github.com/docker/login-action/releases)
+- [Commits](https://github.com/docker/login-action/compare/b45d80f862d83dbcd57f89517bcf500b2ab88fb2...4907a6ddec9925e35a0a9e82d7399ccc52663121)
+
+---
+updated-dependencies:
+- dependency-name: docker/login-action
+  dependency-version: 4.1.0
+  dependency-type: direct:production
+  update-type: version-update:semver-minor
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;</div>
+</div>
+
+<a href="../project/FalkorDB_FalkorDB.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

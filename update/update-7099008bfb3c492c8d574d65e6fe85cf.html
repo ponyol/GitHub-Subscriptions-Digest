@@ -1,0 +1,2138 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (28 commits) - unslothai/unsloth - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (28 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/unslothai_unsloth.html">unslothai/unsloth</a> /
+    Updates in main (28 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/unslothai_unsloth.html">unslothai/unsloth</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-04-10 14:58 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/unslothai/unsloth/commits/main" target="_blank">https://github.com/unslothai/unsloth/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление устраняет катастрофическое расхождение KL при обучении Gemma-4 GRPO, исправляя ошибки, связанные с контрольными точками градиента и конфигурированием logit softcapping. Также добавлена комплексная поддержка AMD ROCm/HIP, включая устранение критической ошибки 4-битного ядра GEMV в `bitsandbytes` на ROCm и реализацию специализированного 16-битного пути вывода для графических процессоров AMD для обеспечения стабильности. Эти изменения повышают стабильность обучения Gemma-4 и расширяют надежную поддержку оборудования AMD.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Fix Gemma-4 GRPO catastrophic KL divergence with TRL 1.0.0+ (#4934)
+
+* Fix Gemma-4 GRPO catastrophic KL divergence with TRL 1.0.0+
+
+Two compounding bugs caused Gemma-4 GRPO training to diverge with KL ~10^12
+at step 1 against TRL 1.0.0+. Both fixes are runtime patches in the existing
+TRL/model patch flow and are no-ops for models and TRL versions that are not
+affected.
+
+Fix 1 (rl.py): replace trl.models.utils.disable_gradient_checkpointing with
+a no-op context manager. TRL 1.0.0+ wraps generation in
+`with torch.no_grad(), disable_gradient_checkpointing(self.model, ...):`
+purely to suppress a cosmetic PyTorch warning (&#34;None of the inputs have
+requires_grad=True&#34;). Inside torch.no_grad() the gradient checkpointing
+state has no functional effect on the forward pass. On context exit, TRL
+calls model.gradient_checkpointing_enable() which dispatches to HF&#39;s
+generic implementation and overwrites Unsloth&#39;s custom
+`use_gradient_checkpointing=&#34;unsloth&#34;` wrapper, corrupting Gemma-4 forward
+numerics. Replacing the toggle with a no-op preserves Unsloth&#39;s custom GC
+wrapper across generation passes. The patch walks sys.modules dynamically
+to also rebind the symbol on every trl.* module that already imported it
+(grpo_trainer, dpo_trainer, rloo_trainer, dppo_trainer, gfpo_trainer,
+grpo_with_replay_buffer_trainer, and any future trainer module).
+
+Fix 2 (vision.py): inject `final_logit_softcapping` from `config.text_config`
+into the top-level `model.config` for multimodal models. Unsloth&#39;s GRPO
+trainer reads `getattr(model.config, &#34;final_logit_softcapping&#34;, 0)` but
+for Gemma-4 the attribute lives only on the nested `Gemma4TextConfig`,
+so the lookup silently defaults to 0 instead of 30.
+
+Backwards compatibility:
+- trl 0.22.2: no `disable_gradient_checkpointing` symbol exists, the patch
+  early-returns via `hasattr` guard.
+- trl 0.27.1: same broken pattern as 1.0.0, the noop replacement is correct.
+- trl 1.0.0+: end-to-end verified on `unsloth/gemma-4-E2B-it` GRPO with TRL
+  1.0.0 and transformers 5.5.0. Step 1 loss=2.46e-08, kl=2.92e-05 (machine
+  zero) vs broken baseline loss=1.37e+06, kl=1.76e+09.
+- Llama / non-VLM text models: Fix 2 is a no-op (no `text_config`); Fix 1
+  is functionally identical (Unsloth&#39;s GC wrapper is preserved).
+- Qwen3-VL and other VLMs without final_logit_softcapping: Fix 2 is a no-op
+  (text_config.final_logit_softcapping is None).
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Apply loop 1 review fixes for PR #4934
+
+- Move Fix 2 from vision.py to rl_replacements.py:858 and :1110 at the
+  actual consumer sites. This avoids mutating model.config (which could
+  leak into save_pretrained output) and covers text-only Gemma-4 paths
+  that do not flow through FastBaseModel.from_pretrained.
+- Revert the vision.py injection block entirely.
+- Narrow the bare except blocks in patch_trl_disable_gradient_checkpointing
+  from `except Exception:` to `(AttributeError, ImportError)` and
+  `(AttributeError, TypeError)` to avoid masking unrelated bugs.
+- Add logger.warning_once when the noop patch is installed, matching
+  patch_trl_openenv and patch_trl_vllm_generation convention.
+- Remove the dead per-module `_unsloth_noop_patched` sentinel check inside
+  the sys.modules walk. The function-level early return already covers
+  this case.
+- Move `import sys` and `from contextlib import contextmanager` to the
+  module-level imports instead of inside the function body.
+- Rewrite the ordering comment in PatchFastRL to accurately describe
+  why patch_trl_disable_gradient_checkpointing must run before
+  patch_trl_rl_trainers.
+- Fix keyword default spacing to match surrounding rl.py style.
+
+End-to-end verified: Gemma-4-E2B GRPO on TRL 1.0.0 + transformers 5.5.0
+step 1 loss=2.464e-08 kl=2.921e-05, all 5 steps succeed.
+
+* Apply loop 2 review fix for PR #4934
+
+Extract the final_logit_softcapping fallback logic into a shared helper
+`_unsloth_get_final_logit_softcapping(config)` defined in rl_replacements.py
+and injected into the compiled cache via RL_PRE_ITEMS[&#34;grpo_trainer&#34;]. Both
+call sites (`grpo_trainer__generate_and_score_completions` and
+`grpo_trainer_compute_loss`) now use the helper instead of inlining the
+same text_config fallback block twice.
+
+Verified: compiled cache file lists the helper at module scope and both
+consumer sites call it. Gemma-4-E2B GRPO step 1 loss=2.464e-08 kl=2.921e-05
+(unchanged), all 5 steps pass.
+
+* Apply loop 3 review fix for PR #4934
+
+Extend _unsloth_get_final_logit_softcapping to also fall back to
+config.get_text_config() for composite configs such as T5GemmaConfig
+where the text sub-config is not exposed via the text_config attribute
+but only via the get_text_config() method. Guard against (TypeError,
+ValueError) raised by ambiguous composite configs, and skip the
+self-referential case where get_text_config() returns self.
+
+This addresses the 6/7 reviewer consensus from the third review loop.
+
+Verified:
+- Helper returns 30.0 for Gemma-4, T5Gemma, and Gemma 1/2 configs.
+- Helper returns 0 for Llama, Qwen, Mistral, Cohere, Granite, and
+  ambiguous configs raising ValueError.
+- Gemma-4-E2B GRPO step 1 loss=2.464e-08 kl=2.921e-05 (unchanged).
+- Llama-3.2-1B GRPO all 5 steps loss=0 kl=0 (no regression).
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+---------
+
+Co-authored-by: pre-commit-ci[bot] &lt;66853113+pre-commit-ci[bot]@users.noreply.github.com&gt;
+
+- Pin bitsandbytes to continuous-release_main on ROCm (4-bit decode fix) (#4954)
+
+* Pin bitsandbytes to continuous-release_main on ROCm for 4-bit decode fix
+
+bitsandbytes 0.49.2 on PyPI ships with a broken 4-bit GEMV kernel on
+every ROCm target:
+
+  - CDNA (gfx90a / gfx942 / gfx950 = MI210 / MI300X / MI350) via a
+    broken blocksize=32/64 warp64 GEMV kernel whose tests were
+    explicitly skipped with ROCM_WARP_SIZE_64 guards because the
+    code was known broken.
+  - RDNA3 / RDNA3.5 (gfx1100-1103 / gfx1150-1152) via a compile-time
+    BNB_WARP_SIZE macro in the host-side dispatch that resolves to
+    64 when the multi-arch wheel is compiled with CDNA as the
+    primary target, so num_blocks is wrong on RDNA and half the GEMV
+    output is never written.
+
+At decode shape (1, 1, hidden) both bugs produce NaN. Training is
+unaffected because training shapes are (batch, seq_len &gt; 1, hidden)
+and never touch the GEMV path. The crash during autoregressive
+inference surfaces as _assert_async_cuda_kernel in torch.multinomial
+which on HIP becomes a hard HSA_STATUS_ERROR_EXCEPTION instead of
+a clean Python error.
+
+Both bugs are fixed by bitsandbytes commit 713a3b8 (&#34;[ROCm] Enable
+blocksize 32 4-bit quantization and GEMV kernels on AMD CDNA&#34;,
+PR #1887, merged 2026-03-09) which replaces BNB_WARP_SIZE with a
+runtime hipDeviceGetAttribute query and ships a working CDNA warp64
+kernel. That commit has not shipped to PyPI yet, but
+continuous-release_main wheels are published on every push to bnb
+main via GitHub Releases.
+
+Point the ROCm install path at the continuous-release_main x86_64 and
+aarch64 wheels and fall back to PyPI &gt;=0.49.1 when the pre-release is
+unreachable (offline installs, firewalled hosts, or architectures not
+covered by the pre-release wheels). Drop the pin once bnb cuts a
+0.50+ tag on PyPI.
+
+Verified on MI300X (gfx942, ROCm 7.2, torch 2.10.0+rocm7.1): direct
+bnb GEMV shape test now returns 0.0078 max abs error at seq_len=1
+(no NaN) vs NaN on 0.49.2, and full Unsloth + for_inference + 4-bit
+sampling generation works end-to-end.
+
+NVIDIA / CPU / Mac / Windows paths are unaffected -- the helper is
+gated on the ROCm torch index and platform.machine() respectively.
+
+* Drop Studio ROCm 16-bit fallback now that bnb 0.50+ fixes 4-bit decode
+
+The 16-bit fallback in studio/backend/core/inference/inference.py was
+added as a workaround for a bug that this PR already fixes at the
+install layer: bitsandbytes &lt;= 0.49.2 has a broken 4-bit GEMV kernel
+on every ROCm target, which NaNs at decode shape (seq_len=1) and
+crashes autoregressive inference. bnb PR #1887 (commit 713a3b8, in
+0.50.0.dev0+, pinned by install.sh / install_python_stack.py in this
+PR) restores correct 4-bit decode on MI300X and verified working
+end-to-end with full Unsloth + for_inference + sampling.
+
+Revert the dual code path so ROCm and NVIDIA both go through the
+normal FastLanguageModel.from_pretrained + for_inference flow:
+
+  - Remove the conditional `from unsloth import` that skipped the
+    import on ROCm. The monkey-patches it was trying to avoid were
+    never the cause of the crash; bnb 4-bit GEMV was.
+  - Remove the `if _hw_module.IS_ROCM:` branch in load_model that
+    loaded with plain transformers + PEFT + bfloat16, and the
+    `_resolve_fp16_base` helper it relied on.
+  - Remove the `get_chat_template is not None` fallback in
+    _load_chat_template_info -- get_chat_template is now always
+    imported.
+  - Refactor the audio/vision ROCm guard to check _hw_module.IS_ROCM
+    directly instead of the removed _IS_ROCM_ENV global. Audio and
+    vision on ROCm still need separate validation (FastVisionModel
+    and the CSM audio codecs were never tested on HIP) so the guard
+    stays for now.
+
+Add _bnb_rocm_4bit_ok() as a runtime safety net for users who
+install from this PR before the install.sh bnb pin kicks in, or
+whose installer fell back to the PyPI pin because the continuous-
+release wheel was unreachable. When the installed bnb is &lt; 0.50 on
+ROCm, force load_in_4bit=False and strip any -unsloth-bnb-4bit /
+-bnb-4bit suffix from the model path so a pre-quantized repo
+resolves to its FP16 sibling instead of pulling bnb back in via
+the repo&#39;s quantization_config. LoRA adapters whose base is a
+pre-quantized repo on old bnb will still fail inside Unsloth&#39;s
+loader -- the only real fix there is `unsloth studio update`.
+
+Verified on MI300X (gfx942, ROCm 7.2, torch 2.10.0+rocm7.1):
+
+  - HAPPY path (bnb 0.50.0.dev0, load_in_4bit=True, pre-quantized
+    repo): loads in 4-bit via the fixed GEMV, generation returns
+    &#34;Paris.&#34; for greedy and sampling.
+  - SAFETY-NET path (simulated old bnb, suffix-stripped to the
+    FP16 sibling, load_in_4bit=False): loads in bf16, generation
+    returns &#34;Paris.&#34; for greedy and sampling.
+
+Net diff is ~45 lines smaller than the pre-revert state because
+the entire plain-transformers 16-bit branch is gone.
+
+* Cache _bnb_rocm_4bit_ok() with functools.cache
+
+load_model() can be called many times in a single session but the bnb
+version and hardware state cannot change at runtime, so memoise the
+check. First call is ~1.9 ms (dominated by the lazy `import bitsandbytes`
+inside the try block), subsequent calls drop to sub-microsecond dict
+lookups. Zero behavioral change.
+
+* Shorten verbose bnb/ROCm comments
+
+Comment-only cleanup across install.sh, studio/install_python_stack.py,
+and studio/backend/core/inference/inference.py. No behavioral change.
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Remove _bnb_rocm_4bit_ok safety net from inference.py
+
+Studio&#39;s ROCm support is brand new (PR #4720, merged today) and every
+fresh install pulls the bnb continuous-release_main wheel via
+install.sh / install_python_stack.py in this same PR. There are no
+existing ROCm Studio installs carrying bnb &lt; 0.50, so the defensive
+version-check fallback is guarding against a scenario that cannot
+actually occur. Delete the helper, the functools import, and the
+safety-net block -- inference.py now calls FastLanguageModel.from_pretrained
+directly with no ROCm branching.
+
+* Drop audio/vision ROCm guard in inference.py — verified unblocked by bnb fix
+
+Vision inference was blocked by the same bnb 4-bit GEMV bug that affected
+text inference (vision models use bnb 4-bit for the LM backbone). With
+bnb 0.50+ pinned in install.sh / install_python_stack.py, vision works
+end-to-end on MI300X: Llama-3.2-11B-Vision-Instruct-unsloth-bnb-4bit
+loaded in 4-bit via FastVisionModel + for_inference returns a correct
+answer to a multimodal prompt.
+
+Audio (CSM) was never actually blocked by HIP — on this hardware CSM
+loads and runs its backbone forward pass fine with bnb 0.50, then fails
+during generate() with a transformers-level kwarg validation mismatch
+in generation_csm.py (`backbone_last_hidden_state` rejected). That&#39;s a
+pre-existing transformers/CSM integration bug that reproduces identically
+on NVIDIA, so the ROCm-gated guard was never actually protecting users
+from anything HIP-specific.
+
+Remove the combined audio/vision guard and the now-unused _hw_module
+import. Also restore the one-word &#34;Can be&#34; in an inline comment that
+drifted during the earlier comment-shortening pass, so the inference.py
+delta vs pre-#4720 is exactly the max_seq_length&lt;=0 crash fix and
+nothing else.
+
+* Shorten max_seq_length=0 guard comment to one line
+
+---------
+
+Co-authored-by: Daniel Han &lt;danielhanchen@users.noreply.github.com&gt;
+Co-authored-by: pre-commit-ci[bot] &lt;66853113+pre-commit-ci[bot]@users.noreply.github.com&gt;
+
+- Add AMD ROCm/HIP support across installer and hardware detection (#4720)
+
+* Add ROCm detection to install.sh and expand shell tests
+
+Add AMD ROCm GPU detection to get_torch_index_url() in install.sh.
+When nvidia-smi is not found, probe for ROCm via amd-smi, /opt/rocm
+version file, hipconfig, dpkg-query, and rpm.
+
+Includes validation guard for malformed _rocm_tag, Debian epoch prefix
+stripping, ROCm 7.2+ cap to rocm7.1 index, bitsandbytes AMD install,
+and status messaging. Shell tests expanded to 23 cases.
+
+Co-authored-by: Daniel Han &lt;danielhanchen@gmail.com&gt;
+
+* Add ROCm torch reinstall support to install_python_stack.py
+
+Add _detect_rocm_version() and _ensure_rocm_torch() to detect when a
+Linux host has ROCm but the venv received CPU-only torch, and reinstall
+with the correct ROCm wheels. Covers ROCm 6.0 through 7.1 with a
+30-second timeout on the torch GPU probe subprocess.
+
+Co-authored-by: Daniel Han &lt;danielhanchen@gmail.com&gt;
+
+* Add ROCm support to llama.cpp prebuilt installer
+
+Add has_rocm field to HostInfo, extend detect_host() to probe for ROCm
+via hipcc/amd-smi/rocm-smi/ROCM_PATH, and route ROCm hosts to upstream
+prebuilts (Linux ROCm 7.2 prebuilt with source fallback, Windows HIP
+prebuilt with CPU fallback). Add linux-rocm and windows-hip install
+kinds to runtime_patterns_for_choice().
+
+Co-authored-by: Daniel Han &lt;danielhanchen@gmail.com&gt;
+
+* Add IS_ROCM hardware flag and fix AMD error message
+
+Add IS_ROCM flag to hardware.py detect_hardware() (set when
+torch.version.hip is present, DeviceType stays CUDA). Export IS_ROCM
+from __init__.py. Add &#34;rocm&#34; key to get_package_versions().
+
+Replace &#34;We do not support AMD&#34; error in tokenizer_utils.py with a
+helpful message pointing to ROCm installation docs.
+
+Co-authored-by: Daniel Han &lt;danielhanchen@gmail.com&gt;
+
+* Add comprehensive ROCm support test suite (68 tests)
+
+Add tests/studio/install/test_rocm_support.py covering all ROCm code
+paths across install_llama_prebuilt.py, install_python_stack.py,
+hardware.py, tokenizer_utils.py, and install.sh. All tests use mocks
+and run without AMD hardware.
+
+Covers: asset selection (11), runtime patterns (5), HostInfo (4),
+ROCm version detection (9), torch reinstall (9), index mapping (8),
+hardware flag (8), tokenizer message (2), install.sh structure (10),
+and live regression (1).
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Harden ROCm support: probe error handling, version cap, validation
+
+Address review findings from 8 independent reviewers:
+
+- Wrap _ensure_rocm_torch() torch probe in try/except for
+  TimeoutExpired and OSError so a hung or broken torch import does not
+  crash the installer (8/8 reviewers flagged this)
+- Add torch&gt;=2.4,&lt;2.11.0 version cap to the ROCm reinstall path to
+  prevent installing unsupported torch 2.11.0 from the rocm7.1 index
+- Use with-statement for file reads in _detect_rocm_version() to avoid
+  resource leaks
+- Handle ROCM_PATH=&#34;&#34; correctly (use `or &#34;/opt/rocm&#34;` instead of
+  default parameter to avoid relative path resolution)
+- Strengthen shell validation guard from rocm[0-9] to rocm[1-9] to
+  reject rocm0.x tags that would produce nonexistent PyTorch index URLs
+- Switch shell version cap from blocklist to allowlist (rocm6.*|rocm7.0*
+  |rocm7.1* pass through, everything else caps to rocm7.1) so future
+  ROCm 10+ does not fall through to a nonexistent index
+- Add sorted() to _ROCM_TORCH_INDEX lookup for defensive ordering
+- Fix test_probe_timeout_handled: replace zero-assertion test with
+  proper assertions verifying reinstall proceeds after timeout
+
+* Clean up rocm_paths list construction in detect_host()
+
+Filter None from the ROCM_PATH env var lookup at list construction time
+instead of relying on the inline `if p` guard in the any() call.
+
+* Require actual AMD GPU presence before selecting ROCm paths
+
+All 8 reviewers across 2 cycles independently flagged that ROCm
+detection used toolkit/filesystem hints (hipcc, /opt/rocm, rocm-core)
+as a proxy for GPU presence, which would misroute CPU-only or NVIDIA
+hosts that happen to have ROCm tools installed.
+
+Now all 3 detection points (install.sh, install_python_stack.py,
+install_llama_prebuilt.py) probe for an actual AMD GPU before
+entering the ROCm path:
+
+- install.sh: check rocminfo for gfx* GPU names, or amd-smi list
+  for device rows, before version detection
+- install_python_stack.py: new _has_rocm_gpu() function probes
+  rocminfo and amd-smi list before _ensure_rocm_torch() proceeds
+- install_llama_prebuilt.py: detect_host() probes rocminfo/amd-smi
+  list instead of just checking tool existence or directory paths
+
+Also:
+- Shell test mock amd-smi now handles &#34;list&#34; subcommand
+- Python tests updated to mock _has_rocm_gpu where needed
+- Added test_no_gpu_with_rocm_tools_skips to verify the new guard
+- Test index lookups now use sorted() to match production code
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Harden hipconfig version parsing and torch probe compatibility
+
+- Add parts[1].isdigit() check in hipconfig version parsing to handle
+  versions like &#34;6.3-HIP&#34; where the minor component has non-numeric
+  suffix (strip &#34;-&#34; prefix before int() conversion)
+- Use getattr() in torch probe subprocess to safely handle old or
+  custom torch builds that may lack torch.version.hip/cuda attributes
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Strengthen AMD GPU detection and add NVIDIA precedence guard
+
+- Change amd-smi list detection from any-non-empty-output to requiring
+  &#34;gpu&#34; marker in output, matching the shell-side NR&gt;1 check. Prevents
+  false positives from header-only amd-smi list output.
+- Add nvidia-smi check at the top of _ensure_rocm_torch() so mixed
+  AMD+NVIDIA hosts preserve NVIDIA precedence (matching install.sh and
+  install_llama_prebuilt.py behavior).
+- Apply the same amd-smi marker fix to install_llama_prebuilt.py
+  detect_host() for consistency.
+
+* Add Windows-specific ROCm/HIP detection in detect_host()
+
+The previous detect_host() ROCm check used rocminfo and amd-smi list
+which are Linux-only tools. On Windows, has_rocm would always be False,
+making the Windows HIP prebuilt path at line 1794 unreachable.
+
+Now detect_host() uses platform-specific detection:
+- Linux: rocminfo (check for gfx GPU names) or amd-smi list
+- Windows: hipinfo.exe, amd-smi, or amdhip64.dll on PATH
+
+This allows Windows AMD users to get the HIP prebuilt binary instead
+of silently falling through to the CPU prebuilt.
+
+* Add AMD ROCm gaps: Mamba/SSM source builds, GPU monitoring, Windows messaging, RDNA expansion
+
+- worker.py: Add HIP detection to causal-conv1d/mamba-ssm probe, check
+  for hipcc before ROCm source builds, improve status messages and error
+  reporting, add timeout and uv support for the source build fallback
+- amd.py: New AMD GPU monitoring module via amd-smi metric --json,
+  mirroring nvidia.py structure (utilization, temperature, power, VRAM)
+- hardware.py: Branch to amd.py when IS_ROCM is True for GPU utilization,
+  visible GPU queries, and physical GPU count
+- install_python_stack.py: Detect AMD GPUs on Windows and warn that
+  ROCm-enabled PyTorch must be installed manually
+- kernels/utils.py: Expand is_rdna() to cover RDNA2 (gfx1030-1032),
+  RDNA3 (gfx1102-1103), RDNA3.5 (gfx1150-1152) alongside existing entries
+- tests: Add 32 new tests covering all changes (95/95 pass)
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Harden ROCm detection, fix VRAM heuristic, and expand RDNA2 coverage
+
+- Windows ROCm detection: validate actual GPU presence via hipinfo/amd-smi
+  output markers instead of just checking tool existence on PATH
+- _ensure_rocm_torch: validate nvidia-smi actually reports a GPU before
+  giving NVIDIA precedence (fixes AMD-only hosts with stale NVIDIA tools)
+- amd.py _parse_numeric: handle dict-shaped metric objects from newer
+  amd-smi versions ({&#34;value&#34;: 10, &#34;unit&#34;: &#34;W&#34;}) and strip MiB/GiB units
+- amd.py VRAM heuristic: raise threshold from 100k to 10M to correctly
+  handle MI300X (192 GB = 196608 MB) and other high-VRAM GPUs
+- amd.py visible GPU: use AMD-reported GPU IDs instead of enumerate index
+  so non-dense sets like CUDA_VISIBLE_DEVICES=1,3 report correctly
+- install.sh: add ROCm &lt;6.0 minimum version guard (no PyTorch wheels
+  exist for older versions); fix rocm7.1* glob to not match rocm7.10+
+- is_rdna: add gfx1033-1036 for RDNA2 mobile GPUs (RX 6600M etc.)
+- worker.py: increase ROCm source build timeout from 600s to 1800s;
+  fix success log message for ROCm source builds
+- Tests: update mocks for _has_usable_nvidia_gpu, add RDNA2 target asserts
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Add HIP_VISIBLE_DEVICES support, unit-aware VRAM parsing, Windows GPU validation
+
+- hardware.py: check HIP_VISIBLE_DEVICES and ROCR_VISIBLE_DEVICES on ROCm
+  before falling back to CUDA_VISIBLE_DEVICES, so multi-GPU AMD setups with
+  HIP-specific env vars report the correct visible device set
+- amd.py: add _parse_memory_mb() that reads &#34;unit&#34; from dict-shaped amd-smi
+  JSON (e.g. {&#34;value&#34;: 192, &#34;unit&#34;: &#34;GiB&#34;}) and converts to MB correctly;
+  fixes MI300X VRAM misreported as 0.19 GB instead of 192 GB
+- install_python_stack.py: Windows AMD warning now validates actual GPU
+  presence via hipinfo/amd-smi output markers before printing
+- install_llama_prebuilt.py: restore amdhip64.dll fallback for Windows HIP
+  detection after tool-based checks, so Windows HIP installs without CLI
+  tools on PATH are still detected
+- hardware.py: fix IS_ROCM comment to accurately describe its role
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Fix HIP_VISIBLE_DEVICES empty-string handling in GPU visibility spec
+
+Use explicit None checks instead of Python `or` operator when reading
+HIP_VISIBLE_DEVICES / ROCR_VISIBLE_DEVICES, so that an empty string
+(&#34;&#34;) is correctly honored as &#34;no visible GPUs&#34; rather than silently
+falling through to CUDA_VISIBLE_DEVICES on mixed ROCm+CUDA systems.
+
+* Fix IS_ROCM test assertion for multi-line formatting
+
+* Cap torchvision/torchaudio versions, remove amdhip64.dll fallback, fix visible GPU count
+
+- Cap torchvision&lt;0.26.0 and torchaudio&lt;2.11.0 alongside torch&lt;2.11.0 in
+  both install.sh and install_python_stack.py to prevent resolver from
+  selecting incompatible companion packages from ROCm wheel index
+- Remove amdhip64.dll fallback in Windows ROCm detection (DLL presence
+  without hipinfo/amd-smi is not proof of GPU existence)
+- Fix get_visible_gpu_count() to use _get_parent_visible_gpu_spec() which
+  respects HIP_VISIBLE_DEVICES/ROCR_VISIBLE_DEVICES on ROCm hosts
+
+* Attribute is_rdna() RDNA2/3/3.5/4 expansion to PR #4428
+
+The is_rdna() expansion to cover RDNA2 (gfx1030-1036), RDNA3
+(gfx1100-1103), RDNA3.5 (gfx1150-1152), and RDNA4 (gfx1200-1201)
+architectures is based on the original work from PR #4428.
+
+Co-authored-by: GoldenGrapeGentleman &lt;yueyuan@amd.com&gt;
+Co-authored-by: billishyahao &lt;bill.he@amd.com&gt;
+
+* Support AMD Radeon for studio (#4770)
+
+Co-authored-by: Iswarya Alex &lt;iswarya.alex@amd.com&gt;
+
+* Remove ROCm test files from main PR
+
+Move test_rocm_support.py and shell test additions to a separate PR
+to keep the main ROCm support PR focused on implementation changes.
+
+* Fix installer and hardware detection issues for PR #4720
+
+- Fix empty _tri_arg passed to uv pip install in Radeon path (causes
+  &#34;Empty field is not allowed for PEP508&#34; error)
+- Fix Radeon fallback: use ROCm index instead of CPU-only when
+  repo.radeon.com is unreachable (TORCH_INDEX_URL already has ROCm)
+- Use $TORCH_CONSTRAINT in fallback paths instead of hardcoded strings
+- Fix _pick_radeon_wheel: relax suffix to match manylinux_2_28_x86_64
+  wheels (AMD Radeon repo does not use bare linux_x86_64 platform tag)
+- Fix IS_ROCM export: use __getattr__ so callers always see the live
+  value after detect_hardware() runs
+- Fix apply_gpu_ids: set HIP_VISIBLE_DEVICES and ROCR_VISIBLE_DEVICES
+  on ROCm so _get_parent_visible_gpu_spec picks up narrowed GPU set
+- Fix _parse_memory_mb: distinguish GB (1000 MB) from GiB (1024 MiB)
+- Add amd-smi version as a fallback in _detect_rocm_version
+- Fix trailing whitespace and missing newline at EOF in install.sh
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Fix GPU detection false positives and add missing health groups
+
+- Fix _has_rocm_gpu() false positive: require &#34;GPU: &lt;number&gt;&#34; data rows
+  from amd-smi list, not just header containing &#34;gpu&#34;
+- Apply same fix in detect_host() in install_llama_prebuilt.py
+- Add runtime_payload_health_groups for linux-rocm and windows-hip so
+  partial/corrupt ROCm/HIP prebuilt installs are properly detected
+- Add bitsandbytes install to Radeon fallback paths (was only in the
+  success path, skipped when repo.radeon.com was unreachable)
+- Keep DEVICE/CHAT_ONLY as direct imports in __init__.py (matching main)
+  and only use __getattr__ for IS_ROCM
+
+* Fix _ensure_rocm_torch and Windows AMD warning false positives
+
+- _ensure_rocm_torch: only skip when HIP is already present, not for
+  CUDA builds (which are unusable on AMD-only hosts). Fixes the case
+  where a venv has a stale CUDA wheel and the repair step is skipped.
+- Windows AMD warning: use GPU data row check (same as Linux fix) to
+  avoid false positives from amd-smi list header-only output.
+
+* Fix amd-smi GPU detection for GPU[N] output format
+
+Older amd-smi versions output &#34;GPU[0] : Card series: ...&#34; instead of
+&#34;GPU: 0&#34;. The regex now matches both &#34;GPU: &lt;digit&gt;&#34; and &#34;GPU[&lt;digit&gt;&#34;
+formats to detect actual GPU data rows.
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Harden AMD GPU detection against false positives
+
+- install.sh: replace weak amd-smi list check (awk &#39;NR&gt;1 &amp;&amp; NF&#39;) with
+  strict pattern matching GPU data rows (/^GPU[[:space:]]*[:\[]/)
+- All files: reject rocminfo gfx000 (CPU HSA agent) by requiring
+  gfx[1-9] instead of gfx[0-9] in the rocminfo GPU probe
+- Fixes false positives on hosts with ROCm tools but no AMD GPU
+
+* Remove duplicate comment from pre-commit merge
+
+* Refactor: deduplicate AMD detection, consolidate bitsandbytes, clean up imports
+
+- Extract _has_amd_rocm_gpu() shell function to avoid duplicating the
+  rocminfo/amd-smi GPU detection logic in get_torch_index_url and
+  the Radeon auto-detect block
+- Consolidate bitsandbytes install into a single case block after torch
+  install (was duplicated 4 times across Radeon success/fallback paths)
+- Move math and re imports to top of amd.py (were inline in functions)
+- Add _smi_query() helper in hardware.py to centralize IS_ROCM backend
+  selection for get_gpu_utilization and get_visible_gpu_utilization
+
+Addresses Gemini code review suggestions.
+
+* Fix VRAM parsing for string values and GB/GiB consistency
+
+- Extract unit from string-valued VRAM fields (e.g. &#34;192 GiB&#34;) so
+  _parse_memory_mb correctly applies the unit multiplier instead of
+  treating the value as bare MB
+- Treat GB and GiB identically (both as binary x1024) since GPU tools
+  including amd-smi use binary units even when labeling them &#34;GB&#34;
+- Fixes incorrect VRAM reporting on MI300-class cards (was showing
+  ~0.19 GB instead of 192 GB for string-valued outputs)
+
+* Add --no-cache to uv for ROCm HIP source builds
+
+Avoid stale cache artifacts from partial HIP source builds when
+uv is used for causal-conv1d/mamba-ssm compilation on ROCm.
+The pip path already uses --no-cache-dir; this adds the uv equivalent
+(--no-cache) only when is_hip is True.
+
+* Fix critical: initialize _amd_gpu_radeon before case block
+
+_amd_gpu_radeon was only set inside the */rocm*) case arm, so on
+NVIDIA/CPU/macOS paths where TORCH_INDEX_URL does not contain &#34;rocm&#34;,
+the variable was unbound. With set -u (nounset) enabled, this crashes
+the installer for every non-AMD user.
+
+Move initialization to before the case block so it is always defined.
+
+* Fix Windows AMD: route has_rocm hosts to HIP prebuilt path
+
+resolve_release_asset_choice was selecting windows-cpu for all Windows
+x86_64 hosts including those with has_rocm=True. Windows AMD users
+should fall through to resolve_upstream_asset_choice which tries the
+HIP prebuilt first. Add &#34;not host.has_rocm&#34; guard to the published
+windows-cpu selection.
+
+* Harden ROCm detection, Radeon wheel fallback, and HIP visibility
+
+Addresses review findings from parallel reviewers on PR #4720:
+
+- install.sh: add _has_usable_nvidia_gpu() helper requiring nvidia-smi -L
+  to actually list a GPU before treating the host as NVIDIA. Fixes the
+  stale-nvidia-smi-on-PATH regression where AMD-only hosts fell into the
+  CUDA branch.
+- install.sh: fix hipconfig awk blocks to propagate a non-zero exit code
+  when the output is not a recognisable version string, so the ||-chain
+  continues to dpkg-query / rpm instead of terminating early.
+- install.sh: fail-closed on Radeon wheel fallback. When torch,
+  torchvision or torchaudio is missing from the Radeon repo for the
+  active Python tag, fall back to the standard ROCm index instead of
+  silently mixing Radeon wheels with PyPI defaults. Quote all wheel
+  arguments individually so wheel filenames cannot be word-split or
+  glob-expanded.
+- install_llama_prebuilt.py: detect_host() now requires nvidia-smi -L to
+  list a GPU before setting has_physical_nvidia. Routes AMD ROCm hosts
+  with a broken leftover nvidia-smi to the ROCm path instead of
+  misclassifying them as NVIDIA.
+- install_llama_prebuilt.py: scan upstream assets for any rocm-&lt;version&gt;
+  prebuilt instead of hard-coding rocm-7.2, so ROCm 6.x / 7.0 / 7.1 / 7.3+
+  users pick up a matching upstream prebuilt when one exists.
+- install_llama_prebuilt.py: validate_server() adds --n-gpu-layers 1 for
+  linux-rocm and windows-hip hosts, so new HIP prebuilts are preflighted
+  on the GPU path instead of passing validation on CPU only.
+- install_llama_prebuilt.py: restore the published windows-cpu fallback
+  for AMD Windows hosts without a HIP prebuilt so hash-approved bundles
+  are still preferred over the raw upstream CPU asset.
+- install_python_stack.py: drop the /opt/rocm / hipcc gate in
+  _ensure_rocm_torch() and rely on _has_rocm_gpu(). Runtime-only ROCm
+  installs (package-managed minimal installs, Radeon software) that ship
+  amd-smi / rocminfo without hipcc can now repair a CPU-only venv via
+  &#34;unsloth studio update&#34;. Adds an explicit IS_WINDOWS / IS_MACOS guard.
+- studio/backend/utils/hardware/amd.py: honour HIP_VISIBLE_DEVICES /
+  ROCR_VISIBLE_DEVICES / CUDA_VISIBLE_DEVICES in
+  get_primary_gpu_utilization(). A process restricted to GPU 2 now
+  reports metrics for GPU 2 instead of physical GPU 0. Tighten the plain
+  bytes unit detection to an explicit allowlist.
+- studio/backend/utils/hardware/hardware.py: route
+  get_backend_visible_gpu_info()&#39;s backend_cuda_visible_devices field
+  through a helper that reads HIP_VISIBLE_DEVICES on ROCm. Drop the
+  unconditional &#34;(rocm=False)&#34; suffix in apply_gpu_ids() logs.
+
+* Fix round 2 regressions: ROCm validate_server and Windows HIP routing
+
+Follow-up to 810b833b addressing review findings on the first round of
+hardening commits:
+
+- install_llama_prebuilt.py validate_server: gate --n-gpu-layers on the
+  resolved install_kind instead of host.has_rocm. AMD Windows hosts
+  without a HIP prebuilt fall back to windows-cpu and must not be
+  validated with GPU layers; thread install_kind through from the
+  caller.
+- install_llama_prebuilt.py resolve_release_asset_choice: reinstate the
+  &#34;not has_rocm&#34; guard on the published windows-cpu bundle so AMD
+  Windows hosts reach resolve_upstream_asset_choice() where the new
+  HIP prebuilt path lives. Prefer a published windows-hip bundle first
+  when one exists, fall through to upstream HIP + upstream CPU
+  otherwise.
+- install_llama_prebuilt.py detect_host: also set has_physical_nvidia
+  when the secondary --query-gpu block confirms a working NVIDIA GPU,
+  so older nvidia-smi versions without -L support do not silently skip
+  the Linux diagnostics that key off has_physical_nvidia.
+- install_llama_prebuilt.py: drop redundant &#34;import re as _re&#34; /
+  &#34;import re as _re_rocm&#34; local aliases in favour of the existing
+  top-level &#34;import re&#34;.
+- install_python_stack.py _ensure_rocm_torch: run the AMD
+  bitsandbytes install unconditionally after the HIP-torch probe so
+  &#34;unsloth studio update&#34; on venvs that already have ROCm torch still
+  gains the AMD bitsandbytes build.
+- install.sh: add a non-x86_64 early-exit to get_torch_index_url() so
+  aarch64 / arm64 Linux hosts do not hit the ROCm wheel index
+  (PyTorch only publishes ROCm wheels for linux_x86_64).
+- install.sh: add bitsandbytes install to the migrated-environment
+  branch so upgrades pick it up for ROCm hosts instead of only the
+  fresh-install path.
+- install.sh: in the Radeon wheel path, pass version constraints +
+  --no-index --find-links to uv instead of explicit wheel URLs so a
+  version-compatible torch / torchvision / torchaudio triple is
+  resolved, rather than picking the highest-version wheel for each
+  package independently.
+- studio/backend/utils/hardware/amd.py _first_visible_amd_gpu_id: fall
+  through to lower-priority visibility env vars when the first entry
+  is malformed (leading comma, all-whitespace first token) instead of
+  silently returning GPU 0.
+
+* Fix round 3 findings: x86_64 guard, ROCm version clip, Radeon deps
+
+Address issues surfaced by the round 3 reviewers on top of 8636fa63:
+
+- install_python_stack.py _ensure_rocm_torch: add the same `x86_64`
+  guard that install.sh already has. Linux aarch64 / arm64 ROCm hosts
+  must skip the repair path entirely; PyTorch only publishes ROCm
+  wheels for linux_x86_64, and without this guard
+  `unsloth studio update` aborts with a missing-wheel error on non
+  x86_64 hosts.
+- install_llama_prebuilt.py resolve_upstream_asset_choice: add a
+  best-effort _detect_host_rocm_version() helper (reading
+  /opt/rocm/.info/version, amd-smi version, hipconfig --version) and
+  filter rocm_candidates to entries whose major.minor is &lt;= host
+  version. Falls back to the newest candidate only when no compatible
+  one exists, so a ROCm 6.4 host downloads rocm-6.4 instead of being
+  handed the numerically newest rocm-7.2 bundle (which fails preflight
+  and forces a source build).
+- install.sh: remove the round 2 --no-index switch from the Radeon
+  wheel branch. --no-index forced uv to ignore PyPI entirely, which
+  broke transitive dependency resolution (filelock, sympy, networkx,
+  jinja2, fsspec, setuptools, typing-extensions, ...) on a fresh venv.
+  Restore the round 1 explicit wheel URL invocation but add a
+  torch / torchvision / torchaudio version-pair sanity check so a
+  mismatched trio (e.g. torch 2.9.1 + torchvision 0.23.0 + torchaudio
+  2.9.0) falls back to the standard ROCm index instead of installing a
+  broken combination.
+- install_python_stack.py _ensure_rocm_torch: restructure the
+  &#34;tag is None&#34; path so it no longer short-circuits the bitsandbytes
+  install. On a ROCm runtime older than anything in
+  _ROCM_TORCH_INDEX, print the &#34;no wheel&#34; warning but still run the
+  AMD bitsandbytes install.
+- studio/backend/core/training/worker.py: restore the pre-PR
+  &#34;no timeout&#34; behaviour for non-HIP causal-conv1d / mamba-ssm source
+  builds. The round 2 &#34;timeout = 1800 if is_hip else 300&#34; cap aborts
+  slow non-HIP builds (Linux aarch64, unsupported torch/CUDA combos)
+  after 5 minutes; omit timeout for the non-HIP branch so the cap
+  only applies to ROCm source builds.
+
+* Fix round 4 findings: apply_gpu_ids env inheritance, Radeon X.Y, bitsandbytes gate
+
+Address remaining issues surfaced by the round 4 reviewers:
+
+- studio/backend/utils/hardware/hardware.py apply_gpu_ids: mirror the
+  selection into HIP_VISIBLE_DEVICES / ROCR_VISIBLE_DEVICES whenever
+  the caller already had a ROCm visibility env var set, not only when
+  IS_ROCM has already been set by detect_hardware(). Training and
+  inference workers call apply_gpu_ids() before detect_hardware()
+  runs, so the old guard would leave a forked ROCm worker with a
+  stale HIP_VISIBLE_DEVICES mask that no longer matched the
+  narrowed CUDA_VISIBLE_DEVICES selection.
+- install.sh get_radeon_wheel_url: accept X.Y ROCm versions in
+  addition to X.Y.Z. The `/opt/rocm/.info/version` file and some
+  hipconfig versions report only two components, and the Radeon
+  repository publishes both rocm-rel-X.Y.Z/ and rocm-rel-X.Y/
+  directories, so treating X.Y as invalid caused Radeon hosts to fall
+  back to the generic ROCm index even when a matching AMD wheel set
+  existed.
+- install_python_stack.py _ensure_rocm_torch: only install the AMD
+  bitsandbytes build when the venv actually has a ROCm-compatible
+  torch (either already present or just installed by this function).
+  Previously the bitsandbytes install ran unconditionally, which
+  could leave an AMD bitsandbytes layered on top of a CPU/CUDA torch
+  on hosts where the ROCm runtime is older than any entry in
+  _ROCM_TORCH_INDEX. Also add --force-reinstall so an existing
+  CPU/CUDA bitsandbytes is replaced by the AMD build during upgrades.
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Fix gemini findings: amd-smi metric envelope validation and dict-wrapped GPU id
+
+Two medium-severity defensive fixes from the gemini-code-assist review on
+the AMD monitoring backend:
+
+1. _extract_gpu_metrics may return a dict where every value is None when
+   amd-smi succeeds (zero exit) but the JSON envelope contains no usable
+   fields (error response, unsupported card). The new _has_real_metrics
+   helper lets get_primary_gpu_utilization surface available:False and
+   lets get_visible_gpu_utilization skip ghost device rows so the UI
+   does not render placeholder cards with empty numbers.
+
+2. Newer amd-smi versions wrap scalar fields as {&#34;value&#34;: 0, &#34;unit&#34;:
+   &#34;none&#34;}, including the per-GPU id. The previous int(raw_id) call
+   silently fell back to the enumeration index in that case, losing the
+   real GPU id. Routing raw_id through the existing _parse_numeric
+   helper handles bare ints, floats, strings, and the dict shape
+   uniformly, with a debug log on parse failure.
+
+* Fix gemini round 2 findings: explicit length guard on ROCm version file parser
+
+Both _detect_rocm_version (install_python_stack.py) and
+_detect_host_rocm_version (install_llama_prebuilt.py) read /opt/rocm/.info/version
+or $ROCM_PATH/lib/rocm_version, split on &#34;.&#34; and unconditionally accessed
+parts[1]. The surrounding broad `except Exception: pass` already swallowed
+the resulting IndexError, so a one-component file like &#34;6\n&#34; did fall
+through to the next detection source -- but the control flow relied on
+exception handling instead of an explicit check.
+
+Add `if len(parts) &gt;= 2:` guards in both helpers so the loop falls through
+on its own without raising. Behaviour is unchanged for the common multi-
+component case; the previously-silent IndexError path becomes an explicit
+no-op.
+
+* Fix gemini round 3: include has_rocm in validate_server fallback path
+
+When validate_server is called without an explicit install_kind (older
+call sites that have not been updated), the fallback was only enabling
+--n-gpu-layers for NVIDIA and macOS arm64 hosts. AMD ROCm Linux hosts
+fell through to the CPU validation path even though the prebuilt being
+exercised was a HIP binary.
+
+Add host.has_rocm to the fallback expression so the GPU offload flag is
+applied consistently with the install_kind==&#39;linux-rocm&#39; / &#39;windows-hip&#39;
+branches above.
+
+* Fix gemini round 4: remove risky bytes-vs-MB heuristic in _parse_memory_mb
+
+The previous heuristic divided any bare number above 10_000_000 by
+1024*1024 on the assumption that large unit-less values were bytes.
+This misclassified small VRAM allocations: 5 MB of used VRAM reported
+as 5_242_880 bytes without a unit would be taken at face value and
+render as 5_242_880 MB (~5 TB) in the monitoring UI.
+
+Modern amd-smi always provides explicit units (MiB/GiB dict form),
+and legacy amd-smi returns bare numbers in MB -- the heuristic never
+had a real workload to handle. Drop it and default to MB for bare
+numeric input, keeping the existing unit-aware branches for dict /
+string inputs unchanged.
+
+The unrelated gemini suggestion to &#34;default minor to 0&#34; in the
+amd-smi version awk parser was intentionally NOT applied: rocm7.0
+and rocm7.1 ship different wheel sets, so silently substituting 0
+for a missing minor could install the wrong wheels. The existing
+reject-and-fall-through behaviour is safer.
+
+* Fix gemini round 5: POSIX compliance and leading-comma visibility parsing
+
+Three medium findings from gemini-code-assist addressed in this commit:
+
+1. _pick_radeon_wheel used grep -o and sort -V, both GNU extensions
+   that are not in POSIX and break on BSD/BusyBox coreutils. install.sh
+   has a #!/bin/sh shebang so the whole pipeline was rewritten as a
+   single awk script that extracts all href=&#34;...&#34; hits on each line,
+   filters to wheels matching the package prefix and python tag, and
+   picks the newest version via zero-padded lexical comparison. No
+   external sort or grep is needed.
+
+2. _first_visible_amd_gpu_id in the AMD monitoring backend treated a
+   leading comma (e.g. HIP_VISIBLE_DEVICES=&#34;,1&#34;) as &#34;fall through to
+   the next env var&#34;, which is surprising given the clear intent to
+   narrow to device 1. Filter empty tokens after the split and return
+   the first real one. An all-commas value (&#34;,&#34; / &#34;,,,&#34;) still falls
+   through because no real tokens exist; the empty-string and &#34;-1&#34;
+   explicit-zero cases are unchanged.
+
+The unrelated amd-smi version awk parser suggestion was not applied
+(see round 4 commit message for rationale: defaulting a missing minor
+to 0 could silently install the wrong ROCm wheel set).
+
+* Fix 20-reviewer.py findings: base drift, Radeon %2B, dpkg/rpm fallback, bnb, backend label
+
+Consolidated fix batch from a 20-parallel reviewer.py run on the current
+head. Each fix is drawn from a high-consensus finding and addresses a
+real bug or feature gap, not a stylistic preference.
+
+1. install.sh: bump `unsloth&gt;=2026.4.2` -&gt; `unsloth&gt;=2026.4.4` at five
+   call sites so this branch no longer regresses main&#39;s version floor
+   (main bumped to 2026.4.4 in #4876). Without this, merging 4720 would
+   silently downgrade the minimum version pin for fresh installs.
+
+2. install.sh: URL-decode Radeon wheel names before extracting the
+   torch / torchvision / torchaudio version strings. Real wheel URLs
+   from repo.radeon.com are percent-encoded (&#34;torch-2.10.0%2Brocm7.2.0...&#34;)
+   so the previous `[+-]` terminator in the sed regex never matched,
+   `_torch_ver` stayed empty, `_radeon_versions_match` stayed false,
+   and every Radeon consumer install silently fell back to the generic
+   ROCm index. Now decode %2B -&gt; + first, then extract, then validate.
+
+3. install.sh: the two AMD bitsandbytes install lines were running
+   `uv pip install &#34;bitsandbytes&gt;=0.49.1&#34;` without `--force-reinstall`,
+   so upgrades where the venv already has a CPU/CUDA bitsandbytes
+   satisfying the constraint would keep the stale non-AMD wheel. Add
+   `--force-reinstall --no-cache-dir` to both call sites, matching the
+   pattern already used in install_python_stack.py::_ensure_rocm_torch.
+
+4. install_python_stack.py and install_llama_prebuilt.py: add
+   `dpkg-query -W rocm-core` and `rpm -q rocm-core` fallbacks to the
+   Python-side ROCm version detectors so they match the chain in
+   install.sh::get_torch_index_url. Package-managed ROCm installs
+   (Debian/Ubuntu/RHEL/Fedora distro packages) can expose GPUs via
+   rocminfo/amd-smi but still lack /opt/rocm/.info/version, hipconfig,
+   or amd-smi `version` output -- without these fallbacks, `unsloth
+   studio update` on such hosts returned None and skipped the ROCm
+   torch repair. Also strip the dpkg epoch prefix (&#34;1:6.3.0-1&#34;) before
+   parsing so epoch-annotated packages parse correctly.
+
+5. hardware.py: add a `_backend_label(device)` helper that returns
+   &#34;rocm&#34; when IS_ROCM is set and the device is DeviceType.CUDA, and
+   use it for every `&#34;backend&#34;: ...` emission in JSON responses served
+   to the Studio frontend. Internally we still represent ROCm hosts as
+   DeviceType.CUDA (ROCm torch reuses the whole torch.cuda.* API
+   surface), but the user-facing API now correctly reports &#34;rocm&#34; on
+   AMD boxes instead of labeling them as &#34;cuda&#34;.
+
+All 250 simulation scenarios pass (was 233 before this batch: added 17
+new regression tests covering the version pin, %2B decoding, bnb
+force-reinstall flags, dpkg/rpm fallback presence, and the
+_backend_label helper&#39;s four-way truth table).
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Fix gemini round 6 + URL audit: amd.py defensive checks, rocm6.5+ clip to 6.4
+
+Two rounds of fixes in one commit, plus a full URL audit of every PyPI /
+download.pytorch.org / repo.radeon.com reference the PR introduces.
+
+amd.py (4 medium gemini findings on commit b3627bc2):
+
+1. _extract_gpu_metrics used `and vram_total_mb` as part of the vram_util
+   gate. The follow-up `vram_total_mb &gt; 0` already handles the division
+   guard, but the truthiness check was redundant and slightly surprising
+   for a 0.0 valid value. Replace with explicit `is not None and &gt; 0`
+   for both vram_util and power_util.
+
+2. get_physical_gpu_count called `data.get(&#34;gpu&#34;, ...)` without guarding
+   for non-dict envelopes. A scalar / string JSON response from amd-smi
+   would raise AttributeError. Add an isinstance(data, dict) check and
+   return None for unexpected shapes.
+
+3. get_visible_gpu_utilization had the same .get() exposure on the outer
+   envelope. Rewrite the gpu_list extraction as an explicit
+   list/dict/else cascade so a malformed scalar envelope produces
+   gpu_list=[data] and continues without raising.
+
+4. The same function&#39;s per-entry loop also called gpu_data.get() on
+   whatever was inside gpu_list. If a scalar ever leaks into the list
+   (directly or via the previous fix&#39;s fallback), _extract_gpu_metrics
+   would raise on the first .get() inside the helper. Skip non-dict
+   entries in the loop before extracting metrics.
+
+install.sh (URL audit finding, previously flagged by 20-reviewer as #13):
+
+5. get_torch_index_url used `rocm6.*` in the rocm tag case statement,
+   which matched rocm6.5 and rocm6.6 and emitted
+   download.pytorch.org/whl/rocm6.5 -- which returns HTTP 403 because
+   PyTorch only publishes rocm 5.7, 6.0-6.4, 7.0-7.2. Enumerate the
+   supported 6.x minors explicitly and add a rocm6.* fallback branch
+   that clips to rocm6.4 (the last supported 6.x wheel set).
+
+URL audit results (all URLs PR 4720 references):
+- 14/14 download.pytorch.org/whl/{cpu,cu118,cu124,cu126,cu128,cu130,
+  rocm6.0..6.4,rocm7.0..7.2} return HTTP 200.
+- 9/9 repo.radeon.com/rocm/manylinux/rocm-rel-{5.7,6.0,6.1,6.2,6.3,
+  6.4,7.0,7.1,7.2}/ return HTTP 200.
+- X.Y.Z patch directories exist for 7.0.2, 7.1.1, 7.2.1 but NOT for
+  6.3.0, 6.4.0, 6.2.1 -- install.sh already handles this via the X.Y.Z
+  -&gt; X.Y fallback sed in the Radeon wheel install block.
+- Docs links (rocm.docs.amd.com, docs.unsloth.ai AMD guide) and the
+  llama.cpp GitHub releases API endpoint all return 200.
+
+Test suite: 255 -&gt; 258. New regression coverage:
+- U17: get_physical_gpu_count tolerates scalar amd-smi envelope
+- U18: get_visible_gpu_utilization tolerates scalar envelope
+- U19a-c: vram_util / power_util return None on zero total, but
+  vram_total_gb still echoes 0.0 (not None)
+- A_rocm{6.5,6.6,6.9}_clips_to_rocm64: install.sh clips unsupported
+  6.x minors to rocm6.4 instead of producing a 403 index URL
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Fix reviewer.py round 2: tokenizer AMD multi-GPU, --no-torch bnb, main.py backend label
+
+Three high-confidence findings from a second 20-parallel reviewer.py run
+on commit 7effb3ae. Triaged 15 total findings and applied the three that
+were confirmed as real bugs; the rest were either false positives (e.g.
+&#34;migrated AMD venv not repaired&#34; -- _ensure_rocm_torch runs downstream
+via setup.sh regardless), design decisions (e.g. visibility mask env
+vars not consulted in installer detection), or edge cases the existing
+fallback logic already handles.
+
+1. unsloth/tokenizer_utils.py [6/20]: the multi-GPU guard&#39;s shell probe
+   runs `nvidia-smi --query-gpu=memory.used`, catches the failure, then
+   only raises if `torch.cuda.is_available()` is False. On ROCm torch,
+   torch.cuda.is_available() returns True (ROCm reuses the torch.cuda.*
+   API), so the guard becomes dead code on AMD hosts and multi-GPU AMD
+   setups slip through even though unsloth does not support them yet.
+   Add a torch.cuda.device_count() &gt; 1 fallback inside the except so
+   AMD multi-visible-device setups are flagged consistently with the
+   original CUDA memory check.
+
+2. install.sh [1/20]: the fresh-install bitsandbytes block for AMD ROCm
+   ran unconditionally when TORCH_INDEX_URL matched `*/rocm*`, even when
+   SKIP_TORCH=true (from --no-torch or Intel Mac auto-detect). A user
+   running `install.sh --no-torch` on an AMD host would still pull in
+   bitsandbytes despite explicitly asking for GGUF-only mode. Wrap the
+   case block in an outer `[ &#34;$SKIP_TORCH&#34; = false ]` guard.
+
+3. studio/backend/main.py [3/20]: the /api/system endpoint returned
+   `&#34;device_backend&#34;: get_device().value`, which is &#34;cuda&#34; on ROCm
+   hosts (because ROCm torch piggybacks on torch.cuda). Other endpoints
+   (hardware.py) already use the _backend_label helper which swaps
+   &#34;cuda&#34; -&gt; &#34;rocm&#34; when IS_ROCM. Route /api/system through the same
+   helper so the Studio UI reports the backend consistently across all
+   endpoints.
+
+4. studio/backend/tests/test_utils.py: update test_backend_matches_device
+   to call _backend_label(get_device()) instead of raw get_device().value
+   so the test matches the new contract and still passes on CUDA hosts.
+
+Tests: 258 -&gt; 261. New regression coverage:
+- X08 main.py /api/system uses _backend_label
+- X09 tokenizer multi-GPU guard has device_count() fallback
+- X10 fresh-install bnb case block gated on SKIP_TORCH=false
+
+* fix: prevent bitsandbytes from overwriting ROCm torch with CUDA wheels
+
+During install, bitsandbytes was installed without --no-deps, causing
+uv to resolve torch from PyPI (CUDA build) and silently overwrite the
+ROCm wheels that were just installed in the previous step.
+
+This happened in three places:
+- install.sh: bitsandbytes install in both migrated and fresh paths
+- install_python_stack.py: bitsandbytes install inside _ensure_rocm_torch()
+
+Additionally, multiple install steps in install_python_stack.py (extras,
+overrides, studio deps) can pull in CUDA torch via transitive
+dependencies. A final _ensure_rocm_torch() call at the end of the
+install sequence ensures ROCm torch is always in place at runtime.
+
+All changes are gated behind ROCm-specific conditions and do not affect
+NVIDIA, CPU-only, macOS, or Windows install paths.
+
+Tested on AMD Instinct MI300X VF with ROCm 7.2.0 -- confirms
+torch==2.10.0+rocm7.1 with HIP 7.1.25424 after install.
+
+* fix: ROCm inference fallback -- skip Unsloth patching and bnb 4-bit on HIP
+
+On AMD ROCm (HIP), two issues prevent the normal Unsloth inference path:
+
+1. Unsloth&#39;s global monkey-patching of transformers model classes
+   (LlamaRotaryEmbedding, attention modules) triggers
+   _assert_async_cuda_kernel crashes on HIP during generation.
+   Training uses different code paths and works fine.
+
+2. bitsandbytes 4-bit matmul kernels also trigger HIP assertion
+   failures on MI300X (CDNA3 / gfx942), even without Unsloth patching.
+
+This commit adds a ROCm-specific inference fallback that:
+- Skips importing Unsloth at module level (prevents global patching)
+- Loads models in 16-bit with plain transformers + PEFT instead
+- Resolves pre-quantized model names (e.g. &#34;xxx-bnb-4bit&#34; -&gt; &#34;xxx&#34;)
+  since pre-quantized HF repos still trigger bnb codepaths
+- Guards get_chat_template calls (unavailable without Unsloth import)
+- Fixes max_seq_length=0 being passed to from_pretrained (GGUF
+  semantics don&#39;t apply to transformers path)
+
+The NVIDIA path is completely unchanged -- Unsloth import and
+for_inference() optimization remain active. GGUF inference (via
+llama-server/HIP) is unaffected since it never imports Python model
+classes. AMD GPUs typically have large VRAM (e.g. 192GB on MI300X)
+so 16-bit loading is practical for inference.
+
+Tested on AMD Instinct MI300X VF (ROCm 7.2, HIP 7.1.25424):
+- Simple generation: PASS
+- Compare mode (base vs finetuned): PASS
+- GGUF inference + tool calling: PASS (unaffected by this change)
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* fix: guard audio/vision inference on ROCm, remove unused import
+
+- Add clear RuntimeError for audio/vision model inference on ROCm
+  (these paths use Unsloth&#39;s FastModel/FastVisionModel which would
+  crash on HIP; GGUF inference is the supported path on AMD)
+- Remove unused `import os as _os` from the ROCm changes
+
+* fix: amd-smi parsing for newer output format (gpu_data wrapper, mem_usage, temperature)
+
+amd-smi on recent ROCm versions (7.x) wraps metric output in a
+{&#34;gpu_data&#34;: [...]} envelope instead of returning a raw list. This
+caused get_primary_gpu_utilization() and get_visible_gpu_utilization()
+to fail silently (returning available=False) because the GPU data
+dict was never unwrapped.
+
+Additionally:
+- VRAM data moved from &#34;vram&#34; to &#34;mem_usage&#34; with &#34;total_vram&#34; /
+  &#34;used_vram&#34; keys. Added fallback key lookup.
+- Temperature &#34;edge&#34; sensor returns &#34;N/A&#34; on MI300X VF; the previous
+  dict.get() chain returned the &#34;N/A&#34; string instead of falling
+  through to &#34;hotspot&#34;. Changed to a loop that checks each key until
+  a parseable value is found.
+
+Tested on AMD Instinct MI300X VF (ROCm 7.2, amd-smi 24.x):
+- GPU utilization: 0% (idle), up to 100% during training
+- Temperature: 40-44C (from hotspot sensor)
+- VRAM: 0.28/191.69 GB (idle)
+- Power: 158-211W draw
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Bug fix detecting radeon (#4940)
+
+* Bug fix detecting radeon
+
+* Expanding GPU target for gfx1100*
+
+* Generalize gfx family-prefix filter to cover gfx10/gfx12 as well
+
+rocminfo on ROCm 6.1+ emits LLVM generic-family ISA lines alongside the
+specific GPU (e.g. gfx11-generic next to gfx1100). The outer grep captures
+the bare family prefix from the generic line, and passing that to
+-DGPU_TARGETS breaks the HIP build because clang only accepts specific
+gfxNNN ids.
+
+The previous filter only special-cased gfx11. Generalize it so any bare
+2-digit family prefix (gfx10, gfx11, gfx12, ...) is dropped whenever a
+specific sibling target is present in the same list. No real AMD GPU has
+a 2-digit gfx id, so the filter can only ever drop family prefixes and
+never a real target.
+
+Covers the existing gfx11 cases unchanged, and extends the same fix to
+gfx10-1-generic / gfx10-3-generic (RDNA1/2) and gfx12-generic (RDNA4),
+which would otherwise hit the same build failure on newer rocminfo.
+
+---------
+
+Co-authored-by: Iswarya Alex &lt;iswarya.alex@amd.com&gt;
+Co-authored-by: Daniel Han &lt;danielhanchen@users.noreply.github.com&gt;
+
+---------
+
+Co-authored-by: Eda Z &lt;eda.zhou@amd.com&gt;
+Co-authored-by: GoldenGrapeGentleman &lt;yueyuan@amd.com&gt;
+Co-authored-by: pre-commit-ci[bot] &lt;66853113+pre-commit-ci[bot]@users.noreply.github.com&gt;
+Co-authored-by: billishyahao &lt;bill.he@amd.com&gt;
+Co-authored-by: Iswarya Alex &lt;47045679+iswaryaalex@users.noreply.github.com&gt;
+Co-authored-by: Iswarya Alex &lt;iswarya.alex@amd.com&gt;
+Co-authored-by: Daniel Han &lt;danielhanchen@users.noreply.github.com&gt;
+
+- Revert &#34;updated models template mappers. added lfm2.5vl450m to transformers 5…&#34; (#4945)
+
+This reverts commit bcf4fd6bd3e912a6f4a93a060367bd1d8de07256.
+
+- updated models template mappers. added lfm2.5vl450m to transformers 5… (#4939)
+
+* updated models template mappers. added lfm2.5vl450m to transformers 5.3.0 whitelist
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+---------
+
+Co-authored-by: pre-commit-ci[bot] &lt;66853113+pre-commit-ci[bot]@users.noreply.github.com&gt;
+
+- fix: check find() return value before adding offset in try_fix_tokenizer (#4923)
+
+* fix: check find() return value before adding offset in try_fix_tokenizer
+
+The `str.find()` result was checked for -1 only after adding
+`len(find_text)`, turning the guard into dead code. When the substring
+is absent, `start` becomes `len(find_text) - 1` (a positive number),
+so the `if start == -1: continue` never triggers and the subsequent
+slice extracts garbage from the tokenizer string.
+
+Split the find and offset into two steps so the -1 check works correctly.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* Add defensive guards for token_id None and end find() returning -1
+
+- Skip loop iteration early when token_id is None to avoid constructing
+  a find_text that can never match valid JSON
+- Guard end = tokenizer_string.find(&#39;&#34;,&#39;, start) against -1 to prevent
+  silent garbage extraction from malformed tokenizer strings
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+Co-authored-by: Daniel Han &lt;danielhanchen@gmail.com&gt;
+Co-authored-by: pre-commit-ci[bot] &lt;66853113+pre-commit-ci[bot]@users.noreply.github.com&gt;
+
+- Studio: keep chat input visible and fix compare pane clipping (#4924)
+
+* fix(chat): sticky composer bar in thread
+
+* fix(chat): fix compare pane clipping
+
+* fix(chat): tighten scroll-to-bottom placement and compare footer spacing
+
+* Fix TypeScript build break and clean up ViewportFooter classes
+
+- Remove unused `compact` prop from ThreadScrollToBottom call site
+  (component is FC with no props, passing it caused TS2322)
+- Extract shared classes (sticky, bottom-0, z-20, bg-transparent) from
+  ternary branches into the unconditional className string
+- Restore `relative` on normal-mode footer so the inner absolute
+  bg-background strip has a positioning context
+- Remove redundant md:pb-3 / md:pb-4 (same value as base pb-3 / pb-4)
+- Remove no-op `sticky bottom-0` from SharedComposer wrapper in both
+  LoraCompareContent and GeneralCompareContent (flex layout with
+  shrink-0 already pins it at the bottom; parent has no scrollable
+  overflow for sticky to bind to)
+- Fix truncated comment on pointer-events rationale
+
+---------
+
+Co-authored-by: Daniel Han &lt;danielhanchen@gmail.com&gt;
+
+- Fix raw text paragraph break normalization (#4884)
+
+* Fix raw text paragraph break normalization
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Normalize horizontal whitespace before stripping non-ASCII and collapse leftover doubles
+
+Run the [^\S\n]+ horizontal-whitespace collapse before the non-ASCII strip
+so that Unicode whitespace (\u00A0, \u202F, \u2009, \u3000, \v, \f, etc.)
+becomes a single ASCII space instead of being deleted outright. The prior
+ordering silently merged adjacent words on HTML/PDF/OCR-sourced text:
+&#34;hello\u00a0world&#34; used to produce &#34;helloworld&#34; after this PR; it now
+produces &#34;hello world&#34;.
+
+Also drop \t from the allow-list since the horizontal-whitespace collapse
+already normalizes tabs to a single space, and add a targeted [ ]{2,} pass
+right after the non-ASCII strip so that a non-whitespace non-ASCII character
+sitting between two spaces (&#34;word1 (c) word2&#34;) does not leave an interior
+double space. Without this extra pass, clean_text was not idempotent on
+such inputs: the first call produced &#34;word1  word2&#34; and only the second
+call collapsed it to &#34;word1 word2&#34;. Fuzz testing over 10000 random inputs
+now satisfies the idempotence invariant in every case.
+
+* Add regression tests for Unicode/control whitespace and non-ASCII edge cases
+
+Cover:
+- Unicode horizontal whitespace separators (NBSP, narrow NBSP, thin space,
+  en/em space, ideographic space, vertical tab, form feed) normalizing to
+  a single ASCII space instead of being deleted.
+- Mixed paragraph + Unicode whitespace realistic input (&#34;Section\u00a01\r\n\r\nBody\ftext\u202Fhere&#34;).
+- Tab collapsing and space trimming around newlines.
+- Non-whitespace non-ASCII characters (copyright, accented letters, emoji)
+  sitting between spaces: must not leave an interior double space, and
+  clean_text must be idempotent on these inputs.
+- Non-ASCII characters adjacent to a newline: stripping must not leave
+  stray leading or trailing spaces on the neighbouring line, and must not
+  swallow an adjacent paragraph break.
+
+---------
+
+Co-authored-by: pre-commit-ci[bot] &lt;66853113+pre-commit-ci[bot]@users.noreply.github.com&gt;
+Co-authored-by: Daniel Han &lt;danielhanchen@gmail.com&gt;
+
+- Fix Mistral DPO/preference training crash on non-xformers platforms (e.g. Intel XPU) (#4889)
+
+* Fix Mistral training crash when xformers is unavailable
+
+* Fix/adjust Mistral DPO training crash fix for PR #4889
+
+- Clarify comment in MistralForCausalLM_fast_forward: the DPO embed-masking
+  block runs BEFORE attention_mask is nulled out, and it is the consumer that
+  requires a 2D mask.
+- Add defensive attention_mask.ndim == 2 guard to the LlamaModel_fast_forward
+  DPO embed-masking block so it self-protects if a 4D mask ever reaches it.
+
+---------
+
+Co-authored-by: Daniel Han &lt;danielhanchen@gmail.com&gt;
+
+- Only run ldconfig CUDA-linking recovery when we have permission (#4930)
+
+* Only run ldconfig CUDA-linking recovery when we have permission
+
+When `import unsloth` runs on a non-root environment (shared HPC,
+locked-down container, CI runner, etc.) the CUDA-linking recovery path
+shells out to `os.system(&#34;ldconfig /usr/lib64-nvidia&#34;)`, which fails
+loudly with &#34;Permission denied&#34;. It&#39;s especially noisy for users who
+don&#39;t even have bitsandbytes installed - they&#39;re doing 16bit or full
+finetuning and the line immediately above told them &#34;16bit and full
+finetuning works!&#34;. The reason the recovery runs at all in that case
+is that `bnb.functional.lib.cdequantize_blockwise_fp32` raises
+AttributeError on `bnb is None`, the bare `except:` swallows it, and
+the code drops into the recovery unconditionally.
+
+Fix: gate the recovery body on `os.geteuid() == 0`. When we don&#39;t
+have permission to run ldconfig, silently skip the recovery. When we
+do, the recovery runs UNCHANGED - same `os.system()` calls, same
+reload + retry, same warnings. `libcuda_dirs()` is used by both triton
+and bitsandbytes, so we still want to run the recovery whenever we
+have permission, regardless of whether bnb is installed.
+
+For non-root users who DO have bitsandbytes installed and broken,
+emit a single remediation warning telling them how to fix it manually
+(`sudo ldconfig /usr/lib64-nvidia`). This preserves the diagnostic
+guidance from the original code without the Permission denied noise.
+
+Scope:
+- Only the `DEVICE_TYPE == &#34;cuda&#34;` branch is touched.
+- The `hip` (AMD ROCm) and `xpu` (Intel) branches are unchanged.
+- On a real CUDA box running as root, behavior is byte-identical to
+  main: same os.system() calls, same reload, same retry, same warnings.
+  AST-verified by /tmp/verify_minimal/verify.py.
+- `hasattr(os, &#34;geteuid&#34;)` guards against Windows where `os.geteuid`
+  doesn&#39;t exist.
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+---------
+
+Co-authored-by: Daniel Han &lt;info@unsloth.ai&gt;
+Co-authored-by: pre-commit-ci[bot] &lt;66853113+pre-commit-ci[bot]@users.noreply.github.com&gt;
+
+- build(deps): bump the bun-frontend group across 1 directory with 16 updates (#4586)
+
+* build(deps): bump the bun-frontend group across 1 directory with 16 updates
+
+Bumps the bun-frontend group with 16 updates in the /studio/frontend directory:
+
+| Package | From | To |
+| --- | --- | --- |
+| [@dagrejs/dagre](https://github.com/dagrejs/dagre) | `2.0.4` | `3.0.0` |
+| [@dagrejs/graphlib](https://github.com/dagrejs/graphlib) | `3.0.4` | `4.0.1` |
+| @hugeicons/core-free-icons | `3.3.0` | `4.0.0` |
+| [@streamdown/cjk](https://github.com/vercel/streamdown/tree/HEAD/packages/streamdown-cjk) | `1.0.2` | `1.0.3` |
+| [@streamdown/code](https://github.com/vercel/streamdown/tree/HEAD/packages/streamdown-code) | `1.0.2` | `1.1.1` |
+| [lucide-react](https://github.com/lucide-icons/lucide/tree/HEAD/packages/lucide-react) | `0.577.0` | `1.6.0` |
+| [recharts](https://github.com/recharts/recharts) | `3.7.0` | `3.8.0` |
+| [shadcn](https://github.com/shadcn-ui/ui/tree/HEAD/packages/shadcn) | `3.8.5` | `4.1.0` |
+| [streamdown](https://github.com/vercel/streamdown/tree/HEAD/packages/streamdown) | `2.3.0` | `2.5.0` |
+| [@biomejs/biome](https://github.com/biomejs/biome/tree/HEAD/packages/@biomejs/biome) | `1.9.4` | `2.4.8` |
+| [@eslint/js](https://github.com/eslint/eslint/tree/HEAD/packages/js) | `9.39.4` | `10.0.1` |
+| [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped/tree/HEAD/types/node) | `24.12.0` | `25.5.0` |
+| [eslint](https://github.com/eslint/eslint) | `9.39.4` | `10.1.0` |
+| [eslint-plugin-react-refresh](https://github.com/ArnaudBarre/eslint-plugin-react-refresh) | `0.4.26` | `0.5.2` |
+| [globals](https://github.com/sindresorhus/globals) | `16.5.0` | `17.4.0` |
+| [typescript](https://github.com/microsoft/TypeScript) | `5.9.3` | `6.0.2` |
+
+
+
+Updates `@dagrejs/dagre` from 2.0.4 to 3.0.0
+- [Release notes](https://github.com/dagrejs/dagre/releases)
+- [Changelog](https://github.com/dagrejs/dagre/blob/master/changelog.md)
+- [Commits](https://github.com/dagrejs/dagre/compare/v2.0.4...v3.0.0)
+
+Updates `@dagrejs/graphlib` from 3.0.4 to 4.0.1
+- [Release notes](https://github.com/dagrejs/graphlib/releases)
+- [Changelog](https://github.com/dagrejs/graphlib/blob/master/changelog.md)
+- [Commits](https://github.com/dagrejs/graphlib/compare/v3.0.4...v4.0.1)
+
+Updates `@hugeicons/core-free-icons` from 3.3.0 to 4.0.0
+
+Updates `@streamdown/cjk` from 1.0.2 to 1.0.3
+- [Release notes](https://github.com/vercel/streamdown/releases)
+- [Changelog](https://github.com/vercel/streamdown/blob/main/packages/streamdown-cjk/CHANGELOG.md)
+- [Commits](https://github.com/vercel/streamdown/commits/@streamdown/cjk@1.0.3/packages/streamdown-cjk)
+
+Updates `@streamdown/code` from 1.0.2 to 1.1.1
+- [Release notes](https://github.com/vercel/streamdown/releases)
+- [Changelog](https://github.com/vercel/streamdown/blob/main/packages/streamdown-code/CHANGELOG.md)
+- [Commits](https://github.com/vercel/streamdown/commits/@streamdown/code@1.1.1/packages/streamdown-code)
+
+Updates `lucide-react` from 0.577.0 to 1.6.0
+- [Release notes](https://github.com/lucide-icons/lucide/releases)
+- [Commits](https://github.com/lucide-icons/lucide/commits/1.6.0/packages/lucide-react)
+
+Updates `recharts` from 3.7.0 to 3.8.0
+- [Release notes](https://github.com/recharts/recharts/releases)
+- [Changelog](https://github.com/recharts/recharts/blob/main/CHANGELOG.md)
+- [Commits](https://github.com/recharts/recharts/compare/v3.7.0...v3.8.0)
+
+Updates `shadcn` from 3.8.5 to 4.1.0
+- [Release notes](https://github.com/shadcn-ui/ui/releases)
+- [Changelog](https://github.com/shadcn-ui/ui/blob/main/packages/shadcn/CHANGELOG.md)
+- [Commits](https://github.com/shadcn-ui/ui/commits/shadcn@4.1.0/packages/shadcn)
+
+Updates `streamdown` from 2.3.0 to 2.5.0
+- [Release notes](https://github.com/vercel/streamdown/releases)
+- [Changelog](https://github.com/vercel/streamdown/blob/main/packages/streamdown/CHANGELOG.md)
+- [Commits](https://github.com/vercel/streamdown/commits/streamdown@2.5.0/packages/streamdown)
+
+Updates `@biomejs/biome` from 1.9.4 to 2.4.8
+- [Release notes](https://github.com/biomejs/biome/releases)
+- [Changelog](https://github.com/biomejs/biome/blob/main/packages/@biomejs/biome/CHANGELOG.md)
+- [Commits](https://github.com/biomejs/biome/commits/@biomejs/biome@2.4.8/packages/@biomejs/biome)
+
+Updates `@eslint/js` from 9.39.4 to 10.0.1
+- [Release notes](https://github.com/eslint/eslint/releases)
+- [Commits](https://github.com/eslint/eslint/commits/v10.0.1/packages/js)
+
+Updates `@types/node` from 24.12.0 to 25.5.0
+- [Release notes](https://github.com/DefinitelyTyped/DefinitelyTyped/releases)
+- [Commits](https://github.com/DefinitelyTyped/DefinitelyTyped/commits/HEAD/types/node)
+
+Updates `eslint` from 9.39.4 to 10.1.0
+- [Release notes](https://github.com/eslint/eslint/releases)
+- [Commits](https://github.com/eslint/eslint/compare/v9.39.4...v10.1.0)
+
+Updates `eslint-plugin-react-refresh` from 0.4.26 to 0.5.2
+- [Release notes](https://github.com/ArnaudBarre/eslint-plugin-react-refresh/releases)
+- [Changelog](https://github.com/ArnaudBarre/eslint-plugin-react-refresh/blob/main/CHANGELOG.md)
+- [Commits](https://github.com/ArnaudBarre/eslint-plugin-react-refresh/compare/v0.4.26...v0.5.2)
+
+Updates `globals` from 16.5.0 to 17.4.0
+- [Release notes](https://github.com/sindresorhus/globals/releases)
+- [Commits](https://github.com/sindresorhus/globals/compare/v16.5.0...v17.4.0)
+
+Updates `typescript` from 5.9.3 to 6.0.2
+- [Release notes](https://github.com/microsoft/TypeScript/releases)
+- [Commits](https://github.com/microsoft/TypeScript/compare/v5.9.3...v6.0.2)
+
+---
+updated-dependencies:
+- dependency-name: &#34;@dagrejs/dagre&#34;
+  dependency-version: 3.0.0
+  dependency-type: direct:production
+  update-type: version-update:semver-major
+  dependency-group: bun-frontend
+- dependency-name: &#34;@dagrejs/graphlib&#34;
+  dependency-version: 4.0.1
+  dependency-type: direct:production
+  update-type: version-update:semver-major
+  dependency-group: bun-frontend
+- dependency-name: &#34;@hugeicons/core-free-icons&#34;
+  dependency-version: 4.0.0
+  dependency-type: direct:production
+  update-type: version-update:semver-major
+  dependency-group: bun-frontend
+- dependency-name: &#34;@streamdown/cjk&#34;
+  dependency-version: 1.0.3
+  dependency-type: direct:production
+  update-type: version-update:semver-patch
+  dependency-group: bun-frontend
+- dependency-name: &#34;@streamdown/code&#34;
+  dependency-version: 1.1.1
+  dependency-type: direct:production
+  update-type: version-update:semver-minor
+  dependency-group: bun-frontend
+- dependency-name: lucide-react
+  dependency-version: 1.6.0
+  dependency-type: direct:production
+  update-type: version-update:semver-major
+  dependency-group: bun-frontend
+- dependency-name: recharts
+  dependency-version: 3.8.0
+  dependency-type: direct:production
+  update-type: version-update:semver-minor
+  dependency-group: bun-frontend
+- dependency-name: shadcn
+  dependency-version: 4.1.0
+  dependency-type: direct:production
+  update-type: version-update:semver-major
+  dependency-group: bun-frontend
+- dependency-name: streamdown
+  dependency-version: 2.5.0
+  dependency-type: direct:production
+  update-type: version-update:semver-minor
+  dependency-group: bun-frontend
+- dependency-name: &#34;@biomejs/biome&#34;
+  dependency-version: 2.4.8
+  dependency-type: direct:development
+  update-type: version-update:semver-major
+  dependency-group: bun-frontend
+- dependency-name: &#34;@eslint/js&#34;
+  dependency-version: 10.0.1
+  dependency-type: direct:development
+  update-type: version-update:semver-major
+  dependency-group: bun-frontend
+- dependency-name: &#34;@types/node&#34;
+  dependency-version: 25.5.0
+  dependency-type: direct:development
+  update-type: version-update:semver-major
+  dependency-group: bun-frontend
+- dependency-name: eslint
+  dependency-version: 10.1.0
+  dependency-type: direct:development
+  update-type: version-update:semver-major
+  dependency-group: bun-frontend
+- dependency-name: eslint-plugin-react-refresh
+  dependency-version: 0.5.2
+  dependency-type: direct:development
+  update-type: version-update:semver-minor
+  dependency-group: bun-frontend
+- dependency-name: globals
+  dependency-version: 17.4.0
+  dependency-type: direct:development
+  update-type: version-update:semver-major
+  dependency-group: bun-frontend
+- dependency-name: typescript
+  dependency-version: 6.0.2
+  dependency-type: direct:development
+  update-type: version-update:semver-major
+  dependency-group: bun-frontend
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+
+* Revert dagrejs upgrades
+
+Keep @dagrejs/dagre at ^2.0.4 and @dagrejs/graphlib at ^3.0.4.
+
+* Revert biome, eslint, typescript, and recharts upgrades
+
+These upgrades break studio/frontend locally:
+
+- @biomejs/biome 2.4.10 fails to parse the existing biome.json
+  (files.ignore and organizeImports keys removed in v2; schema
+  version mismatch).
+- typescript 6.0.2 emits TS5101 on tsconfig.app.json baseUrl
+  (&#34;Option &#39;baseUrl&#39; is deprecated and will stop functioning in
+  TypeScript 7.0&#34;), so tsc -b exits 2.
+- eslint 10.2.0 conflicts with eslint-plugin-react-hooks@7.0.1,
+  which peers on eslint ^9; npm install fails with ERESOLVE.
+- recharts 3.8.1 widened LegendPayload.dataKey to include a
+  function type, which breaks the React key={item.dataKey} usage
+  in src/components/ui/chart.tsx (TS2322).
+
+Hold these at their current pinned versions until the upstream
+peer deps and config migrations are ready.
+
+---------
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+Co-authored-by: Daniel Han &lt;danielhanchen@gmail.com&gt;
+
+- Let recipes use the model loaded in Chat (#4840)
+
+* feat: inject local model provider into recipe jobs via JWT
+
+* feat: auto-generate JWT for local model providers in recipes
+
+* feat: add is_local flag to model provider config types and utils
+
+* fix(studio): skip endpoint validation for local providers
+
+* feat(studio): add local/external model source toggle to provider dialog
+
+* feat(studio): thread localProviderNames through model config dialog chain
+
+* feat(studio): show &#39;Local model (Chat)&#39; label for local model_provider configs
+
+* fix: hardcode loopback for local endpoint, clear stale creds on toggle
+
+* fix: document TOCTOU/JWT rotation, add deferred import comments, fix is_local serialization
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* fix(studio): clear stale local model state on provider toggle and validation
+
+* fix(studio): override empty local endpoint in validation and skip model gate for unused providers
+
+* fix(studio): resolve loopback port from app.state, clear stale local provider fields, sync model id on toggle
+
+Address review feedback on the local-model-provider flow:
+
+- Backend (jobs.py): _resolve_local_v1_endpoint now reads the actual bound
+  port from app.state.server_port (set in run.py after binding) instead of
+  parsing it out of request.base_url, which is wrong behind any reverse
+  proxy or non-default port. The two duplicated urlparse blocks are gone.
+- Backend (jobs.py): defensively pop api_key_env, extra_headers, extra_body
+  from local providers so a previously external provider that flipped to
+  local cannot leak invalid JSON or rogue auth headers into the local /v1
+  call. Also dedupe the post-loop assignment and tighten the local-name
+  intersection so empty names cannot match.
+- Backend (jobs.py): hoist datetime and urllib.parse imports to the top
+  import block for consistency with the rest of the file.
+- Backend (run.py): expose the bound port on app.state.server_port after
+  the uvicorn server is constructed.
+- Frontend (model-provider-dialog.tsx): clear extra_headers and extra_body
+  when toggling to local mode. Hidden inputs would otherwise keep stale
+  JSON blocking validate/run.
+- Frontend (model-config-dialog.tsx): factor the local-aware provider
+  selection logic into applyProviderChange and call it from both
+  onValueChange and onBlur, so manually typing a provider name and tabbing
+  away keeps the model field consistent.
+- Frontend (recipe-studio.ts store): handle both directions of the
+  is_local toggle in the cascade. external -&gt; local now backfills
+  model: &#34;local&#34; on already-linked model_configs so they pass validation
+  immediately, mirroring the existing local -&gt; external clear path.
+- Frontend (validate.ts + build-payload.ts): thread localProviderNames
+  into validateModelConfigProviders and skip the &#34;model is required&#34;
+  check for local-linked configs. Local providers do not need a real
+  model id since the inference endpoint uses the loaded Chat model.
+
+* fix(studio): narrow store cascade types, sync model placeholder on graph relink and node removal, harden ephemeral port path
+
+Loop 2 review fixes:
+
+- recipe-studio.ts: type-narrow next.is_local by also checking
+  next.kind === &#34;model_provider&#34;. TS otherwise raised TS2339 because
+  next was typed as the union NodeConfig after the spread. The behavior
+  is unchanged but the code now compiles cleanly.
+- model-config-dialog.tsx: convert the lastProviderRef / providerInputRef
+  ref-during-render pattern (pre-existing react-hooks/refs lint error)
+  to a useEffect that syncs providerInputRef from config.provider. The
+  combobox blur path still uses applyProviderChange and remains stable.
+- recipe-graph-connection.ts: when a graph drag links a model_provider
+  to a model_config, mirror the dialog applyProviderChange behavior:
+  fill model: &#34;local&#34; if the new provider is local and the model field
+  is blank, clear model when relinking from a local placeholder to an
+  external provider, otherwise leave the model alone.
+- reference-sync.ts: when a referenced provider node is removed, clear
+  the synthetic model: &#34;local&#34; placeholder along with the provider
+  field, so a future relink to an external provider does not pass
+  validation with a stale value that fails at runtime.
+- run.py: only publish app.state.server_port when the bound port is a
+  real positive integer; for ephemeral binds (port==0) leave it unset
+  and let request handlers fall back to request.base_url.
+- jobs.py: _resolve_local_v1_endpoint also falls back when
+  app.state.server_port is non-positive, and uses `is None` instead of
+  the truthy fallback so a literal 0 is handled correctly.
+
+* fix(studio): strict is_local check, narrow loaded-model gate to LLM-reachable configs, add scope-server port fallback
+
+Loop 3 review fixes:
+
+- jobs.py, validate.py: require `is_local is True` instead of truthy
+  check. Malformed payloads such as is_local: &#34;false&#34; or is_local: 1
+  would otherwise be treated as local and silently rewritten to the
+  loopback endpoint.
+- jobs.py: _resolve_local_v1_endpoint now tries request.scope[&#34;server&#34;]
+  (the actual uvicorn-assigned (host, port) tuple) as a second
+  resolution step before falling back to parsing request.base_url.
+  This covers direct-uvicorn startup paths and ephemeral binds that
+  never publish app.state.server_port.
+- jobs.py: new _used_llm_model_aliases helper collects the set of
+  model_aliases that an LLM column actually references, and the
+  &#34;Chat model loaded&#34; gate is now only triggered when a local
+  provider is reachable from that set. Orphan model_config nodes on
+  the canvas no longer block unrelated recipe runs.
+
+* fix(studio): force skip_health_check on local-linked configs, skip JSON parsing for local providers, local-aware inline editor
+
+Loop 4 review fixes:
+
+- jobs.py: after rewriting local providers, also force
+  skip_health_check: true on any model_config linked to a local
+  provider. The /v1/models endpoint only advertises the real loaded
+  model id, so data_designer&#39;s default model-availability health check
+  would otherwise fail against the placeholder &#34;local&#34; id before the
+  first chat completion call. The inference route already ignores the
+  model id in chat completions, so skipping the check is safe.
+- builders-model.ts: buildModelProvider now short-circuits for local
+  providers and emits only { name, endpoint: &#34;&#34;, provider_type, is_local }
+  without running parseJsonObject on the hidden extra_headers/extra_body
+  inputs. Imported or hydrated recipes with stale invalid JSON in those
+  fields no longer block client-side validate/run.
+- inline-model.tsx: the model_config branch now accepts an optional
+  localProviderNames prop and mirrors the dialog applyProviderChange
+  behavior. Changing provider to/from a local one auto-fills or clears
+  the &#34;local&#34; placeholder consistently with the other edit paths.
+- recipe-graph-node.tsx: derive localProviderNames from the store via
+  useMemo (stable identity) and pass it through renderNodeBody to
+  &lt;InlineModel&gt;. Hooks order is preserved by declaring them above the
+  early return for markdown_note nodes.
+- run.py: minor comment tweak - loop 3 already added the scope-server
+  fallback path, note that in the comment.
+
+---------
+
+Co-authored-by: pre-commit-ci[bot] &lt;66853113+pre-commit-ci[bot]@users.noreply.github.com&gt;
+Co-authored-by: danielhanchen &lt;info@unsloth.ai&gt;
+
+- Update dependabot.yml (#4915)
+
+- build(deps): bump oxc-parser (#4776)
+
+Bumps the npm-oxc-validator group in /studio/backend/core/data_recipe/oxc-validator with 1 update: [oxc-parser](https://github.com/oxc-project/oxc/tree/HEAD/napi/parser).
+
+
+Updates `oxc-parser` from 0.121.0 to 0.123.0
+- [Release notes](https://github.com/oxc-project/oxc/releases)
+- [Changelog](https://github.com/oxc-project/oxc/blob/main/napi/parser/CHANGELOG.md)
+- [Commits](https://github.com/oxc-project/oxc/commits/crates_v0.123.0/napi/parser)
+
+---
+updated-dependencies:
+- dependency-name: oxc-parser
+  dependency-version: 0.123.0
+  dependency-type: direct:production
+  update-type: version-update:semver-minor
+  dependency-group: npm-oxc-validator
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+
+- build(deps): bump oxc-parser (#4776)
+
+Bumps the npm-oxc-validator group in /studio/backend/core/data_recipe/oxc-validator with 1 update: [oxc-parser](https://github.com/oxc-project/oxc/tree/HEAD/napi/parser).
+
+
+Updates `oxc-parser` from 0.121.0 to 0.123.0
+- [Release notes](https://github.com/oxc-project/oxc/releases)
+- [Changelog](https://github.com/oxc-project/oxc/blob/main/napi/parser/CHANGELOG.md)
+- [Commits](https://github.com/oxc-project/oxc/commits/crates_v0.123.0/napi/parser)
+
+---
+updated-dependencies:
+- dependency-name: oxc-parser
+  dependency-version: 0.123.0
+  dependency-type: direct:production
+  update-type: version-update:semver-minor
+  dependency-group: npm-oxc-validator
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+
+- [pre-commit.ci] pre-commit autoupdate (#4879)
+
+updates:
+- [github.com/astral-sh/ruff-pre-commit: v0.15.8 → v0.15.9](https://github.com/astral-sh/ruff-pre-commit/compare/v0.15.8...v0.15.9)
+
+Co-authored-by: pre-commit-ci[bot] &lt;66853113+pre-commit-ci[bot]@users.noreply.github.com&gt;
+
+- split venv_t5 into tiered 5.3.0/5.5.0 and fix trust_remote_code (#4878)
+
+* split venv_t5 into venv_t5_530 and venv_t5_550 for tiered transformers 5.x support
+
+* fix bfloat16 crash on T4 for FORCE_FLOAT32 models and disable trust_remote_code auto-enable for native t5 models
+
+* revert FORCE_FLOAT32 dtype change
+
+* restrict trust_remote_code auto-enable to Nemotron models only
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* use config.json model_type for tier detection, add unsloth/nvidia namespace guard
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Revert &#34;[pre-commit.ci] auto fixes from pre-commit.com hooks&#34;
+
+This reverts commit fb43d468e25379f28dd2477e6c24dd60cf55c099.
+
+* Revert &#34;use config.json model_type for tier detection, add unsloth/nvidia namespace guard&#34;
+
+This reverts commit fc49ae24531780a658049e6c238f146960f466b6.
+
+* add unsloth/nvidia namespace guard to Nemotron trust_remote_code auto-enable
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* reorder tier checks: all substring matches before config.json fetches
+
+* extract shared activate_transformers_for_subprocess into transformers_version.py
+
+* narrow Nemotron trust_remote_code to nemotron_h/nemotron-3-nano, add to export worker
+
+* clean venv_t5 dirs before re-install in setup.sh, clarify version alias comment
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* run venv_t5 migration outside deps fast-path gate in both setup scripts
+
+---------
+
+Co-authored-by: pre-commit-ci[bot] &lt;66853113+pre-commit-ci[bot]@users.noreply.github.com&gt;
+
+- Bump minimum unsloth version to 2026.4.4 in install scripts (#4876)
+
+- Update _utils.py
+
+- Studio: Fix empty chat threads on navigation and stabilize new chat flow (#4872)
+
+* fix(chat): prevent implicit empty thread creation and stabilize new-chat flow
+
+* fix(chat): harden compare thread sync and simplify sidebar thread query
+
+* fix(chat): harden new-thread state sync and isolate compare active thread updates
+
+* fix(chat): stabilize new-thread state sync and prevent compare/session bleed
+
+* Fix thread restoration, handleNewThread guard, sidebar filter, and delete flow
+
+- Remove __LOCALID_ filter from getInitialSingleChatView: in this
+  Dexie-backed adapter, AUI&#39;s __LOCALID_ prefixed IDs ARE the real
+  persistent thread IDs stored by initialize(). Filtering them out
+  breaks thread restoration on navigation.
+
+- Simplify handleNewThread to synchronous: the async Dexie message
+  check is redundant (persistence is already deferred to first append)
+  and strands users on legacy empty threads. Use a simple guard that
+  checks the store&#39;s activeThreadId to detect unsent drafts.
+
+- Add message-count filter to sidebar: filter threads to only show
+  those with at least one message, hiding legacy empty threads.
+
+- Add store-based sidebar highlighting fallback: use activeThreadId
+  from the store when view.threadId is not set (nonce-backed chats).
+
+- Fix handleDelete to call onNewThread() instead of onSelect(), and
+  clear activeThreadId, so the runtime properly resets after deleting
+  the active thread.
+
+* Fix handleDelete nonce path and restore __LOCALID_ filter
+
+handleDelete was calling onNewThread() after clearing activeThreadId,
+but the handleNewThread guard sees !view.threadId &amp;&amp; !activeThreadId
+and returns early, leaving the UI stuck on the deleted thread.
+Fix by directly calling onSelect with a new nonce instead.
+
+Restore __LOCALID_ filter in getInitialSingleChatView to prevent
+restoring unpersisted AUI local thread IDs on navigation. Without
+this filter, navigating away from /chat before sending a message
+would restore a non-existent thread that Dexie cannot fetch.
+
+---------
+
+Co-authored-by: Daniel Han &lt;danielhanchen@gmail.com&gt;
+
+- Update
+
+- Add unit tests for HfFileSystem glob skip guard (#4854)
+
+Tests verifying that HfFileSystem().glob() is correctly skipped when
+is_model or is_peft is False, matching the guard added in PR #4852.
+
+- fix(studio): custom folder scan fails to find GGUF variants when pointing directly at a model directory (#4860)
+
+Fix custom folder scanning when pointing directly at a model directory.
+
+When a user adds a custom scan folder that points directly at a model
+directory (e.g. /path/to/gemma-4-e2b-it-gguf/ containing config.json
+and gemma-4-E2B-it-BF16.gguf), the model list previously showed
+individual .gguf files as separate entries instead of recognizing the
+directory as a single model. Clicking any entry showed &#34;No GGUF
+variants found&#34; because list_local_gguf_variants received a file path
+and immediately returned empty.
+
+Changes:
+- Add _is_model_directory() helper that detects directories with both
+  config metadata and actual model weight files (excludes mmproj GGUFs
+  and non-weight .bin files like tokenizer.bin)
+- _scan_models_dir: detect self-model and return single directory entry
+- _scan_lmstudio_dir: surface model directories directly instead of
+  descending into them as publisher folders; handle both root and child
+  model directories
+- Add _resolve_gguf_dir() helper for GGUF path resolution that only
+  falls back to parent directory when parent has model metadata
+- list_local_gguf_variants / _find_local_gguf_by_variant: use resolver
+  so .gguf file paths inside model directories work correctly
+
+- fix: skip redundant HfFileSystem().glob() calls in loader.py (#4852)
+
+* fix: skip redundant HfFileSystem().glob() calls in loader.py
+
+Guard the SUPPORTS_LLAMA32 glob blocks with `is_model and is_peft` so
+the HfFileSystem HTTP call is only made when both configs could actually
+exist. This prevents indefinite hangs on slow/unreliable networks since
+the glob result is redundant when either AutoConfig or PeftConfig
+already failed to load.
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Remove test file from main PR - moved to separate PR
+
+Tests for the glob skip guard belong in their own PR to keep
+the loader change minimal and reviewable.
+
+* Harden HfFileSystem glob: fix Windows path splitting, add try/except
+
+- Use str.rsplit(&#34;/&#34;, 1) instead of os.path.split to extract filenames
+  from HfFileSystem paths. HfFileSystem always returns POSIX-style paths,
+  but os.path.split uses the OS separator, so on Windows the entire path
+  was returned as the &#34;filename&#34; and the config name comparison always
+  failed.
+- Wrap the HfFileSystem().glob() call in try/except to gracefully handle
+  network failures (offline mode, timeouts, unreachable Hub). On failure
+  both_exist stays False, which is the safe default.
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Remove redundant HfFileSystem().glob() call for remote repos
+
+When is_model and is_peft are both True, AutoConfig and PeftConfig
+have already loaded successfully, proving both config.json and
+adapter_config.json exist. The HfFileSystem network call to re-verify
+this was redundant and could cause hangs on slow networks.
+
+Replace the glob + try/except block with a direct both_exist = True
+assignment.
+
+* Remove unused HfFileSystem import
+
+HfFileSystem was only used for the glob() calls that were replaced
+with direct both_exist = True assignments in the previous commit.
+
+---------
+
+Co-authored-by: pre-commit-ci[bot] &lt;66853113+pre-commit-ci[bot]@users.noreply.github.com&gt;
+Co-authored-by: Daniel Han &lt;danielhanchen@gmail.com&gt;
+
+- Remove Gemma-4 from FORCE_FLOAT32 (#4875)
+
+Gemma-4 does not need FORCE_FLOAT32. Testing shows that both float16 and
+bfloat16 work correctly without the forced float32 override:
+
+- Inference: identical outputs for float16 and bfloat16 (greedy decoding)
+- Training (100 steps, 4-bit LoRA, SFT on FineTome-100k):
+  - float16 final loss: 3.048
+  - bfloat16 final loss: 3.065
+  - Losses converge to within 0.02 by step 60
+  - Grad norms healthy and comparable for both dtypes
+
+The FORCE_FLOAT32 path was actually causing training divergence. With
+it enabled, the compiled float32 run diverged at step ~28 with grad norms
+collapsing to near zero and loss plateauing at ~12.4. Without it, both
+dtypes train normally.
+
+This enables float16 on Tesla T4 and other GPUs without bfloat16 support.
+
+- Add tests for is_vision_model() caching behaviour (#4855)
+
+* Add tests for is_vision_model() caching behaviour
+
+* Fix review feedback: remove dead helper, fix exception test
+
+- Remove unused _make_config() helper function (dead code)
+- Fix test_exception_result_cached to actually exercise the exception path
+  by mocking load_model_config to raise OSError instead of using
+  side_effect=[False] which only tested normal False returns
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Use strict mock specs so tests exercise intended detection paths
+
+Use MagicMock(spec=[]) for all config mocks so hasattr() only returns
+True for explicitly set attributes. Without this, MagicMock defaults
+make all hasattr checks truthy, allowing tests to pass via unintended
+detection paths (e.g. img_processor instead of vision_config).
+
+---------
+
+Co-authored-by: Roland Tannous &lt;rolandtannous@gravityq.ai&gt;
+Co-authored-by: pre-commit-ci[bot] &lt;66853113+pre-commit-ci[bot]@users.noreply.github.com&gt;
+
+- [Studio][Optimization]Add vision detection cache to is_vision_model() (#4853)
+
+* Add vision detection cache to is_vision_model() to avoid redundant subprocess spawns
+
+is_vision_model() is called 4-5 times per training run for the same model
+with zero caching. For transformers 5.x models, each call spawns a full
+subprocess (~6s each). This adds a module-level _vision_detection_cache dict
+following the same pattern as the existing _audio_detection_cache used by
+detect_audio_type(). The function is refactored into a thin cache wrapper
+around _is_vision_model_uncached(), saving ~12s per training run.
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+* Include hf_token in vision cache key for gated model correctness
+
+Cache key is now (model_name, hf_token) instead of just model_name.
+This prevents stale False results when an unauthenticated probe for a
+gated model is followed by an authenticated call.
+
+* Remove test file from main PR - will be submitted separately
+
+* Fix vision cache: normalize model names and skip caching transient failures
+
+- Normalize model names in cache key using resolve_cached_repo_id_case()
+  to avoid duplicate entries for different casings of the same HF repo
+  (aligns with case normalization from #4822)
+- Return None instead of False on transient failures (network errors,
+  subprocess timeouts, HF API issues) so the cache layer can distinguish
+  &#34;definitely not a vision model&#34; from &#34;failed to check&#34;
+- Only cache definitive True/False results; transient failures are retried
+  on the next call instead of being permanently locked in as False
+
+* Refine failure handling: cache deterministic failures, guard normalization
+
+- Subprocess non-zero exit, JSON errors, and general exceptions return
+  False (deterministic, cached) instead of None (retryable). Only
+  subprocess.TimeoutExpired returns None since timeouts are transient.
+- Wrap cache key normalization in try/except so resolve_cached_repo_id_case
+  or normalize_path failures fall back to raw model_name instead of
+  crashing callers.
+
+* Harden vision detection cache: fix transient failure handling, thread safety, token security
+
+- All subprocess failure paths now return None (transient) instead of False,
+  preventing permanent misclassification of VLMs after temporary HF/auth/network errors
+- Use SHA256 fingerprint for hf_token in cache key instead of raw bearer token
+- Add threading.Lock with double-checked locking to prevent thundering herd
+  of concurrent subprocess spawns for the same uncached model
+- Distinguish permanent failures (RepositoryNotFoundError, GatedRepoError,
+  ValueError) from transient ones in _is_vision_model_uncached
+- Pass resolved/normalized model name to detection (not just cache key)
+- Log normalization fallback at debug level instead of silent swallow
+- Thread hf_token through callers in routes/models.py and trainer.py
+  that previously omitted it
+
+* Refine lock strategy and token fingerprint
+
+- Move detection computation outside the lock to avoid serializing
+  long-running subprocess spawns (60s timeout) and HF API calls across
+  all concurrent model checks. Lock is now only held for cache writes.
+- Use full SHA256 digest for token fingerprint instead of truncated
+  16-char prefix to eliminate collision risk.
+
+* Fix huggingface_hub import fallback and use atomic cache read
+
+- Add fallback import path for RepositoryNotFoundError/GatedRepoError
+  from huggingface_hub.utils (older hub versions) when .errors is
+  not available
+- Use sentinel-based dict.get() for single atomic cache read instead
+  of two-step in/[] pattern (future-proof for no-GIL runtimes)
+
+* [pre-commit.ci] auto fixes from pre-commit.com hooks
+
+for more information, see https://pre-commit.ci
+
+---------
+
+Co-authored-by: pre-commit-ci[bot] &lt;66853113+pre-commit-ci[bot]@users.noreply.github.com&gt;
+Co-authored-by: Daniel Han &lt;danielhanchen@gmail.com&gt;
+
+- Fix/studio colab button message: Add fallback message for Colab Studio button when proxy URL fails (#4866)
+
+* Add fallback message for Colab Studio button when localhost link doesn&#39;t work
+
+* Make fallback message darker grey for better readability
+
+* Make fallback message bold for better visibility
+
+---------
+
+Co-authored-by: LeoBorcherding &lt;LeoBorcherding@users.noreply.github.com&gt;</div>
+</div>
+
+<a href="../project/unslothai_unsloth.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

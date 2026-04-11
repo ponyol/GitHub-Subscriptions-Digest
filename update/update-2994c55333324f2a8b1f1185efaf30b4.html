@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (59 commits) - vectorize-io/hindsight - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (59 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/vectorize-io_hindsight.html">vectorize-io/hindsight</a> /
+    Updates in main (59 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/vectorize-io_hindsight.html">vectorize-io/hindsight</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-04-10 21:24 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/vectorize-io/hindsight/commits/main" target="_blank">https://github.com/vectorize-io/hindsight/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This release, Hindsight v0.5.0, significantly expands Hindsight&#39;s capabilities with new LLM providers such as `llama.cpp` for local inference and OpenRouter support, alongside a configurable `append` mode for document content concatenation. It introduces comprehensive CLI coverage, enhances the OpenClaw integration with improved configuration and session filtering, and includes crucial fixes for billing accuracy and PostgreSQL compatibility. Performance improvements, like capping entity fanout in recall, further optimize the system.
+
+Russian translation:
+Этот релиз, Hindsight v0.5.0, значительно расширяет возможности Hindsight за счет новых провайдеров LLM, таких как `llama.cpp` для локального вывода и поддержка OpenRouter, а также настраиваемого режима `append` для конкатенации содержимого документов. Он вводит полное покрытие CLI, улучшает интеграцию OpenClaw благодаря усовершенствованной конфигурации и фильтрации сессий, а также включает критические исправления для точности расчетов и совместимости с PostgreSQL. Улучшения производительности, такие как ограничение расширения графа сущностей при вызове `recall`, дополнительно оптимизируют систему.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix: add PEP 561 py.typed marker to all Python packages (#973)
+
+* fix: add PEP 561 py.typed marker to all Python packages
+
+Add empty py.typed marker files to all 13 Python packages that were
+missing them. Only hindsight-integrations/autogen already had one.
+
+Per PEP 561, packages that wish to support type checking must include
+a py.typed marker file. Without it, type checkers (mypy, pyright) treat
+the package as untyped and skip all inline type annotations.
+
+Fixes #965
+
+* fix: ensure py.typed markers survive client regeneration
+
+Add touch commands in generate-clients.sh to recreate PEP 561 py.typed
+marker files after the OpenAPI generator runs, since the script deletes
+and regenerates the hindsight_client_api directory.
+
+---------
+
+Co-authored-by: r266-tech &lt;r266-tech@users.noreply.github.com&gt;
+
+- blog: Hindsight 0.5.0 Templates Hub (#971)
+
+* blog: add Templates Hub deep-dive post for Hindsight 0.5.0
+
+- fix(billing): mark reflect&#39;s internal recall calls as internal (#972)
+
+Reflect&#39;s tool functions (tool_search_observations, tool_recall) call
+recall_async with the user&#39;s original request_context, which has
+internal=False. The usage metering extension sees these as user-facing
+recall operations and bills them separately — double-charging the
+customer for recalls that are already included in the reflect operation
+cost.
+
+Fix: wrap request_context with dataclasses.replace(internal=True) before
+passing to recall_async. This matches the pattern used by consolidation,
+which already creates an internal RequestContext for its sub-operations.
+
+The internal flag causes the metering extension to:
+- Record the usage as &#34;internal_recall&#34; (tracked but not billed)
+- Skip credit deduction entirely
+
+Observed impact: a single reflect call was generating 2 extra billed
+recall entries (one from tool_search_observations, one from tool_recall),
+inflating the customer&#39;s recall token count by ~26 tokens per reflect.
+
+- Add Cloudflare OAuth proxy integration for self-hosted Hindsight (#922)
+
+Adds an OAuth 2.1 proxy Worker that connects cloud MCP clients
+(claude.ai, Claude Code, Codex) to a self-hosted Hindsight instance
+via Cloudflare Workers and Tunnel.
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(retain): run _ann_seeds temp table inside a transaction (#954)
+
+compute_semantic_links_ann created a TEMP TABLE outside any transaction,
+then ran a TRUNCATE / COPY / SELECT / DROP sequence as separate statements
+on the same asyncpg connection. This is fine against a direct Postgres
+connection but fails intermittently when the caller is routed through
+PgBouncer in transaction pool mode:
+
+  CREATE TEMP TABLE IF NOT EXISTS _ann_seeds (...)   -- backend A
+  TRUNCATE _ann_seeds                                 -- backend B -&gt; FAILS
+
+Temp tables are session-scoped to the backend that created them. In
+PgBouncer transaction mode the backend is only pinned to the client for
+the duration of an actual transaction, so between standalone statements
+the pooler can (and under concurrency, will) rebind the client to a
+different backend. When that happens the _ann_seeds table disappears
+and the follow-up statement fails with:
+
+  relation &#34;_ann_seeds&#34; does not exist
+
+Symptom: ~3% of sync retain calls (2 of 61) failed the Hindsight Cloud
+smoke test on a recent hindsight-dev deploy. Async retains are masked
+by the 3-attempt retry loop so they usually eventually succeed.
+
+Fix: wrap the CREATE TEMP TABLE -&gt; COPY -&gt; SELECT sequence in a single
+`async with conn.transaction():` block, and use ON COMMIT DROP so the
+temp table is transaction-scoped and auto-cleaned at commit. Also
+switch `SET hnsw.ef_search = 60` to `SET LOCAL` so the tuning is
+transaction-scoped and no longer leaks onto the pooled backend for
+subsequent recall queries. Drop the now-unnecessary manual TRUNCATE,
+explicit DROP TABLE, and RESET hnsw.ef_search.
+
+The function docstring still correctly describes this as running on a
+separate connection outside the surrounding write transaction — this
+change only adds an inner transaction around the ANN work itself to
+keep the temp table visible to PgBouncer.
+
+Tests:
+- Add TestComputeSemanticLinksAnnPgBouncerSafety with 5 regression
+  tests using a mocked connection. These are structural asserts — they
+  check that the function enters conn.transaction(), uses ON COMMIT DROP,
+  uses SET LOCAL, and does not reintroduce manual TRUNCATE / DROP /
+  RESET calls. They would have caught the original bug if they had
+  existed, and will catch any future reversion.
+
+- refactor(openclaw)!: read config from plugin config instead of process.env (#974)
+
+* refactor(openclaw)!: read config from plugin config instead of process.env
+
+The plugin loaded credentials and runtime settings from environment
+variables (HINDSIGHT_API_LLM_*, HINDSIGHT_EMBED_API_*, HINDSIGHT_BANK_ID)
+plus auto-detection of OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY
+/ GROQ_API_KEY. That tripped OpenClaw&#39;s install-scanner env-harvesting
+rule and bypassed the framework&#39;s first-class SecretRef resolution.
+Switch to reading from the plugin config exclusively, with secrets
+configured via &#39;openclaw config set ... --ref-source env|file|exec&#39;.
+
+Combined with the daemon lifecycle extraction in #949, this closes the
+remaining install-scanner findings the 0.5.x plugin was hitting. The
+plugin source now contains neither process.env nor child_process; the
+former moved to plugin config (resolved by OpenClaw before the plugin
+loads), and the latter lives in @vectorize-io/hindsight-all under
+node_modules where the scanner&#39;s directory walker skips it. The plugin
+can be installed without --dangerously-force-unsafe-install.
+
+BREAKING CHANGE: drops the llmApiKeyEnv plugin config field along with
+the HINDSIGHT_API_LLM_*, HINDSIGHT_EMBED_API_*, and HINDSIGHT_BANK_ID
+environment variables. Users must now configure llmProvider and
+llmApiKey explicitly via &#39;openclaw config set&#39;. Migration guide is in
+hindsight-docs/docs-integrations/openclaw.md and the integration
+changelog.
+
+* chore(openclaw): pin published versions of hindsight-all and hindsight-client
+
+Phase 2 (#949) introduced @vectorize-io/hindsight-all and
+@vectorize-io/hindsight-client as plugin dependencies using &#39;file:&#39;
+workspace paths. Those paths resolve inside the monorepo but break when
+the published tarball is installed outside it — &#39;openclaw plugins
+install @vectorize-io/hindsight-openclaw&#39; failed with &#39;Cannot find
+module @vectorize-io/hindsight-all&#39; because npm could not resolve the
+file: path from the extracted extension directory.
+
+Replace both with semver ranges targeting the published versions:
+
+  @vectorize-io/hindsight-all   ^0.1.0
+  @vectorize-io/hindsight-client ^0.5.0
+
+Verified end-to-end: &#39;openclaw plugins install &lt;local-tarball&gt;&#39; now
+succeeds without --dangerously-force-unsafe-install and without the
+workspace-symlink hack. npm pulls both dependencies from the registry
+into the extracted extension&#39;s node_modules, the plugin loads cleanly,
+and &#39;openclaw plugins doctor&#39; reports no issues.
+
+- feat(opencode): add recallTags and recallTagsMatch config options (#969)
+
+- feat(cli): cover every OpenAPI endpoint and request-body param (#968)
+
+Wires the Rust CLI up to every endpoint exposed by the Hindsight OpenAPI
+spec and adds CI enforcement so new endpoints or new request-body fields
+cannot slip in without matching CLI coverage.
+
+Endpoints
+- New `hindsight webhook {list,create,update,delete,deliveries}` and
+  `hindsight audit {list,stats}` subcommands.
+- `hindsight bank` gains `set-disposition`, `consolidation-recover`,
+  `export-template`, `import-template`, `template-schema`.
+- `hindsight memory` gains `history` and per-memory `clear-observations`.
+- `hindsight document update`, `hindsight operation retry` added.
+- Brings CLI coverage from 46/62 to 62/62 operations.
+
+Request-body parameters
+- Expose missing flags that the CLI was silently hardcoding: directive
+  `--priority`; mental-model `--tags` / `--max-tokens` /
+  `--trigger-refresh-after-consolidation`; recall `--query-timestamp`;
+  reflect `--fact-types` / `--exclude-mental-models` /
+  `--exclude-mental-model-ids`; retain `--document-tags`.
+
+CI enforcement
+- New `cli-coverage-check` entry point in `hindsight-dev` parses
+  openapi.json and verifies that (a) every operationId is called from
+  hindsight-cli/src/ (the progenitor client method names match the
+  operationId), and (b) every request-body property is present in
+  main.rs as a clap field or `long = &#34;...&#34;` attribute.
+- Intentional non-exposures live in `hindsight-cli/.openapi-coverage.toml`
+  under `[skip]` / `[fields.&lt;op&gt;]` with a reason each (38 documented
+  field skips for flattened structs, nested structs, or fields surfaced
+  via a different subcommand).
+- New `check-cli-coverage` job in .github/workflows/test.yml, triggered
+  on cli/core/dev/ci path changes, runs the script on every PR.
+- smoke-test.sh exercises the new webhook / audit / bank-template /
+  set-disposition / consolidation-recover commands.
+
+- feat: add HINDSIGHT_API_DEFAULT_BANK_TEMPLATE env var (#966)
+
+* feat: add HINDSIGHT_API_DEFAULT_BANK_TEMPLATE env var
+
+Server-level default bank template applied automatically to every
+newly-created bank. Holds an inline JSON BankTemplateManifest with the
+same shape as the /import endpoint body. Fields set by the template
+become per-bank overrides so they take precedence over equivalent
+HINDSIGHT_API_* env defaults. The template is applied once on first
+creation and never reapplied, so user overrides via PATCH /config are
+never clobbered. Malformed manifests are logged and ignored so a broken
+server-level setting cannot wedge bank creation.
+
+* chore: regenerate docs skill
+
+* test: update async_retain test mock for renamed bank_profile helper
+
+- feat: add @vectorize-io/hindsight-all daemon lifecycle package (#949)
+
+* feat: add @vectorize-io/hindsight-embed daemon lifecycle package
+
+Create a new top-level `hindsight-embed-npm/` package that owns the daemon
+lifecycle for the Python `hindsight-embed` CLI: spawning via `uvx`, writing
+the profile, waiting for `/health`, and shutting down. Nothing more.
+
+Deliberately does not ship an HTTP client — `@vectorize-io/hindsight-client`
+already covers retain / recall / reflect / createBank against the Hindsight
+API, and the two packages compose: once `manager.start()` returns, consumers
+talk to the daemon via `new HindsightClient({ baseUrl: manager.getBaseUrl() })`.
+
+`HindsightEmbedManagerOptions.env` forwards an arbitrary `Record&lt;string,
+string&gt;` to both the daemon process and the profile config via `--env K=V`,
+and `extraProfileCreateArgs` / `extraDaemonStartArgs` escape hatches cover
+any new CLI flag without waiting for a wrapper release.
+
+Refactor `hindsight-integrations/openclaw` to consume both packages:
+`HindsightEmbedManager` for daemon lifecycle in local mode, `HindsightClient`
+for all HTTP memory operations. Drop the bespoke subprocess/HTTP client that
+used to live in openclaw. The retain queue stays local to openclaw (it&#39;s a
+client-side reliability workaround with a single consumer today — will move
+to the client package or server-side when a second consumer needs it).
+
+Wire the new package into the main release pipeline (versioned alongside
+the other core packages, published from `v*` tags) and add a CI build job.
+
+* docs: add Embedded Node.js SDK page for @vectorize-io/hindsight-embed
+
+* refactor: rename hindsight-embed-npm to hindsight-all, restructure docs sidebar
+
+The Node package previously named @vectorize-io/hindsight-embed was
+semantically misnamed: hindsight-embed (Python) is a CLI tool, while what
+this Node package actually provides is the Node equivalent of hindsight-all
+— a programmatic lifecycle manager for a local Hindsight daemon. Rename to
+match.
+
+Package rename
+  - hindsight-embed-npm/ → hindsight-all-npm/ (git mv, history preserved)
+  - @vectorize-io/hindsight-embed → @vectorize-io/hindsight-all
+  - class HindsightEmbedManager → HindsightServer (matches Python hindsight-all)
+  - HindsightEmbedManagerOptions → HindsightServerOptions
+  - src/manager.ts → src/server.ts, src/manager.test.ts → src/server.test.ts
+  - openclaw (index.ts, backfill.ts, tests) and the claude-code Python port
+    updated to reference the new names
+
+Docs restructure
+  - Split sdks/python.md: now client-only content. New sdks/hindsight-all.md
+    covers the programmatic hindsight-all Python package (HindsightServer and
+    HindsightEmbedded).
+  - Rename sdks/embed-npm.md → sdks/hindsight-all-npm.md with HindsightServer
+    examples.
+  - New &#34;Installation&#34; sidebar section, placed after Hosting, containing
+    Docker / Kubernetes / Bare Metal (anchor links into developer/installation)
+    plus Programmatic API (Python), Programmatic API (Node.js), and Daemon CLI.
+  - Add si-docker, si-kubernetes, si-nodedotjs, lu-hard-drive to the sidebar
+    ICON_MAP.
+
+Docs dev-server fix
+  - docusaurus.config.ts: drop the flaky NODE_ENV sniff for including the
+    &#34;Next&#34; version. Use INCLUDE_CURRENT_VERSION exclusively. NODE_ENV was
+    unreliable across hot-reload paths and caused the Next version to
+    disappear intermittently when editing files.
+  - scripts/dev/start-docs.sh: export INCLUDE_CURRENT_VERSION=true so local
+    dev always shows Next; production builds leave it unset.
+
+Lockfile cleanup
+  - package-lock.json and hindsight-integrations/openclaw/package-lock.json
+    had extraneous hindsight-embed-npm blocks left over from the rename.
+    Removed manually and verified with npm install.
+
+* ci: fix openclaw jobs by pre-building workspace deps; regenerate docs-skill
+
+The build-openclaw-integration and test-openclaw-integration jobs failed
+with &#34;Failed to resolve entry for package @vectorize-io/hindsight-all&#34;
+because openclaw depends on two monorepo workspaces via `file:` deps
+(@vectorize-io/hindsight-client and @vectorize-io/hindsight-all) whose
+`dist/` directories are gitignored and never built before openclaw&#39;s npm ci.
+Both jobs now install the root workspace and build the two deps first,
+mirroring the release-control-plane pattern.
+
+Also regenerate skills/hindsight-docs/references/* via
+./scripts/generate-docs-skill.sh:
+  - new skill pages for sdks/hindsight-all{.md,-npm.md}
+  - updated skill pages for sdks/embed.md and sdks/python.md to match
+    the new H1s and split content
+  - incidental refreshes to changelog/index.md, developer/models.md,
+    openapi.json, and uv.lock that verify-generated-files picked up
+
+* ci: build openclaw before running tests so symlink test can realpath dist
+
+- docs: document update_mode parameter in retain API (#959)
+
+PR #932 added update_mode (replace/append) to retain items but
+did not update the docs. Add a section explaining the parameter,
+when to use append mode, and a JSON example.
+
+Closes #957
+
+- blog: Agno Persistent Memory (#951)
+
+* blog: add Agno persistent memory post
+
+-  feat(openclaw): add config-aware history backfill CLI (#878)
+
+* Add OpenClaw history backfill CLI
+
+* Fix backfill resume and local daemon behavior
+
+* Fix backfill checkpoint finalization semantics
+
+* Fix symlinked backfill CLI entrypoint detection
+
+* fix(ci): skip PR status write for fork approvals
+
+---------
+
+Co-authored-by: Nicolò Boschi &lt;boschi1997@gmail.com&gt;
+
+- feat(openclaw): add session pattern filtering for ignore and stateless sessions (#909)
+
+* feat(openclaw): add session pattern filtering for ignore and stateless sessions
+
+Adds three new config options to the OpenClaw plugin that allow filtering
+sessions by key pattern before recall and retain operations fire:
+
+- `ignoreSessionPatterns`: glob patterns for sessions to skip entirely
+  (no recall, no retain). Useful for cron/scheduled agent sessions.
+- `statelessSessionPatterns`: glob patterns for read-only sessions —
+  retain is always skipped; recall is also skipped when
+  `skipStatelessSessions` is true (default).
+- `skipStatelessSessions`: boolean (default: true). When false, sessions
+  matching statelessSessionPatterns can still recall but never retain.
+
+Pattern syntax mirrors lossless-claw: `*` matches non-colon characters,
+`**` matches anything including colons. Session keys follow the OpenClaw
+format `agent:&lt;agentId&gt;:&lt;type&gt;:&lt;uuid&gt;`.
+
+Example config:
+  ignoreSessionPatterns:    [&#34;agent:*:cron:**&#34;]
+  statelessSessionPatterns: [&#34;agent:*:subagent:**&#34;, &#34;agent:*:heartbeat:**&#34;]
+  skipStatelessSessions:    true
+
+Implementation:
+- New `session-patterns.ts` module with compile/match utilities
+- Session filter applied in `before_prompt_build` and `agent_end` hooks
+  immediately after the existing `excludeProviders` check
+- New fields wired through `getPluginConfig`
+- Schema added to `openclaw.plugin.json` (additionalProperties: false
+  was already set, causing config validation errors without this)
+- 11 unit tests in `session-patterns.test.ts`
+- 5 integration tests added to `hooks.integration.test.ts`
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* test(openclaw): support HINDSIGHT_API_TOKEN in integration tests
+
+Pass HINDSIGHT_API_TOKEN env var through to HindsightClient and plugin
+config in integration tests so tests work against authenticated APIs.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* docs(openclaw): document session pattern filtering options
+
+Add ignoreSessionPatterns, statelessSessionPatterns, and skipStatelessSessions
+to the README config table with glob syntax reference and usage examples.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Marco Rutsch &lt;marco@rutimka.de&gt;
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- feat(openclaw): add resilient startup and richer retain metadata (#942)
+
+* feat(openclaw): enrich retain metadata and ignore heartbeat by default
+
+* docs(openclaw): move retain metadata note out of config table
+
+* fix(openclaw): make hook registration runtime-idempotent
+
+* fix(openclaw): lazily initialize when service start is skipped
+
+---------
+
+Co-authored-by: Aldous &lt;aldous@agentmail.to&gt;
+Co-authored-by: Josh &lt;joshdwells@gmail.com&gt;
+Co-authored-by: Aldous the Orchestrator &lt;Aldoustheorchestrator@users.noreply.github.com&gt;
+
+- docs: 0.5.0 release notes, changelog, and blog post (#907)
+
+* docs: add 0.5.0 release notes and changelog
+
+* docs: include all commits since v0.4.22 and add recall perf to blog
+
+* docs: include all commits since v0.4.22 and add recall perf to blog
+
+* docs: add openrouter default model to provider table
+
+* docs: reorder blog sections, fix code snippets, remove paperclip
+
+* docs: add hermes integration docs link
+
+* docs: fix broken anchor in blog post TOC
+
+- fix(deps): pin greenlet&lt;3.4.0 — missing arm64 wheels in 3.4.0
+
+- fix(docker): constrain greenlet&lt;3.4.0 for arm64 Docker builds
+
+greenlet 3.4.0 lacks manylinux_2_41_aarch64 wheels. Use a UV_CONSTRAINT
+file instead of the workspace lock file (which doesn&#39;t work in the
+single-package Docker context).
+
+- fix(docker): copy uv.lock into build context to pin greenlet version
+
+Without the lock file, uv sync resolves fresh and picks up greenlet
+3.4.0 which lacks arm64 wheels for manylinux_2_41, breaking the
+multi-arch Docker build.
+
+- Release v0.5.0
+
+- Update version to 0.5.0 in all components
+- Regenerate OpenAPI spec and client SDKs
+- Python packages: hindsight-api, hindsight-dev, hindsight-all, hindsight-embed
+- Python client: hindsight-clients/python
+- TypeScript client: hindsight-clients/typescript
+- Rust CLI: hindsight-cli
+- Control Plane: hindsight-control-plane
+- Helm chart
+- Create documentation version-0.5
+
+- Add Codex persistent memory blog post (#812)
+
+* Add Codex persistent memory blog post
+
+- fix: exclude local-llm from [all] extra, add as opt-in to hindsight-all (#936)
+
+* fix: exclude local-llm from [all] extra to avoid heavy llama-cpp-python dep
+
+local-llm (llama-cpp-python) requires C++ compilation and is only needed
+for the built-in llamacpp provider. Keep it as a separate opt-in:
+pip install &#39;hindsight-api-slim[local-llm]&#39;
+
+* feat: add local-llm optional extra to hindsight-all
+
+Allows: pip install &#39;hindsight-all[local-llm]&#39; to get built-in llamacpp support.
+
+* chore: regenerate uv.lock from workspace root
+
+- feat(openclaw): add configurable retain tags (#937)
+
+Co-authored-by: Aldous the Orchestrator &lt;Aldoustheorchestrator@users.noreply.github.com&gt;
+
+- feat: add built-in llama.cpp LLM provider for local inference (#933)
+
+* feat: add built-in llama.cpp LLM provider for fully local inference
+
+Add `llamacpp` as a new LLM provider that manages a llama-cpp-python server
+subprocess. Auto-downloads Gemma 4 E2B Q4_K_M (~3.5 GB) on first use and
+runs inference locally via Metal/CUDA with no external services needed.
+
+- New provider: `HINDSIGHT_API_LLM_PROVIDER=llamacpp`
+- Singleton server shared across retain/reflect/consolidation
+- Configurable: model path, GPU layers, context size, grammar enforcement
+- User-extensible via `HINDSIGHT_API_LLAMACPP_EXTRA_ARGS`
+- Flash attention + prompt caching enabled by default
+- LLM provider cleanup on shutdown (stops subprocess)
+- hindsight-embed: `--ui` flag on `daemon start`, removed FORCE_CPU on macOS
+- Docs: configuration.md, models.mdx, providers grid updated
+
+* chore: regenerate docs skill and update lockfile for local-llm dep
+
+- feat: add retain update_mode=&#39;append&#39; for document content concatenation (#932)
+
+* feat: add update_mode=&#39;append&#39; for retain to concatenate content to existing documents
+
+When retaining with update_mode=&#39;append&#39; and a document_id that already exists,
+the new content is appended to the existing document text and the full document
+is reprocessed. Delta retain automatically skips unchanged chunks, so only the
+new content triggers LLM extraction.
+
+- Add update_mode field to MemoryItem (API), RetainContentDict (internal), MCP tools
+- Validate that update_mode=&#39;append&#39; requires a document_id
+- Fetch existing document content and prepend before processing in orchestrator
+- Update Python, TypeScript, Go generated clients and top-level client wrappers
+- Add tests for append, multiple appends, no-existing-doc, validation, and default replace
+
+* fix: add update_mode field to Rust CLI and client MemoryItem initializers
+
+* chore: regenerate docs skill references for update_mode
+
+- chore: drop hindsight-hermes integration (#931)
+
+* chore: drop hindsight-hermes integration in favor of native Hermes memory provider
+
+Hermes Agent now ships with a native Hindsight memory provider (NousResearch/hermes-agent#5094),
+making our pip-installable hindsight-hermes package redundant.
+
+Removes:
+- hindsight-integrations/hermes/ (source, tests, config)
+- CI job, release script entry, changelog generator references
+- Cookbook page and pip package changelog (referenced deleted code)
+
+Keeps:
+- Integration docs (updated by #881 for native provider)
+- Blog posts (historical, already have deprecation notices)
+- Sidebar/banner entries (still valid for native integration)
+
+* fix(docs): remove broken cookbook link to deleted hermes-memory page
+
+- feat: add OpenRouter support for LLM, embeddings, and reranking (#930)
+
+* docs: add best practice for filtering recall by memory shape (#856)
+
+Add guidance on using entity labels with `tag: true` to deterministically
+filter recall results when a bank contains different memory shapes
+(e.g., concise rules vs. detailed procedures).
+
+* feat: add OpenRouter support for LLM, embeddings, and reranking
+
+OpenRouter is OpenAI-compatible for chat/embeddings and Cohere-compatible
+for reranking, so no new provider classes are needed.
+
+- LLM: added as OpenAICompatibleLLM provider (default model: qwen/qwen3.5-9b)
+- Embeddings: reuses OpenAIEmbeddings with OpenRouter base URL (default: perplexity/pplx-embed-v1-0.6b)
+- Reranker: reuses CohereCrossEncoder with OpenRouter rerank endpoint (default: cohere/rerank-v3.5)
+- API key fallback chain: dedicated key → shared OPENROUTER_API_KEY → LLM_API_KEY
+
+* chore: regenerate docs skill references and fix formatting
+
+- feat: include occurred_end and mentioned_at in think-prompt fact serialization (#929)
+
+Extend format_facts_for_prompt() to include occurred_end and mentioned_at
+temporal fields (when non-null), matching the MemoryFact model. Also add
+RecallResponse.to_prompt_string() to Python and TypeScript client SDKs so
+users can serialize recall results (with chunks and entity summaries) into
+LLM-ready prompt strings.
+
+Closes #924
+
+- fix: make LiteLLM SDK embeddings encoding_format configurable (#928)
+
+* fix: make LiteLLM SDK embeddings encoding_format configurable (#925)
+
+The hardcoded encoding_format=&#39;float&#39; breaks providers like Voyage AI
+(only accepts &#39;base64&#39;) and Gemini (doesn&#39;t support the parameter at all).
+
+Add HINDSIGHT_API_EMBEDDINGS_LITELLM_SDK_ENCODING_FORMAT config option
+that defaults to &#39;float&#39; for backwards compatibility. Set to empty string
+to omit the parameter for incompatible providers.
+
+* chore: regenerate docs skill after configuration change
+
+- security: bump lodash, lodash-es, defu in root lockfile (#915)
+
+* security: bump lodash, lodash-es, and defu in root lockfile
+
+Fixes Dependabot alerts in the root npm workspace lockfile:
+- GHSA-r5fr-rjxr-66jc (high) lodash &lt;4.18.1     (alert #338)
+- GHSA-r5fr-rjxr-66jc (high) lodash-es &lt;4.18.1  (alert #335)
+- GHSA-737v-mqg7-c878 (high) defu &lt;6.1.7        (alert #343)
+
+defu (6.1.4 -&gt; 6.1.7) and lodash (4.17.23 -&gt; 4.18.1) were bumped via
+targeted `npm update`. lodash-es was pinned exactly to 4.17.23 by
+@chevrotain packages (transitive dep of mermaid in hindsight-docs),
+so a `lodash-es` override (&gt;=4.18.1) is added to the root package.json
+to force resolution to the patched 4.18.1.
+
+Verified: `npm ci` succeeds with 0 vulnerabilities. Mermaid/chevrotain
+consumers all dedupe to lodash-es 4.18.1. lodash-es 4.x is semver-
+compatible.
+
+* chore: regenerate hindsight-docs skill
+
+Picks up FAQ and best-practice sections added in #905 that were not
+regenerated at merge time, so that `verify-generated-files` passes
+for this branch.
+
+- security: bump vite across integrations (high CVE fix) (#913)
+
+* security: bump vite across integrations to patched versions
+
+Fixes Dependabot alerts for vite transitive dev dependency:
+- GHSA-v2wj-q39q-566r (high): server.fs.deny bypass with queries
+- GHSA-p9ff-h696-f583 (high): related vite server vulnerability
+
+Adds a `vite` entry to the npm `overrides` in each integration&#39;s
+package.json to force the patched version (&gt;=8.0.5). To make this
+possible in ai-sdk, chat, and openclaw — which pinned vitest ^4.0.18
+whose vite peer is `^6.0.0 || ^7.0.0` — the minor-compatible bump
+vitest ^4.0.18 -&gt; ^4.1.2 is also included. vitest 4.1.x supports
+vite 8.x (peer: ^6 || ^7 || ^8), so all six integrations converge on
+vite 8.x consistently.
+
+paperclip had no overrides block; one was added.
+
+Verified locally: `npm ci &amp;&amp; npx vitest run` passes in all six
+integrations (ai-sdk 23, chat 28, openclaw 66, opencode 89, paperclip 27,
+nemoclaw 36 tests).
+
+* chore: regenerate hindsight-docs skill
+
+Picks up FAQ and best-practice sections added in #905 that were not
+regenerated at merge time, so that `verify-generated-files` passes
+for this branch.
+
+- fix: clamp out-of-range content_index in _map_results_to_contents (#908)
+
+Some LLM providers (e.g. Anthropic Haiku) return 1-indexed
+content_index values. When only one content item is provided,
+this causes KeyError: 1 since the dict only has key 0.
+
+Clamp content_index to the valid range instead of crashing.
+
+Fixes #873
+
+Co-authored-by: easonysliu &lt;easonysliu@tencent.com&gt;
+
+- Update author name from Mike to Michael (#917)
+
+- Remove hindsight-cloud tag from guest post (#916)
+
+- fix(recall): cap entity fanout in graph expansion (#911)
+
+* fix(recall): cap entity fanout in graph expansion to prevent slow queries
+
+On large banks, the entity co-occurrence self-join in _expand_combined()
+produces massive intermediate row counts when seeds reference high-fanout
+entities (e.g. an entity with 25K+ mentions). This causes recall latency
+to degrade significantly.
+
+Changes:
+- Replace unbounded entity self-join with LATERAL per-entity cap
+  (graph_per_entity_limit, default 200), reducing intermediate rows
+  from potentially millions to at most num_entities * 200
+- Add ORDER BY unit_id DESC in LATERAL subquery for deterministic
+  recency-biased sampling (rides the PK index, no extra sort)
+- Add timeout fallback (graph_expansion_timeout, default 10s) that
+  drops entity expansion and falls back to semantic+causal only
+- Add composite index (entity_id, unit_id) on unit_entities for
+  index-only scans in the LATERAL subquery
+- Merge 3 unmerged migration heads into one
+- Fix recall_perf.py dotenv override issue
+
+Unlike the approach in #895, this does NOT filter out hub entities
+entirely — all entities are kept but capped equally, preserving
+retrieval quality for queries about frequently-mentioned entities.
+
+Benchmarked on a 67K-unit bank (top entity = 25K mentions):
+- retrieval_graph: 0.337s → 0.055s (84% faster)
+- end-to-end recall: 0.912s → 0.519s (43% faster)
+
+* fix(tests): fix broken test_combined_scoring and test_reranking_proof_count
+
+- test_combined_scoring: replace MagicMock(spec=RetrievalResult) with real
+  dataclass instances — MagicMock attributes returned nested mocks that
+  failed on &gt;= comparisons with int
+- test_reranking_proof_count: remove deleted `embedding` param from
+  RetrievalResult constructor, use None for occurred_start/end to get
+  neutral recency (datetime.now gave recency=1.0 which boosted scores)
+
+* refactor: rename config to link_expansion_ prefix, fix observation fanout
+
+- Rename GRAPH_PER_ENTITY_LIMIT → LINK_EXPANSION_PER_ENTITY_LIMIT and
+  GRAPH_EXPANSION_TIMEOUT → LINK_EXPANSION_TIMEOUT to follow the
+  convention that these are specific to the link_expansion graph retriever
+- Apply the same LATERAL per-entity cap to _expand_observations(), which
+  had the same unbounded self-join through unit_entities
+
+* style: fix formatting in config.py
+
+- blog: One Memory for Every AI Tool I Use (#914)
+
+* blog: One Memory for Every AI Tool I Use (guest post)
+
+- feat(openclaw): support bankId for static banks (#910)
+
+* feat(openclaw): support exact static bank ids
+
+* test(openclaw): use generic static bank id example
+
+* feat(openclaw): support bankId static bank configuration
+
+---------
+
+Co-authored-by: Aldous the Orchestrator &lt;Aldoustheorchestrator@users.noreply.github.com&gt;
+
+- security: bump litellm to &gt;=1.83.0 (#912)
+
+Fixes Dependabot alerts:
+- GHSA-jjhc-v7c2-5hh6 (critical): Authentication bypass via OIDC userinfo
+  cache key collision (CVE-2026-35030)
+- GHSA-53mr-6c8q-9789 (high): related litellm vulnerability
+
+Updates both hindsight-api-slim and hindsight-integrations/litellm to
+require litellm &gt;=1.83.0. The previous upper cap (&lt;=1.82.6) was set due
+to the 1.82.7/1.82.8 supply chain compromise, which has since been yanked
+from PyPI; 1.83.0 was published from the new secure CI/CD v2 pipeline
+and is safe.
+
+The uv.lock diffs are large because the current uv version (0.9.11)
+upgrades the lockfile format (adds revision=3 and upload-time fields);
+only litellm itself changes version (1.81.10/1.80.10 -&gt; 1.83.0).
+
+All 68 tests in hindsight-integrations/litellm pass against 1.83.0.
+
+- fix(mcp): validate UUID inputs and add sync_retain tool (#906)
+
+* fix(mcp): validate UUID inputs at engine level and add sync_retain tool (#888)
+
+- Add UUID validation in memory_engine for get_memory_unit, delete_memory_unit,
+  get_mental_model, delete_mental_model, get_mental_model_history (raises ValueError)
+- Catch ValueError → 400 in HTTP route handlers
+- Add sync_retain MCP tool that calls retain_batch_async directly for immediate
+  availability (no polling needed)
+- Register sync_retain in _ALL_TOOLS, _SINGLE_BANK_TOOLS, UI MCP_TOOL_GROUPS
+- Add code-review check for MCP tool registration completeness
+
+* fix: remove UUID validation for mental model IDs (column is TEXT, not UUID)
+
+Mental model IDs are TEXT columns that accept arbitrary string IDs
+(e.g., &#39;team-communication-preferences&#39;). UUID validation was incorrectly
+added to get_mental_model, delete_mental_model, and get_mental_model_history.
+
+- fix(config): validate entity_labels structure on PATCH (#902)
+
+* test: add regression tests for #874 and #894
+
+Add tests for None event_date in fact extraction (AttributeError fix)
+and for _register_profile skipping .env overwrite with short config keys.
+
+* fix(config): validate entity_labels structure on PATCH (#891)
+
+Config PATCH accepted bare strings in entity_labels values without
+validation, causing silent failures at retain time. Now validates
+via parse_entity_labels() before writing to DB, and fixes the
+BankTemplateConfig type from list[str] to list[dict[str, Any]].
+
+* fix(scripts): handle Python client generator README crash gracefully
+
+The openapi-generator sometimes crashes writing README_onlypackage.mustache.
+Allow the failure with || true since all API/model files are generated
+before that step, and add a verification check for api_client.py.
+
+* chore: regenerate docs skill openapi.json
+
+- docs: add best practice for filtering recall by memory shape (#856) (#905)
+
+Add guidance on using entity labels with `tag: true` to deterministically
+filter recall results when a bank contains different memory shapes
+(e.g., concise rules vs. detailed procedures).
+
+- fix: add paperclip and opencode to changelog generator (#903)
+
+* fix: add paperclip and opencode to changelog valid integrations
+
+* fix: add paperclip and opencode package names to changelog generator
+
+* release(paperclip): v0.1.1
+
+- feat: add OpenCode persistent memory plugin (#853)
+
+* feat: add OpenCode persistent memory plugin
+
+Add hindsight-opencode integration with:
+- Three custom tools: hindsight_retain, hindsight_recall, hindsight_reflect
+- Auto-retain on session.idle with document_id deduplication
+- Memory injection on session start via system transform hook
+- Memory preservation during context window compaction
+- Sliding window retain with retainOverlapTurns support
+- 4-level config hierarchy (defaults, user file, plugin options, env vars)
+- Dynamic bank ID derivation (agent, project, channel, user dimensions)
+- CI job, release script entry, docs page
+
+79 tests across 6 test files.
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* fix: address review findings for opencode integration
+
+1. Pre-compaction retain now uses shared retainSession() helper,
+   respecting retainMode, documentId, and session_id metadata
+   consistently with idle-retain (was bypassing retention policy).
+
+2. System transform recall is only consumed after successful injection.
+   If Hindsight is briefly unavailable, the plugin retries on the next
+   LLM call instead of permanently skipping recall for the session.
+
+3. Config validation for retainMode and recallBudget — typos like
+   &#34;full_session&#34; or &#34;maximum&#34; now log a warning and fall back to
+   the default instead of silently changing retention semantics.
+
+85 tests (6 new covering compaction documentId, recall retry, and
+config validation).
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* fix: docs/tools findings from second review round
+
+1. Remove &#34;session&#34; from supported dynamic bank fields in docs —
+   the implementation can&#39;t vary bank ID per session since it&#39;s
+   derived once at plugin startup.
+
+2. Explicit tools (retain, reflect) now call ensureBankMission()
+   before API calls, so bankMission/retainMission are applied even
+   when the agent uses tools exclusively without triggering hooks.
+
+3. Added tests for mission setup via tools path.
+
+88 tests pass.
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* fix: recall retry semantics and README bank scoping clarity
+
+1. recallForContext now returns { context, ok } to distinguish
+   &#34;no results&#34; (ok=true) from &#34;API error&#34; (ok=false). System
+   transform consumes the session on ok=true even with 0 results,
+   so empty banks don&#39;t cause repeated queries. Only transient API
+   failures preserve retry.
+
+2. README clarifies that channel/user bank dimensions are process-
+   scoped (set via env vars before launch), not per-session dynamic
+   within a running OpenCode process.
+
+89 tests pass.
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* fix: review fixes for opencode integration
+
+- Rename CI job from build-opencode-integration to test-opencode-integration
+  to match naming convention for integrations that run tests
+- Fix tsconfig module resolution to Node16 (consistent with other integrations)
+- Extract shared makeConfig test helper to avoid duplication across 3 test files
+
+* fix: remove unused PluginState import from tools.ts
+
+---------
+
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+Co-authored-by: Nicolò Boschi &lt;boschi1997@gmail.com&gt;
+
+- test: add regression tests for #874 and #894 (#901)
+
+Add tests for None event_date in fact extraction (AttributeError fix)
+and for _register_profile skipping .env overwrite with short config keys.
+
+- fix: make bank_id metric label opt-in to prevent OTel memory leak (#898)
+
+* fix: make bank_id metric label opt-in to prevent OTel memory leak
+
+bank_id as an OTel metric attribute creates unbounded histogram growth
+since each unique bank_id produces never-evicted time series. Default
+to excluding it; opt in with HINDSIGHT_API_METRICS_INCLUDE_BANK_ID=true
+for deployments with few banks.
+
+Closes #850
+
+* refactor: use config.py for metrics_include_bank_id setting
+
+Move HINDSIGHT_API_METRICS_INCLUDE_BANK_ID from direct os.getenv in
+metrics.py to the standard HindsightConfig path. Add configuration
+documentation.
+
+- fix(mcp): auto-coerce string-encoded JSON in tool arguments (#849) (#899)
+
+LLM agents frequently serialize list/dict tool arguments as JSON strings
+instead of native types (e.g., tags=&#39;[&#34;a&#34;,&#34;b&#34;]&#39; instead of tags=[&#34;a&#34;,&#34;b&#34;]),
+causing Pydantic validation failures. This extends _make_tools_tolerant to
+detect array/object parameters from the JSON Schema and auto-coerce string
+values via json.loads before validation.
+
+Also fixes _make_tools_tolerant compatibility with FastMCP 3.x by adding
+a _get_mcp_tools helper that supports both 2.x and 3.x internal APIs.
+
+- feat(recall): add proof_count boost to combined scoring (#821)
+
+* feat(recall): add proof_count boost to combined scoring
+
+Observations with more supporting evidence now rank slightly higher
+in recall results. proof_count is threaded through the retrieval
+pipeline and applied as a multiplicative boost in reranking:
+
+- types.py: add proof_count field to RetrievalResult
+- retrieval.py: include proof_count in SELECT columns
+- reranking.py: add log1p-normalized proof_count boost (alpha=0.1)
+
+The boost uses the same multiplicative pattern as recency and temporal
+signals. proof_count=1 is neutral, proof_count=50 gives ~+5% boost.
+Non-observation fact types are unaffected (neutral 0.5).
+
+* fix(retrieval): Apply proof_count boost to graph and temporal retrieval, normalize scaling
+
+* fix(retrieval): correct proof_norm math to zero-center at count 1
+
+* fix(retrieval): Apply proof_count boost to link_expansion retrieval
+
+* fix: remove BFS zombie, clamp proof_norm to [0,1], fix test comment (log1p-&gt;math.log)
+
+- fix(paperclip): address review fixes for paperclip integration (#900)
+
+- Add CI job for paperclip integration tests with change detection
+- Add paperclip to valid release integrations
+- Validate hindsightApiUrl is set in loadConfig()
+- Log warnings on recall/retain failures instead of silently swallowing
+- Remove hardcoded timeout from reflect call
+- Fix tsconfig module resolution to Node16
+- Update tests to pass required hindsightApiUrl
+
+- fix(embed): skip profile .env overwrite when config has no HINDSIGHT_API_* keys (#896)
+
+When the daemon is already running, ensure_running() calls _register_profile()
+with a config dict using short keys (llm_api_key, llm_provider, etc.) that do
+not match the HINDSIGHT_API_* prefix filter. This caused api_config to always
+be empty, and create_profile() would overwrite the existing .env with an empty
+file on every CLI command.
+
+Add an early return guard so _register_profile() skips the create_profile()
+call when api_config is empty, preserving any existing profile configuration.
+
+Fixes #894
+
+- fix(query_analyzer): handle dateparser internal crashes gracefully (#893)
+
+DateparserQueryAnalyzer.analyze() called dateparser.search.search_dates()
+without any error handling, so internal bugs in the third-party library
+propagated all the way up the search/consolidation pipeline and failed
+the calling task.
+
+Observed traceback:
+
+  File &#34;.../engine/query_analyzer.py&#34;, line 140, in analyze
+    results = self._search_dates(query, settings=settings)
+  File &#34;.../dateparser/search/search.py&#34;, line 294, in search_dates
+    &#34;Dates&#34;: self.search.search_parse(...)
+  File &#34;.../dateparser/search/search.py&#34;, line 168, in search_parse
+    translated, original = self.search(shortname, text, settings)
+  File &#34;.../dateparser/languages/locale.py&#34;, line 224, in translate_search
+    [original_tokens[i], original_tokens[i + 1]],
+  IndexError: list index out of range
+
+Wrap the call in a try/except so any parser failure is treated as
+&#34;no temporal constraint found&#34; — the caller can then fall back to
+non-temporal retrieval instead of erroring out the whole task. The
+failure is logged at WARNING level so we still notice it.
+
+Add a regression test that monkey-patches _search_dates to raise an
+IndexError and asserts the analyzer returns an empty constraint and
+emits a warning log.
+
+- chore(deps): bump actions/github-script from 7 to 8 (#879)
+
+Bumps [actions/github-script](https://github.com/actions/github-script) from 7 to 8.
+- [Release notes](https://github.com/actions/github-script/releases)
+- [Commits](https://github.com/actions/github-script/compare/v7...v8)
+
+---
+updated-dependencies:
+- dependency-name: actions/github-script
+  dependency-version: &#39;8&#39;
+  dependency-type: direct:production
+  update-type: version-update:semver-major
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+
+- Fix AttributeError when event_date is None in fact_extraction (#875)
+
+* Fix AttributeError when event_date is None in fact_extraction
+
+`_extract_facts_from_chunk` crashes with `&#39;NoneType&#39; object has no
+attribute &#39;isoformat&#39;` when retaining documents without a timestamp.
+
+Two locations fixed:
+- Line 1058: debug log called `event_date.isoformat()` without a None
+  check
+- Line 921: `parse_datetime_flexible()` can return None, so re-check
+  before calling `.strftime()` / `.isoformat()`
+
+Fixes #874
+
+* Revert unnecessary None guard on line 921
+
+The original `if event_date is not None:` already guards that block.
+Only line 1058 needed the fix.
+
+- fix: Windows compatibility for hindsight-embed (#867)
+
+- Add cross-platform file locking support
+- Use fcntl on Unix-like systems, msvcrt on Windows
+- Add detailed documentation explaining why we don&#39;t use external libraries
+- Fixes issue where module couldn&#39;t be imported on Windows due to missing fcntl
+
+Co-authored-by: yishun.eason &lt;yishun.eason@bytedance.com&gt;
+
+- feat(google): add support for google embeddings and reranker (#863)
+
+* Add support for google embeddings gemini/vertex and google reranker via vertex search api
+
+* Add reference docs
+
+- feat(helm): add persistent volume for local model cache (#861)
+
+* feat(helm): add persistent volume for local model cache
+
+When using local reranker (e.g., BAAI/bge-reranker-v2-m3) or local
+embedding models, the models are downloaded to /home/hindsight/.cache
+on every pod restart, causing slow startup and unnecessary bandwidth.
+
+Add optional persistent volume support:
+- api: PVC mounted at /home/hindsight/.cache
+- worker: volumeClaimTemplate (StatefulSet) at same path
+
+Disabled by default. Enable via:
+  api.persistence.modelCache.enabled: true
+  worker.persistence.modelCache.enabled: true
+
+Closes #860
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(helm): add extraVolumes and extraVolumeMounts for api and worker
+
+Allow users to mount arbitrary volumes (configMaps, secrets, emptyDir,
+etc.) into api and worker pods via values, following common helm chart
+library conventions.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix: use max_tokens for OpenAI-compatible endpoints with custom base URL (#858)
+
+Mistral (and several other providers) reject &#39;max_completion_tokens&#39; with a 422
+because they haven&#39;t adopted the newer OpenAI parameter name. When the openai
+provider is configured with a custom base_url (e.g. Mistral, Together AI),
+fall back to the widely-supported &#39;max_tokens&#39; parameter.
+
+Native OpenAI (no custom base_url) and Groq still use &#39;max_completion_tokens&#39;.
+
+Fixes #852
+
+- blog: Persistent Memory for AutoGen Agents with Hindsight (#883)
+
+* Add AutoGen persistent memory blog post
+
+- blog: Hindsight is now a native memory provider in Hermes Agent (#882)
+
+* Add Hermes native memory provider blog post
+
+- docs(hermes): update integration docs for plugin overhaul (hermes-agent#5094) (#881)
+
+* docs(hermes): update integration docs for hermes-agent plugin overhaul</div>
+</div>
+
+<a href="../project/vectorize-io_hindsight.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

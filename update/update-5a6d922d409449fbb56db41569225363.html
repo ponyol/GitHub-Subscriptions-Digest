@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (32 commits) - facebookresearch/faiss - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (32 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a> /
+    Updates in main (32 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-04-11 00:59 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/facebookresearch/faiss/commits/main" target="_blank">https://github.com/facebookresearch/faiss/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This Faiss update delivers numerous bug fixes, enhancing stability and correctness across core components such as sorting, NNDescent, NSG, and IVF indices. It significantly improves robustness and security through comprehensive deserialization validation, refined exception handling in OpenMP regions, and the replacement of bare assertions with detailed error messages. Additionally, the release introduces performance optimizations via better SIMD dispatch, dimension-aware BLAS thresholding, and updated memory management, alongside expanded platform support for macOS and AMD GPUs.
+
+---
+
+Данное обновление Faiss включает многочисленные исправления ошибок, повышая стабильность и корректность работы основных компонентов, таких как сортировка, NNDescent, NSG и индексы IVF. Также значительно улучшены надежность и безопасность за счет добавления всесторонней валидации при десериализации, усовершенствования обработки исключений в OpenMP-регионах и замены простых утверждений подробными сообщениями об ошибках. Кроме того, в релиз вошли оптимизации производительности благодаря улучшенной диспетчеризации SIMD, уточненным порогам BLAS и обновленному управлению памятью, а также расширена поддержка платформ macOS и AMD GPU.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Fix race condition, memory management, debug output, and hashtable lookup in sorting.cpp (#5078)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5078
+
+Four fixes in `faiss/utils/sorting.cpp`:
+
+**1. OpenMP directive fix in `fvec_argsort_parallel`**
+
+The initialization loop used `#pragma omp parallel` without the `for` directive. This caused every thread to execute the entire loop independently rather than distributing iterations. With `nt` threads, each `permA[i]` was written by all `nt` threads concurrently — a data race under the C++ memory model (multiple unsynchronized writes to the same non-atomic location), and O(n * nt) wasted work instead of O(n). Fixed by changing to `#pragma omp parallel for`.
+
+In practice, all threads write the same value (`permA[i] = i`), so the output was always correct despite the UB. The fix eliminates the undefined behavior and the redundant work.
+
+**2. RAII memory management in `fvec_argsort_parallel`**
+
+Replaced `new size_t[n]` / `delete[] perm2` with `std::vector&lt;size_t&gt;`. The old code had no realistic exception path between allocation and deallocation (all intermediate code is either C functions or non-throwing OpenMP regions), but the manual `new`/`delete` pattern is fragile against future edits that might introduce a throwing path. The `std::vector` provides RAII lifetime management with no behavioral change.
+
+**3. Removed debug `printf` in `fvec_argsort_parallel`**
+
+A leftover `printf(&#34;merge %d %d, %d threads\n&#34;, ...)` in the parallel merge loop wrote to stdout during normal operation. Removed.
+
+**4. Missing early termination in `hashtable_int64_to_int64_lookup`**
+
+The linear probing loop did not check for empty slots (`tab[slot * 2] == -1`). In an open-addressing hash table with no deletion support, an empty slot is definitive proof that the key was not inserted — the insert function would have placed it there or earlier. Without this check, lookups for absent keys probed every slot in the bucket before the wrap-around termination at `slot == hk_i`. The fix adds the standard empty-slot check, matching the structure of the insert function (`hashtable_int64_to_int64_add`). This is a performance optimization — the old code always returned the correct result (`-1` after a full bucket scan), just slower.
+
+Reviewed By: mnorris11
+
+Differential Revision: D100317917
+
+fbshipit-source-id: aadfe33b1d76c34e04db7fe0c9b7ca53b4a30c71
+
+- Support IO_FLAG_MMAP_IFC on Darwin (#5058)
+
+Summary:
+Extend the POSIX mmap reader to Apple platforms and use MAP_FAILED for mmap error checks while keeping madvise best-effort.
+
+Update the C++ and Python mmap tests to exercise Darwin, and stop linking faiss_test against the Python example extension so Python-enabled test builds can run on macOS.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5058
+
+Reviewed By: junjieqi
+
+Differential Revision: D100351635
+
+Pulled By: alibeklfc
+
+fbshipit-source-id: f384251a634c7d3154103dbc763293b52b093ee8
+
+- Expose fast_scan_code_size from non-IVF FastScan indices (#5077)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5077
+
+Mirror of D100047797 for the non-IVF IndexFastScan hierarchy.
+Adds a pure virtual fast_scan_code_size() to IndexFastScan with
+concrete implementations in IndexPQFastScan (M2/2),
+IndexAdditiveQuantizerFastScan (M2/2), and IndexRaBitQFastScan ((d+7)/8).
+
+Reviewed By: alibeklfc
+
+Differential Revision: D100342866
+
+fbshipit-source-id: 3e5edcb1f45d53eec2b41ca63c7854fd8f1f4280
+
+- Validate FastScan M2 consistency during deserialization (#5056)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5056
+
+Add deserialization-time validation for FastScan `M2` across all six
+FastScan index types to reject corrupted or malicious index files that
+would cause heap buffer overflows during search.
+
+During normal construction, `M2 = roundup(M, 2)` is an invariant
+maintained by `init_fastscan()`. During deserialization, `M2` is read
+directly from the file and was not validated. A corrupted file with
+`M2 &lt; M` causes `compute_quantized_LUT` to write `M * ksub` bytes
+into a buffer sized for `M2 * ksub` bytes, producing an out-of-bounds
+write. The `memset` that zeroes padding from M to M2 additionally
+underflows as an unsigned subtraction when `M2 &lt; M`.
+
+1. **Added `validate_fastscan_fields()` helper**:
+   Consolidates all FastScan field validation into a single function:
+   M &gt; 0, ksub &gt; 0, bbs &gt; 0 and 32-aligned, M2 == roundup(M, 2),
+   and overflow checks for ksub * M and ksub * M2.
+
+2. **Non-IVF FastScan paths (already had partial validation)**:
+   Replaced inline checks in IndexPQFastScan, IndexAdditiveQuantizer-
+   FastScan, and IndexRaBitQFastScan with calls to the new helper,
+   adding the missing M2 consistency check.
+
+3. **IVF FastScan paths (had no validation at all)**:
+   Added validation to IndexIVFPQFastScan, IndexIVFAdditiveQuantizer-
+   FastScan, and IndexIVFRaBitQFastScan, which previously had zero
+   checks on any FastScan fields.
+
+Reviewed By: mnorris11
+
+Differential Revision: D99738294
+
+fbshipit-source-id: 8e334993b0e8b4375f9ec173c20754e301b7c9f6
+
+- Validate SVS storage_kind during deserialization (#5055)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5055
+
+Add deserialization-time validation for the `storage_kind` field in SVS
+index types (IndexSVSVamana, IndexSVSVamanaLVQ, IndexSVSVamanaLeanVec)
+to reject corrupted or malicious index files before they can cause
+crashes.
+
+1. **Read `storage_kind` as int and range-check before cast**:
+   `storage_kind` was previously read directly into the `SVSStorageKind`
+   enum via `READ1`, which is undefined behavior for out-of-range values.
+   Now read into a temporary `int`, validate the value is in
+   `[0, SVS_count)`, and only then cast to `SVSStorageKind`. This rejects
+   invalid values at deserialization time with a `FaissException` instead
+   of reaching `to_svs_storage_kind()` where the `default` branch calls
+   `FAISS_ASSERT(false)` and aborts the process.
+
+2. **Add `SVS_count` sentinel to `SVSStorageKind` enum**:
+   Follows the convention used by `QT_count`, `ST_count`, and
+   `DMT_count` in other FAISS enums. The deserialization validation
+   uses this sentinel so it automatically stays correct when new
+   storage kinds are added.
+
+Reviewed By: mnorris11
+
+Differential Revision: D99722676
+
+fbshipit-source-id: 557cf91a963d1d93171fea2a67ba99f19b9b3420
+
+- Default-initialize SVSStorageKind in IndexSVSVamana (#5054)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5054
+
+`IndexSVSVamana::storage_kind` was declared without a default initializer,
+and the default constructor is `= default`, so the field was left
+uninitialized in default-constructed instances. This is undefined behavior
+any time the value is read — including serialization via `write_index`,
+which writes the garbage value to disk.
+
+Add `= SVS_FP32` as the default initializer, matching the default used by
+the parameterized constructor `IndexSVSVamana(d, degree, metric, storage)`.
+
+This is a safe, behavior-preserving change:
+
+- The parameterized constructor already defaults to `SVS_FP32`, so any
+  code constructing an index with arguments is unaffected.
+
+- The two derived classes (`IndexSVSVamanaLVQ`, `IndexSVSVamanaLeanVec`)
+  explicitly set `storage_kind` in their own default constructors, so
+  they are also unaffected.
+
+- The only code path that changes behavior is default construction of
+  `IndexSVSVamana` itself, which previously produced an uninitialized
+  (UB) value and now produces `SVS_FP32`.
+
+Reviewed By: mnorris11
+
+Differential Revision: D99891611
+
+fbshipit-source-id: da6acff7bdeb5668a2bf5f3b585bc1a3179004b9
+
+- Add search-path bounds checking to IndexIVF::search1 (#5040)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5040
+
+Add the missing `key &lt; nlist` upper-bound check in
+`IndexIVF::search1()`, which was the only IVF search entry point
+lacking this validation. The other two paths —
+`search_preassigned()` and `range_search_preassigned()` — already
+had this check.
+
+Also add deserialization acceptance tests verifying that IVF indexes
+with various quantizer states deserialize correctly:
+
+1. **Surplus centroids** (`ntotal &gt; nlist`):
+   Produced by `shard_ivf_index_centroids()`, which distributes
+   all of the original quantizer&#39;s centroids across shards without
+   adjusting `nlist`. The search-time `key &lt; nlist` bounds check
+   prevents OOB access if the quantizer returns out-of-range keys.
+
+2. **Trained quantizer** (`ntotal == nlist`):
+   The normal trained IVF state.
+
+3. **Sharded quantizer** (`0 &lt; ntotal &lt; nlist`):
+   Also produced by `shard_ivf_index_centroids()`, when the
+   original quantizer has `ntotal == nlist` and centroids are
+   split across shards.
+
+4. **Untrained quantizer** (`ntotal == 0`):
+   Legitimate for custom inverted list management.
+
+Reviewed By: mnorris11
+
+Differential Revision: D99494237
+
+fbshipit-source-id: 6a76b55f104b9c233dfdd2625bb0336ed8061463
+
+- Fix correctness bugs in NNDescent Nhood copy/move operations and gen_random bounds (#5072)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5072
+
+Fix correctness bugs in `NNDescent` `Nhood` copy/move operations and `gen_random` bounds.
+
+## Bug 1: Broken Nhood copy constructor and copy assignment operator
+
+The copy constructor and copy assignment operator for `Nhood` were incomplete:
+- Copy assignment used `std::back_inserter` to append to `nn_new` instead of replacing it, leading to duplicate entries on reassignment and heap-use-after-free on self-assignment.
+- Neither operation copied `pool`, `nn_old`, `rnn_old`, or `rnn_new`, meaning copied `Nhood` objects had missing neighbor data.
+- This caused data loss when `std::vector&lt;Nhood&gt;` reallocated during `push_back`.
+
+Fixed both operations to properly copy all 6 data members. Added self-assignment guard (`if (this != &amp;other)`) to the copy assignment operator. Changed the copy constructor to use a member initializer list in declaration order to avoid `-Wreorder` warnings.
+
+**Proof:** `NhoodCopy.CopyConstructorPreservesAllFields` and `NhoodCopy.CopyAssignmentPreservesAllFields` fail without the fix — `pool.size()` is 0 (expected 3), `nn_old`, `rnn_new`, `rnn_old` are all empty. `NhoodCopy.CopyAssignmentSelfAssign` triggers heap-use-after-free without the self-assignment guard. `NhoodCopy.VectorReallocationPreservesData` shows data loss during `std::vector&lt;Nhood&gt;` reallocation.
+
+## Bug 2: Division by zero in `gen_random`
+
+When `size == N`, the expression `rng() % (N - size)` is a division by zero (undefined behavior). This occurs in `search()` when `search_L` or `topk` equals `ntotal`, because `L_2 = max(search_L, topk)` is passed to `gen_random(rng, init_ids.data(), L_2, ntotal)`.
+
+Added a precondition assertion (`size &gt; 0 &amp;&amp; size &lt;= N`) and a Fisher-Yates shuffle for the `size == N` special case.
+
+**Proof:** `TestNNDescentGenRandom.test_search_L_equals_ntotal` crashes (process killed by SIGFPE) without the fix, passes with it.
+
+## Performance: Added move constructor and move assignment operator
+
+Since `std::mutex` is neither copyable nor movable, the compiler cannot generate implicit move operations for `Nhood`. With user-defined copy operations, implicit move generation is suppressed entirely. Without explicit move operations, `std::vector&lt;Nhood&gt;::push_back(Nhood&amp;&amp;)` falls back to copy — 5 unnecessary vector allocations per element.
+
+Added `noexcept` move constructor and move assignment operator. `noexcept` is required for `std::vector` to prefer move over copy during reallocation. The move assignment operator is included for Rule of Five consistency.
+
+**Proof:** All tests pass both with and without move operations, confirming these are a performance optimization, not a correctness fix.
+
+## Cleanup: Removed misleading `omp_get_thread_num()`
+
+The RNG seed in `nndescent()` was `random_seed * 6577 + omp_get_thread_num()`. This function is not inside any `#pragma omp parallel` region — the call chain is `IndexNNDescent::add()` -&gt; `NNDescent::build()` -&gt; `NNDescent::nndescent()`, all sequential. Per the OpenMP specification, `omp_get_thread_num()` returns 0 in sequential context. The `+ 0` is dead code.
+
+**Proof:** No behavioral change. The seed was always `random_seed * 6577`.
+
+Reviewed By: mnorris11
+
+Differential Revision: D100155792
+
+fbshipit-source-id: 042a7d0a53a7696915a96bf1e48a464507f044b3
+
+- HNSW Cagra base-level entrypoint sampling parallel (#5068)
+
+Summary:
+fix bug to make parallel happens
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5068
+
+Reviewed By: junjieqi
+
+Differential Revision: D100213935
+
+Pulled By: alibeklfc
+
+fbshipit-source-id: 31f4d8b05843d0b97f0539f69db0aebecb0063a8
+
+- Fix uncaught exceptions in IndexIVF::range_search_preassigned OpenMP region (#5053)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5053
+
+C++ exceptions thrown inside `#pragma omp parallel` regions that are not
+caught within the region call `std::terminate` — they cannot propagate
+across thread boundaries.
+
+`IndexIVF::range_search_preassigned` had the same class of bugs fixed in
+`search_preassigned` by D99455250:
+
+1. **`scan_list_func` lambda**:
+   `FAISS_THROW_IF_NOT_FMT(key &lt; nlist)` was above the try-catch block,
+   so a corrupt key &gt;= nlist would throw uncaught and call
+   `std::terminate`.
+
+2. **Outer parallel region**:
+   `get_InvertedListScanner()`, `scanner-&gt;set_query()`, and
+   `FAISS_THROW_IF_NOT(scanner.get())` had no try-catch at all.
+
+Fixes:
+
+1. Moved the existing try-catch in `scan_list_func` up to also cover the
+   key validation.
+
+2. Wrapped the entire `#pragma omp parallel` body in a try-catch that
+   uses the existing `interrupt`/`exception_string`/`exception_mutex`
+   pattern to safely propagate exceptions out of the parallel region.
+
+Reviewed By: mnorris11
+
+Differential Revision: D99879998
+
+fbshipit-source-id: e768372cbaf8a22a9459fc3fd9b9df6e019897a6
+
+- Fix bugs in NSG search_on_graph and sync_prune (#5063)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5063
+
+Fix two bugs in `fbcode/faiss/impl/NSG.cpp`:
+
+**Bug 1: `init_ids[i]` → `init_ids[num_ids]` in `search_on_graph`**
+
+The init loop in `search_on_graph` reads neighbors of the enterpoint from the
+knn_graph. When an entry has `id &gt;= ntotal`, it is skipped via `continue`. The
+loop variable `i` advances but `num_ids` (the write pointer) does not. The old
+code wrote `init_ids[i] = id`, placing valid entries at non-contiguous positions
+and leaving gaps in between. The gap-filling loop that follows starts from
+`num_ids`, so it never overwrites the internal gaps.
+
+Example with neighbors `[5, 99999, 3, 99999, 7]` and `ntotal=100`:
+
+| i | id    | old: `init_ids[i]=id` | new: `init_ids[num_ids]=id` |
+|---|-------|-----------------------|-----------------------------|
+| 0 | 5     | `init_ids[0] = 5`     | `init_ids[0] = 5`           |
+| 1 | 99999 | skip (gap at [1])     | skip                        |
+| 2 | 3     | `init_ids[2] = 3`     | `init_ids[1] = 3`           |
+| 3 | 99999 | skip (gap at [3])     | skip                        |
+| 4 | 7     | `init_ids[4] = 7`     | `init_ids[2] = 7`           |
+
+Old result: `[5, 0, 3, 0, 7, ...]` — gaps contain 0 (from `vector&lt;int&gt;`
+zero-initialization). The consumption loop reads these zeros as node IDs,
+biasing the search pool toward node 0 during graph construction and degrading
+graph quality.
+
+Fixed result: `[5, 3, 7, ...]` — valid entries packed contiguously, gap-filling
+starts from the correct position.
+
+**Bug 2: `sync_prune` out-of-bounds access**
+
+`sync_prune` accesses `pool[start]` without bounds checking. Two cases cause
+out-of-bounds reads:
+- Pool is empty after augmentation
+- Pool contains only the query node itself (e.g., `ntotal=1`)
+
+In both cases `start` advances past `pool.size()` and `pool[start]` is an
+out-of-bounds vector read — undefined behavior that crashes under ASAN and
+silently corrupts the graph in release builds.
+
+Trace for `ntotal=1, L=1`:
+1. `search_on_graph` returns `pool = [{id:0, dist:0}]`
+2. `sync_prune(q=0)`: `pool[0].id == q` → `start++` → `start=1 == pool.size()`
+3. Old code: `result.push_back(pool[1])` — OOB read
+4. Fix: guard checks `start &gt;= pool.size()`, fills graph row with `EMPTY_ID`
+
+**Other fixes:**
+- Replace `min = 1e6` (float-to-int truncation) with `std::numeric_limits&lt;int&gt;::max()`
+- Remove `srand(0x1998)` from the NSG constructor (global RNG side effect)
+
+Reviewed By: mnorris11
+
+Differential Revision: D100024850
+
+fbshipit-source-id: 0d290801658e381e198b6c6ab54ebe981e0f09f3
+
+- Remove bare simdlib type aliases from simdlib_dispatch.h (#5069)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5069
+
+Remove the 10 global bare-name using declarations (simd16uint16,
+simd32uint8, simd8uint32, simd8float32, simd256bit, simd512bit,
+simd32uint16, simd64uint8, simd16float32) from simdlib_dispatch.h.
+
+These aliases resolved through SINGLE_SIMD_LEVEL which is NONE in DD
+mode, creating a trap where per-ISA TU code accidentally uses scalar
+emulation. Each file that needs the aliases now declares its own using
+with an explicit SIMD level, making the dependency visible.
+
+Behavior-preserving: all files use the same SINGLE_SIMD_LEVEL they
+used before, but now explicitly.
+
+Reviewed By: mdouze
+
+Differential Revision: D100033901
+
+fbshipit-source-id: 2db034c2868de275a5f018d886264762776548c5
+
+- Convert partitioning to dynamic dispatch (#5062)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5062
+
+Convert `utils/partitioning.cpp` SIMD code to dynamic dispatch so that
+IVF partition assignment and histogram functions use the correct SIMD
+implementation at runtime instead of being dead-coded in DD mode.
+
+The partitioning code has two SIMD blocks:
+1. `simd_partitioning` namespace — SIMD-accelerated uint16_t partition
+   using simdlib wrappers (simd16uint16, simd32uint8)
+2. Histogram subroutines — SIMD 8-bin and 16-bin histogram computation
+
+Both were guarded by `#ifdef __AVX2__` / `#if defined(__AVX2__) || defined(__aarch64__)`
+which are always false in DD mode on x86, silently disabling the fast paths.
+
+Approach:
+- Extract all SIMD code into `partitioning_simdlib256.h`, a shared header
+  included once per ISA TU (AVX2, NEON). The code uses simdlib portable
+  wrappers so it works on both x86 and ARM without changes.
+- Create per-ISA TUs (`partitioning_avx2.cpp`, `partitioning_neon.cpp`)
+  that include the shared header with the correct compiler flags.
+- In the common TU, replace `#ifdef` guards with `with_simd_level_256bit`
+  dispatch. NONE level falls through to dedicated scalar fallbacks.
+- No AVX512 TU needed — code uses only 256-bit ops; AVX512 falls through
+  to AVX2 via the dispatch mechanism.
+
+Reviewed By: mdouze
+
+Differential Revision: D99991775
+
+fbshipit-source-id: 726cdf3a46db31ed1ff1f9a8966e471d9f5ac0b1
+
+- Fix priority_queue constructor inheritance for Apple Clang on macOS (#5065)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5065
+
+The `reservePriorityQueue` helper in HNSW.cpp defines a local `Access` struct inheriting from `std::priority_queue` but uses parenthesized initialization `Access access(std::move(q))`. Apple Clang with libc++ on macOS-14 correctly rejects this because the implicit move constructor of `Access` takes `Access&amp;&amp;`, not `std::priority_queue&amp;&amp;`.
+
+The fix changes from parenthesized initialization to brace initialization `Access access{std::move(q)}`, which uses C++17 aggregate initialization. Since `Access` is an aggregate (no user-declared constructors, only a `using` declaration for member access), brace initialization directly initializes the base class sub-object from the `priority_queue&amp;&amp;` argument. This is backward-compatible with GCC, MSVC, and all Clang versions.
+
+Note: The alternative approach of adding `using std::priority_queue&lt;T, Container, Compare&gt;::priority_queue;` to inherit base constructors was considered but rejected because it removes `Access`&#39;s aggregate status, breaking C++20 parenthesized aggregate initialization that the Linux toolchain (clang19) relies on.
+
+Reviewed By: junjieqi
+
+Differential Revision: D100090366
+
+fbshipit-source-id: 07821475d2f2fbc205fb3288cf25a6ebea0ca3a5
+
+- Expose a fast scan code size from fast scan indices (#5064)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5064
+
+Useful when splitting codes that do and don&#39;t need packing. For example, in rabitq, output codes from encode_vectors look like [rqfs_codes][flat_factors], and input to pq4_pack_codes should only be a block of [rqfs_codes][rqfs_codes]...
+
+Reviewed By: alibeklfc
+
+Differential Revision: D100047797
+
+fbshipit-source-id: 9cbad95beba8ddbbbe4e6ce8c4541692d3d7b0fa
+
+- OMP build diagnostics (#4842)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4842
+
+Some tools which depend on FAISS recently became much slower because they were accidentally changed to depend on `faiss:faiss_no_multithreading` instead of `faiss:faiss`.
+
+This adds `faiss::has_omp()`, which returns true if a `#pragma omp parallel` region had any effect through the use of a `reduction(max)` which would otherwise be stripped out.
+
+Note:
+1. Compile-time check is not sufficient, as the `faiss_no_multithreading` and/or `faiss_omp_mock` targets control whether the `faiss/*.cpp` implementations have effective `#pragma omp` blocks.
+2. Depending on the BUCK build mode, a `cpp_binary` which depends on `faiss:faiss_no_multithreading` and `faiss:faiss` *may or may not* link to implementations with OpenMP support.
+
+Reviewed By: subhadeepkaran
+
+Differential Revision: D94394555
+
+fbshipit-source-id: ea477dd4146619ba1106a16f3021e0437ece9074
+
+- Roll out @for_all_simd_levels to key test files (#5061)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5061
+
+Roll out the `for_all_simd_levels` decorator to 62 test classes across
+11 test files. This ensures that every available SIMD level (NONE, AVX2,
+AVX512, etc.) is exercised in CI, rather than only testing at the
+auto-detected (highest) level.
+
+Previously only `TestExtraDistances` in `test_extra_distances.py` used
+the decorator. Now all test files covering DD-dispatched code paths are
+parameterized: distances, PQ, SQ, fast scan, RaBitQ, partitioning,
+HNSW, and binary indices.
+
+Changes:
+- Add `for_all_simd_levels` to 62 test classes across 11 test files
+- BUCK: move decorated test targets to `supports_static_listing = False`
+  (required because the decorator replaces class names with None,
+  breaking TPX&#39;s static test enumeration)
+- test_fast_scan.py, test_fast_scan_ivf.py: apply decorator manually
+  after dynamic `setattr` method generation for TestAQFastScan and
+  TestIVFAQFastScan (the `setattr` loops reference the class by name)
+- test_rabitq_fastscan.py: extract `_create_fastscan_index` as
+  module-level helper to fix cross-class method reference that broke
+  when TestRaBitQFastScan was replaced by the decorator
+- IndexFastScan.cpp: fix `search_implem_14` to auto-cap `qbs` based
+  on `bbs`. The accumulate loop dispatch table only instantiates
+  certain (nq, BB) pairs (e.g. BB=2 only has nq=1,2). Previously,
+  using bbs=64 with the default qbs (batch of 4) would crash with
+  &#34;nq=3 bbs=64 not instantiated&#34;. Now the query batch size is
+  automatically capped to the max nq supported for the given BB.
+  Exposed by per-level testing of test_factory_with_batch_size.
+
+Reviewed By: mdouze
+
+Differential Revision: D99978401
+
+fbshipit-source-id: 54858f3810bab91ac5ec8bf0ce0d55a77710727b
+
+- Assorted Dynamic Dispatch cleanup fixes (#5060)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5060
+
+Five small fixes for Dynamic Dispatch (DD) mode issues found during the DD migration audit.
+
+**Preprocessor guard fixes (3):**
+
+These files use `#ifdef __AVX2__` (or `__AVX__`) in common translation units. In DD mode, common TUs are compiled without `-mavx2`, so `__AVX2__` is never defined and the guarded code is silently disabled. The DD-era equivalent is `COMPILE_SIMD_AVX2`, which is defined target-wide for all TUs in DD mode (and also in static AVX2 builds).
+
+- `ProductQuantizer.cpp`: The dsub=2 fast path for `compute_distance_tables` and `compute_inner_prod_tables` was gated on `__AVX2__ || __aarch64__`. Changed to `COMPILE_SIMD_AVX2 || COMPILE_SIMD_ARM_NEON`. Without this, PQ distance table computation for dsub=2 falls back to the generic path in DD mode.
+
+- `LocalSearchQuantizer.cpp`: The prefetch include and usage were gated on `__AVX2__`. Changed to `COMPILE_SIMD_AVX2`. Without this, LSQ&#39;s ICM encoding loop loses prefetch hints in DD mode.
+
+- `prefetch.h`: The x86 prefetch path (`_mm_prefetch` via `&lt;xmmintrin.h&gt;`) was gated on `__AVX__`. This is an SSE intrinsic available on all x86_64 — the correct guard is `__x86_64__ || _M_X64`. The `__AVX__` guard was too restrictive even outside DD mode (it excluded SSE-only x86 builds, though those are rare in practice).
+
+**CMake build fixes (2):**
+
+- CMake DD mode (`FAISS_OPT_LEVEL=dd`) was missing `COMPILE_SIMD_AVX512_SPR` from the x86 compile definitions. Buck defines it via `arch_specific_compiler_flags`, but CMake only had `COMPILE_SIMD_AVX2 COMPILE_SIMD_AVX512`. Any code guarded on `COMPILE_SIMD_AVX512_SPR` (AMX-based fast scan kernels) was dead in CMake DD builds.
+
+- `distances_dispatch.h` was listed in `FAISS_HEADERS` (the CMake install list), but it&#39;s a private DD-internal header not meant for downstream consumers. Removed from the install list. (It remains in Buck&#39;s `header_files()` since Buck uses that list for compilation visibility, not just install.)
+
+Reviewed By: mdouze
+
+Differential Revision: D99966090
+
+fbshipit-source-id: 05f0d5ee6353f850671f8be3932eb18e84cf8f92
+
+- fbcode/faiss/impl/HNSW.cpp (#5059)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5059
+
+Reviewed By: DenisYaroshevskiy
+
+Differential Revision: D99854747
+
+fbshipit-source-id: 8bca36ec90475771ef17356d9a16b0d680a6296b
+
+- Add a balanced assignment function (#5050)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5050
+
+- Implement balanced assignment in clustering.py based on notebook N10159950
+- add a test that shows we improve the imabalace at some cost in MSE
+
+Reviewed By: algoriddle
+
+Differential Revision: D99819394
+
+fbshipit-source-id: 568b6deb7d2b95b8228dbb276c5578df23b01a96
+
+- Replace bare assert() with FAISS_THROW_IF_NOT in core index files (#5052)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5052
+
+Multiple core Faiss C++ source files use bare `assert()` for runtime invariant checks. Since `assert()` is compiled out in release builds (when `NDEBUG` is defined), these checks silently disappear in production, potentially masking bugs and data corruption.
+
+This diff replaces bare `assert()` calls with Faiss&#39;s own `FAISS_THROW_IF_NOT` / `FAISS_THROW_IF_NOT_MSG` macros in 11 core index files. These macros throw `FaissException` with descriptive error messages and remain active in all build modes (debug and release).
+
+Files modified:
+- AutoTune.cpp
+- Clustering.cpp
+- IVFlib.cpp
+- IndexBinaryIVF.cpp
+- IndexIVFFlat.cpp
+- IndexIVFPQ.cpp
+- IndexIVFPQFastScan.cpp
+- IndexIVFPQR.cpp
+- IndexLSH.cpp
+- IndexPQ.cpp
+- IndexRefine.cpp
+
+Impact:
+- Prevents silent failures in release builds
+- Provides actionable error messages for debugging
+- Aligns with Faiss coding conventions (most of the codebase already uses FAISS_THROW_IF_NOT)
+
+Reviewed By: mnorris11
+
+Differential Revision: D99857988
+
+fbshipit-source-id: 89b01e022958495b0883c5faebc82bfe9b17da18
+
+- Fix type mismatch bug and remove dead code in IndexRowwiseMinMax::sa_decode_impl (#5051)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5051
+
+In `sa_decode_impl&lt;StorageMinMaxT&gt;()`, a local variable `std::vector&lt;StorageMinMaxFP16&gt; minmax(...)` was:
+
+1. Using the wrong type: It hardcoded `StorageMinMaxFP16` instead of the template parameter `StorageMinMaxT`. When this function is instantiated with `StorageMinMaxFP32` (via `IndexRowwiseMinMax::sa_decode`), this would create a vector of the wrong type.
+
+2. Dead code: The vector was allocated but never actually used in the function body. The decoding logic reads `StorageMinMaxT` values directly from the input byte buffer, making this allocation unnecessary.
+
+This change removes the unused variable, eliminating both the type mismatch and the unnecessary memory allocation. The allocation was O(min(chunk_size, n)) per decode call, so removing it also provides a minor performance benefit.
+
+Note: The corresponding `sa_encode_impl` function does NOT have this issue (it correctly uses a local `minmax` that IS used), and the `train_inplace_impl` / `train_impl` functions also correctly use their `minmax` vectors. Only `sa_decode_impl` had this issue.
+
+Reviewed By: mnorris11
+
+Differential Revision: D99851973
+
+fbshipit-source-id: a288a4cd355ccc7d9e13d1f7d61bc54fc524675c
+
+- Re-enable ROCm runner for AMD GPU CI (#4854)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4854
+
+This re-enables the AMD ROCm runner that was previously disabled in D86250489.
+
+Changes from the original configuration:
+- Updated runner from `faiss-amd-MI200` to `linux-amd-rocm-mi325-ubuntu-24` to match the currently available GitHub Actions runner
+- Updated container image from Ubuntu 22.04 to Ubuntu 24.04 to align with the runner environment
+
+Test change:
+- seems like cuda and hip disagree about some small rounding errors, so AI updated the test.
+
+Reviewed By: subhadeepkaran
+
+Differential Revision: D94941142
+
+fbshipit-source-id: d5158b7939e3b7327432aa89a9a0d2e5ed1ad190
+
+- Debug manifold crash with NaN (#5025)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5025
+
+In c++ when running in dev mode:
+```
+  Crash chain:
+  1. index-&gt;add(1, vec) → IndexIVF::add_with_ids() (line 190)
+  2. quantizer-&gt;assign() → Index::assign() → IndexHNSW::search() — searches the HNSW coarse quantizer with the NaN
+  vector
+  3. HNSW::search() computes d_nearest = qdis(entry_point) — this returns NaN because the input vector has NaN
+  4. NaN is pushed into MinimaxHeap candidates. All comparisons with NaN return false, corrupting heap ordering
+  5. search_from_candidates() pops a garbage node ID v0 from the corrupted heap
+  6. neighbor_range(v0, ...) hits FAISS_CHECK_RANGE_DEBUG — v0 is out of bounds → crash
+```
+
+In python test or opt mode:
+```
+The test timed out — it hung instead of crashing. This is consistent with the analysis: in the Python bindings (which
+  run with mode/opt, so no debug assertions), pop_min returns -1, neighbor_range(-1, ...) doesn&#39;t crash on the
+  assertion (it&#39;s a debug-only check), and instead accesses offsets[-1] which is undefined behavior. The NaN corrupts
+  the heap, the search loops forever because nvalid never decrements when pop_min returns -1.
+
+  So in Python/opt mode: no stack trace, just a hang. The C++ debug build crashes with the assertion. Both are fixed by
+  the same push() NaN→+inf change in HNSW.cpp.
+```
+
+Performance impact??
+--
+it is in the tightest loop in search_from_candidates.  Claude seems to think it is fine:
+```
+  In search_from_candidates (line 707), push() is called for every neighbor visited during greedy graph traversal — batched 4 at a time via
+  add_to_heap. This is indeed the tightest inner loop in HNSW search.
+
+  What std::isnan actually costs
+
+  std::isnan(float) on x86_64 compiles to essentially v != v — a single ucomiss + conditional jump (jp). That&#39;s 1-2 instructions.
+
+  Context: what else happens per push call
+
+  Each push call is preceded by significantly more expensive work:
+  1. Distance computation (distances_batch_4 at line 718): ~2×d FLOPs per vector (e.g., ~256 FLOPs for d=128)  NOTE: HNSW.cpp:718-726 (qdis.distances_batch_4(...))
+  2. Existing comparisons in push: k == n, v &gt;= dis[0], potential heap_pop/heap_push which are O(log efSearch) with memory accesses    NOTE: HNSW.cpp:1401  (k == n), 1402 (v &gt;= dis[0]), 1408 (heap_pop), 1410 (heap_push)
+  3. Visited table check (vt.set) with prefetching   NOTE:  HNSW.cpp:689 (vt.prefetch(v1)) and 714 (vt.set(v1))
+
+  The isnan check is ~1 instruction compared to hundreds for the distance computation. Even against just the heap operations (several
+  comparisons + pointer chasing), it&#39;s a rounding error.
+
+  Branch prediction
+
+  Since NaN distances essentially never occur in normal operation, this branch is always not-taken. The branch predictor will learn this
+  within the first few iterations and predict it perfectly for the remainder of the search. A perfectly-predicted not-taken branch is ~0
+  cycles on modern CPUs.
+```
+
+And mini benchmark:
+```
+  ┌────────┬────────────────────────┬────────────────────────┬───────────────────┐
+  │        │ With NaN check (run 1) │ With NaN check (run 2) │ Without NaN check │
+  ├────────┼────────────────────────┼────────────────────────┼───────────────────┤
+  │ Mean   │ 401.146 ms             │ 400.515 ms             │ 401.191 ms        │
+  ├────────┼────────────────────────┼────────────────────────┼───────────────────┤
+  │ Median │ 396.746 ms             │ 398.172 ms             │ 398.520 ms        │
+  ├────────┼────────────────────────┼────────────────────────┼───────────────────┤
+  │ Min    │ 389.939 ms             │ 388.670 ms             │ 391.850 ms        │
+  ├────────┼────────────────────────┼────────────────────────┼───────────────────┤
+  │ Stddev │ 18.903 ms              │ 7.833 ms               │ 8.164 ms          │
+  └────────┴────────────────────────┴────────────────────────┴───────────────────┘
+```
+
+I wanted to make sure it worked regardless of metric type:
+```
+  For inner product (and cosine, which is IP after normalization), HNSW wraps the distance computer in NegativeDistanceComputer, which
+  negates the result. This means all metrics flow through the MinimaxHeap with the same convention: smaller = better.
+
+  So the NaN → +inf replacement works correctly for all metrics:
+
+  ┌────────┬──────────────────────────────┬──────┬───────┬─────────────────┐
+  │ Metric │        qdis() returns        │ Best │ Worst │   +inf means    │
+  ├────────┼──────────────────────────────┼──────┼───────┼─────────────────┤
+  │ L2     │ ‖x-q‖²                       │ 0    │ +inf  │ worst (correct) │
+  ├────────┼──────────────────────────────┼──────┼───────┼─────────────────┤
+  │ IP     │ -&lt;x,q&gt; (negated)             │ -∞   │ +inf  │ worst (correct) │
+  ├────────┼──────────────────────────────┼──────┼───────┼─────────────────┤
+  │ Cosine │ -&lt;x̂,q̂&gt; (negated, normalized) │ -1   │ +inf  │ worst (correct) │
+  └────────┴──────────────────────────────┴──────┴───────┴─────────────────┘
+
+  In all cases, +inf sits at the top of the CMax heap and gets evicted first when the heap is full (v &gt;= dis[0] returns early at line 1402).
+   And pop_min() will never select it over any finite-distance candidate. The semantics are correct regardless of metric type.
+```
+
+Reviewed By: mdouze
+
+Differential Revision: D99036639
+
+fbshipit-source-id: e5d6392e800f243f66ce283c8cd35fe0e7558229
+
+- Update outdated C++17 and Python 2 references (#5045)
+
+Summary:
+- Update C++ language level from C++17 to C++20 in `CONTRIBUTING.md` to match the actual CMake configuration (`CMAKE_CXX_STANDARD 20` in the root `CMakeLists.txt`)
+- Remove outdated &#34;progressively dropping python2 support&#34; note from `contrib/README.md` (Python 2 reached end-of-life in January 2020 and Faiss requires Python 3)
+- Update shebangs from `python2` to `python3` in three benchmark scripts: `benchs/kmeans_mnist.py`, `benchs/bench_gpu_1bn.py`, and `benchs/bench_vector_ops.py`
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5045
+
+Test Plan:
+- [ ] No functional code changes; only documentation and shebangs are modified
+- [ ] Verified C++20 is the actual standard by checking `CMakeLists.txt` (`set(CMAKE_CXX_STANDARD 20)`) and `INSTALL.md` (which already references &#34;a C++20 compiler&#34;)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Reviewed By: mnorris11
+
+Differential Revision: D99691731
+
+Pulled By: alibeklfc
+
+fbshipit-source-id: 579cf21054cdf6bdaea27f5abb1c56e0b709a922
+
+- Use HTTPS for GitHub links in README (#5043)
+
+Summary:
+- Replace two `http://github.com` links with `https://github.com` in the README
+  - Wiki page link (line 38)
+  - Issues page link (line 85)
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5043
+
+Test Plan:
+- [x] Both links resolve correctly with HTTPS
+- [x] No other changes
+
+Reviewed By: mnorris11
+
+Differential Revision: D99690282
+
+Pulled By: alibeklfc
+
+fbshipit-source-id: 42e94ac7e45e457b1d6b5b511c4092990c696c54
+
+- Fix duplicate words and grammar typos across codebase (#5044)
+
+Summary:
+- Fix duplicate word &#34;the the&#34; to &#34;the&#34; in `faiss/utils/quantize_lut.h` (comment) and `benchs/README.md`
+- Fix duplicate word &#34;to to&#34; to &#34;to&#34; in `faiss/IndexBinaryHNSW.cpp` (comment)
+- Fix subject-verb agreement &#34;This produce&#34; to &#34;This produces&#34; in `INSTALL.md`
+- Fix broken grammar &#34;it does not the case&#34; to &#34;it is not the case&#34; in `tests/test_residual_quantizer.py`
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5044
+
+Test Plan:
+- [ ] No functional code changes; only comments, documentation, and test comments are modified
+- [ ] Verified each fix is a clear typo/grammar correction
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Reviewed By: mnorris11
+
+Differential Revision: D99692631
+
+Pulled By: alibeklfc
+
+fbshipit-source-id: e3ae88ba4ca732e9f620e1c205f51e4b827d0730
+
+- Use explicit ISA flags instead of -march/-mtune=sapphirerapids (#5034)
+
+Summary:
+In GCC, `-mtune=sapphirerapids` sets prefer-vector-width to 256 via `X86_TUNE_AVX256_OPTIMAL`. In LLVM, the same default is set via the prefer-256-bit subtarget feature. This was originally added to avoid AVX-512 frequency throttling on Skylake-SP, but the penalty is negligible since Sapphire Rapids. Switching to explicit ISA flags allows the auto-vectorizer to use zmm registers. I don&#39;t see any performance regression. Below is an example.
+
+```cpp
+// bench_ip.cpp
+
+#include &lt;benchmark/benchmark.h&gt;
+#include &lt;vector&gt;
+#include &lt;random&gt;
+#include &lt;thread&gt;
+#include &lt;numeric&gt;
+#include &lt;cstdlib&gt;
+
+_Pragma(&#34;GCC push_options&#34;) \
+_Pragma(&#34;GCC optimize (\&#34;unroll-loops,associative-math,no-signed-zeros\&#34;)&#34;)
+static float inner_product(const float *a, const float *b, int n) {
+    float sum = 0.0f;
+    for (int i = 0; i &lt; n; i++) {
+        sum += a[i] * b[i];
+    }
+    return sum;
+}
+_Pragma(&#34;GCC pop_options&#34;)
+
+static void BM_InnerProduct(benchmark::State &amp;state) {
+    const int n = state.range(0);
+
+    std::mt19937 rng(42 + state.thread_index());
+    std::uniform_real_distribution&lt;float&gt; dist(-1.0f, 1.0f);
+
+    std::vector&lt;float&gt; a(n), b(n);
+    for (int i = 0; i &lt; n; i++) {
+        a[i] = dist(rng);
+        b[i] = dist(rng);
+    }
+
+    for (auto _ : state) {
+        float result = inner_product(a.data(), b.data(), n);
+        benchmark::DoNotOptimize(result);
+    }
+
+    state.SetItemsProcessed(state.iterations() * n);
+    state.SetBytesProcessed(state.iterations() * n * 2 * sizeof(float));
+}
+
+int main(int argc, char **argv) {
+    int num_threads = 1;
+
+    // Parse --threads=N before passing to benchmark
+    for (int i = 1; i &lt; argc; i++) {
+        if (std::string(argv[i]).rfind(&#34;--threads=&#34;, 0) == 0) {
+            num_threads = std::atoi(argv[i] + 10);
+            // Remove from argv so benchmark doesn&#39;t choke
+            for (int j = i; j &lt; argc - 1; j++)
+                argv[j] = argv[j + 1];
+            argc--;
+            i--;
+        }
+    }
+
+    std::vector&lt;int64_t&gt; sizes = {384, 768, 1536};
+    for (auto sz : sizes) {
+        benchmark::RegisterBenchmark(&#34;BM_InnerProduct&#34;, BM_InnerProduct)
+            -&gt;Arg(sz)
+            -&gt;Threads(num_threads)
+            -&gt;UseRealTime();
+    }
+
+    benchmark::Initialize(&amp;argc, argv);
+    benchmark::RunSpecifiedBenchmarks();
+    return 0;
+}
+```
+
+**Current**:
+`g++ -O3 -march=sapphirerapids -mtune=sapphirerapids  bench_ip.cpp -lbenchmark -lpthread`
+
+```text
+---------------------------------------------------------------------------------------------------
+Benchmark                                         Time             CPU   Iterations UserCounters...
+---------------------------------------------------------------------------------------------------
+BM_InnerProduct/384/real_time/threads:1        20.7 ns         20.6 ns     33860063 bytes_per_second=138.529Gi/s items_per_second=18.5931G/s
+BM_InnerProduct/768/real_time/threads:1        43.0 ns         43.0 ns     16293169 bytes_per_second=133.043Gi/s items_per_second=17.8567G/s
+BM_InnerProduct/1536/real_time/threads:1       86.5 ns         86.3 ns      7699745 bytes_per_second=132.321Gi/s items_per_second=17.7598G/s
+
+----------------------------------------------------------------------------------------------------
+Benchmark                                          Time             CPU   Iterations UserCounters...
+----------------------------------------------------------------------------------------------------
+BM_InnerProduct/384/real_time/threads:64        31.2 ns         31.1 ns     22750464 bytes_per_second=91.7077Gi/s items_per_second=12.3088G/s
+BM_InnerProduct/768/real_time/threads:64        59.3 ns         59.2 ns     10872768 bytes_per_second=96.4611Gi/s items_per_second=12.9468G/s
+BM_InnerProduct/1536/real_time/threads:64        130 ns          130 ns      5561152 bytes_per_second=87.9984Gi/s items_per_second=11.8109G/s
+```
+
+**This PR**: `g++ -O3 -mavx512f bench_ip.cpp -lbenchmark -lpthread`
+
+```text
+---------------------------------------------------------------------------------------------------
+Benchmark                                         Time             CPU   Iterations UserCounters...
+---------------------------------------------------------------------------------------------------
+BM_InnerProduct/384/real_time/threads:1        17.5 ns         17.5 ns     40056065 bytes_per_second=163.685Gi/s items_per_second=21.9695G/s
+BM_InnerProduct/768/real_time/threads:1        34.2 ns         34.1 ns     20446203 bytes_per_second=167.326Gi/s items_per_second=22.4582G/s
+BM_InnerProduct/1536/real_time/threads:1       72.4 ns         72.3 ns      9451952 bytes_per_second=158.094Gi/s items_per_second=21.219G/s
+
+----------------------------------------------------------------------------------------------------
+Benchmark                                          Time             CPU   Iterations UserCounters...
+----------------------------------------------------------------------------------------------------
+BM_InnerProduct/384/real_time/threads:64        23.4 ns         23.4 ns     27661760 bytes_per_second=122.456Gi/s items_per_second=16.4358G/s
+BM_InnerProduct/768/real_time/threads:64        49.1 ns         48.9 ns     13923776 bytes_per_second=116.614Gi/s items_per_second=15.6517G/s
+BM_InnerProduct/1536/real_time/threads:64        105 ns          105 ns      6088320 bytes_per_second=108.736Gi/s items_per_second=14.5943G/s
+```
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5034
+
+Test Plan: Verified flag consistency across all three CMake files. Added missing -mavx512vpopcntdq required by hamming_distance/avx512-inl.h and rabitq_avx512.cpp.
+
+Reviewed By: mnorris11
+
+Differential Revision: D99687322
+
+Pulled By: alibeklfc
+
+fbshipit-source-id: 1a27191149f9d0ff9dc392183bbd3c97c9915aa3
+
+- Merge .gitignore updates from faiss-gpu-cu132 into main (#4996)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4996
+
+Reviewed By: alibeklfc
+
+Differential Revision: D99569811
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 127c6b6b771b81b1f11b0f28dc4936959fafac09
+
+- Fix d_out check bug and add descriptive error messages to VectorTransform assertions (#5047)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5047
+
+## Summary
+
+This diff fixes a bug and improves error message quality in `VectorTransform.cpp`.
+
+### Bug Fix (line 153)
+`VectorTransform::check_identical()` had a copy-paste bug where `d_in` was checked twice and `d_out` was never checked:
+```cpp
+// Before (buggy):
+FAISS_THROW_IF_NOT(other.d_in == d_in &amp;&amp; other.d_in == d_in);
+// After (fixed):
+FAISS_THROW_IF_NOT_MSG(
+        other.d_in == d_in &amp;&amp; other.d_out == d_out,
+        &#34;input and output dimensions must match&#34;);
+```
+This meant two VectorTransforms with matching `d_in` but different `d_out` would incorrectly pass the identity check. This could lead to subtle bugs when comparing or serializing transform chains (e.g., in `IndexPreTransform`).
+
+### Error Message Improvements
+All 28 bare `FAISS_THROW_IF_NOT()` calls in `VectorTransform.cpp` have been converted to `FAISS_THROW_IF_NOT_MSG()` with clear, actionable error messages. Previously, assertion failures would only show the raw C++ condition (e.g., `&#34;Error: &#39;p &gt; 0&#39; failed&#34;`), which is unhelpful for users. Now each assertion provides semantic context:
+
+- **Dynamic cast failures**: `&#34;failed to cast to HadamardRotation&#34;` instead of `&#34;hr&#34;`
+- **Dimension mismatches**: `&#34;input and output dimensions must match when PCA is disabled&#34;` instead of `&#34;din == dout&#34;`
+- **Training state errors**: `&#34;CenteringTransform has not been trained&#34;` instead of `&#34;is_trained&#34;`
+- **LAPACK errors**: `&#34;LAPACK dgesvd workspace query failed&#34;` instead of `&#34;info == 0&#34;`
+- **Parameter validation**: `&#34;map entries must be -1 (unused) or valid input dimension indices&#34;` instead of raw condition
+
+### Affected classes
+- `VectorTransform` (base class)
+- `LinearTransform`
+- `HadamardRotation`
+- `PCAMatrix`
+- `ITQMatrix`
+- `ITQTransform`
+- `OPQMatrix`
+- `NormalizationTransform`
+- `CenteringTransform`
+- `RemapDimensionsTransform`
+
+### Design decisions
+- Used `FAISS_THROW_IF_NOT_MSG` (not `FAISS_THROW_IF_NOT_FMT`) since all messages are static strings — no runtime formatting needed, keeping zero overhead.
+- Error messages follow existing Faiss patterns seen in `index_read.cpp` and other files.
+- Each message describes the semantic meaning of the condition, not just the code.
+
+Reviewed By: mnorris11
+
+Differential Revision: D99674067
+
+fbshipit-source-id: cf0fe9a8a7f047013011683d76221682d97beb6c
+
+- Fix uncaught exceptions in IndexIVF::search_preassigned OpenMP region (#5037)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5037
+
+C++ exceptions thrown inside `#pragma omp parallel` regions that are not
+caught within the region call `std::terminate` — they cannot propagate
+across thread boundaries.
+
+`IndexIVF::search_preassigned` had multiple unguarded throw sites inside
+its OpenMP parallel region:
+
+1. **`scan_one_list` lambda**:
+   `FAISS_THROW_IF_NOT_FMT(key &lt; nlist)` and `scanner-&gt;set_list()` were
+   above the try-catch block, so a corrupt key &gt;= nlist would throw
+   uncaught and call `std::terminate`.
+
+2. **Outer parallel region**:
+   `get_InvertedListScanner()` and `scanner-&gt;set_query()` had no
+   try-catch at all.
+
+Fixes:
+
+1. Moved the existing try-catch in `scan_one_list` up to also cover the
+   key validation and `set_list` calls.
+
+2. Wrapped the entire `#pragma omp parallel` body in a try-catch that
+   uses the existing `interrupt`/`exception_string`/`exception_mutex`
+   pattern to safely propagate exceptions out of the parallel region.
+
+Reviewed By: mnorris11
+
+Differential Revision: D99455250
+
+fbshipit-source-id: 41e8816d71c031b1e8526f76bd5a8936f4d4f160
+
+- Make distance_compute_blas_threshold dimension-aware (#5022)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5022
+
+I used the C++ benchmark in https://github.com/facebookresearch/faiss/pull/4971 but modified it a lot to measure on my machine.
+
+```
+
+  The BLAS threshold for flat distance computation was a fixed query count (nq &lt; 20), regardless of vector dimension. This meant BLAS was
+  used for as few as 20 queries even at d=128, where the sequential SIMD path is 10-25x faster.
+
+  The optimal crossover between sequential and BLAS depends on the total work in the query matrix (nq × d), not just query count.
+  Benchmarking across dimensions shows the crossover at roughly nq × d ≈ 128,000:
+
+  ┌──────┬────────────────────┬──────────────────────────────┐
+  │  d   │ Old threshold (nq) │ New effective threshold (nq) │
+  ├──────┼────────────────────┼──────────────────────────────┤
+  │ 128  │ 20                 │ 1000                         │
+  ├──────┼────────────────────┼──────────────────────────────┤
+  │ 256  │ 20                 │ 500                          │
+  ├──────┼────────────────────┼──────────────────────────────┤
+  │ 512  │ 20                 │ 250                          │
+  ├──────┼────────────────────┼──────────────────────────────┤
+  │ 1024 │ 20                 │ 125                          │
+  ├──────┼────────────────────┼──────────────────────────────┤
+  │ 2048 │ 20                 │ 63                           │
+  └──────┴────────────────────┴──────────────────────────────┘
+
+  This change replaces the comparison nq &lt; threshold with nq * d &lt; threshold and sets the default to 128,000.
+
+  Speedup vs old default (nb=100,000, L2 (same as IP for me), compiled with optimizations):
+
+      nq | d=128 | d=256 | d=512 | d=1024 | d=2048
+     ----|-------|-------|-------|--------|-------
+      20 | 22.8x |  9.3x |  4.5x |  2.6x  |  1.4x
+      50 | 19.4x |  9.3x |  4.7x |  2.0x  |  1.2x
+     100 | 13.3x |  5.6x |  2.1x |  1.0x  |  1.0x
+     200 |  8.2x |  2.7x |  1.1x |  1.0x  |  1.0x
+     500 |  3.2x |  1.0x |  1.0x |  1.0x  |  1.0x
+    1000 |  1.0x |  1.0x |  1.0x |  1.0x  |  1.0x
+
+  No regressions observed — the worst case is d=1024, nq=100 at 0.99x (within noise).
+```
+
+Reviewed By: mdouze
+
+Differential Revision: D99032435
+
+fbshipit-source-id: 45153e1d5add3ab20efa0e1e90cfc18533f4ac97</div>
+</div>
+
+<a href="../project/facebookresearch_faiss.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
