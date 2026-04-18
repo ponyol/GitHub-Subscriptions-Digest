@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (100 commits) - modular/modular - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (100 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/modular_modular.html">modular/modular</a> /
+    Updates in main (100 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/modular_modular.html">modular/modular</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-04-17 17:19 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/modular/modular/commits/main" target="_blank">https://github.com/modular/modular/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Этот выпуск обеспечивает значительный прирост производительности благодаря оптимизированным операциям ядра, включая планировщик с перекрытием для сгруппированного умножения матриц NVFP4 (ускорение в 1,047 раза по среднему геометрическому), новое нативное блочно-масштабированное умножение матриц MXFP4 для AMD CDNA4 и объединенные операции ядра для повышения эффективности. Основные архитектурные обновления включают новую систему диспетчеризации SPMD на основе правил для распределенных операций, консолидацию типов входных данных KVCache с использованием дженериков и модульную структуру API `Atomic`, а также значительный рефакторинг основных компонентов, таких как трансформатор Wan. Улучшения для разработчиков включают поддержку `syncscope` для `pop.store` и `Atomic.store` для предотвращения избыточной синхронизации, добавление индикаторов выполнения для захвата графов CUDA и исправление различных проблем с загрузкой весов моделей и ошибок производительности (например, улучшение задержки декодирования Eagle в 2-3 раза).</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- [Release] Update lockfiles to point to latest nightly version: 26.3.0.dev2026041716
+
+- [MAX] Expose `metadata()` on the `max._core.safetensors.SafeTensor`
+binding
+
+MODULAR_ORIG_COMMIT_REV_ID: abe98c36939c6a63c542a25cbadb9f5c1d78e982
+
+- [Kernels] Overlap scheduler for NVFP4 grouped matmul
+
+The old grouped-matmul scheduler ran in every consumer warp via an
+inline shuffle-scan WorkIterator. It added ~700 ns of pipeline bubble
+per tile in the critical path (TMA load + MMA), blocking the drain of
+tile N from overlapping with the fill of tile N+1.
+
+The fix is to move the scheduler to a dedicated warp that publishes the
+next tile into a 2-slot SMEM ring while the consumers are still draining
+the current one. Inter-tile pipeline overlap is the whole point of a
+persistent kernel, and this finally lets it happen.
+
+For first-tile latency, iter 0 on each consumer still uses the old-style
+inline scan + warp.broadcast, so nobody waits on the scheduler&#39;s first
+publication.
+
+On Kimi K2.5 (B200, 16 shapes, best-of-3), 16/16 shapes are faster than
+main with a 1.047× geomean.
+
+MODULAR_ORIG_COMMIT_REV_ID: b44560c1413ed591324d3974d9772f756ef72a83
+
+- [KGEN][stdlib] Plumb syncscope through `pop.store`
+
+The POP dialect&#39;s `pop.load` already accepts an optional `syncscope`
+attribute on atomic loads, but `pop.store` did not, which forced
+`Atomic.store` to use `pop.atomic.rmw[xchg]` to carry both ordering and
+syncscope. That had two problems: it lowered to
+`atom.exch.release.&lt;scope&gt;` on NVPTX (heavier than the
+`st.release.&lt;scope&gt;` that `gpu.intrinsics.store_release` used to emit),
+and it silently dropped `syncscope` because the call site forgot to pass
+it through.
+
+Add an optional `syncscope` attribute to `POP_StoreOp`, mirroring
+`POP_LoadOp` exactly:
+
+* `POPOps.td`: add `syncscope` to arguments, builder, and
+`assemblyFormat`.
+* `POPOps.cpp`: extend `StoreOp::build` and add the &#34;cannot specify
+syncscope without an atomic store&#34; verifier check (mirrors
+`LoadOp::verify`).
+* `LowerPOPToLLVM.cpp`: forward `syncscope` from `pop.store` to
+`LLVM::StoreOp` (mirrors `ConvertPOPLoad`).
+
+Then switch `Atomic.store` in `std/atomic/atomic.mojo` to use `pop.store
+atomic syncscope(...) ordering` instead of `pop.atomic.rmw[xchg]`. With
+this change,
+`Atomic[..., scope=&#34;device&#34;].store[ordering=RELEASE](ptr, v)` lowers to
+`store atomic ... syncscope(&#34;device&#34;) release` (LLVM IR), which NVPTX
+emits as `st.release.gpu.global.&lt;type&gt;` and AMDGPU emits as a
+properly-scoped atomic store. The Mojo API surface is unchanged.
+
+Note: `Atomic._xchg` (which must remain an RMW since it returns the
+previous value) still has the same syncscope-drop bug; that fix lands
+separately.
+MODULAR_ORIG_COMMIT_REV_ID: 76c2f8fbbe61af4b21c864dd2cf910622befe817
+
+- [kernels] This change allows arbitrary N for non-multimem P2P 1-stage
+while keeping multimem behavior and alignment requirements unchanged.
+
+MODULAR_ORIG_COMMIT_REV_ID: 8fca27b81c396233fda60b4ffe3c57b54e35ee79
+
+- [MAX] Enable FLUX.2 logit verification on AMD MI355
+
+Remove nvidia-only tag and add *mi355_1x to post_submit_agents for
+FLUX.2-dev-t2i and FLUX.2-dev-i2i (v2/v3). Validated that existing
+SSIM/LPIPS thresholds are sufficient on MI355.
+
+Also adds *b200_1x to post_submit_agents since those entries previously
+had no scheduled agents despite having pregenerated goldens.
+
+FLUX.1-dev and FLUX.2-klein-4B remain manual/nvidia-only pending
+separate validation.
+
+MODULAR_ORIG_COMMIT_REV_ID: 024abcdc4dc456bcde8e879ae16811b38a2ae985
+
+- [mblack] Fix space inserted after `*` in variadic pack unpacks
+
+`mblack` was inserting a space between `*` and a complex operand
+in variadic pack unpacking annotations, so fix that.
+
+MODULAR_ORIG_COMMIT_REV_ID: 2e5393c0c762e9ffb61995c48e6dfd39f28c92cd
+
+- [mojo-stdlib] Add helper utilities to ParameterList
+
+This adds adds the following utilities to ParameterList:
+  `empty_of`, `reduce`/`any_satisfies`/`all_satisfies`/`contains`
+
+This migrates the corresponding capabilities off of Variadic.
+
+MODULAR_ORIG_COMMIT_REV_ID: b59b2f644719f3013ab78580b0f9baec5db4876c
+
+- [GraphCompiler] Switch StaticTensorSpecList to ParameterList
+
+Modernize this type getting off low-level MLIR internals.
+
+MODULAR_ORIG_COMMIT_REV_ID: 5f8d2a5b2a7869770866d41f7e53cf16b9276f4b
+
+- [CI] Store smoke test eval_metrics under alias name
+
+Yet another bug fix, follow up #83667
+
+MODULAR_ORIG_COMMIT_REV_ID: bc373b73975d5d8dbe6f0a3c95fa63b164b07da7
+
+- [CI] Fix smoke test alias lookup with canonical HF casing
+
+Fixes bugs related to casing and custom models( `__module_v3` for
+example) introduced in:
+- #83546
+
+MODULAR_ORIG_COMMIT_REV_ID: 9178bc4d55650cedef1c8fd677dd04f4b4c94c3b
+
+- [NFC] Remove unused variables in SDK and max/tests
+
+Remove unused variable assignments across 10 files under SDK/ and
+max/tests/. Towards enabling the F841 lint rule repo-wide.
+
+MODULAR_ORIG_COMMIT_REV_ID: 64738df17c507c6a5366b9153f4bef652a32d624
+
+- [MAX] Rename &#39;CUDA graph&#39; to &#39;device graph&#39; in tqdm progress bar
+
+Make the progress bar text accelerator agnostic so it applies to both
+NVIDIA and AMD GPUs.
+
+MODULAR_ORIG_COMMIT_REV_ID: f80d2a99e34e8fa291fb730f1193222d7866b691
+
+- [Kernels] Add new fused ConcatSlice kernel
+
+Add a new fused kernel doing both a concat and a slice, then returning
+both outputs.
+
+MODULAR_ORIG_COMMIT_REV_ID: da25d122c6d9c71ea3e610b3d59c9751df710c04
+
+- [mojo-stdlib] Improve struct reflection dox
+
+Tidy up some comments to align with recent changes.
+
+MODULAR_ORIG_COMMIT_REV_ID: d0e42541c46d6c72832d13d86535dcd58ecb31ec
+
+- [MAX] Refactor distributed_functional into rule-based SPMD dispatch
+
+Replace the 8 per-category dispatch files (`elementwise.py`, `matmul.py`, `reduction.py`, `shape.py`, `collectives.py`, `creation.py`, `random.py`, `_context_provider.py`) with 3 files organized by dispatch pattern:
+
+- **`spmd_ops.py`** — `functional()` wrapper + ~80 ops, each wired up in one line: `matmul = functional(ops.matmul, rule=matmul_rule)`
+- **`collective_ops.py`** — primitive collectives (`allreduce_sum`, `allgather`, `reduce_scatter`) + universal `transfer_to` entry point
+- **`creation_ops.py`** — tensor factories without tensor inputs (`full`, `ones`, `zeros`, `uniform`, `gaussian`)
+- **`utils.py`** — shared leaf (`ensure_context`, `map_tensors`, etc.)
+
+The key shift: **dispatch logic is separated from sharding rules**. The old code had sharding decisions inlined in each op file. Now sharding rules live in `sharding/rules/` and `spmd_ops.py` just wires them up. Adding a new distributed op is a one-liner instead of a 30-line function.
+
+Other changes:
+- Add `Tensor.from_shard_values()` classmethod
+- Rename `redistribute` → `transfer_to` (the universal placement op)
+- Add control flow support (`_cond_graph`, `_while_loop_graph` wrappers)
+- Update `nn/_compile_utils.py` import (`collectives.shard` → `transfer_to`)
+
+MODULAR_ORIG_COMMIT_REV_ID: b551cdfaaf2c04924dd02ac149ac54380d80e437
+
+- [CI] Preserve HuggingFace model casing in smoke tests
+
+This updates the smoke test matrix to use the canonical HF casing, as
+defined by hf repo lock file.
+Adds a test to enforce this.
+
+In preparation for consolidating the double cache due to mismatches
+casing.
+Note that this still resolves to lower-case internally, this will be
+dealt with in a follow up pr
+
+MODULAR_ORIG_COMMIT_REV_ID: 49298d8b7560b5300ef1e701c1316aa2a0ee99a2
+
+- [Docs] Removed Apple silicon GPU print() restriction from docs and code tests
+
+Replaced the &#34;not currently supported&#34; Apple silicon GPU print()
+restriction with a &#34;Known limitation&#34; documenting the
+one-string-literal-per-call constraint. Rewrote print_threads examples
+to use numeric-only output with host-side column headers, ensuring
+all GPU doc code tests pass on Apple silicon and other supported
+GPUs.
+
+MODULAR_ORIG_COMMIT_REV_ID: b68e05fee224a70fa789081c2ce078d22132a8ff
+
+- [Kernels] Use explicit null in topk_fi
+
+MODULAR_ORIG_COMMIT_REV_ID: 6fd09961821fc2410cd467c62124b8fc5d60113a
+
+- [stdlib] Honor `syncscope` in `Atomic.store` and `_xchg`
+
+`Atomic.store` and `Atomic._xchg` lower via `pop.atomic.rmw[xchg]`, but
+the `syncscope` attribute that every other RMW op in `atomic.mojo`
+forwards (`fetch_add`, `_max_impl_base`, `_min_impl_base`, etc.) was
+omitted from these two call sites. As a result, `Atomic[...,
+scope=&#34;device&#34;].store(...)` was emitting LLVM `atomicrmw xchg release`
+with no syncscope, which the NVPTX backend lowers as system scope. The
+requested scope was silently ignored, producing wider cache fences than
+intended on Hopper/Blackwell, and similar over-synchronization on
+AMDGPU.
+
+Add `syncscope=_get_kgen_string[Self.scope]()` to both `pop.atomic.rmw`
+calls and add regression tests in `test_compile_atomic.mojo` that assert
+the LLVM IR carries the expected syncscope (and that the default empty
+scope produces no syncscope, matching system-wide semantics).
+
+Follow-up: `Atomic.store` still lowers via `pop.atomic.rmw[xchg]` rather
+than `pop.store`, so on NVPTX it emits
+`atom.exch.release.&lt;scope&gt;` instead of the lighter `st.release.&lt;scope&gt;`.
+The cleaner fix is to add `syncscope` to `pop.store` (mirroring
+`pop.load`, which already accepts it) and switch `Atomic.store` to use
+it. That change touches KGEN&#39;s POP dialect TableGen and lowering and
+will land separately.
+MODULAR_ORIG_COMMIT_REV_ID: f79d6cc01fea5ef32bf653b68f466ae855b8c688
+
+- [MAX] Remove unused kvcache agent
+
+This PR removes the unused kvcache agent to simplify workflow and
+kvcache manager logic
+
+Signed-off-by: Aaron Pham &lt;contact@aarnphm.xyz&gt;
+MODULAR_ORIG_COMMIT_REV_ID: 4d37cbdd9eec0a27b1ac2178e009de5ed5398720
+
+- [Kernels] use `None` for null TileTensor/LayoutTensor construction.
+
+MODULAR_ORIG_COMMIT_REV_ID: ecc31b6489677784c897c943f577860ab3105564
+
+- [Pipelines] Move image_latent_ids to GPU in ImageEncoder
+
+_build_image_ids() creates a CPU buffer from numpy but the denoiser
+expects all inputs on GPU. The text-to-image path already called
+.to(device) on its empty placeholder, but the img2img path did not.
+
+MODULAR_ORIG_COMMIT_REV_ID: 545ac862c222d7919be4a2589627444f2cf4fa89
+
+- [stdlib][NFC] Use `Atomic` in `std/gpu/sync/semaphore.mojo`
+
+Replace the `store_release[scope=Scope.GPU]` /
+`load_acquire[scope=Scope.GPU]` calls in `Semaphore` and
+`NamedBarrierSemaphore` with `Atomic[DType.int32, scope=&#34;device&#34;]`. Both
+structs gate on NVIDIA at construction, so hardcoding the NVPTX
+syncscope is safe.
+
+MODULAR_ORIG_COMMIT_REV_ID: 95431e7c8567bb08ec408464630d0b71eeb24705
+
+- [kernels][EP] Use `Atomic` in `ep_comm.mojo`
+
+Replace `store_release`/`load_acquire` helpers from `std.gpu.intrinsics`
+with `Atomic[dtype, scope=...].store/load[ordering=...]` in
+`ep_comm.mojo`.
+The `Atomic` API already provides equivalent functionality; using it
+consistently (alongside existing `fetch_add` calls) removes a duplicate
+atomic
+surface from EP kernels.
+
+On NVIDIA, generated PTX is equivalent (one line shorter) and SASS is
+identical. On AMD, the previous `std.gpu.intrinsics` path silently
+ignored `scope`, making everything effectively system-wide; routing
+through `Atomic[scope=&#34;agent&#34;]` means the requested device scope is now
+actually honored.
+
+MODULAR_ORIG_COMMIT_REV_ID: 84eba4028fea209db921afdee1228d114cd396e7
+
+- [Eagle] Fix bug where we would not replay graph even when we should be
+
+Classic off by one bug. This improves perf substantially since hitting
+cuda graphs improves decode latency by 2-3x on deepseek. When there is
+1 request, 7 dp padding requests are added. Each of these padding
+requests
+has 1 generated token which would fail this check. Now it can use replay
+when there are dp padding requests in the batch.
+
+Before:
+```
+// 39.90ms
+23:20:37.937 INFO: Executed TG batch with 8 reqs | Terminated: 1 reqs, Pending: 0 reqs | Input Tokens: 8/1024 toks | Context Tokens: 2801/163840 toks | Prompt Tput: 200.5 tok/s, Generation Tput: 200.5 tok/s | Batch creation: 279.12us, Execution: 39.90ms | KVCache usage: 0.0% of 100992 blocks, Cache hit rate: 0.0% | Draft Tokens: 8659/9408 (92.04%) accepted, Acceptance Len: 0.92 / 1 toks, Per-Pos: [p0=92%] | All Preemptions: 0 reqs
+```
+
+After:
+```
+// 11.60ms
+00:11:17.019 INFO: Executed TG batch with 8 reqs | Terminated: 1 reqs, Pending: 0 reqs | Input Tokens: 8/1024 toks | Context Tokens: 4432/163840 toks | Prompt Tput: 689.5 tok/s, Generation Tput: 689.5 tok/s | Batch creation: 287.51us, Execution: 11.60ms | KVCache usage: 0.0% of 100992 blocks, Cache hit rate: 0.0% | Draft Tokens: 22236/24372 (91.24%) accepted, Acceptance Len: 0.91 / 1 toks, Per-Pos: [p0=91%] | All Preemptions: 0 reqs
+```
+MODULAR_ORIG_COMMIT_REV_ID: 10e3413390f873349304b2f76775e11c923ea34c
+
+- [MAX] Add progress bar during CUDA graph capture in overlap scheduler
+
+Add a tqdm progress bar to the warmup_pre_ready method in
+ServeGraphCaptureRunner to show progress during CUDA graph capture. This
+helps users understand startup progress when capturing graphs for many
+batch sizes.
+
+This is a table stakes feature that both vLLM and SGLang have:
+https://github.com/vllm-project/vllm/pull/11349
+
+THIS IS 100% AI GENERATED
+
+```
+...
+00:14:13.813 INFO: Auto-detected pipeline task: text_generation (model architecture: UnifiedMTPDeepseekV3ForCausalLM)
+00:14:14.686 INFO: Starting server...
+Starting ASGI metrics server on port 8001
+00:14:18.343 INFO: Starting worker: MODEL_a7974ca3-bdee-48a1-a93d-5c9e9c0e809c
+00:14:18.343 INFO: Waiting for model worker readiness
+00:14:22.188 INFO: Metrics initialized.
+00:15:19.482 INFO: All weight files for nvidia/deepseek-v3.1-nvfp4 found in local HF cache.
+00:15:24.572 INFO: Building and compiling with_mtp_model...
+00:15:26.411 INFO: DeepSeekV3: data_parallel_degree=8, ep_size=8. Use DP-attention + EP-MoE strategy.
+00:15:26.754 INFO: Initializing EP communication infrastructure...
+00:15:26.755 INFO: Estimated EP memory usage per device: 3.62 GiB
+00:15:30.251 INFO: Initialized EP for node 0
+00:15:30.318 INFO: DeepSeekV3: data_parallel_degree=8, ep_size=8. Use DP-attention + EP-MoE strategy.
+00:15:30.318 INFO: NextN weights are BF16 (no weight_scale_2 found); disabling NVFP4 config for draft.
+00:15:44.570 INFO: Building with_mtp_model graph took 20.0 seconds
+00:15:59.082 INFO: Compiling with_mtp_model took 14.5 seconds
+00:15:59.082 INFO: Building and compiling with_mtp_model took 34.5 seconds
+00:16:03.380 WARNING: Capping graph capture batch size to 128 (max_batch_size=512). Decode batches above 128 will fall back to eager execution.
+00:16:03.381 INFO: Starting serve device graph capture warmup.
+00:16:03.381 INFO: Pre-capturing overlap device graphs for decode batch sizes [1..128] with num_steps=1.
+Capturing CUDA graph shapes:  48%|██████████████████████████████████████████████████████▎                                                           | 61/128 [00:13&lt;00:14,  4.72it/s]
+```
+MODULAR_ORIG_COMMIT_REV_ID: ade691a9e993a623736e07555e1306faae627384
+
+- [Kernels] Move `topk` off nullable pointers and use explicit
+nullability.
+
+This also remove a few unneeded `DeviceBuffer` creations when passing to
+some invoked kernels and just more simply passes the pointer.
+
+MODULAR_ORIG_COMMIT_REV_ID: 09a1ba820e1cb38e7b48fff849c3b71ebd22a738
+
+- [MAX] Add interpreter handlers for MutableStoreOp and
+MutableStoreSliceOp
+
+Add eager interpreter handlers for `mo.MutableStoreOp` and
+`mo.MutableStoreSliceOp`, complementing the existing `MutableLoadOp`
+handler. Enables `F.buffer_store` / `F.buffer_store_slice` under
+`EagerRealizationContext(use_interpreter=True)`.
+
+MODULAR_ORIG_COMMIT_REV_ID: 1c16f069f7e8acf01fe19ac78fbd66b5601c7870
+
+- [Benchmarking] Fix CLI args take precedence over workload YAML
+Fix CLI args take precedence over workload YAML
+Also changed `workload_config` default from `&#34;&#34;` to `None` in
+`ServingBenchmarkConfig`
+
+MODULAR_ORIG_COMMIT_REV_ID: 4d06bbdfac27cd25395aa573eeb6264ce371ca59
+
+- [KVCache] Consolidate KVCache input types via generics
+
+Instead of:
+```
+@dataclass
+class PagedCacheInputSymbols(IterableInputSymbols):
+    &#34;&#34;&#34;Symbolic graph input types for a single device&#39;s paged KV cache.&#34;&#34;&#34;
+
+    kv_blocks: BufferType
+    cache_lengths: TensorType
+    lookup_table: TensorType
+    max_lengths: TensorType
+    kv_scales: BufferType | None = None  # KV scales for FP8 quantization
+    dispatch_metadata: AttentionDispatchMetadata[TensorType] | None = None
+
+@dataclass
+class PagedCacheValues(NestedIterableDataclass[BufferValue | TensorValue]):
+    &#34;&#34;&#34;Concrete graph values for a single device&#39;s paged KV cache.&#34;&#34;&#34;
+
+    kv_blocks: BufferValue
+    cache_lengths: TensorValue
+    lookup_table: TensorValue
+    max_lengths: TensorValue
+    kv_scales: BufferValue | None = None  # KV scales for FP8 quantization
+    dispatch_metadata: AttentionDispatchMetadata[TensorValue] | None = None
+
+@dataclass
+class KVCacheInputsPerDevice:
+    &#34;&#34;&#34;Holds the concrete KV cache buffer inputs for a single device.&#34;&#34;&#34;
+
+    blocks: Buffer
+    cache_lengths: Buffer
+    lookup_table: Buffer
+    max_lengths: Buffer
+    kv_scales: Buffer | None = None  # Scale tensor for FP8 quantization
+    attention_dispatch_metadata: Buffer | None = None
+```
+
+Just do:
+```
+class KVCacheInputs(Generic[_Tensor, _Buffer]): ...
+```
+
+We also start cleaning up some of the mess that is flattening and
+unflattening.
+This change is related to:
+[Internal link]
+I currently manually implement flatten/unflatten but it can be automated
+later on. It is out of scope for this PR.
+
+Regardless of the outcome of the above proposal, I believe this is a
+step
+in the right direction. Followup prs will do the obvious improvements.
+This
+PR is already huge so I do not want to make it even bigger.
+
+The background for why I am doing this is because I wanted to add
+another
+field to KVCacheInputs for spec decoding but then I gave up because it
+was too much of a headache...
+With structured graph input/outputs, we should be able to add new fields
+with far less effort.
+
+There are some questionable patterns like
+`flatten_without_attention_dispatch_metadata`.
+However, this PR is not introducing the above pattern, just making it
+more
+visible. This flags the pattern and will make it easier to remove later.
+
+MODULAR_ORIG_COMMIT_REV_ID: 600bffec85863cc5a50bf5dc80cbeaff7560e2ab
+
+- [Benchmarking] Remove legacy argparse benchmark config parsing
+infrastructure
+
+Removes five functions from `benchmark_shared/config.py` that
+implemented the old argparse-based config-file-section-name loading
+infrastructure, and drops the corresponding tests.
+
+**Functions removed:**
+- `_add_config_file_arg_to_parser`
+- `_resolve_user_provided_config_file_cli_arg`
+- `_resolve_argparse_type`
+- `_load_user_provided_config`
+- `parse_benchmark_args`
+
+These are fully superseded by the cyclopts/Pydantic-based approach
+(`ConfigFileModel`). Also cleans up now-unused imports (`argparse`,
+`yaml`, `logging`, `Path`, `Sequence`, `deep_merge_max_configs`, etc.).
+
+MODULAR_ORIG_COMMIT_REV_ID: 1859540c76a7e18008e5e171a1c36c151376d9ed
+
+- [stdlib] Move `Atomic` types into new `atomic` module
+
+Move the `Atomic`, `Consistency`, and `fence` APIs out of
+`std.os.atomic`
+into a dedicated top-level `std.atomic` module. Atomic synchronization
+primitives are a general-purpose concurrency facility, not part of the
+`os` interface, so giving them their own module better reflects their
+role.
+
+MODULAR_ORIG_COMMIT_REV_ID: 4786e27ea77ac528de45675d2c8ae8e0d048c4cf
+
+- [stdlib] fixed a docstring
+
+Replaced both occurrences with `String.byte_length`. The output value
+(`5`) is unchanged since `&#34;hello&#34;` is ASCII.
+
+MODULAR_ORIG_COMMIT_REV_ID: 2d75fc383e8f1e5300457c2d5783a8292168f099
+
+- [Benchmarking] Fix missing CSV output from sweep benchmark script
+
+The refactor (Move sweep orchestration logic into benchmark_serving.py)
+#83361 moved the sweep loop into
+main_with_parsed_args, which collected all BenchmarkRunResults into a
+list before returning. This meant CSV rows were only printed after every
+benchmark step completed, rather than inline after each step as before.
+
+Convert main_with_parsed_args from returning list[BenchmarkRunResult] to
+Iterator[BenchmarkRunResult] (a generator). Each result is now yielded
+as soon as its benchmark step finishes, so the sweep script&#39;s CSV writer
+prints each row immediately -- restoring the original streaming
+behavior.
+
+MODULAR_ORIG_COMMIT_REV_ID: dd0810698fa4a81849f4f56812c694d28393b8d9
+
+- [GC] Move `EmptyBufferOp` to use dangling pointer. Add
+`to_device_buffer`.
+
+With `UnsafePointer` no longer supporting `NULL` we need to make
+`ManagedTensorSlice` correctly deal with `EmptyBufferOp` which
+previously used a null pointer. Instead of moving `ManagedTensorSlice`
+to hold an `Optional[UnsafePointer]` to represent &#34;nullable&#34;, the
+cleaner solution is to have `EmptyBufferOp` produce a &#34;dangling
+pointer&#34;. This is **ok** because we can keep track of the pointer&#39;s
+validity via the size of the tensor or the paths this &#34;empty buffer&#34; go
+down never have their pointer checked/dereferenced.
+
+This also adds a `to_device_buffer` method on `ManagedTensorSlice` to
+stream line `DeviceBuffer` creation.
+
+MODULAR_ORIG_COMMIT_REV_ID: b9057a44cf16d5508222b649c140fa9ed48c6057
+
+- [MAX] Fix StackedLinear weight mapping regressions introduced by QKV
+consolidation
+
+Two bugs introduced by the StackedLinear consolidation commit:
+
+1. Llama3 GGUF adapter mapped attention Q/K/V weights to the wrong key
+namespace
+after AttentionWithRope switched to StackedLinear child modules. Split
+the GGUF
+mapping into separate non-quantized (new `qkv_proj.{q,k,v}` namespace)
+and
+quantized (legacy `q_proj/k_proj/v_proj` namespace for
+`GGUFQAttentionWithRope`)
+variants selected by pipeline encoding. Also extend GPTQ desc_act
+perm_idx
+   cleanup to cover both old and new key names.
+
+2. `StackedLinear.shard()` dropped `has_bias` when constructing
+stacked-mode shard
+instances, silently omitting bias weights from sharded multi-GPU models.
+Primarily affected InternVL vision attention (stacked QKV + bias +
+multi-GPU).
+
+MODULAR_ORIG_COMMIT_REV_ID: eb5d1c122ce7aff4ad9d8e44aaf39332acfdb4f7
+
+- [mojo-lang] Move struct reflection impl to stdlib.
+
+This removes the `__struct_field_types` and related keywords from
+Mojo.  This simplifies the compiler and makes it easier to evolve
+the reflection features in a library-only way.
+
+MODULAR_ORIG_COMMIT_REV_ID: 0d76e5eed2eb596e14f14c14622aac5b1f8fcef2
+
+- [Docs] Fix RST formatting in architecture docstrings
+
+Fixed Sphinx warnings-as-errors docstring.
+
+MODULAR_ORIG_COMMIT_REV_ID: 01c16d4bf81dea86feba2b662146d4cc7ef005ea
+
+- [Docs] Add QuantFormat to max.nn API docs and quantization guide
+
+Adds QuantFormat to the max.nn API reference and updates the
+quantization
+guide to point FP8/FP4 model authors to QuantFormat and QuantConfig.
+
+MODULAR_ORIG_COMMIT_REV_ID: 03a0a5dc5417ec6b71c9c518622642d4c3f4ab6e
+
+- [docs] Add landing page for the language reference
+
+MODULAR_ORIG_COMMIT_REV_ID: ea6f404954aee7eaacd315a635781db32c5ffc75
+
+- [docs] Update custom ops matmul introduction
+
+Updates the introduction section to Custom ops for matmul.
+
+MODULAR_ORIG_COMMIT_REV_ID: 53faa44a610289c4e0a99870c10ec61c1cdca218
+
+- [MAX] Order wan_comparison configs from largest to smallest
+
+Reorder VARIED_CONFIGS in descending memory footprint order so the
+biggest allocation lands first while the memory manager has maximum
+headroom, matching the descending strategy in wan_mem_repro.py. This
+allows more configurations to succeed before hitting OOM.
+
+Also update wan_mem_repro.py to add the 480p_81f config, rename config
+keys for clarity, default to Wan2.2, and rework the --order flag to
+support escalating/descending with all three configs.
+
+MODULAR_ORIG_COMMIT_REV_ID: fcb8680aabb826df83455d6f4c7ff53b1afcb929
+
+- [MAX] Use fused norm kernels and bf16 RoPE in Wan transformer
+
+Replace decomposed f32 WanLayerNorm/WanRMSNorm with fused
+ops.layer_norm/ops.rms_norm which accumulate in f32 internally
+via the GPU warp-tiling kernel. Compute RoPE multiply-add in bf16
+instead of casting to f32. Remove redundant dtype cast after
+flash_attention_gpu in cross-attention.
+
+These changes simplify the graph (fewer nodes for the compiler to
+pattern-match) while preserving numerical behavior.
+
+MODULAR_ORIG_COMMIT_REV_ID: ead8f4dadfef7f008364e9dd9b191d4457a608b3
+
+- [MAX] Add `ReduceGroupNormOp` handler to MO eager interpreter
+
+MODULAR_ORIG_COMMIT_REV_ID: 0271f8dede5b4c99a5b5a42c2c1d731eac0f6d57
+
+- [Docs] Fixes API autodocs-process-bases issue
+
+Fixes a visual bug.
+
+MODULAR_ORIG_COMMIT_REV_ID: 0eee650a7355ee724e6f72f225af5d0fdf3e83d6
+
+- [docs] DOCS-1131: Slims down field lifetimes and adds initialization
+links
+
+MODULAR_ORIG_COMMIT_REV_ID: 69260cd01f17e7d2a68d53a51629b301ba75b020
+
+- [stdlib] Introduce `enqueue_cpu_function` and `enqueue_cpu_range` to DeviceContext.
+
+Replace use of the AsyncRT Task/TaskGroup wrappers in `sync_parallelize`. It now
+optionally takes a DeviceContext argument to execute the work on. If none is
+specified, it creates a default CPU DeviceContext. These are only supported by CPU DeviceContexts (DeviceContext(api=&#34;cpu&#34;)).
+
+MODULAR_ORIG_COMMIT_REV_ID: 8734ba9adf5bf2916dbd4a446dee6ed6e45db6dd
+
+- [bazel] Move common dependencies to the base dependency group
+
+I&#39;m planning to do some refactoring here, and I noticed that these
+dependencies are common to all groups but aren&#39;t platform specific
+themselves, so we can consolidate them. This will be important as I&#39;ll
+be introducing some conflicts in the future.
+
+Note that this doesn&#39;t affect the Bazel lockfile, so this is an NFC.
+
+MODULAR_ORIG_COMMIT_REV_ID: 186ecc7d76ac7de6d78cc630ea23fb1fe762e358
+
+- [MAX] Add ReduceRmsNormOp handler to MO eager interpreter.
+
+MODULAR_ORIG_COMMIT_REV_ID: 141925a548367c712ee772f9ec7f8292078e4c0e
+
+- [Kernels][AMD] Native MXFP4 Block-Scaled Matmul
+
+## Summary
+Add a native MXFP4 block-scaled matmul kernel for AMD CDNA4 (MI355X)
+using the `cdna4_block_scaled_mfma` wrapper for the
+`V_MFMA_SCALE_F32_16x16x128_F8F6F4` instruction. This bypasses the
+existing dequant-to-FP8 path (`mxfp4_dequant_matmul_amd`) by feeding
+packed FP4 data and E8M0 scales directly to the hardware.
+### Key design decisions
+- **16x16x128 MFMA shape**: The only f8f6f4 shape that supports
+FLOAT4_E2M1 with 4 accumulators per lane (the 32x32x64 variant uses 16
+accumulators and may be added later for better per-32 MX scale
+compliance).
+- **Direct GMEM loading**: Data is loaded directly from global memory
+into registers using the MFMA&#39;s native row-major lane mapping (`lane_row
+= lane_id % 16`, `lane_chunk = lane_id / 16`). The blocked-product SMEM
+layout used by `AMDMatmul` for BF16/FP8 is incompatible with the FP4
+MFMA&#39;s data mapping. SMEM pipelining will be added in a follow-up for
+performance.
+- **B/A operand swap**: Following the AMD MFMA convention (consistent
+with `gpu_mma(c, b, a, c)` in the existing kernel infrastructure), B is
+passed as `src_a` and A as `src_b`.
+- **FP4 zero-extension**: Each lane loads 16 bytes of packed FP4 data
+and zero-extends to `SIMD[uint8, 32]` for the MFMA operand, per the ROCm
+blog: &#34;128 bits contain data, while the remaining 128 bits are zero.&#34;
+- **Per-MFMA-call scaling**: The CDNA4 hardware applies ONE E8M0 scale
+per lane per MFMA call, covering the entire K=128 dimension. The MX
+format specifies per-32-element scales (4 groups per K=128), but the
+hardware does not apply these individually. For correctness with the
+current per-32 scale tensors, all 4 MX groups within each MFMA&#39;s K range
+must share the same scale value.
+### Files changed
+- **`max/kernels/src/linalg/matmul/gpu/amd/mxfp4_matmul_amd.mojo`**
+(new): Kernel implementation with `BlockScaledMmaOp` (MFMA + scale
+management), `MXFP4MatmulAMD` (kernel struct), and
+`mxfp4_block_scaled_matmul_amd()` entry point.
+- **`max/kernels/src/linalg/matmul/gpu/amd/__init__.mojo`**: Export
+`mxfp4_block_scaled_matmul_amd` and `MXFP4MatmulAMD`.
+- **`max/kernels/test/gpu/linalg/test_mxfp4_matmul_amd.mojo`** (new):
+Test suite validating against a per-element GPU reference kernel using
+`llvm.amdgcn.cvt.scalef32.pk.f32.fp4` for FP4 dequantization. Covers
+M/N/K combinations from 128x128x128 to 128x128x1024.
+## Test plan
+- [x] 128x128x128 — single block, single K-tile
+- [x] 128x128x256 — K-loop with 2 iterations
+- [x] 128x128x512 — deeper K-loop
+- [x] 256x128x256 — multiple blocks in M
+- [x] 128x256x256 — multiple blocks in N
+- [x] 256x256x256 — multiple blocks in M and N
+- [x] 256x256x512 — multi-block with deeper K
+- [x] 128x128x1024 — stress: 8 K-iterations
+- [x] All tests pass with random packed FP4 data and random E8M0 scales
+(groups-of-4 identical along K)
+MODULAR_ORIG_COMMIT_REV_ID: 4b94e462461c3cfc0cc39ad13ad8bf0aeb64322d
+
+- [Kernels] Replace null pointer sentinels with Optional in GPU kernels.
+
+Replaces the `UnsafePointer(_unsafe_null=())` pattern with
+`OptionalReg[UnsafePointer[...]] = None` for optional pointer parameters
+across MLA decode, convolution, matmul, and KV cache kernel interfaces.
+
+MODULAR_ORIG_COMMIT_REV_ID: 6022a687edcbbfcc4b709bd63544ca9e58a6d601
+
+- [Mojo] Remove Dead Code (#83096)
+
+These lingering effects are unused and Claude likes to reference them
+now and again. Eliminate them.
+
+MODULAR_ORIG_COMMIT_REV_ID: c42899c5861cf6bce2dba831baecda83a768d11b
+
+- [Examples] Migrate Mojo GPU function examples to TileTensor
+As part of our process of moving from LayoutTensor to its success in
+TileTensor, this updates our Mojo GPU function examples to use
+TileTensor.
+
+MODULAR_ORIG_COMMIT_REV_ID: bb1389adbaa76a84206992a44f5e32a59ee7f123
+
+- [Models] Fix weight loading bug exclusive to `FLUX.2-Klein-9B` variants
+
+The `FLUX.2-Klein-4B` checkpoints pruned some unused keys, but the
+`FLUX.2-Klein-9B` checkpoints didn&#39;t, leading to a weight loading bug
+that only appeared in the `9B` models.
+
+MODULAR_ORIG_COMMIT_REV_ID: ae0a8d565644a77533cad901547e09f57871842d
+
+- [mojo-stdlib] Generalize variadic reduction algorithms
+
+This generalizes the _ReduceVariadic* algorithms to take and return
+a value plus a list to reduce against, instead of requiring the
+source/dest of the reduction to also be a list.  This allows us to
+improve clients to not generate a ton of temporary paramlists. This
+should be a (tiny) compile time improvement by not generating
+unneeded intermediate lists.
+
+MODULAR_ORIG_COMMIT_REV_ID: 95c7bc4fc3aa18da1c9dac9f491261e060313bc0
+
+- [Eagle] Remove syncs in Eagle+Kimi
+
+The device transfers of the return_n_logits range can be replaced with a
+collective. This allows us to run with device graph capture with 1 draft
+token.
+
+MODULAR_ORIG_COMMIT_REV_ID: 74d2a7470d2ce5f2c6af34a2dd406c358bb75a2d
+
+- [Docs] Fix docstring formatting in max.interfaces and strip Pydantic
+boilerplate
+
+- Fix docstring formatting across `max.interfaces` public APIs: remove
+  type prefixes from `Returns:` sections, remove type annotations from
+  `Args:` parameters, fix backtick formatting, and rename non-standard
+  `Configuration:` section labels.
+- Fix prose in the `Pipeline` class docstring to follow the style guide.
+- Add a Sphinx `autodoc-process-docstring` hook that strips inherited
+  Pydantic `BaseModel.__init__` boilerplate from all generated class
+  docs globally.
+
+MODULAR_ORIG_COMMIT_REV_ID: c790bc3fd5055c6bf3a070b3e7f0c169a97b1612
+
+- [Kernels][AMD] update hostcall interface with better atomics (#83518)
+
+MODULAR_ORIG_COMMIT_REV_ID: 58012998b79993f318294e596032feac261962f5
+
+- [Serve] Log draft acceptance rate per draft position
+
+Add per-position acceptance rate tracking for speculative decoding to
+help diagnose and tune draft model performance. The per-position rates
+show the acceptance probability at each draft token position.
+
+Changes:
+- Extended SpeculativeDecodingMetrics with accepted_per_position and
+num_verifications fields to track per-position acceptance counts
+- Updated update_contexts_and_compute_metrics_standalone to compute
+per-position acceptance from first_rejected_tokens
+- Updated AsyncBatch.sync_and_process_outputs for unified EAGLE path
+- Added acceptance_rate_per_position field to BatchMetrics
+- Added per-position rates to scheduler log output (e.g., &#34;Per-Pos:
+[p0=90%, p1=75%, p2=50%]&#34;)
+- Added OTEL histogram metric
+maxserve.spec_decode.acceptance_rate_per_position with position label
+
+Closes SERVOPT-1215.
+
+MODULAR_ORIG_COMMIT_REV_ID: 64d866277683270441121c229ebebf403fd1dee5
+
+- [stdlib] Make `HostBuffer`&#39;s pointer no longer null.
+
+The goal is to make `HostBuffer` and `DeviceBuffer` not be nullable.
+This aligns that that goal even though the underlying pointers _can_ be
+null, we don&#39;t invoke UB in those cases so it is okay for now.
+
+MODULAR_ORIG_COMMIT_REV_ID: 813f6adb748a57c312077ee2448984892c7206e8
+
+- [MO] Use mo.bundle as input/output type for mo.parallel.
+
+Use `mo.bundle` as the input and result type for `mo.parallel`, instead
+of a range of variadic arguments.
+
+The Python API is updated to build bundle types, but the user still only
+needs to pass in list of Tensor for now. The `extra_inputs` is renamed
+to support the signal buffer list.
+
+MODULAR_ORIG_COMMIT_REV_ID: 32953a2776310a96c0fd0518ba034747627e4ab4
+
+- [CI] Extract is_vision_model() helper in smoke tests
+
+Preparation to fix the case sensitive HF caching issue.
+
+MODULAR_ORIG_COMMIT_REV_ID: b0073a1882e562c75adac348d4c4cbf6addf88a4
+
+- [Models] Add Llama-3.2-1B-Instruct to hf-repo-lock
+
+Pin meta-llama/Llama-3.2-1B-Instruct in hf-repo-lock.tsv.
+
+MODULAR_ORIG_COMMIT_REV_ID: d56c3ddcc64524ead6515a6dc110a80b1378fdf0
+
+- [MAX] Refactor: extract sharding rules module for placement propagation
+
+Extract placement propagation logic from the existing SPMD dispatch code into a standalone sharding rules module. This is primarily a refactor — the rules already existed inline within each distributed op, but were entangled with dispatch mechanics. Now each rule is a pure function on TensorLayout metadata (shapes, placements, mesh topology), completely independent of the graph compiler, interpreter, or any tensor data. This makes the placement logic testable, composable, and easy to reason about in isolation.
+The core idea: every op declares what input placements it needs and what output placements it produces, via a `RuleSignature = tuple[suggested_args, output_mappings]`. The suggested args tell a downstream `redistribute()` call exactly how to reshard incoming tensors before per-shard dispatch. This cleanly decouples &#34;what placements does this op want?&#34; from &#34;how do we execute per-shard?&#34; — the rule only answers the first question. This commit only introduces the high-level rule structure; the `redistribute()` wiring comes in a follow-up.
+
+For now, rules are conservative: the only placement change they ever suggest is resolving Partial placements to Replicated (triggering an all-reduce). Sharded placements pass through unchanged, and rules reject operations that cannot be performed on a sharded axis (e.g., reducing along a sharded dim).
+
+MODULAR_ORIG_COMMIT_REV_ID: ce3de9655efbbc2d2de5488591a154eb75dbb18f
+
+- [Release] Update lockfiles to point to latest nightly version: 26.3.0.dev2026041605
+
+- [Kernels] Generalize grouped matmul block scaled registration to allow
+MXFP4
+
+This unblocks MXFP4 for grouped matmul from the python side.
+Also renames `grouped_dynamic_scaled_nvfp4_matmul` to
+`grouped_matmul_block_scaled`.
+This is because the `dynamic` (referring to dynamically quantized
+activations I assume), is handled outside of this operator. The function
+is no longer NVFP4 specific, but to be used for all block scaled
+formats: MXFP4, NVFP4 (and future MXFP6, MXFP8)
+MODULAR_ORIG_COMMIT_REV_ID: 418f4e7176beeb68271e5d87c1c32b3188d7bc34
+
+- [stdlib] Swap `compare_exchange` ordering arguments
+
+List `success_ordering` before `failure_ordering` in
+`compare_exchange` to match the convention used by C++, Rust,
+and other languages.
+
+MODULAR_ORIG_COMMIT_REV_ID: f24b40a5f8f53fe26664cfb7e272c6227fbcc437
+
+- [Kernels] Enable compute epilogue fusion for block scaled matmul
+
+This PR enables cmpute epilogue fusion for block scaled matmuls.
+
+MODULAR_ORIG_COMMIT_REV_ID: 0d458ab8709492c8e6d22b18a4b6a014ef3134a5
+
+- [Models] Fix V3 Qwen3 text encoder weight loading
+
+This PR applies the same weight adapter fix to the V3 Qwen3 text encoder
+as PR \#83511 did for the V2 Qwen3 text encoder. With this PR,
+FLUX.2-Klein-V3 is no longer broken on `main`.
+
+MODULAR_ORIG_COMMIT_REV_ID: 112a5f665ec825833b1206aaefa6d3a850baa666
+
+- [Models] Implement ModuleV2 variant of FLUX.2-Klein
+
+MODULAR_ORIG_COMMIT_REV_ID: 33e0e000c1ccaeae97dc495fdd1ad67b84521031
+
+- [stdlib] Fix docstring examples to pass LSP validation
+
+Empty the `_NO_DOCSTRING_LIST` in the LSP parse-stdlib test by fixing
+all 46 docstring code examples across the standard library. Each mojo
+block in a docstring is validated independently by the LSP server, so
+every block needs its own imports and definitions.
+
+Common fixes applied:
+- Add missing imports (`from std.X import Y`)
+- Add `@fieldwise_init` to example structs that use field construction
+- Replace stale `UnsafePointer.alloc()` with free function `alloc()`
+- Comment out intentional-error lines in `dict.mojo`/`list.mojo`
+- Fix wrong method/field names (`.center()` → `.ascii_center()`,
+  `Scope.CTA` → `Scope.BLOCK`, `platform_alias` → `platform_map`)
+- Wrap capturing closures in `def main():` for proper scoping
+- Use `run[func2=sleeper]` keyword syntax for benchmark examples
+- Replace `%#` hidden-import prefix with regular imports. In the future,
+  it would be nice to support this in the LSP potentially.
+- Change pseudocode blocks from ```mojo to ```text
+- Fix `Progress.__exit__` to return `Bool` (was returning `None`). This
+  was a genuine bug.
+- Remove stale entries for renamed/deleted files
+
+MODULAR_ORIG_COMMIT_REV_ID: 030b5212090bf7914df29b914b752e18c3e95276
+
+- [Models] Fix V2 Qwen3 text encoder weight loading
+
+The V2 Qwen3 text encoder was reusing Llama3&#39;s
+`LLAMA_SAFETENSOR_MAPPING`, which rewrites `q_proj`/`k_proj`/`v_proj`
+into the fused `qkv_proj.{q,k,v}` form. This is wrong for
+`EncoderAttention`&#39;s unfused Linears, so it caused weight loading to
+fail. This PR adds a Qwen3-specific weight adapter which fixes the
+issue.
+
+MODULAR_ORIG_COMMIT_REV_ID: 5e87c805bb8922ebf0a9baf86ed4bc303c6394f4
+
+- [Models] Re-enable Gemma-4 MoE (no DGC) in smoke test.
+
+MODULAR_ORIG_COMMIT_REV_ID: f358e9a4b248e5f54d3608ddc7f29174673778d0
+
+- [MAX] Add NonMaximumSuppressionOp Handler in Interpreter
+
+* Adds HostOnly NonMaximumSuppresionOp handler for Interpreter
+* Adds NonMaximumSuppresionOp two stage mojo kernel with a &#34;mark and
+sweep&#34; esque approach
+
+MODULAR_ORIG_COMMIT_REV_ID: 2ab356a73aa6974fd1f45b49a567acadc5832965
+
+- [MAX] Add `ConstantExternalOp` and `ConstantScalarOp` interpreter
+handlers.
+
+MODULAR_ORIG_COMMIT_REV_ID: 213cae8e809a97ac2c2b775ee330e857f00f4650
+
+- [docs] DOCS-1406: Correct inference section of function reference
+
+MODULAR_ORIG_COMMIT_REV_ID: 1466a015407e35682f740f23400cc4dd47d56686
+
+- [Kernels] Enable PDL + weight prefetching for SM100 Kimi BMM
+
+Enable PDL + weight prefetching for SM100 Kimi BMM
+
+MODULAR_ORIG_COMMIT_REV_ID: 865bab103d467668b50cea079c1826a58b686d22
+
+- [MAX] Fuse CFG guidance into Wan UniPC scheduler step graph
+
+Merge the separate guidance and UniPC step compiled graphs into a
+single `_guided_schedule_graph`.  The fused graph runs
+`uncond + scale * (cond - uncond)` followed by the UniPC corrector
+and predictor in one graph execution, eliminating a round-trip.
+
+When CFG is disabled, scale=1.0 with a zero uncond buffer makes the
+guidance formula a no-op, removing the need for a separate code path.
+
+Also inlines the transformer forward passes directly into
+`_run_denoising_phase` for clearer control flow and adds a
+`_make_zero_buffer` helper with bfloat16 support.
+
+MODULAR_ORIG_COMMIT_REV_ID: de2e89962fd421ccbdc5f7413ddaa75e8b5c8206
+
+- [MAX] Add `roi_align` op handler to MO eager interpreter.
+
+MODULAR_ORIG_COMMIT_REV_ID: 4914e85fcabfe8803ff07965c247a005046ba2ee
+
+- [Models][CI] Add Kimi-K2.5-NVFP4 LongBench v2 dataset evals
+
+Add EP+DP and EP+TP LongBench v2 evaluation configs for
+nvidia/Kimi-K2.5-NVFP4, matching the nightly benchmark variants. Both
+run on 8x B200 GPUs with fp8 KV cache and a 6.5-hour timeout.
+
+MODULAR_ORIG_COMMIT_REV_ID: bb15956199ec84e4914b4fbaf64e1534e06ccb2c
+
+- [MAX] Fuse cast and I2V concat into Wan transformer pre-processor
+
+Absorb the separate wan_cast_f32_to_mdtype and wan_i2v_concat compiled
+graphs into the wan_pre pre-processor graph. The pre-processor now
+accepts f32 latents (casting to model dtype internally) and an optional
+I2V condition tensor (concatenated along the channel axis before patch
+embedding). This eliminates 2 compiled graphs per denoising step.
+
+MODULAR_ORIG_COMMIT_REV_ID: 0237395167c228488e15235cddd03684248712cf
+
+- [MAX] Add `ops.roi_align` graph op and `F.roi_align` functional wrapper,
+
+MODULAR_ORIG_COMMIT_REV_ID: bd238ebfa830c5704d1238d954928bc3b739500a
+
+- [stdlib] Fix benchmark names
+
+MODULAR_ORIG_COMMIT_REV_ID: a09d0835ffc57273b73f27c91f68f0e7654b7842
+
+- [MAX] Remove unused CFG batching graphs from Wan executor
+
+Remove four compiled helper graphs (duplicate_cfg_latents,
+duplicate_cfg_timesteps, concat_cfg_embeddings, split_cfg_predictions)
+that were compiled at init but never executed. The Wan pipeline uses
+unbatched two-pass CFG which is the correct approach for block-level
+compilation where VRAM is the constraint.
+
+MODULAR_ORIG_COMMIT_REV_ID: ef06b01ab5450c6be4f259fcef660495a3a2fa8d
+
+- [stdlib] utilities for explicit null pointer work.
+
+This adds helpful utilities for upcoming null pointer work.
+1. `TileTensor` constructor from `OptionalReg[UnsafePointer]`
+2. Makes `parallel_memcpy` work with `Optional[UnsafePointer]`
+3. Adds an implicit conversion from `OptionalReg` -&gt; `Optional`.
+4. And overload for `unsafe_cast` that works with
+`OptionalReg[UnsafePointer]`.
+
+MODULAR_ORIG_COMMIT_REV_ID: 9ee79ff180fe71e7d10cf7be5139b82ec3cbf8e2
+
+- [Kernels] Enable block scaled matmul PDL by default
+
+Block scaled matmul uses the same epilogue backend as normal matmul so
+it&#39;s safe to enable the PDL for it.
+
+MODULAR_ORIG_COMMIT_REV_ID: 1d49cff96f854ab5a7255b59b26b1442b54fa5d6
+
+- [MAX] Combine Wan transformer blocks into single compiled model
+
+Compile all 40 transformer blocks as a single Model graph instead of
+40 separate Models. Also removes the broken nvidia-smi VRAM check
+from MoE dual-load (MAX pre-allocates the full GPU pool, so the
+check always fails) and unconditionally compiles both expert models.
+
+MODULAR_ORIG_COMMIT_REV_ID: 5d6045dafc5ca53c252dd0365d77fe9ed8850b56
+
+- [Release] Update lockfiles to point to latest nightly version: 26.3.0.dev2026041520
+
+- [Models] Prevent false-positive distilled-Klein CFG warnings
+
+The &#34;guidance scale ignored on distilled Klein&#34; and &#34;CFG requested but
+no negative prompt&#34; warnings fired on every request because the CLI
+defaults `guidance_scale` to 3.5. This PR gates both warnings on
+`context.explicit_negative_prompt` so that they only fire when the user
+actually supplies a negative prompt.
+
+MODULAR_ORIG_COMMIT_REV_ID: e9975791bb594d18e72716cc8aeeab3f9daff4d8
+
+- [Kernels] Stop test_tiled_matmul_backtoback from building
+
+MODULAR_ORIG_COMMIT_REV_ID: 7aa5063bb9dabc5049dc70da4c52338298995edf
+
+- [MAX] Add Wan memory manager repro script
+
+Minimal reproduction script to test memory manager behavior with
+varying resolutions in the Wan T2V pipeline.
+
+MODULAR_ORIG_COMMIT_REV_ID: 7a359529675264094781691b2eb0f694b6c7097e
+
+- [Kernels] add `mo.distributed.ep.dispatch.mxfp4`
+
+This parallels the work done to add `mo.distributed.ep.dispatch.nvfp4`.
+
+MODULAR_ORIG_COMMIT_REV_ID: bc2cade4accdf8fffb0cd11295a52d87c7a8b9cd
+
+- [MAX] Add StackedLinear layer to consolidate QKV weight management
+
+Introduces a StackedLinear module that manages Q/K/V projections as
+stacked or unfused children, handling quantization, bias, clipping, and
+sharding internally. Converts gemma3, gpt_oss, olmo2, qwen3, diancie,
+internvl, and qwen3vl_moe attention layers to use StackedLinear.
+
+Updates weight adapters and harness weight names to use the new
+qkv_proj.{q,k,v}.weight namespace.
+
+MODULAR_ORIG_COMMIT_REV_ID: 924b3e5ab804e295f580bfeafcef32588ee276c6
+
+- [MAX] Fix Eagle Llama3 draft model device placement
+
+Override draft model device assignment to match the target model so
+weights land on the correct GPU when running on non-zero devices.
+
+MODULAR_ORIG_COMMIT_REV_ID: 5fe336d534f8ddb45adf5d3e2b4205e02143e994
+
+- [MAX] Add Wan T2V performance comparison script
+
+Adds a comparison script that benchmarks Wan text-to-video generation using
+both diffusers (PyTorch) and MAX backends. Reports split preprocessing and
+execution timings with optional MP4 video output via --save-mp4.
+
+MODULAR_ORIG_COMMIT_REV_ID: 020ab434ec2830398f7e305c0af9720fbee7cb2f
+
+- [MAX] Use the actual block size (16) for NVFP4 for WeightScaleSpec (#83389)
+
+MODULAR_ORIG_COMMIT_REV_ID: 3b2a778869a6d341f0c9f8051d6b41d127e594b2
+
+- [Serve] Accept `PipelineExecutor` in `simple_offline_generation`
+
+The script&#39;s pipeline-model type check only accepted `DiffusionPipeline`
+subclasses, which rejected every ModuleV2 `PipelineExecutor`. This PR
+fixes the bug and adds a drive-by mypy fix.
+
+MODULAR_ORIG_COMMIT_REV_ID: 9a80d9204d03cfab8c4255a527809bf8aba22d82
+
+- [Models] Unfuse attention layers to use rope_split_store_ragged
+
+Reland of #82537 with a fix for the missing
+rope_split_store.ragged.paged.with_position_id kernel that broke
+Qwen2.5-VL. Adds Mojo kernel, kernel unit tests, and a Qwen2.5VL
+layer harness test.
+
+MODULAR_ORIG_COMMIT_REV_ID: ae39b492510b88f82af134d494e6d09b8ca3bcba
+
+- [CAPI] Fix layering check on CompileTest
+END_PUBLIC
+
+This was previously not getting built, but now it is due to how
+bazel-diff is configured. Maybe arguably we should match the previous
+behavior, but as long as we&#39;re not exposing _too_ many existing errors
+we can just fix forward and not worry.
+
+MODULAR_ORIG_COMMIT_REV_ID: 4a5e8c63db5d636bfc721b597294d63700e67e21</div>
+</div>
+
+<a href="../project/modular_modular.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

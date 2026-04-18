@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (4 commits) - ruvnet/RuView - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (4 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/ruvnet_RuView.html">ruvnet/RuView</a> /
+    Updates in main (4 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/ruvnet_RuView.html">ruvnet/RuView</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-04-16 14:38 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/ruvnet/RuView/commits/main" target="_blank">https://github.com/ruvnet/RuView/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Прошивка обновлена до версии 0.6.1, внедряя исправление критической ошибки ESP32, при которой `node_id` мог некорректно сбрасываться; теперь корректный идентификатор последовательно захватывается и используется. Кроме того, скрипт `provision.py` был улучшен для совместимости с esptool v5 и теперь предотвращает случайное стирание конфигураций NVS при частичной прошивке, требуя явного ввода пользователя или флагов принуждения. Также был обновлен журнал изменений проекта для последних выпусков.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- chore: bump firmware version to 0.6.1
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- Merge pull request #393 from ruvnet/fix/esp32-node-id-clobber
+
+fix(firmware): defensive node_id capture prevents runtime clobber (#390)
+
+- fix(firmware): defensive node_id capture prevents runtime clobber (#390)
+
+Users on multi-node ESP32 deployments have been reporting for months
+that their provisioned `node_id` reverts to the Kconfig default of `1`
+in UDP frames and the `csi_collector` init log, despite boot showing:
+
+    nvs_config: NVS override: node_id=4
+    main: ESP32-S3 CSI Node (ADR-018) - Node ID: 4
+    csi_collector: CSI collection initialized (node_id=1, channel=11)
+
+See #232, #375, #385, #386, #390. The root memory-corruption path for
+the `g_nvs_config.node_id` byte has not been definitively isolated
+(does not reproduce on my attached ESP32-S3 running current source
+and the v0.6.0 release binary), but the UDP frame header can be made
+tamper-proof regardless:
+
+1. `csi_collector_init()` now captures `g_nvs_config.node_id` into a
+   module-local `static uint8_t s_node_id` at init time.
+2. `csi_serialize_frame()` reads `buf[4]` from `s_node_id`, not from
+   the global - so any later corruption of `g_nvs_config` cannot
+   affect outgoing CSI frames.
+3. All other consumers (`edge_processing.c` x3, `wasm_runtime.c`,
+   `display_ui.c`, `main.c swarm_bridge_init`) now go through a new
+   `csi_collector_get_node_id()` accessor instead of reading the
+   global directly.
+4. A canary at end-of-init logs `WARN` if `g_nvs_config.node_id`
+   already diverges from the captured value - this will pinpoint
+   the corruption path if it happens on a user&#39;s device.
+
+Hardware validation on attached ESP32-S3 (COM8):
+  - NVS loads node_id=2
+  - Boot log: `main: ... Node ID: 2`
+  - NEW log: `csi_collector: Captured node_id=2 at init (defensive
+    copy for #232/#375/#385/#390)`
+  - Init log: `csi_collector: CSI collection initialized (node_id=2)`
+  - UDP frame byte[4] = 2 (verified via socket sniffer, 15/15 packets)
+
+This is defense in depth - it shields the UDP frame from whatever
+upstream bug is clobbering the struct. When a user hits the original
+bug, the canary WARN will help isolate the root cause.
+
+Refs #232 #375 #385 #386 #390
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix: provision.py esptool v5 + refuse partial NVS flashes (#391) (#392)
+
+* fix: provision.py esptool v5 syntax + refuse partial NVS flashes (#391)
+
+Bug 1: `write_flash` -&gt; `write-flash` for esptool v5.x compat
+  - Actual flash command (flash_nvs, line 153) was already fixed
+  - Dry-run manual-flash hint (line 301) still printed old syntax
+
+Bug 2: Refuse partial invocations that would silently wipe NVS
+  - provision.py flashes a fresh NVS binary at offset 0x9000, which
+    REPLACES the entire csi_cfg namespace. Any key not passed on the
+    CLI is erased.
+  - Previously: `provision.py --port COM8 --target-port 5005` would
+    silently wipe ssid, password, target_ip, node_id, etc., causing
+    &#34;Retrying WiFi connection (10/10)&#34; in the field.
+  - Now: refuse unless all of --ssid/--password/--target-ip provided,
+    or --force-partial is set (prints warning listing wiped keys).
+
+Validation:
+  - Dry-run: binary generates to 24576 bytes, hint uses write-flash
+  - Safety check: partial invocation rejected with clear message
+  - Force-partial: warning lists keys that will be wiped
+  - Hardware: esptool v5.1.0 `read-flash 0x9000 0x100` works on
+    attached ESP32-S3 (COM8); NVS preserved, device reconnected at
+    192.168.1.104 with node_id=2 intact after reset.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+* docs: CHANGELOG catch-up for v0.5.5, v0.6.0, v0.7.0 (#367)
+
+The changelog was stale at v0.5.4 — three releases were cut without
+updating it. Added full entries for each, plus an [Unreleased] block
+for the #391 provision.py fixes.
+
+version.txt correctly stays at 0.6.0 — v0.7.0 was a model/pipeline
+release, not a new firmware binary. Latest firmware is v0.6.0-esp32.
+
+Closes #367
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;</div>
+</div>
+
+<a href="../project/ruvnet_RuView.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

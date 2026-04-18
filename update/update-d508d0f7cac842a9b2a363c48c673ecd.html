@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in dev (35 commits) - LMCache/LMCache - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in dev (35 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/LMCache_LMCache.html">LMCache/LMCache</a> /
+    Updates in dev (35 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/LMCache_LMCache.html">LMCache/LMCache</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-04-18 00:16 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/LMCache/LMCache/commits/dev" target="_blank">https://github.com/LMCache/LMCache/commits/dev</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление вносит значительные улучшения в управление кешем, в основном добавляя `cache_salt` в `ObjectKey` для изоляции кеша для каждого пользователя, что потребовало обширных изменений в моделях данных, форматах файлов и интерфейсах адаптеров, а также уточнения политик вытеснения. Оно также повышает производительность и стабильность за счет исправления утечек памяти, оптимизации вытеснения LRU и новых интерфейсов постоянства. Кроме того, значительно улучшена наблюдаемость благодаря новым функциям трассировки, подробным метрикам жизненного цикла кеша KV и логгеру хешей поиска для автономного анализа, что дополняется улучшениями CI/CD и основными архитектурными доработками.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- [MP] Add tracing functionality for storage manager (#3063)
+
+Signed-off-by: ApostaC &lt;yihua98@uchicago.edu&gt;
+
+- [ROCm] Make bare-host ROCm install self-sufficient (#3070)
+
+Signed-off-by: Shaoting Feng &lt;shaotingf@uchicago.edu&gt;
+Co-authored-by: Shaoting Feng &lt;shaotingf@uchicago.edu&gt;
+
+- [MP][Feat] Add cache_salt to ObjectKey for cache isolation (#3042)
+
+* [Feat] Add cache_salt to ObjectKey for per-user cache isolation
+
+Adds a ``cache_salt: str = &#34;&#34;`` field to ``ObjectKey`` and
+``IPCCacheEngineKey`` so same-content/different-user cache entries
+produce distinct keys. This is the data-model piece of the per-user
+L2 cache quota feature (PR2 of 6). PR1a (#3029) wired cache_salt
+through the adapter surface but left it a no-op until the data model
+landed; this PR makes it load-bearing.
+
+Key changes:
+
+- ``ObjectKey`` and ``IPCCacheEngineKey`` gain ``cache_salt`` field
+  participating in eq/hash. ``__post_init__`` on both rejects ``@`` in
+  the salt — this is the invariant the L2 adapter parsers rely on.
+- ``ipc_key_to_object_keys(ipc_key, chunk_hashes)`` reads
+  ``ipc_key.cache_salt`` internally. No separate parameter, so callers
+  cannot accidentally drop the salt.
+- Native connector, FS adapter Python, and FS adapter C++ all use a
+  leading ``@@`` marker to disambiguate salted from legacy keys. Legacy
+  files and wire payloads (empty salt) remain readable — existing
+  stored data is preserved.
+- msgspec encodes dataclasses as maps, so an old 7-field
+  ``IPCCacheEngineKey`` payload decodes on new code with ``cache_salt``
+  defaulting to ``&#34;&#34;``. New-on-old works because msgspec ignores
+  unknown map keys by default.
+
+Tests: 32 new cases covering serialization roundtrip (native + FS),
+validation (``@`` rejection), isolation semantics (eq/hash per salt),
+msgspec wire compat (old→new, new→new), and the FS C++ parser&#39;s
+legacy/salted/``@``-in-model paths.
+
+Signed-off-by: royyhuang &lt;roy.y.huang@gmail.com&gt;
+
+* [Fix] Expand cache_salt validation: reject /, \, NUL; add length cap
+
+Addresses review feedback on #3042:
+
+- cache_salt must not contain &#39;/&#39;, &#39;\&#39;, or NUL (in addition to &#39;@&#39;).
+  The FS adapter embeds salt into filenames — &#39;/&#39; would inject directory
+  separators; &#39;\&#39; is a Windows path separator; NUL terminates C strings
+  in the C++ connector.
+- Max length capped at 128 chars to stay within NAME_MAX (255) after
+  model_name, kv_rank, chunk_hash, and the .data extension are added.
+- Updated example external connector template
+  (examples/lmc_external_native_connector) to handle the @@ salted
+  key format, matching the in-tree csrc/storage_backends/fs/connector.cpp.
+- Added tests for /, \, NUL rejection and length cap on both ObjectKey
+  and IPCCacheEngineKey.
+
+Signed-off-by: royyhuang &lt;roy.y.huang@gmail.com&gt;
+
+* [Refactor] Always use @@-prefixed key format; deprecate legacy
+
+All new writes use the unified @@-prefixed format for both salted and
+unsalted keys:
+
+    @@&lt;cache_salt&gt;@&lt;model&gt;@&lt;rank&gt;@&lt;hash&gt;
+
+For empty cache_salt this becomes @@@model@rank@hash. The legacy
+3-field format (no @@ prefix) is still readable by all parsers for
+backward compatibility but emits a deprecation warning on the FS
+adapter read path. Re-storing a legacy entry automatically migrates
+it to the new format.
+
+This simplifies parsing — the @@ prefix is always present so there
+is no need to disambiguate based on field count (model_name may
+contain @ and would otherwise be ambiguous).
+
+Updated Python (native_connector + fs_l2_adapter), C++ (in-tree
+fs/connector.cpp), and the example external connector template.
+Tests updated: serialization format assertions reflect the @@@
+prefix for empty salt, and roundtrip tests verify the parser still
+handles legacy filenames.
+
+Signed-off-by: royyhuang &lt;roy.y.huang@gmail.com&gt;
+
+* [Refactor] Example connector: always emit @@-prefixed filename
+
+Aligns the example external native connector template with the
+in-tree csrc/storage_backends/fs/connector.cpp convention from the
+previous commit.
+
+Previously the example only emitted the @@ prefix when cache_salt
+was non-empty, leaving empty-salt keys in the legacy 3-field format.
+Now all files on disk use the unified @@-prefixed format (empty
+salt produces @@@model@...), and legacy inputs without @@ are still
+accepted on the read path for backward compatibility.
+
+Third-party connectors cloned from this template will produce
+migrate-compatible filenames out of the box.
+
+Signed-off-by: royyhuang &lt;roy.y.huang@gmail.com&gt;
+
+---------
+
+Signed-off-by: royyhuang &lt;roy.y.huang@gmail.com&gt;
+
+- [Misc] Reduce the logs generated by lazy memory allocator (#3068)
+
+[add] reduce the mp mode lazy alloc logs
+
+Signed-off-by: ApostaC &lt;yihua98@uchicago.edu&gt;
+
+- [Core] Add persistence interfaces and nixl persistence (#2938)
+
+* add persistence interfaces and nixl persistence
+
+Signed-off-by: YaoJiayi &lt;120040070@link.cuhk.edu.cn&gt;
+
+* update tests and docs
+
+Signed-off-by: YaoJiayi &lt;120040070@link.cuhk.edu.cn&gt;
+
+* fix cursor comments
+
+Signed-off-by: YaoJiayi &lt;120040070@link.cuhk.edu.cn&gt;
+
+* fix cursor comments
+
+Signed-off-by: YaoJiayi &lt;120040070@link.cuhk.edu.cn&gt;
+
+* update
+
+Signed-off-by: YaoJiayi &lt;120040070@link.cuhk.edu.cn&gt;
+
+* fix race
+
+Signed-off-by: YaoJiayi &lt;120040070@link.cuhk.edu.cn&gt;
+
+* remove redundant config
+
+Signed-off-by: YaoJiayi &lt;120040070@link.cuhk.edu.cn&gt;
+
+* fix usage double count
+
+Signed-off-by: YaoJiayi &lt;120040070@link.cuhk.edu.cn&gt;
+
+---------
+
+Signed-off-by: YaoJiayi &lt;120040070@link.cuhk.edu.cn&gt;
+
+- Fix: Safely handle layerwise cache shape dimensions in remote backend (#2751)
+
+* Fix: Handle layerwise cache shape dimensions for remote backends
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+
+* Fix mla + remote backend
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+
+* address cursor review comments
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+
+* fixes according to cursor review
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+
+* address cursor&#39;s review comments
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+
+* additional fix
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+
+* add assert if the shape has dimension with 0,
+which can&#39;t be properly handled by design
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+
+* address cursor&#39;s comments
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+
+* fix: avoid warning noise from zero-placeholder shapes in pad_shape_to_4d
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+
+* update docstring
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+
+* minor change to fix CI
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+
+* add default value for backward compatibility
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+
+* address cursor&#39;s comments
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+
+---------
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+
+- chore: expose package version via __init__.py (#3034)
+
+* chore: expose package version via __init__.py
+
+Import __version__ so that users can access
+the version string via `lmcache.__version__`.
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+
+* fix: guard _version import to handle missing build-generated file
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+
+---------
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+
+- Add scheduler instance_id and model_name to L0 KV lifecycle tracking (#3043)
+
+- Adapter sends os.getpid() and self.model_name in
+  report_block_allocations — no vLLM change needed
+- Protocol: [int, str, list[BlockAllocationRecord]]
+- Server passes instance_id and model_name to EventBus
+- L0LifecycleSubscriber keys shadow map by (instance_id, block_id)
+- Emit OTel histograms with instance_id and model_name attributes
+  for per-instance, per-model Prometheus metric slicing
+- Update EVENTS.md, METRICS.md, and observability.rst docs
+- Add test verifying OTel attributes on histogram data points
+
+Signed-off-by: yuwei &lt;yuwei@dev.local&gt;
+Co-authored-by: yuwei &lt;yuwei@dev.local&gt;
+
+- [Docs] Mirror lmcache/ layout in docs/design/ for discoverability (#3040)
+
+* moving the docs to docs/design/ and reorganize the docs/design folder
+
+Signed-off-by: ApostaC &lt;yihua98@uchicago.edu&gt;
+
+- [Hotfix][CI] Pin vLLM nightly to cu130 index to match CUDA 13 base image (#3061)
+
+The base image was bumped to nvidia/cuda:13.0.2-devel-ubuntu24.04 in
+#2981, but setup-env.sh installs vLLM from the generic nightly index
+(wheels.vllm.ai/nightly/vllm/), which resolves non-deterministically to
+either a cu128 or a cu130 torch wheel. When the resolver picks cu128,
+torch.utils.cpp_extension._check_cuda_version aborts the LMCache
+editable install with:
+
+    RuntimeError: The detected CUDA version (13.0) mismatches the
+    version that was used to compile PyTorch (12.8).
+
+#3055 tried to paper over this at runtime by apt-installing
+cuda-compiler-12-8 on mismatch and pointing CUDA_HOME at
+/usr/local/cuda-12.8, but cuda-compiler-*-* only ships nvcc -- not the
+CUDA math-library dev headers (cusparse.h, cublas.h, etc.). The build
+then fails deeper with a cryptic:
+
+    fatal error: cusparse.h: No such file or directory
+
+Every k3 build on dev since 10fd636e (2026-04-16 09:55 UTC) has failed
+this way because vLLM nightly happens to be publishing cu128 torch
+today. Extending the apt install list is a band-aid; the real fix is
+to stop resolving torch non-deterministically.
+
+Pin the install to vLLM&#39;s per-CUDA-major cu130 sub-index per the
+official vllm.ai install instructions. torch.version.cuda is now
+deterministically &#34;13.0&#34; and matches system nvcc 13, so
+_check_cuda_version passes with the system toolchain -- no CUDA_HOME
+override, no apt install, no HTML scraping.
+
+Also drop the HTML index scraper (no longer needed with the proper
+--extra-index-url flags) and replace the runtime alignment block with
+a small Python sanity check that fails with a clear message if the
+pin ever drifts again, so future breakage surfaces here instead of
+inside ninja.
+
+- Unblocks every k3 pipeline on dev.
+- Removes ~40 lines of CUDA version-alignment logic.
+- Keeps the pandas auto-heal loop from #3055 (that problem is
+  independent of this one).
+
+Signed-off-by: Yihua Cheng &lt;yihua98@uchicago.edu&gt;
+
+- [Hotfix][CI] Unblock CI: pandas          auto-heal + CUDA 12 build toolchain (#3055)
+
+- [Bugfix] fix some memory leak in cache_engine and eic connector (#2544)
+
+* [Bugfix] fix some memory leak in cache_engine and eic connector
+
+Signed-off-by: liubj77 &lt;liubj77@gmail.com&gt;
+
+* [Bugfix] fix some memory leak in cache_engine and eic connector
+
+Signed-off-by: liubj77 &lt;liubj77@gmail.com&gt;
+
+* format code
+
+Signed-off-by: liubj77 &lt;liubj77@gmail.com&gt;
+
+* optmize and add tests
+
+Signed-off-by: liubj77 &lt;liubj77@gmail.com&gt;
+
+---------
+
+Signed-off-by: liubj77 &lt;liubj77@gmail.com&gt;
+Co-authored-by: deng451e &lt;57919305+deng451e@users.noreply.github.com&gt;
+
+- feat(pd_backend): add pd_skip_proxy_notification to skip ZMQ proxy notification (#2874)
+
+* feat(pd_backend): add pd_skip_proxy_notification to skip ZMQ proxy notification
+
+The sender role (prefiller) currently requires pd_proxy_host and
+pd_proxy_port to be configured, and unconditionally creates a ZMQ PUSH
+socket to the proxy. This tight coupling prevents using LMCache DPD
+with external routers that manage the prefill-decode flow via HTTP.
+
+When pd_skip_proxy_notification is true, the sender skips the proxy
+config requirement, does not create the ZMQ PUSH socket, and does not
+send ProxyNotif after KV transfer. This allows LMCache DPD to work
+with any HTTP-based orchestrator that uses the prefill response as the
+KV transfer completion signal.
+
+Signed-off-by: Ziwen Ning &lt;ningziwe@amazon.com&gt;
+Signed-off-by: Ziwen Ning &lt;ziwen@ningziwen.com&gt;
+
+* address review comments
+
+- Make pd_proxy_host/pd_proxy_port assertions conditional on
+  pd_skip_proxy_notification being False, so the sender can start
+  without proxy config when notification is skipped.
+- Remove redundant self.skip_proxy_notification instance attribute;
+  use self.config.pd_skip_proxy_notification directly.
+
+Signed-off-by: Ziwen Ning &lt;ningziwe@amazon.com&gt;
+Signed-off-by: Ziwen Ning &lt;ziwen@ningziwen.com&gt;
+
+* docs: clarify pd_skip_proxy_notification is for external orchestrators only
+
+Update documentation and log message to explicitly state that
+pd_skip_proxy_notification=true is intended for external orchestrators
+(e.g., vLLM Production Stack router) and must not be used with
+LMCache&#39;s built-in disaggregation proxy (disagg_proxy_server.py),
+which depends on ZMQ notifications to coordinate prefill-decode flow.
+
+Signed-off-by: Ziwen Ning &lt;ziwen@ningziwen.com&gt;
+
+---------
+
+Signed-off-by: Ziwen Ning &lt;ningziwe@amazon.com&gt;
+Signed-off-by: Ziwen Ning &lt;ziwen@ningziwen.com&gt;
+
+-  [Observability] Per-request root OTel span and SpanRegistry for MP server tracing (#3033)
+
+* request root span for capture events
+
+Signed-off-by: deng451e &lt;838677410@qq.com&gt;
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- [Chore] add coding standard and PR review instructions (#3039)
+
+* [Add] coding standard and ai skills
+
+Signed-off-by: ApostaC &lt;yihua98@uchicago.edu&gt;
+
+* skill for create PR
+
+Signed-off-by: ApostaC &lt;yihua98@uchicago.edu&gt;
+
+---------
+
+Signed-off-by: ApostaC &lt;yihua98@uchicago.edu&gt;
+
+- [Chore] Remove v0 code  (#2968)
+
+[Chore] Remove v0 code
+
+Delete legacy v0 modules that are no longer used by the v1 runtime:
+
+- lmcache/server/ (v0 server; v1 server lives at lmcache/v1/server/)
+- lmcache/config.py, lmcache/protocol.py (v0 equivalents in lmcache/v1/)
+- lmcache/storage_backend/evictor/ (only used by the v0 server)
+- lmcache/storage_backend/serde/{fast,safe,torch}_serde.py (v0-only serializers)
+- tests/test_protocol.py and the unused lmserver_process fixture in
+  tests/conftest.py
+- pyproject.toml: drop the lmcache_v0_server entry point
+- .github/CODEOWNERS: drop the /lmcache/server/ entry
+
+Keep lmcache/storage_backend/serde/cachegen_* and serde.py because they
+are still imported by lmcache/v1/storage_backend/naive_serde. Flattening
+lmcache/v1/ into lmcache/ (and the remaining cleanup that enables) will
+follow in a separate PR.
+
+Signed-off-by: Samuel Shen &lt;slshen@uchciago.edu&gt;
+Co-authored-by: Samuel Shen &lt;slshen@uchciago.edu&gt;
+
+- [Feat][DAX] Optimize staged batched restore path and document modification (#2904)
+
+* Add a native batched memcpy helper and switch the DAX backend batched retrieve path to a persistent staged restore pipeline with region workers, a reusable staging slab, and broader correctness coverage.
+
+* docs: add DAX batched restore usage notes
+
+* [DAX] Remove dead restore cleanup parameter
+
+* [DAX] Share restore dispatch path for blocking get
+
+* [DAX] Document restore helper behavior
+
+Signed-off-by: DongDongJu &lt;commisori28@gmail.com&gt;
+
+- [Feat] Add is_user_level property and cache_salt param to EvictionPolicy (#3032)
+
+* [Feat] Add is_user_level property and cache_salt param to EvictionPolicy
+
+Add is_user_level property to EvictionPolicy base class (default False).
+The eviction controller uses this to decide whether to check per-user
+quotas or aggregate usage — no isinstance checks needed.
+
+Add cache_salt optional parameter to get_eviction_actions(). When set,
+user-level policies scope eviction to keys belonging to that user.
+Non-user-level policies (LRU, NoOp) accept and ignore the parameter.
+
+This is an interface extension only — no new policies or behavioral
+changes. UserLRUEvictionPolicy (follow-up PR) will override
+is_user_level to return True and use cache_salt for scoped eviction.
+
+Signed-off-by: royyhuang &lt;royyhuang@gmail.com&gt;
+Signed-off-by: royyhuang &lt;roy.y.huang@gmail.com&gt;
+
+* address comments
+
+Signed-off-by: royyhuang &lt;roy.y.huang@gmail.com&gt;
+
+---------
+
+Signed-off-by: royyhuang &lt;royyhuang@gmail.com&gt;
+Signed-off-by: royyhuang &lt;roy.y.huang@gmail.com&gt;
+
+- [Feat] Add cache_salt parameter to MP adapter interfaces (#3029)
+
+* [Feat] Add cache_salt parameter to MP adapter interfaces
+
+Add cache_salt=&#34;&#34; default parameter to scheduler and worker adapter
+methods to prepare for per-user cache isolation. This is a no-op
+change — all defaults are empty string, preserving existing behavior.
+
+Scheduler adapter:
+- maybe_submit_lookup_request: add cache_salt param
+- free_lookup_locks: add cache_salt param
+- _create_key: add cache_salt param (accepted, not yet forwarded)
+
+Worker adapter:
+- submit_store_request: add cache_salt param
+- submit_retrieve_request: add cache_salt param
+- batched_submit_store_requests: add cache_salts list param
+- batched_submit_retrieve_requests: add cache_salts list param
+- _create_key: add cache_salt param (accepted, not yet forwarded)
+
+cache_salt will be forwarded to IPCCacheEngineKey once that field is
+added in a follow-up PR.
+
+Signed-off-by: royyhuang &lt;royyhuang@gmail.com&gt;
+Signed-off-by: royyhuang &lt;roy.y.huang@gmail.com&gt;
+
+* add per user l2 usage design docs
+
+Signed-off-by: royyhuang &lt;roy.y.huang@gmail.com&gt;
+
+* address comments
+
+Signed-off-by: royyhuang &lt;roy.y.huang@gmail.com&gt;
+
+---------
+
+Signed-off-by: royyhuang &lt;royyhuang@gmail.com&gt;
+Signed-off-by: royyhuang &lt;roy.y.huang@gmail.com&gt;
+
+- [Feat] L1 Subscriber (#2986)
+
+* [Feat] L0 Subscriber: GPU KV cache block lifecycle metrics
+
+Signed-off-by: yuwei &lt;yuwei@dev.local&gt;
+Co-authored-by: yuwei &lt;yuwei@dev.local&gt;
+
+- feat(tools): add LRU cache simulator for lookup-hash JSONL logs (#3021)
+
+* Add LRU cache simulator for lookup-hash JSONL logs
+
+* Adds lmcache/tools/cache_simulator/ with four modules:
+
+Signed-off-by: crclq2018 &lt;crclq2018@gmail.com&gt;
+Signed-off-by: rigginschen &lt;rigginschen@tencent.com&gt;
+Signed-off-by: kumaneko &lt;crclq2018@gmail.com&gt;
+Co-authored-by: rigginschen &lt;rigginschen@tencent.com&gt;
+
+- [Chore][CI]: K3 MP output token quantity tolerance (#3030)
+
+[CI] Allow 1% tolerance on vllm_bench total_input_tokens check
+
+vLLM&#39;s RandomDataset decodes and re-encodes generated token sequences
+(vllm/benchmarks/datasets.py) to avoid string-level drift, but the
+roundtrip is not guaranteed to preserve exact token counts — the
+benchmark itself only warns when token_mismatch != 0. The strict -eq
+assertion against NUM_PROMPTS * RANDOM_INPUT_LEN was failing with a
+0.08% overage (500400 vs 500000) on Qwen3-14B after a vLLM upgrade.
+
+Switch to a ±1% tolerance check, which matches the benchmark&#39;s own
+semantics while still catching real workload-size regressions.
+
+Signed-off-by: Samuel Shen &lt;slshen@uchciago.edu&gt;
+Co-authored-by: Samuel Shen &lt;slshen@uchciago.edu&gt;
+
+- feat: add chunk hashes logger to MP server for offline data analysis (#2928)
+
+* feat: add chunk hash logger as EventBus subscriber
+
+Add JSONL-based chunk hash logging to the multiprocess server for
+offline analysis of KV cache behavior. Implemented as a
+ChunkHashLoggingSubscriber on the EventBus — no extra queue or
+worker thread needed. Includes configurable log rotation, chunk
+metadata (chunk_size, seq_len, dtypes, shapes), and CLI args.
+
+Signed-off-by: Ryan &lt;crclq2018@gmail.com&gt;
+Signed-off-by: rigginschen &lt;rigginschen@tencent.com&gt;
+
+* refactor: rename ChunkHashLogger to LookupHashLogger
+
+Rename the chunk hash logging subscriber to lookup hash logger to better
+reflect that it logs hashes observed during lookup operations.
+
+- chunk_hash.py → lookup_hash.py
+- ChunkHashLogConfig → LookupHashLogConfig
+- ChunkHashLoggingSubscriber → LookupHashLoggingSubscriber
+- --chunk-hash-log-* CLI args → --lookup-hash-log-*
+- lookup_hashes_*.jsonl file name pattern
+- Update docs and tests accordingly
+
+Co-Authored-By: Claude Sonnet 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+Signed-off-by: rigginschen &lt;rigginschen@tencent.com&gt;
+
+* Use tell to get the accurate file size
+
+Signed-off-by: rigginschen &lt;rigginschen@tencent.com&gt;
+
+* perf(mp): skip MP_LOOKUP event construction when no subscriber is listening
+
+Add EventBus.has_subscribers() to cheaply check if any callback is
+registered for a given EventType. Gate the MP_LOOKUP publish in
+MPCacheEngine.lookup() behind this check so that the metadata dict
+(including dtype/shape list comprehensions) is never allocated when
+the lookup hash logger is disabled.
+
+Co-Authored-By: Claude Sonnet 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+Signed-off-by: rigginschen &lt;rigginschen@tencent.com&gt;
+
+* docs(mp): document MP_LOOKUP event metadata contract in EVENTS.md
+
+Co-Authored-By: Claude Sonnet 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+Signed-off-by: rigginschen &lt;rigginschen@tencent.com&gt;
+
+* test(mp): move lookup hash logger tests to correct directory
+
+Move tests/v1/multiprocess/test_lookup_hash_logger.py to
+tests/v1/mp_observability/subscribers/logging/ to match the source
+file structure and ensure tests run under the standard CI suite.
+
+Co-Authored-By: Claude Sonnet 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+Signed-off-by: kumaneko &lt;crclq2018@gmail.com&gt;
+
+---------
+
+Signed-off-by: Ryan &lt;crclq2018@gmail.com&gt;
+Signed-off-by: rigginschen &lt;rigginschen@tencent.com&gt;
+Signed-off-by: kumaneko &lt;71458228+yoo-kumaneko@users.noreply.github.com&gt;
+Signed-off-by: kumaneko &lt;crclq2018@gmail.com&gt;
+Co-authored-by: rigginschen &lt;rigginschen@tencent.com&gt;
+Co-authored-by: Claude Sonnet 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix: add controller config validation and clear error messages (#2907) (#3003)
+
+fix: add controller config validation and descriptive error messages
+
+When enable_controller=True but required config fields are missing,
+_validate_config() now raises ValueError with clear messages instead of
+silently passing and crashing later with an empty AssertionError.
+
+Also added descriptive messages to bare assert statements in worker.py
+as defense-in-depth.
+
+Fixes #2907
+
+Signed-off-by: Yiyang Liu &lt;yiyangliu@microsoft.com&gt;
+Signed-off-by: Yiyang Liu &lt;37043548+ianliuy@users.noreply.github.com&gt;
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+- [MP][Optimize] Skip locked keys during LRU eviction to improve eviction efficiency (#2978)
+
+* [MP][optimize] optimize lru eviction
+
+Signed-off-by: idellzheng &lt;idellzheng@tencent.com&gt;
+
+* add ut
+
+Signed-off-by: idellzheng &lt;idellzheng@tencent.com&gt;
+
+* delete log
+
+Signed-off-by: idellzheng &lt;idellzheng@tencent.com&gt;
+
+* rename
+
+Signed-off-by: idellzheng &lt;idellzheng@tencent.com&gt;
+
+---------
+
+Signed-off-by: idellzheng &lt;idellzheng@tencent.com&gt;
+
+- [MP] Support lazy import built-in l2 adapter (#2905)
+
+* Support lazy import built-in l2 adapter
+
+Signed-off-by: baoloongmao &lt;baoloongmao@tencent.com&gt;
+
+* Update doc
+
+Signed-off-by: baoloongmao &lt;baoloongmao@tencent.com&gt;
+
+* Add UTs
+
+Signed-off-by: baoloongmao &lt;baoloongmao@tencent.com&gt;
+
+---------
+
+Signed-off-by: baoloongmao &lt;baoloongmao@tencent.com&gt;
+
+- refactor(mp): replace job_id with request_id in query_prefetch_status (#2996)
+
+* refactor(mp): replace job_id with request_id in query_prefetch_status
+
+The server-internal integer job_id was unnecessarily leaked to the vLLM
+adapter via _lookup_job_ids / _finished_lookup_jobs, adding a redundant
+layer of indirection. The external request_id (str) is the natural key
+and is already stored in every _PrefetchJob.
+
+Changes:
+- _prefetch_jobs is now keyed by request_id (str) instead of job_id (int)
+- _next_prefetch_job_id removed; _register_prefetch_job() stores by request_id
+- lookup() now returns None; job tracking is entirely server-side
+- query_prefetch_status(request_id: str) replaces the int-based version
+- query_prefetch_lookup_hits removed: it was only called internally by
+  sync_lookup (feature branch) and had no external callers on dev; the
+  QUERY_PREFETCH_LOOKUP_HITS RPC endpoint is removed accordingly
+- Adapter simplified: _lookup_job_ids replaced by _pending_lookups: set[str]
+  and _finished_lookup_results: dict[str, int] (cache keyed by request_id);
+  polls QUERY_PREFETCH_STATUS by request_id; cached result handles repeated
+  calls to check_lookup_result after the server has popped the job
+- Protocol updated: LOOKUP response_class=None, QUERY_PREFETCH_STATUS
+  payload_classes=[str], QUERY_PREFETCH_LOOKUP_HITS removed
+- tests/v1/multiprocess/test_query_lookup_hits.py deleted
+- All other affected tests updated
+
+No changes to storage_manager.py or prefetch_controller.py; the internal
+prefetch_request_id (int) inside PrefetchHandle is unaffected.
+
+Signed-off-by: crclq2018@gmail.com
+Signed-off-by: rigginschen &lt;rigginschen@tencent.com&gt;
+
+* fix(mp): return 0 for unknown request_id to prevent infinite polling
+
+When query_prefetch_status or query_prefetch_lookup_hits is called with
+an unknown request_id, returning None would cause the caller to
+interpret it as &#34;still in progress&#34; and spin forever. Return 0 instead
+to signal no hits and allow the caller to terminate.
+
+Signed-off-by: crclq2018@gmail.com
+Signed-off-by: rigginschen &lt;rigginschen@tencent.com&gt;
+
+---------
+
+Signed-off-by: crclq2018@gmail.com
+Signed-off-by: rigginschen &lt;rigginschen@tencent.com&gt;
+Co-authored-by: rigginschen &lt;rigginschen@tencent.com&gt;
+
+- refactor: extract PathSharder module for shared multi-path selection (#2982)
+
+Move the duplicated path-sharding logic (CSV parsing, device ID
+extraction, by_gpu strategy) from LocalDiskBackend and GdsBackend
+into a new PathSharder class in path_sharder.py.
+
+Both backends now delegate to PathSharder, keeping the policy in
+one place.  The _resolve_device_id helper handles cuda:N, bare
+cuda, and cpu devices gracefully.
+
+Generated with [Devin](https://cli.devin.ai/docs)
+
+Signed-off-by: Boris Glimcher &lt;Boris.Glimcher@emc.com&gt;
+Co-authored-by: Devin &lt;noreply@cognition.ai&gt;
+
+- [Feat] L0 KV cache lifecycle event subscriber  (#2974)
+
+Signed-off-by: yuwei &lt;yuwei@dev.local&gt;
+Co-authored-by: yuwei &lt;yuwei@dev.local&gt;
+
+- [ops][refactor] Add full list of Python fallbacks to run without compiled CUDA extensions (#2591)
+
+Signed-off-by: Tony Lin &lt;tony.lin@intel.com&gt;
+Co-authored-by: Samuel Shen &lt;slshen@tensormesh.ai&gt;
+Co-authored-by: Martin Hickey &lt;martin.hickey@ie.ibm.com&gt;
+
+- [Chore][CI] Skip k3 builds when only docs/trivial files changed (#2993)
+
+* [CI] Skip k3 builds when only docs/trivial files changed
+
+Adds a path-based skip wrapper used by all 5 k3 test pipelines
+(correctness, integration, comprehensive, multiprocess, blend) so docs-only
+PRs auto-pass without spinning up GPU pods. Builds always run when any
+file under .github/ or .buildkite/ changes. Set K3_PATH_FILTER_DISABLE=1
+to bypass.
+
+Signed-off-by: Samuel Shen &lt;slshen@uchciago.edu&gt;
+
+* [CI] Treat .github/ as trivial in k3 path filter
+
+k3 tests run on Buildkite, not GitHub Actions, so changes under .github/
+(workflows, CODEOWNERS, PR templates, dependabot) have no effect on what
+the k3 tests do. Move .github/* from the always-trigger list to the
+trivial list. .buildkite/* stays force-trigger since it does drive the
+k3 tests.
+
+Signed-off-by: Samuel Shen &lt;slshen@uchciago.edu&gt;
+
+* [CI] Move k3 path filter into pipeline.yml shim (no UI changes needed)
+
+Restructure each k3 test so the path-filter logic lives entirely in the
+repo. The Buildkite Web UI&#39;s upload command stays the literal
+`buildkite-agent pipeline upload .buildkite/k3_tests/&lt;test&gt;/pipeline.yml`
+it has always been -- but pipeline.yml is now a tiny one-step shim that
+runs upload-pipeline.sh on steps.yml. The real test steps moved verbatim
+into steps.yml.
+
+Layout per test:
+  pipeline.yml -- 1-step path-filter shim (was: full test pipeline)
+  steps.yml    -- the actual test steps   (was: pipeline.yml content)
+
+Because pipeline.yml is fetched fresh from the repo on every build,
+edits to the filter / steps / shim now take effect on the next push
+without anyone re-pasting anything in the Buildkite UI.
+
+Signed-off-by: Samuel Shen &lt;slshen@uchciago.edu&gt;
+
+* [CI] Fix path filter: never skip scheduled builds, clean up shell
+
+- Never skip when BUILDKITE_SOURCE=schedule (nightly baseline builds
+  with NEED_UPLOAD=true would silently not run if the latest commit
+  on dev only touched docs).
+- Simplify PR detection: use -n test instead of double != check.
+- Remove redundant &gt;&amp;2 before 2&gt;/dev/null on git fetch.
+
+Addresses review feedback on PR #2993.
+
+Signed-off-by: Samuel Shen &lt;slshen@uchciago.edu&gt;
+
+* [BugFix] Fix test_l2 crash on HistogramDataPoint without .value
+
+_read_counters() iterates all metrics from the InMemoryMetricReader,
+not just counters. When another library registers a histogram on the
+same MeterProvider, the reader returns HistogramDataPoint objects
+which lack .value (they have .sum/.count instead). Guard with hasattr.
+
+Signed-off-by: Samuel Shen &lt;slshen@uchciago.edu&gt;
+
+* Revert &#34;[BugFix] Fix test_l2 crash on HistogramDataPoint without .value&#34;
+
+This reverts commit 7c3c32b0f97208a9198f3961d42029ec582019f2.
+
+* [CI] Fix path filter SSH host key prompt in ephemeral pods
+
+The filter step&#39;s git fetch hangs on GitHub&#39;s SSH host key verification
+prompt because ephemeral K8s pods have no known_hosts entry. Set
+GIT_SSH_COMMAND with StrictHostKeyChecking=accept-new so the fetch
+auto-accepts new host keys without blocking.
+
+Signed-off-by: Samuel Shen &lt;slshen@uchciago.edu&gt;
+
+* [CI] Run path filter in upload step, drop pipeline.yml shim
+
+The pipeline.yml shim approach added an extra pod-provisioning wait to
+every build. Instead, run the path filter directly in the upload step
+by having buildkite-pipeline.yml call upload-pipeline.sh (which the
+user pastes into the Buildkite UI once).
+
+This restores the original 2-step flow: upload → test steps.
+Skipped builds finish with just the upload pod (no GPU pod).
+
+Requires a one-time re-paste of each test&#39;s buildkite-pipeline.yml
+into the Buildkite UI Steps editor after merging.
+
+Signed-off-by: Samuel Shen &lt;slshen@uchciago.edu&gt;
+
+* [CI] Remove migration notes from permanent docs
+
+Move one-time UI re-paste instructions to the PR description where
+they belong instead of cluttering the README and BK_WEB_SETUP files.
+
+Signed-off-by: Samuel Shen &lt;slshen@uchciago.edu&gt;
+
+* [CI] Replace K3_PATH_FILTER_DISABLE env var with force-ci PR label
+
+Contributors can now add a &#34;force-ci&#34; label on the GitHub PR to bypass
+the path filter and force a full k3 CI run. This replaces the
+K3_PATH_FILTER_DISABLE env var which required access to the Buildkite
+UI. Buildkite exposes PR labels via BUILDKITE_PULL_REQUEST_LABELS.
+
+Signed-off-by: Samuel Shen &lt;slshen@uchciago.edu&gt;
+
+---------
+
+Signed-off-by: Samuel Shen &lt;slshen@uchciago.edu&gt;
+Co-authored-by: Samuel Shen &lt;slshen@uchciago.edu&gt;
+
+- [MP] Add a new argument to specify whether retain_in_l1 (#2813)
+
+* [MP] Add a new argument to specify whether retain_in_l1
+
+Signed-off-by: baoloongmao &lt;baoloongmao@tencent.com&gt;
+
+* Remove redundant override method.
+
+Signed-off-by: baoloongmao &lt;baoloongmao@tencent.com&gt;
+
+---------
+
+Signed-off-by: baoloongmao &lt;baoloongmao@tencent.com&gt;
+
+- Copy a snapshot of lmcache_mp_connector.py for vllm 0.18.0 (#2887)
+
+* Copy a snapshot of lmcache_mp_connector.py for vllm 0.18.0
+
+Signed-off-by: baoloongmao &lt;baoloongmao@tencent.com&gt;
+
+- [Build] Add lmcache-cli lightweight wheel (#2959)
+
+* cli wheel build and release
+
+* add openai in cli dependency
+
+
+Signed-off-by: deng451e &lt;838677410@qq.com&gt;
+Co-authored-by: Yihua Cheng &lt;yihua98@uchicago.edu&gt;
+
+- [MP] Introduce a simple way to register_gauge metrics. (#2906)
+
+Introduce a simple way to register_gauge metrics.
+
+Signed-off-by: baoloongmao &lt;baoloongmao@tencent.com&gt;
+Co-authored-by: Roy Huang &lt;roy.y.huang@gmail.com&gt;
+Co-authored-by: Samuel Shen &lt;slshen@tensormesh.ai&gt;</div>
+</div>
+
+<a href="../project/LMCache_LMCache.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

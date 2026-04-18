@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (4 commits) - FluidInference/FluidAudio - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (4 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a> /
+    Updates in main (4 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-04-12 19:09 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/FluidInference/FluidAudio/commits/main" target="_blank">https://github.com/FluidInference/FluidAudio/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление значительно унифицирует управление моделями японской ASR, объединяя модели TDT и CTC в рамках единого API `AsrModels`/`AsrManager`. Это решает проблемы с загрузкой моделей, обеспечивает информацию о времени и устраняет избыточные менеджеры, специфичные для японского языка, что приводит к более чистому и согласованному коду. Изменения также уточняют именование репозиториев моделей и улучшают обработку ошибок при загрузке моделей только для CTC, направляя пользователей к соответствующим специализированным менеджерам.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Fix Japanese TDT models and consolidate to unified AsrModels API (#521)
+
+## Summary
+- Fixes TDT Japanese model downloads by returning union of both CTC and
+TDT required models
+- Enables Japanese TDT models to work with `AsrModels`/`AsrManager` for
+timing information
+- **Removes all redundant Japanese-specific managers** (TdtJaManager,
+CtcJaManager) - consolidates to unified AsrModels path
+
+## Problems Fixed
+
+### Problem 1: Model Download (Issue #517)
+The `parakeet-ctc-0.6b-ja-coreml` repository contains both CTC models
+(`CtcDecoder.mlmodelc`) and TDT models (`Decoderv2.mlmodelc`,
+`Jointerv2.mlmodelc`). When `TdtJaModels` attempts to download from
+`Repo.parakeetJa`, the `getRequiredModelNames()` function was only
+returning `CTCJa.requiredModels`, which doesn&#39;t include the TDT-specific
+models.
+
+This caused TDT Japanese models to fail downloading with &#34;Model file not
+found&#34; errors.
+
+### Problem 2: AsrModels File Name Mismatch
+`AsrModels` used hardcoded file names from `ModelNames.ASR` (expecting
+`Decoder.mlmodelc` and `JointDecision.mlmodelc`), which didn&#39;t match
+Japanese TDT model files (`Decoderv2.mlmodelc`, `Jointerv2.mlmodelc`).
+
+This prevented users from loading `.tdtJa` with `AsrModels`/`AsrManager`
+to get timing information.
+
+### Problem 3: Code Duplication
+Japanese models had 4 specialized managers (TdtJaManager, CtcJaManager,
+TdtJaModels, CtcJaModels) that duplicated functionality and didn&#39;t match
+the pattern used by other TDT variants (v2, v3, tdtCtc110m all use
+AsrModels directly).
+
+## Solution
+
+### Fix 1: Model Downloads (ModelNames.swift)
+Updated `ModelNames.swift` line 675-677 to return the union of both
+model sets:
+
+```swift
+case .parakeetJa:
+    // Repo contains BOTH CTC and TDT models - return union of both sets
+    return ModelNames.CTCJa.requiredModels.union(ModelNames.TDTJa.requiredModels)
+```
+
+This ensures all 5 models are downloaded:
+- Preprocessor.mlmodelc (shared)
+- Encoder.mlmodelc (shared)
+- CtcDecoder.mlmodelc (CTC only)
+- Decoderv2.mlmodelc (TDT only)
+- Jointerv2.mlmodelc (TDT only)
+
+### Fix 2: Version-Specific Model File Names (AsrModels.swift)
+- Added `getModelFileNames()` to return version-specific decoder, joint,
+and vocabulary file names
+- Added `getRequiredModels()` to return version-specific model sets
+- Updated `load()`, `loadVocabulary()`, and `modelsExist()` to use
+version-specific names
+
+### Fix 3: Remove Redundant Code
+**Deleted:**
+- `TdtJaManager.swift` - broken, redundant
+- `TdtJaModels.swift` - redundant
+- `CtcJaManager.swift` - redundant (TDT is superior)
+- `CtcJaModels.swift` - redundant
+- `AsrModelVersion.ctcJa` enum case - no longer needed
+- All related tests (replaced by `AsrModelsTdtJaTests`)
+
+**Updated:**
+- JapaneseAsrBenchmark → uses `AsrModels` + `AsrManager`
+- Removed `.ctcJa` from version labels and validation
+
+## Result
+
+Clean, unified API for Japanese TDT models that matches other TDT
+variants:
+
+```swift
+// Load Japanese TDT models
+let models = try await AsrModels.load(version: .tdtJa)
+let manager = AsrManager(models: models)
+
+// Transcribe with timing info
+var state = try TdtDecoderState(decoderLayers: 2)
+let result = try await manager.transcribe(url, decoderState: &amp;state)
+
+// Access text and timing information
+print(result.text)
+print(result.timings)  // ✅ Timing info available!
+```
+
+## Benefits
+1. **Timing information** - Users get token timings via `AsrManager`
+(not available in `TdtJaManager`)
+2. **Consistency** - Japanese TDT follows same pattern as
+v2/v3/tdtCtc110m
+3. **Less code** - Removed ~1000 lines of redundant manager code
+4. **Single source of truth** - One way to load Japanese TDT models
+
+## Testing
+- ✅ `CtcJaTests.testCtcJaTranscription` - Full CTC Japanese pipeline
+test
+- ✅ `TdtJaTests.testTdtJaTranscription` - Full TDT Japanese pipeline
+test
+- ✅ `AsrModelsTdtJaTests.testTdtJaWithAsrModels` - TDT Japanese loads
+via AsrModels
+- ✅ `AsrModelsTdtJaTests.testTdtJaWithAsrManager` - TDT Japanese works
+with AsrManager
+- ✅ Build verified with `swift build`
+
+Fixes #517
+
+- Refactor: Rename Repo.parakeetCtcJa to Repo.parakeetJa for accuracy (#520)
+
+## Problem
+
+The enum name `Repo.parakeetCtcJa` is misleading because it implies the
+repository only contains CTC models, but it actually contains **both CTC
+and TDT models**.
+
+## Verified Repository Contents
+
+**`FluidInference/parakeet-ctc-0.6b-ja-coreml`** contains:
+- ✅ CTC models: `CtcDecoder.mlmodelc`
+- ✅ TDT v2 models: `Decoderv2.mlmodelc` + `Jointerv2.mlmodelc`
+- Shared: `Preprocessor.mlmodelc`, `Encoder.mlmodelc`, `vocab.json`
+
+## Solution
+
+Renamed `Repo.parakeetCtcJa` → `Repo.parakeetJa` to accurately reflect
+that it&#39;s the Japanese models repository containing both decoder
+variants.
+
+## Changes
+
+- **ModelNames.swift**: Renamed enum case from `.parakeetCtcJa` to
+`.parakeetJa`
+- **AsrModels.swift**: Updated `.ctcJa` and `.tdtJa` to use
+`.parakeetJa`
+- **CtcJaModels.swift**: Updated repository reference
+- **TdtJaModels.swift**: Updated repository reference and added comment
+
+## Testing
+
+- ✅ Build succeeds
+- ✅ Both CTC and TDT Japanese managers now use the correct repository
+name
+
+## Related
+
+- Follow-up to #516 and #519
+- Addresses naming clarity issue raised by @Josscii
+&lt;!-- devin-review-badge-begin --&gt;
+
+---
+
+&lt;a href=&#34;https://app.devin.ai/review/fluidinference/fluidaudio/pull/520&#34;
+target=&#34;_blank&#34;&gt;
+  &lt;picture&gt;
+&lt;source media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-dark.svg?v=1&#34;&gt;
+&lt;img
+src=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-light.svg?v=1&#34;
+alt=&#34;Open with Devin&#34;&gt;
+  &lt;/picture&gt;
+&lt;/a&gt;
+&lt;!-- devin-review-badge-end --&gt;
+
+- Fix parakeet-ctc-ja download error: Prevent AsrModels from loading CTC-only models (#516)
+
+## Problem
+
+Issue #514 reported that downloading `parakeet-ctc-ja` models would
+succeed, but then fail during loading with:
+```
+[WARN] First load failed: Model file not found: Decoder.mlmodelc
+```
+
+### Root Cause
+
+`AsrModels` (designed for TDT models) was incorrectly accepting `.ctcJa`
+and `.ctcZhCn` model versions, which use different decoder file names:
+- **TDT models** use `Decoder.mlmodelc`
+- **Japanese CTC models** use `CtcDecoder.mlmodelc`
+- **Chinese CTC models** use `Decoder.mlmodelc` (but with different
+structure)
+
+When users tried to load `.ctcJa` models via `AsrModels`:
+1. Download succeeded (correct files downloaded: `CtcDecoder.mlmodelc`)
+2. Loading failed (looking for wrong file: `Decoder.mlmodelc`)
+
+## Solution
+
+Added validation in `AsrModels.load()` and `AsrModels.download()` to
+reject CTC-only model versions with clear error messages that direct
+users to the correct manager classes:
+- For `.ctcJa` → Use `CtcJaManager`
+- For `.ctcZhCn` → Use `CtcZhCnManager`
+
+## Changes
+
+### Modified Files
+- `Sources/FluidAudio/ASR/Parakeet/SlidingWindow/TDT/AsrModels.swift`
+  - Added validation at the start of `load()` method
+  - Added validation at the start of `download()` method
+  - Throws descriptive `AsrModelsError` with guidance to correct manager
+
+-
+`Tests/FluidAudioTests/ASR/Parakeet/SlidingWindow/TDT/AsrModelsTests.swift`
+  - Added 5 new tests for CTC-only model validation
+  - Tests verify both `.ctcJa` and `.ctcZhCn` are properly rejected
+  - Tests verify error messages contain correct manager class names
+
+## Testing
+
+All 32 tests in `AsrModelsTests` pass, including the new validation
+tests:
+- ✅ `testCtcJaModelRejectsAsrModelsLoad()`
+- ✅ `testCtcJaModelRejectsAsrModelsDownload()`
+- ✅ `testCtcZhCnModelRejectsAsrModelsLoad()`
+- ✅ `testCtcZhCnModelRejectsAsrModelsDownload()`
+- ✅ `testCtcOnlyModelsAreMarkedCorrectly()`
+
+## Example Error Message
+
+Before (confusing):
+```
+Model file not found: Decoder.mlmodelc
+```
+
+After (clear guidance):
+```
+CTC-only model .ctcJa must be loaded via CtcJaManager, not AsrModels
+```
+
+Closes #514
+&lt;!-- devin-review-badge-begin --&gt;
+
+---
+
+&lt;a href=&#34;https://app.devin.ai/review/fluidinference/fluidaudio/pull/516&#34;
+target=&#34;_blank&#34;&gt;
+  &lt;picture&gt;
+&lt;source media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-dark.svg?v=1&#34;&gt;
+&lt;img
+src=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-light.svg?v=1&#34;
+alt=&#34;Open with Devin&#34;&gt;
+  &lt;/picture&gt;
+&lt;/a&gt;
+&lt;!-- devin-review-badge-end --&gt;
+
+- docs: Clarify diarization pipeline version differences (#511)
+
+## Summary
+
+Addresses feedback from
+https://github.com/FluidInference/docs.fluidinference.com/pull/6#discussion_r3068126335
+
+Clarifies the distinction between online and offline diarization
+pipeline versions:
+- **Online/streaming** (`DiarizerManager`): Based on Pyannote 3.1
+- **Offline batch** (`OfflineDiarizerManager`): Based on Pyannote
+Community-1
+
+## Changes
+
+Updated documentation in four files to clearly distinguish between the
+two pipelines:
+
+1. **CLAUDE.md** - Model Sources section now lists both versions
+2. **README.md** - Added version info to Streaming/Online Speaker
+Diarization section
+3. **Documentation/Models.md** - Updated Pyannote CoreML Pipeline
+description in table
+4. **Documentation/Diarization/GettingStarted.md** - Added version to
+WeSpeaker/Pyannote Streaming section
+
+## Context
+
+PR #6 updated references from 3.1 to community-1, but Brandon&#39;s review
+comment clarified that both versions are correct - they just apply to
+different pipelines. This PR makes that distinction clear throughout the
+documentation.
+&lt;!-- devin-review-badge-begin --&gt;
+
+---
+
+&lt;a href=&#34;https://app.devin.ai/review/fluidinference/fluidaudio/pull/511&#34;
+target=&#34;_blank&#34;&gt;
+  &lt;picture&gt;
+&lt;source media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-dark.svg?v=1&#34;&gt;
+&lt;img
+src=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-light.svg?v=1&#34;
+alt=&#34;Open with Devin&#34;&gt;
+  &lt;/picture&gt;
+&lt;/a&gt;
+&lt;!-- devin-review-badge-end --&gt;
+
+---------</div>
+</div>
+
+<a href="../project/FluidInference_FluidAudio.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

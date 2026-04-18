@@ -1,0 +1,3219 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (81 commits) - QwenLM/qwen-code - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (81 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/QwenLM_qwen-code.html">QwenLM/qwen-code</a> /
+    Updates in main (81 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/QwenLM_qwen-code.html">QwenLM/qwen-code</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-04-18 05:46 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/QwenLM/qwen-code/commits/main" target="_blank">https://github.com/QwenLM/qwen-code/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This update brings significant core improvements, including a more robust ToolRegistry with lazy loading and concurrency deduplication, intelligent tool parallelism, and detection of infinite tool validation retry loops. Key new features allow for a dual-output sidecar mode for the interactive TUI, background subagents, and a comprehensive managed auto-memory and auto-dream system. The release also expands customization with path-based context rules and new HTTP/Function hooks, refines the UI (e.g., optimized compact mode), and addresses numerous bugs, alongside the discontinuation of the Qwen OAuth free tier.
+
+---
+
+Это обновление приносит значительные улучшения ядра, включая более надежный ToolRegistry с ленивой загрузкой и дедупликацией параллельных операций, интеллектуальный параллелизм инструментов и обнаружение бесконечных циклов повторных попыток валидации инструментов. Ключевые новые функции включают режим двухканального вывода для интерактивного TUI, фоновые субагенты и комплексную систему управляемой авто-памяти и авто-сновидений. Релиз также расширяет возможности кастомизации с помощью контекстных правил на основе путей и новых HTTP/функциональных хуков, улучшает пользовательский интерфейс (например, оптимизированный компактный режим) и устраняет множество ошибок, наряду с прекращением бесплатного уровня Qwen OAuth.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">-   test(core): update scheduler registry mock (#3415)
+
+Update the CoreToolScheduler retry-loop test registry mock to match the current
+  ToolRegistry interface. Add ensureTool and getAllToolNames so the tests exercise
+  the scheduler path used in production.
+
+- Fix typo in class name (#2189)
+
+- fix(tool-registry): add lazy factory registration with inflight concurrency dedup (#3297)
+
+Closes #3221.
+
+Introduces a lazy factory API on ToolRegistry (registerFactory,
+ensureTool, warmAll, getAllToolNames) as infrastructure for future
+esbuild code-splitting (#3226). With the current single-bundle build,
+the lazy API does not change startup time on its own — the primary
+immediate value is fixing three pre-existing bugs uncovered while
+designing it.
+
+Bug fixes:
+
+- Concurrent instantiation (P0): the original ensureTool had no
+  concurrency protection around `await factory()` — two concurrent
+  calls for the same tool both passed the cache check and each ran the
+  factory, producing two instances. AgentTool and SkillTool register
+  SubagentManager listeners in their constructors, so the extra
+  instance leaked listeners. Fix: a per-name `inflight: Map&lt;string,
+  Promise&lt;Tool&gt;&gt;` so concurrent ensureTool() calls share a single
+  promise. On factory rejection the inflight entry is cleared so a
+  subsequent call can retry.
+
+- stop() resource leak: stop() only disposed tools already in
+  `this.tools`; tools still loading in `inflight` when stop() ran
+  finished afterward and were never disposed. Fix: await
+  Promise.allSettled(inflight.values()) before the dispose loop.
+
+- Cache hit left stale factory: ensureTool&#39;s cache-hit branch did not
+  delete the factory entry, so warmAll() would re-invoke the factory
+  for an already-loaded tool. Fix: delete the factory on cache hit.
+
+Additional hardening in response to review feedback:
+
+- warmAll({ strict?: boolean }): strict mode re-throws the first
+  factory failure rather than swallowing it. Config.initialize() uses
+  strict: true so a broken built-in tool fails startup fast instead of
+  silently leaving a partially initialized registry; runtime-path
+  callers (GeminiChat, agent runtime, etc.) continue to use the
+  non-strict default and log failures via debugLogger.
+- getAllTools() and getFunctionDeclarationsFiltered() emit a debug
+  warning when called while unloaded factories remain, nudging callers
+  toward warmAll() without hard-breaking existing code paths.
+- copyDiscoveredToolsFrom() now iterates source.tools.values()
+  directly instead of source.getAllTools() — the copy path deals only
+  with already-discovered MCP/command tools and should not trigger the
+  unloaded-factory warning.
+- MemoryTool and SkillTool config parsing was extracted into
+  memory-config.ts and skill-utils.ts so a factory can resolve tool
+  metadata without importing the tool module.
+
+Tests:
+
+- tool-registry.test.ts adds 128 lines covering: concurrent ensureTool
+  runs the factory exactly once, warmAll and ensureTool overlap,
+  retries succeed after a prior factory failure, stop() disposes tools
+  that finish loading after stop was called, and warmAll strict vs
+  default behavior.
+- 33 existing call sites across cli, core, agents, and subagents were
+  updated to await warmAll() before bulk tool access.
+
+- feat(core): detect tool validation retry loops and inject stop directive (#3178)
+
+Primary change: prevent the model from burning tokens in an infinite retry
+loop when a tool call repeatedly fails schema validation with the same
+error (observed with ask_user_question and a malformed `questions`
+parameter retrying 10+ times with the same validation error).
+
+- Track consecutive validation failures per (tool name, error message)
+  pair in CoreToolScheduler via a `validationRetryCounts` Map.
+- After 3 consecutive failures for the same (tool, error) pair, append a
+  RETRY LOOP DETECTED directive to the error response instructing the
+  model to stop, re-examine the schema, try a fundamentally different
+  approach, or surface the issue to the user.
+- Reset per-tool counters when the tool invocation succeeds; reset
+  globally when an incoming batch shares no tool name with any
+  previously failing tool; reset the per-tool counter when the tool
+  returns a different validation error so unrelated mistakes do not
+  accumulate toward the threshold.
+- Distinct from LoopDetectionService, which tracks model-behavior loops
+  (repeated thoughts, stagnant actions); this change catches tool-API
+  misuse loops at the scheduler layer.
+
+Piggyback fixes bundled in the same PR:
+
+- packages/cli/index.ts, packages/core/src/services/shellExecutionService.ts:
+  treat PTY `EAGAIN` on the read path as an expected read error alongside
+  `EIO`, avoiding noisy surface-level failures from transient
+  non-blocking reads.
+- scripts/build.js: switch the settings-schema generation step from
+  `npx tsx` to `node --import tsx/esm` for Bun compatibility.
+
+Tests:
+
+- Unit tests in coreToolScheduler.test.ts cover: directive injection on
+  the 3rd consecutive failure, counter reset when a different tool is
+  called, and counter reset after a successful invocation of the same
+  tool (fail → fail → succeed → fail → fail must not trip the directive).
+
+- fix(cli): auto-submit on number key press in AskUserQuestionDialog (#3407)
+
+Fixes #500.
+
+Number keys in AskUserQuestionDialog previously only moved the highlight
+cursor without submitting, inconsistent with RadioButtonSelect and the
+standard tool approval dialog. Users pressed a number, saw the option
+highlight, and assumed it was selected, but the dialog was still waiting
+for Enter.
+
+- For single-select predefined options, pressing a number key now
+  auto-submits immediately.
+- Multi-select, &#34;Other&#34; custom input, and the Submit tab remain
+  highlight-only (unchanged).
+- Extracted a shared selectAndAdvance helper to deduplicate the
+  select-and-submit/advance logic across 4 code paths (number key,
+  Enter, multi-select submit, custom input submit).
+- Removed redundant isFocused guard inside the useKeypress callback;
+  it is already handled via the isActive parameter.
+
+Tests cover all four behavioral branches: single-select auto-submits,
+multi-select does not, &#34;Other&#34; custom input does not, and the Submit
+tab does not.
+
+- fix(sdk): settle pending next() promise in Stream.return() to prevent hangs (#2981)
+
+* fix(sdk): settle pending next() promise in Stream.return() to prevent hangs
+
+* test(sdk): add regression tests for Stream.return() pending-promise cleanup
+
+- fix(channels): re-attach bridge disconnect handler after crash recovery (#2975)
+
+- fix(weixin): check full 4-byte PNG magic signature (#2970)
+
+PNG&#39;s magic bytes are 89 50 4E 47, but detectImageMime only checked
+the first three. The WebP branch in the same function correctly checks
+all four bytes of its signature — the PNG path was clearly an oversight.
+Extend the PNG check to include 0x47 (&#39;G&#39;) for consistency and to
+eliminate the (admittedly rare) false-positive window.
+
+- fix(text-buffer): unify offset-to-position logic (#2969)
+
+getPositionFromOffsets used different per-line length calculations and
+different comparison operators for start vs end offsets, producing
+asymmetric and sometimes invalid results at line boundaries.
+
+Concrete failure: lines=[&#39;abc&#39;,&#39;def&#39;], endOffset=4 (the position after
+the newline at offset 3). The start calc correctly resolved this to
+(row=1,col=0), but the end calc used lineLength=length (no +1 for the
+last-line case) combined with &gt;= and returned (row=0,col=4) — an
+out-of-bounds column on a 3-char line.
+
+Downstream, replaceRangeInternal rejects endCol &gt; currentLineLen(endRow)
+as an invalid range and silently returns state unchanged. This caused
+vim line-change commands (vim_change_movement &#39;j&#39;/&#39;k&#39;, vim_change_line
+spanning row boundaries) to no-op while still pushing an empty undo
+frame.
+
+Replace both loops with a single offsetToRowCol helper that matches the
+original start-calc logic, and update the vim &#39;change multiple lines
+down&#39; test whose expectation was baked around the silent no-op.
+
+- fix(scripts): avoid &#39;undefined Options: ...&#39; for enums without description (#2963)
+
+schema.description is only assigned when setting.description is truthy.
+For enum settings missing a description, the subsequent += produced the
+literal string &#39;undefined Options: foo, bar&#39; in the generated JSON
+schema. Initialize the field when absent instead of concatenating onto
+undefined.
+
+- fix(integration-tests): honor stdinDoesNotEnd option (#2966)
+
+The stdinDoesNotEnd option was completely broken. The original code had
+a conditional stdin.end() scoped to object-type promptOrOptions, followed
+by an unconditional stdin.end() that always ran — so stdinDoesNotEnd: true
+had no effect.
+
+Restructure as an explicit keepStdinOpen check: close stdin unless the
+caller passed an options object with stdinDoesNotEnd: true. The string-
+prompt call path still closes stdin, and null is guarded (typeof null
+=== &#39;object&#39; in JS).
+
+- fix(scripts): remove duplicate bundle rmSync in clean script (#2964)
+
+scripts/clean.js deleted the bundle directory twice. The second call
+was harmless (the first already removed it) but clearly a copy-paste
+leftover from when RMRF_OPTIONS was introduced.
+
+- fix(sandbox): fall back to &#39;latest&#39; tag when image name has no colon (#2962)
+
+If the sandbox image name has no explicit :tag and QWEN_SANDBOX_IMAGE_TAG
+is unset, imageName.split(&#39;:&#39;)[1] returns undefined, producing a bogus
+build target like &#39;myimage:undefined&#39;. Fall back to &#39;latest&#39; to match
+Docker&#39;s conventional default.
+
+- fix(dingtalk): remove reactionContext map to eliminate leak from blocked messages (#2979)
+
+- fix(dingtalk): preserve empty text after stripping bot @mention (#2978)
+
+- fix(dingtalk): only suffix &#39;(cont.)&#39; on continuation chunks, not first (#2977)
+
+-   fix(cli): reduce terminal redraw cursor movement (#3381)
+
+* fix(cli): reduce terminal redraw cursor movement
+
+  Collapse Ink multiline erase sequences into a single relative cursor move plus erase-down operation.
+
+  This avoids excessive repeated cursor-up writes during streaming interactive renders while preserving normal TTY behavior. Screen
+  reader mode and non-TTY output are left unchanged, with a legacy env fallback available.
+
+* Optimize Ink multiline erase sequences during interactive TTY rendering.
+
+  Collapse repeated cursor-up movement while preserving bounded line clearing, so redraws avoid excessive upward cursor jumps without erasing
+  unrelated terminal output below the frame. Non-TTY output, screen reader mode, and non-string writes are unchanged.
+
+- feat: bind `M-d` to a reasonable (Emacs-like) default (#3358)
+
+`M-d` was not bond.  Many users might miss the behavior introduced by
+this commit.
+
+- feat(cli): add dual-output sidecar mode for TUI (#3352)
+
+* feat(cli): add dual-output sidecar mode for TUI
+
+Adds an optional **dual-output** mode for the interactive TUI: while Qwen
+Code keeps rendering normally on stdout, it concurrently emits a structured
+JSON event stream on a second channel (--json-fd / --json-file) and
+optionally watches a JSONL command file (--input-file) for prompts and
+tool-permission responses written by an external program.
+
+This unlocks programmatic embedding of the TUI from IDE extensions, web
+frontends, CI agents, or automation scripts without forcing them to give
+up the rich interactive UI in favor of --output-format=stream-json.
+
+## Design
+
+The TUI already has a battle-tested JSON event emitter
+(`StreamJsonOutputAdapter`). This change makes that adapter pluggable on
+its output stream and wires a small `DualOutputBridge` that forwards TUI
+events to a second instance of the adapter writing to fd / file.
+
+For tool approvals, when a tool enters awaiting_approval the bridge emits
+`control_request` (subtype `can_use_tool`); whichever side resolves first
+(TUI&#39;s native UI or `confirmation_response` via --input-file) wins, and a
+`control_response` is mirrored back so all observers stay in sync.
+
+`session_start` is announced once when the bridge is constructed so
+consumers can correlate the channel with a session before any other event
+arrives.
+
+## CLI surface
+
+- `--json-fd &lt;n&gt;` — write JSON events to fd n (n &gt;= 3; provided via spawn
+  stdio).
+- `--json-file &lt;path&gt;` — write JSON events to a file / FIFO / /dev/fd/N.
+- `--input-file &lt;path&gt;` — watch this file for JSONL commands.
+
+`--json-fd` and `--json-file` are mutually exclusive. fds 0/1/2 are
+rejected to prevent corrupting the TUI.
+
+## Wire protocol
+
+Output: existing stream-json schema with `includePartialMessages` always
+enabled, plus:
+
+- `system` / `subtype: session_start` — emitted once on bridge
+  construction.
+- `control_request` / `subtype: can_use_tool` — pending tool approval.
+- `control_response` — final approval outcome (mirrors TUI-native or
+  external resolution).
+
+Input (--input-file):
+
+    {&#34;type&#34;:&#34;submit&#34;,&#34;text&#34;:&#34;What does this function do?&#34;}
+    {&#34;type&#34;:&#34;confirmation_response&#34;,&#34;request_id&#34;:&#34;...&#34;,&#34;allowed&#34;:true}
+
+`submit` is queued and retried when the TUI returns to idle.
+`confirmation_response` is dispatched immediately — a pending tool call
+is blocking and the response cannot wait behind earlier submits.
+
+See `docs/users/features/dual-output.md` for the full schema, latency
+notes, failure modes, and a spawn example.
+
+## What changes when the flags are absent
+
+Nothing. The bridge and watcher are constructed only when the relevant
+flags are set; otherwise the React Context providers carry `null` and
+every callsite short-circuits. No overhead, no behavioral change for
+existing users.
+
+## Failure handling
+
+- Bad fd / unopenable path → warning on stderr, dual output stays
+  disabled, TUI launches normally.
+- Consumer disconnect (EPIPE) → bridge silently disables itself, TUI
+  keeps running.
+- Any exception inside the adapter → caught, logged, bridge disabled.
+  The TUI is never crashed by a dual-output failure.
+
+## Files
+
+New:
+- packages/cli/src/dualOutput/{DualOutputBridge,DualOutputContext,index}.{ts,tsx}
+- packages/cli/src/remoteInput/{RemoteInputWatcher,RemoteInputContext,index}.{ts,tsx}
+- packages/cli/src/nonInteractive/io/index.ts
+- docs/users/features/dual-output.md
+
+Modified:
+- packages/core/src/config/config.ts — 3 new ConfigParameters fields + getters
+- packages/cli/src/config/config.ts — yargs options + mutex validation
+- packages/cli/src/gemini.tsx — instantiate bridge / watcher in
+  startInteractiveUI, wrap with Context Providers, register cleanup
+- packages/cli/src/ui/AppContainer.tsx — connect RemoteInput to
+  submitQuery, bridge tool confirmations
+- packages/cli/src/ui/hooks/useGeminiStream.ts — call
+  dualOutput?.processEvent(...) at five existing event points
+- packages/cli/src/nonInteractive/io/{Base,Stream}JsonOutputAdapter.ts —
+  StreamJsonOutputAdapter accepts an injected output stream; base adapter
+  exposes emitPermissionRequest / emitControlResponse through a new
+  emitControlMessageImpl hook (default no-op in batch mode).
+
+## Tests
+
+- packages/cli/src/dualOutput/DualOutputBridge.test.ts — fd validation,
+  auto session_start, control-event routing, post-shutdown safety.
+- packages/cli/src/remoteInput/RemoteInputWatcher.test.ts — submit
+  forwarding, immediate confirmation dispatch, busy/idle retry,
+  malformed-line tolerance, shutdown.
+- packages/cli/src/nonInteractive/io/StreamJsonOutputAdapter.dualOutput.test.ts —
+  custom outputStream injection and new emitPermissionRequest /
+  emitControlResponse paths.
+
+tsc --noEmit -p packages/cli/tsconfig.json is clean.
+vitest run src/nonInteractive src/dualOutput src/remoteInput → 297 passed,
+1 skipped, 11 files.
+
+* feat(cli): dual-output capability handshake, session_end, control_error, settings.json
+
+Incremental improvements on top of the initial dual-output PR based on
+reviewer feedback. All extensions are additive; older consumers that
+ignore unknown fields keep working.
+
+## Capability handshake in session_start
+
+`session_start.data` now carries three new fields so consumers can
+feature-detect without sniffing the stream:
+
+- `protocol_version` (integer, currently 1) — bumped on any protocol
+  change consumers might care about.
+- `version` (string) — the Qwen Code CLI version, threaded in from
+  `gemini.tsx`.
+- `supported_events` (string[]) — the event kinds this bridge version
+  is known to emit, exported as `SUPPORTED_EVENTS` from the module.
+
+## session_end on bridge shutdown
+
+DualOutputBridge.shutdown() now emits a final
+`system` / `session_end` event carrying `session_id` before closing the
+stream. Gives consumers a definitive termination signal rather than
+requiring them to infer it from EPIPE. Idempotent — calling shutdown
+twice emits exactly one session_end.
+
+## control_error emission path
+
+`ControlErrorResponse` (already defined in types.ts) now has a first-
+class emission path: `BaseJsonOutputAdapter.emitControlError(requestId,
+message)` → `control_response` with `subtype: &#39;error&#39;`. Wired into
+AppContainer&#39;s remote-input confirmation handler so that a
+`confirmation_response` referencing an unknown / already-resolved
+request_id produces a structured error reply instead of silently
+dropping, letting consumers retry or surface the error.
+
+## settings.json support
+
+New `dualOutput` top-level settings block with `jsonFile` and
+`inputFile` properties. `--json-fd` has no settings equivalent (fd
+passing is a spawn-time concern). CLI flag wins over settings when
+both are present, so scripted one-off runs still work unchanged.
+`requiresRestart: true` since the bridge is constructed once at
+startup.
+
+## Documentation
+
+`docs/users/features/dual-output.md` gains three major sections:
+
+- **Use cases** — concrete integration scenarios (terminal+chat dual
+  sync, IDE extensions, web frontends, CI observers, multi-agent
+  orchestration, session replay, observability, QA).
+- **Why two output flags?** — detailed rationale for coexisting
+  `--json-fd` and `--json-file`, including the PTY constraint
+  (`node-pty` / `bun-pty` expose no stdio array, and `forkpty(3)` /
+  `login_tty` actively close fds &gt;= 3 before exec).
+- **Comparison with Claude Code&#39;s stream-json** — schema-parity
+  matrix, transport-topology differences, permission-control-plane
+  behavioral notes, and a &#34;room to improve&#34; section as a design
+  horizon.
+- **Runnable demos** — seven copy-paste POCs: event observer, remote
+  submit, permission bridge, Node embedder with capability
+  feature-detection, session_end handling, failure drills.
+- **Settings-based configuration** — example settings.json snippet and
+  precedence rules.
+
+## Tests
+
+- DualOutputBridge.test.ts: new cases for capability handshake shape,
+  session_end on shutdown, shutdown idempotency, and emitControlError.
+- StreamJsonOutputAdapter.dualOutput.test.ts: new case for
+  emitControlError at the adapter level.
+
+302 passed, 1 skipped, 11 files. tsc --noEmit -p packages/cli is clean.
+
+* docs(dual-output): shrink Claude Code comparison to one honest sentence
+
+After actually reading the Claude Code source (src/cli/structuredIO.ts,
+src/bridge/*, src/utils/messages/systemInit.ts), the previous
+&#34;Comparison with Claude Code&#39;s stream-json&#34; section was overstated:
+
+- Claude Code has no equivalent of TUI + sidecar running simultaneously.
+  Its stream-json only works with --print (non-interactive); the bridge
+  in src/bridge/* is Anthropic&#39;s own remote worker protocol, not a
+  local embedding surface.
+- CC uses `system/init` (not `session_start`) and has no session_end in
+  the wire protocol, so the schema-parity table contained false ticks.
+- Framing this PR as &#34;parity with Claude Code&#34; is therefore inaccurate;
+  it&#39;s filling a gap Claude Code does not address.
+
+Replace the whole multi-section comparison (schema matrix, transport
+table, permission notes, borrow list, roadmap) with a single sentence
+stating the accurate relation: same event format in spirit, different
+topology — CC&#39;s is non-interactive only.
+
+* fix(cli): address review feedback on dual-output sidecar mode
+
+- Fix control_response mirror: external-initiated confirmations now
+  emit control_response via the same mirror useEffect as TUI-native
+  resolutions, making the emission path symmetric for all observers.
+- Fix ENOENT: --json-file with a non-existent path now falls back to
+  createWriteStream (auto-creates the file) instead of throwing.
+- Fix race: add reading guard to RemoteInputWatcher.readNewLines()
+  preventing duplicate command processing on rapid appends.
+- Refactor confirmationHandler to use refs (pendingToolCallsRef,
+  dualOutputRef) and register once (deps: [remoteInput]) to eliminate
+  teardown/re-registration churn.
+- Add debug logging to shutdown bare catch for ops correlation.
+- Add ENOENT fallback test case for DualOutputBridge.
+- Regenerate settings.schema.json for dualOutput section.
+
+Generated with AI
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+* fix(cli): make RemoteInputWatcher poll interval configurable for CI reliability
+
+RemoteInputWatcher.test.ts was timing out in CI (5s default) because
+fs.watchFile&#39;s 500ms poll interval is unreliable under load. Fix:
+
+- Accept optional `pollIntervalMs` in constructor (default 500ms).
+- Tests use 100ms poll interval for faster feedback.
+- Increase per-test timeout to 15s and waitFor timeout to 10s.
+- Increase &#34;TUI busy&#34; wait from 800ms to 1500ms for CI headroom.
+
+Generated with AI
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+* fix(cli): eliminate fs.watchFile timing dependency in RemoteInputWatcher tests
+
+Tests were flaky across all CI platforms (macOS/ubuntu/windows) because
+fs.watchFile polling (even at 100ms) is unreliable under CI load.
+
+Fix: expose checkForNewInput() as a public method that directly triggers
+file reading and returns a Promise. Tests now call it synchronously after
+writing to the input file — no polling, no timeouts, deterministic.
+
+Also fixes:
+- Windows ENOTEMPTY: add delay in afterEach before rmSync
+- Add active check in readNewLines to respect shutdown state
+- readNewLines now returns Promise&lt;void&gt; for awaitable reads
+
+Generated with AI
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+---------
+
+Co-authored-by: 秦奇 &lt;gary.gq@alibaba-inc.com&gt;
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+- test(integration): match new cron notification format in interactive tests (#3402)
+
+Cron prompts are rendered as `● Cron: …` notifications since the
+distinct Cron message type was added; the interactive tests still
+waited for the legacy `&gt; …` user-message line and timed out.
+
+- feat(core): add path-based context rule injection from .qwen/rules/ (#3339)
+
+* feat(core): add path-based context rule injection from .qwen/rules/
+
+Support multiple rule files in `.qwen/rules/` directories with optional
+YAML frontmatter for conditional loading based on glob patterns.
+
+Rules with a `paths:` field only load when matching files exist in the
+project. Rules without `paths:` always load as baseline rules.
+
+Key behaviors:
+- Global rules from ~/.qwen/rules/ always load
+- Project rules from &lt;root&gt;/.qwen/rules/ require folder trust
+- HTML comments stripped to save tokens
+- Files sorted alphabetically for deterministic ordering
+- Deduplication when project root equals home directory
+- Uses globIterate for early termination on first match
+
+* feat(core): align rules loading with Claude Code reference implementation
+
+Closes three gaps with Claude Code&#39;s .claude/rules/ feature:
+
+1. Recursive directory scanning — .qwen/rules/ now supports subdirectories
+   like frontend/, backend/ for organized rule hierarchies.
+
+2. Exclusion patterns — new `contextRuleExcludes` config parameter accepts
+   glob patterns to skip specific rule files (useful in monorepos with
+   other teams&#39; rules).
+
+3. Turn-level lazy loading — conditional rules (with `paths:` frontmatter)
+   are no longer injected eagerly at session start. Instead, they are
+   stored in a per-session ConditionalRulesRegistry and injected on-demand
+   via &lt;system-reminder&gt; when the model reads/edits a matching file
+   (read_file, edit, write_file). Each rule is injected at most once per
+   session.
+
+Internals:
+- loadRules() now returns { content, ruleCount, conditionalRules } — only
+  baseline rules flow into the system prompt; conditional rules are
+  deferred.
+- ConditionalRulesRegistry pre-compiles picomatch matchers for efficiency
+  and tracks injected rules to avoid duplicate injection.
+- coreToolScheduler.ts injects matched rules after PostToolUse hooks but
+  before the tool response is sent to the model.
+- Path matching defensively rejects files outside the project root.
+- /memory refresh and /directory add keep the registry in sync via
+  setConditionalRulesRegistry().
+
+* fix(core): correct field placement in config.test.ts mocks after merge
+
+Earlier replace_all inserted ruleCount/conditionalRules/projectRoot
+into the wrong mock call (readAutoMemoryIndex instead of
+loadServerHierarchicalMemory), breaking the build with syntax errors.
+Move the fields back to the correct mocked return value.
+
+* fix(core): normalize rule display paths to forward slashes for Windows
+
+On Windows, path.relative() returns backslash-separated paths, causing
+the &#34;Rule from:&#34; marker to differ from Linux/macOS and breaking the
+formats-rules-with-source-markers test on Windows CI.
+
+Normalize to forward slashes for cross-platform consistency, matching
+the convention used in glob patterns (paths: field) so that the model
+sees the same format regardless of the host OS.
+
+* fix(core): harden rulesDiscovery path checks and sort determinism
+
+Two small defensive improvements surfaced by the audit:
+
+1. matchAndConsume now rejects the exact &#39;..&#39; relative path in addition
+   to &#39;../&#39;-prefixed paths. path.relative returns &#39;..&#39; (no trailing
+   slash) when the target equals the parent of projectRoot — rare in
+   practice but worth guarding against.
+
+2. loadRulesFromDir now uses Array.sort() default (UTF-16 code point
+   comparison) instead of localeCompare. The previous sort was
+   locale-dependent and could produce different rule loading order on
+   machines with non-English locales (e.g. zh-CN). Rule filenames are
+   typically ASCII so behaviour is unchanged in common cases, but
+   deterministic ordering is preferable across environments.
+
+Adds one test case for the &#39;..&#39; rejection path.
+
+* fix(core): address CodeQL incomplete HTML comment sanitization
+
+stripHtmlComments only matched complete &lt;!-- ... --&gt; pairs in a single
+pass, so input like &#39;A&lt;!-- one --&gt;&lt;!-- two --&gt;B&lt;!--unclosed&#39; would
+leave a residual &#39;&lt;!--&#39; marker — flagged by CodeQL as
+incomplete-multi-character-sanitization.
+
+Not a security issue in our context (the output goes to an LLM system
+prompt, not an HTML renderer), but worth fixing to:
+ - clear the CodeQL alert in CI
+ - avoid token waste from dangling markers
+ - produce deterministic output
+
+Strategy: iteratively strip &lt;!-- ... --&gt; pairs until stable, then
+remove any residual &lt;!-- markers (leaving the following content
+visible since the author probably intended it to appear in the rule).
+
+- feat: background subagents with headless and SDK support (#3076)
+
+* feat(core): add run_in_background support for Agent tool
+
+Enable sub-agents to run asynchronously via `run_in_background: true`
+parameter. Background agents execute independently from the parent,
+which receives an immediate launch confirmation and continues working.
+A notification is injected into the parent conversation when the
+background agent completes.
+
+Key changes:
+- BackgroundTaskRegistry tracks lifecycle of background agents
+- Agent tool gains async execution path with fire-and-forget semantics
+- Background agents use YOLO approval mode to prevent deadlock
+- Independent AbortControllers survive parent ESC cancellation
+- CLI bridges notifications via useMessageQueue for between-turn delivery
+- State race guards prevent complete/fail after cancellation
+- Session cleanup aborts all running background agents
+
+* feat(background): improve notification formatting and UI handling
+
+- Add prefix/separator protocol to distinguish background notifications from user input
+- Show concise summary in UI while sending full details to LLM
+- Add &#39;notification&#39; history item type with specialized display
+- Add &#39;background&#39; agent status for background-running agents
+- Prevent notifications from polluting prompt history (up-arrow)
+- Truncate long descriptions in display text
+
+This improves the UX for background agents by showing cleaner, more concise
+notifications while preserving full context for the LLM.
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+* fix(background): reject run_in_background in non-interactive mode
+
+Headless mode skips AppContainer, so the notification callback is never
+registered and background agent results would be silently dropped. Return
+an error prompting the model to retry without run_in_background.
+
+* refactor(background): replace prefix/separator protocol with typed notification queue
+
+Replace the stringly-typed \x00__BG_NOTIFY__\x00 prefix/separator
+encoding with a typed notification path using SendMessageType.Notification.
+
+- Add SendMessageType.Notification to the enum
+- Change BackgroundNotificationCallback to emit (displayText, modelText)
+- Move notification queue from AppContainer into useGeminiStream (mirrors
+  the cron queue pattern): register on registry, queue structured items,
+  drain on idle via submitQuery
+- prepareQueryForGemini short-circuits for Notification type (skips slash
+  commands, shell mode, @-commands, prompt history logging)
+- Remove BACKGROUND_NOTIFICATION_PREFIX/SEPARATOR constants
+
+* refactor(background): move abortAll to Config.shutdown
+
+Background agent cleanup belongs in Config.shutdown() alongside other
+resource teardown (skillManager, toolRegistry, arenaRuntime), not in
+AppContainer&#39;s registerCleanup. This also ensures headless mode gets
+cleanup for free.
+
+* fix(background): persist notification items for session resume
+
+Background agent notifications were missing after session resume because
+they were never recorded in the chat history. The model text was absent
+from the API history and the display item was lost.
+
+- Add recordNotification() to ChatRecordingService — stores as user-role
+  message with subtype &#39;notification&#39; and displayText payload
+- Thread notificationDisplayText through submitQuery → sendMessageStream
+- Restore as HistoryItemNotification in resumeHistoryUtils
+
+* fix(background): replace YOLO with deny-by-default for background agents
+
+Background agents were using YOLO approval mode which auto-approves all
+tool calls — too permissive. Replace with shouldAvoidPermissionPrompts
+which auto-denies tool calls that need interactive approval, matching
+claw-code&#39;s approach.
+
+The permission flow for background agents is now:
+1. L3/L4 permission rules (allow/deny) — same as foreground
+2. Approval mode overrides (AUTO_EDIT for edits) — same as foreground
+3. PermissionRequest hooks — can override the denial
+4. Auto-deny — if no hook decided, deny because prompts are unavailable
+
+* fix(background): add missing getBackgroundTaskRegistry mock in useGeminiStream tests
+
+* refactor(core): move fork subagent params from execute() to construction time
+
+Identity-shaping fork inputs (parent history, generationConfig, tool decls,
+env-skip flag) were threaded through `AgentHeadless.execute()`&#39;s options bag
+and re-passed by the SubagentStop hook retry loop. They belong on the agent&#39;s
+construction-time configs, not its per-invocation options.
+
+- PromptConfig gains `renderedSystemPrompt` (verbatim, bypasses templating
+  and userMemory injection) and drops the `systemPrompt`/`initialMessages`
+  XOR so fork can carry both. createChat skips env bootstrap when
+  `initialMessages` is non-empty.
+- AgentHeadless.execute() shrinks to (context, signal?). Fork dispatch in
+  agent.ts builds synthetic PromptConfig/ModelConfig/ToolConfig from the
+  parent&#39;s cache-safe params and calls AgentHeadless.create directly
+  (bypassing SubagentManager). Parent&#39;s tool decls flow through verbatim
+  including the `agent` tool itself for cache parity.
+- Recursive-fork prevention switches from fork-side tool stripping to a
+  runtime guard. The previous `isInForkChild(history)` helper was dead
+  code (it scanned the main GeminiClient&#39;s history, not the fork child&#39;s
+  chat). Replaced with `isInForkExecution()` backed by AsyncLocalStorage:
+  the fork&#39;s background execution runs inside `runInForkContext`, and the
+  ALS frame propagates through the standard async chain into nested
+  AgentTool.execute() calls where the guard fires.
+
+* refactor(core): move agent tool files into dedicated tools/agent/ directory
+
+Move agent.ts, agent.test.ts, and fork-subagent.ts under
+tools/agent/ and update all import paths accordingly.
+
+* refactor(core): remove dead temp and top_p fields from ModelConfig
+
+These fields were never populated from subagent frontmatter and served
+no purpose in the fork path either. The ModelConfig interface retains
+only the actively-used model field.
+
+* refactor(core): read parent generation config directly instead of getCacheSafeParams
+
+Fork subagent now reads system instruction and tool declarations from
+the live GeminiChat via getGenerationConfig() instead of the global
+getCacheSafeParams() snapshot. This removes the cross-module coupling
+between the agent tool and the followup infrastructure.
+
+* fix(core): prevent duplicate tool declarations when toolConfig has only inline decls
+
+prepareTools() treated asStrings.length === 0 as &#34;add all registry tools&#34;,
+which is correct when no tools are specified at all, but wrong when the
+caller provides only inline FunctionDeclaration[] (no string names). The
+fork path passes parent tool declarations as inline decls for cache parity,
+so prepareTools was adding the full registry set on top — duplicating every
+non-excluded tool.
+
+Add onlyInlineDecls.length === 0 to the condition so that pure-inline
+toolConfigs bypass the registry entirely.
+
+* feat(core): support agent-level `background: true` in frontmatter
+
+Subagent definitions can now declare `background: true` in their YAML
+frontmatter to always run as background tasks. This is OR&#39;d with the
+`run_in_background` tool parameter — useful for monitors, watchers, and
+proactive agents so the LLM doesn&#39;t need to remember to set the flag.
+
+* fix(core): address background subagent lifecycle gaps
+
+- Inherit bgConfig from agentConfig so the resolved approval mode is
+  preserved for background agents (foreground would run AUTO_EDIT but
+  background fell back to DEFAULT, which combined with shouldAvoid-
+  PermissionPrompts would auto-deny every permission request).
+- Honor SubagentStop blocking decisions in background runs by looping
+  on hook output up to 5 iterations, matching runSubagentWithHooks.
+- Check terminate mode before reporting completion; non-GOAL modes
+  (ERROR, MAX_TURNS, TIMEOUT) are now reported as failures instead of
+  emitting a success notification for an incomplete run.
+- Exclude SendMessageType.Notification from the UserPromptSubmit hook
+  guard so background completion messages are not rewritten or blocked
+  as if they were user input.
+
+* feat(cli): headless support and SDK task events for background agents (#3379)
+
+* feat(cli): unify notification queue for cron and background agents
+
+Migrate cron from its own queue (cronQueueRef / cronQueue) to the shared
+notification queue used by background agents. Both producers now push the
+same item shape { displayText, modelText, sendMessageType } and a single
+drain effect / helper processes them in FIFO order.
+
+Cron fires render as HistoryItemNotification (● prefix) instead of
+HistoryItemUser (&gt; prefix), with a &#34;Cron: &lt;prompt&gt;&#34; display label.
+Records use subtype &#39;cron&#39; for clean resume and analytics separation.
+
+Lift the non-interactive rejection for background agents. Register a
+notification callback in nonInteractiveCli.ts with a terminal hold-back
+phase (100ms poll) that keeps the process alive until all background
+agents complete and their notifications are processed.
+
+* feat(cli): emit SDK task events for background subagents
+
+Emit `task_started` when a background agent registers and
+`task_notification` when it completes, fails, or is cancelled, so
+headless/SDK consumers can track lifecycle without parsing display
+text. Model-facing text is now structured XML with status, summary,
+truncated result, and usage stats. Completion stats (tokens, tool
+uses, duration) are captured from the subagent and included in both
+the SDK payload and the model XML.
+
+* fix: address codex review issues for background subagents
+
+- Background subagents now inherit the resolved approval mode from
+  agentConfig instead of the raw session config, so a subagent with
+  `approvalMode: auto-edit` (or execution in a trusted folder) keeps
+  that override when it runs asynchronously.
+- Non-interactive cron drains are single-flight: concurrent cron fires
+  now await the same in-flight drain, and the cron-done check gates
+  on it, preventing the final result from being emitted while a cron
+  turn is still streaming.
+- Background forks go through createForkSubagent so they retain the
+  parent&#39;s rendered system prompt and inherited history instead of
+  degrading to a plain FORK_AGENT.
+
+* fix(cli): restore cancellation, approval, and error paths in queued drain
+
+- Hold-back loop now reacts to SIGINT/SIGTERM: when the main abort
+  signal fires it calls registry.abortAll() so background agents with
+  their own AbortControllers stop promptly instead of pinning the
+  process open.
+- Queued-turn tool execution forwards the stream-json approval update
+  callback (onToolCallsUpdate) so permission-gated tools inside a
+  background-notification follow-up emit can_use_tool requests.
+- Queued-turn stream loop mirrors the main loop&#39;s text-mode handling
+  of GeminiEventType.Error, writing to stderr and throwing so provider
+  errors produce a non-zero exit code instead of silently succeeding.
+- Interactive cron prompts go through the normal slash/@-command/shell
+  preprocessing again; only Notification messages skip that path.
+
+* fix(cli): skip duplicate user-message item for cron prompts
+
+Cron prompts already render as a `● Cron: …` notification via the queue
+drain, so adding them again as a `USER` history item produced a
+duplicate `&gt; …` line.
+
+* fix(cli): honor SIGINT/SIGTERM during cron scheduler wait
+
+The non-interactive cron phase awaits a Promise that resolves only when
+scheduler.size reaches 0 and no drain is in flight. Recurring cron jobs
+never drop the scheduler size to 0 on their own, so the previous abort
+handling (added to the hold-back loop) was unreachable — the process
+hung indefinitely after SIGINT/SIGTERM. Attach an abort listener inside
+the promise so abort stops the scheduler and resolves immediately,
+allowing the hold-back loop to run and the process to exit cleanly.
+
+* feat(core): propagate tool-use id through background agent notifications
+
+Plumb the scheduler&#39;s callId into AgentToolInvocation via an optional
+setCallId hook on the invocation, detected structurally in
+buildInvocation. The agent tool forwards it as toolUseId on the
+BackgroundTaskRegistry entry so completion notifications can carry a
+&lt;tool-use-id&gt; tag and SDK task_started / task_notification events can
+emit tool_use_id — letting consumers correlate background completions
+back to the original Agent tool-use that spawned them.
+
+* fix(cli): drain single-flight race kept task_notification from emitting
+
+drainLocalQueue wrapped its body in an async IIFE and cleared the
+promise reference via finally. When the queue is empty the IIFE has
+no awaits, so its finally runs synchronously as part of the RHS of
+the assignment `drainPromise = (async () =&gt; {...})()` — clearing
+drainPromise BEFORE the outer assignment overwrites it with the
+resolved promise. The reference then stayed stuck on that fulfilled
+promise forever, so later calls short-circuited through
+`if (drainPromise) return drainPromise` and never processed
+queued notifications.
+
+Symptom: in headless `--output-format json` (and `stream-json`),
+task_started emitted but task_notification never did, even after
+the background agent completed. The process sat in the hold-back
+loop until SIGTERM.
+
+Fix: move the null-clearing out of the async body into an outer
+`.finally()` on the returned promise. `.finally()` runs as a
+microtask after the current synchronous block, so it clears the
+latest drainPromise reference instead of the pre-assignment null.
+
+* fix(cli): append newline to text-mode emitResult so zsh PROMPT_SP doesn&#39;t erase the line
+
+Headless text mode wrote `resultMessage.result` without a trailing newline.
+In a TTY, zsh themes that use PROMPT_SP (powerlevel10k, agnoster, …) detect
+the missing `\n` and emit `\r\033[K` before drawing the next prompt, which
+wipes the final line off the screen. Pipe-captured output was unaffected,
+so the bug only surfaced for interactive shell users — most visibly in the
+background-agent flow where the drain-loop&#39;s final assistant message is
+the *only* stdout write in text mode.
+
+Append `\n` to both the success (stdout) and error (stderr) writes.
+
+* docs(skill): tighten worked-example blurb in structured-debugging
+
+Mirror the simplified blurb from .claude/skills/structured-debugging/SKILL.md
+(knowledge repo). Drops the round-by-round narrative; keeps the contradiction
++ two lessons.
+
+* docs(skill): mirror SKILL.md improvements (reframing failure mode, generalized path, value-logging guidance)
+
+Mirror of knowledge repo commit 38eb28d into the qwen-code .qwen/skills
+copy.
+
+* docs(skill): mirror worked example into .qwen/skills/structured-debugging/
+
+Mirrors knowledge/.claude/skills/structured-debugging/examples/
+headless-bg-agent-empty-stdout.md so the .qwen copy of the skill links
+resolve.
+
+* docs(skill): mirror generalized side-note path guidance
+
+* fix(cli): harden headless cron and background-agent failure paths
+
+Three regressions surfaced by Codex review of feat/background-subagent:
+
+- Cron drain rejections were dropped by a bare `void`, so a failing
+  queued turn left the outer Promise unresolved and hung the run. Route
+  drain failures through the Promise&#39;s reject so they propagate to the
+  outer catch.
+- The background-agent registry entry was inserted before
+  `createForkSubagent()` / `createAgentHeadless()` was awaited. Failed
+  init returned an error from the tool call but left a phantom `running`
+  entry, and the headless hold-back loop (`registry.getRunning()`) waited
+  forever. Register only after init succeeds.
+- SIGINT/SIGTERM during the hold-back phase aborted background tasks,
+  then fell through to `emitResult({ isError: false })`, so a cancelled
+  `qwen -p ...` exited 0 with the prior assistant text. Route through
+  `handleCancellationError()` so cancellation exits non-zero, matching
+  the main turn loop.
+
+* test(cli): update stdout/stderr assertions for trailing newline
+
+`feadf052f` appended `\n` to text-mode `emitResult` output, but the
+nonInteractiveCli tests still asserted the pre-change strings. Update
+the 11 affected assertions to expect the trailing newline.
+
+* fix: address review comments on background-agent notifications
+
+Four additional issues from the PR review that the prior regression-fix
+commit didn&#39;t cover:
+
+- Escape XML metacharacters when interpolating `description`, `result`,
+  `error`, `agentId`, `toolUseId`, and `status` into the task-notification
+  envelope. Subagent output (which itself may carry untrusted tool output,
+  fetched HTML, or another agent&#39;s notification) could contain
+  `&lt;/result&gt;` or `&lt;/task-notification&gt;` and forge sibling tags the parent
+  model would treat as trusted metadata. Truncate result text *before*
+  escaping so the truncation never slices through an entity like `&amp;amp;`.
+- Emit the terminal notification from `cancel()` and `abortAll()`. The
+  fire-and-forget `complete()`/`fail()` from the subagent task is guarded
+  by `status !== &#39;running&#39;` and was no-op&#39;d after cancellation, so SDK
+  consumers saw `task_started` with no matching `task_notification`,
+  breaking the contract this PR establishes. Updated two race-guard
+  tests that asserted the old behavior.
+- Call `adapter.finalizeAssistantMessage()` before the abort-triggered
+  early return inside `drainOneItem`&#39;s stream loop. Without it,
+  `startAssistantMessage()` had already been called, so stream-json mode
+  left `message_start` unpaired.
+- Enforce `config.getMaxSessionTurns()` in `drainOneItem` for symmetry
+  with the main turn loop. Cron fires and notification replies otherwise
+  bypass the budget cap in headless runs.
+
+* fix: address codex review comments for background subagents
+
+- Wrap background fork execute() in runInForkContext so the
+  recursive-fork guard (AsyncLocalStorage-based) fires when a
+  background fork&#39;s child model calls `agent` again. Previously only
+  the foreground fork path was wrapped, so background forks could
+  spawn nested implicit forks.
+- Emit queued terminal task_notifications on SIGINT/SIGTERM before
+  handleCancellationError exits. abortAll() enqueues cancellation
+  notifications via the registry callback, but the process was
+  exiting before the drain loop had a chance to flush them — leaving
+  stream-json consumers that already saw task_started without a
+  matching terminal task_notification. Extracted the SDK-emit block
+  into a shared emitNotificationToSdk helper reused by the normal
+  drain and the cancellation flush.
+- Skip notification/cron subtypes in ACP HistoryReplayer. These
+  records are persisted as type: &#39;user&#39; so the model&#39;s chat history
+  keeps them for continuity, but they were never user input —
+  replaying them leaked raw &lt;task-notification&gt; XML (and cron
+  prompts) back into the ACP session as if the user typed them.
+
+* test(cli): sync JsonOutputAdapter text-mode assertions with trailing newline
+
+Commit 0da1182b7 appended a newline to text-mode emitResult output
+(zsh PROMPT_SP fix) and updated the nonInteractiveCli tests, but
+four assertions in JsonOutputAdapter.test.ts were missed. Update
+them to expect the trailing newline so CI passes.
+
+* refactor: simplify background subagent plumbing
+
+- Extract the SubagentStop hook blocking-decision loop into a
+  runSubagentStopHookLoop helper so the foreground and background
+  paths no longer duplicate the iteration/abort/log scaffolding.
+- Unify BackgroundTaskRegistry.abortAll to delegate to cancel,
+  removing copy-pasted abort/notification bookkeeping.
+- Drop the unused findByName and BackgroundAgentEntry.name field.
+- In nonInteractiveCli drain, hoist inputFormat and
+  toolCallUpdateCallback out of the inner tool loop, and drop the
+  unreachable try/catch around the readonly registry.
+- Trim boilerplate doc/narration comments while keeping load-bearing
+  WHY comments.
+
+* fix: address codex review comments for background subagents
+
+- Use tool callId (or short random suffix) instead of Date.now() for
+  background agentIds; avoids registry collisions when parallel
+  same-type agents launch in the same millisecond.
+- Reset loopDetector and lastPromptId for Notification turns so a
+  prior turn&#39;s loop count doesn&#39;t trip LoopDetected on the
+  notification response.
+- Replay notification/cron displayText in ACP HistoryReplayer so
+  the assistant reply has an antecedent in resumed transcripts.
+
+---------
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+- feat(skills): add /batch skill for parallel batch operations (#3079)
+
+* feat(skills): add /batch skill for parallel batch operations
+
+Add a new built-in skill `/batch` that orchestrates large-scale parallel
+changes across multiple files. The skill automatically:
+
+- Discovers target files using glob patterns
+- Splits files into chunks for parallel processing
+- Launches multiple worker agents concurrently
+- Aggregates results with success/failure statistics
+- Supports --dry-run mode for preview
+
+Resolves #3043
+
+* fix(skills): address PR review feedback for /batch skill
+
+- Extend chunking table to cover 51-100 files (now uses 5 chunks)
+- Clarify that `task` tool is the Agent tool for spawning workers
+- Add SKIPPED status to Agent Prompt Template output format
+- Shorten description field, move examples to body
+- Expand test file exclusion patterns (*.test.js, __tests__/, etc.)
+- Expand Dry-Run Mode section with detailed example output
+- Fix example math: &#34;24 files → 3 chunks of ~8 each&#34;
+
+* fix(skills): address wenshao&#39;s review feedback for /batch skill
+
+- Add copyright header
+- Add ask_user_question to allowedTools
+- Fix edit_file -&gt; edit (canonical tool name)
+- Fix chunking table math (3-8 each, not ~7-8)
+- Add zero file match handling
+- Reframe dry-run from --flag to natural language pattern
+
+* fix(skills): remove unnecessary copyright header from SKILL.md
+
+---------
+
+Co-authored-by: jinye.djy &lt;jinye.djy@alibaba-inc.com&gt;
+
+- refactor(core): move fork subagent params from execute() to construction time (#3255)
+
+* refactor(core): move fork subagent params from execute() to construction time
+
+Identity-shaping fork inputs (parent history, generationConfig, tool decls,
+env-skip flag) were threaded through `AgentHeadless.execute()`&#39;s options bag
+and re-passed by the SubagentStop hook retry loop. They belong on the agent&#39;s
+construction-time configs, not its per-invocation options.
+
+- PromptConfig gains `renderedSystemPrompt` (verbatim, bypasses templating
+  and userMemory injection) and drops the `systemPrompt`/`initialMessages`
+  XOR so fork can carry both. createChat skips env bootstrap when
+  `initialMessages` is non-empty.
+- AgentHeadless.execute() shrinks to (context, signal?). Fork dispatch in
+  agent.ts builds synthetic PromptConfig/ModelConfig/ToolConfig from the
+  parent&#39;s cache-safe params and calls AgentHeadless.create directly
+  (bypassing SubagentManager). Parent&#39;s tool decls flow through verbatim
+  including the `agent` tool itself for cache parity.
+- Recursive-fork prevention switches from fork-side tool stripping to a
+  runtime guard. The previous `isInForkChild(history)` helper was dead
+  code (it scanned the main GeminiClient&#39;s history, not the fork child&#39;s
+  chat). Replaced with `isInForkExecution()` backed by AsyncLocalStorage:
+  the fork&#39;s background execution runs inside `runInForkContext`, and the
+  ALS frame propagates through the standard async chain into nested
+  AgentTool.execute() calls where the guard fires.
+
+* refactor(core): move agent tool files into dedicated tools/agent/ directory
+
+Move agent.ts, agent.test.ts, and fork-subagent.ts under
+tools/agent/ and update all import paths accordingly.
+
+* refactor(core): remove dead temp and top_p fields from ModelConfig
+
+These fields were never populated from subagent frontmatter and served
+no purpose in the fork path either. The ModelConfig interface retains
+only the actively-used model field.
+
+* refactor(core): read parent generation config directly instead of getCacheSafeParams
+
+Fork subagent now reads system instruction and tool declarations from
+the live GeminiChat via getGenerationConfig() instead of the global
+getCacheSafeParams() snapshot. This removes the cross-module coupling
+between the agent tool and the followup infrastructure.
+
+* fix(core): prevent duplicate tool declarations when toolConfig has only inline decls
+
+prepareTools() treated asStrings.length === 0 as &#34;add all registry tools&#34;,
+which is correct when no tools are specified at all, but wrong when the
+caller provides only inline FunctionDeclaration[] (no string names). The
+fork path passes parent tool declarations as inline decls for cache parity,
+so prepareTools was adding the full registry set on top — duplicating every
+non-excluded tool.
+
+Add onlyInlineDecls.length === 0 to the condition so that pure-inline
+toolConfigs bypass the registry entirely.
+
+* refactor(core): remove dead temp and skipEnvHistory fields from AgentPathParams
+
+These fields were carried over from earlier designs but have no remaining
+effect after the fork subagent refactor:
+
+- `temp` was never forwarded into ModelConfig, which this PR already
+  stripped of the temperature field.
+- `skipEnvHistory` is redundant with the auto-skip in `AgentCore.createChat`,
+  which already bypasses env bootstrap whenever `initialMessages` is
+  non-empty — the condition under which any caller would set this flag.
+
+Also drops the corresponding `skipEnvHistory: true` at the one caller in
+the memory extraction planner.
+
+- fix(core): add shell argument quoting guidance to prevent special char errors (#3327)
+
+* fix(core): add shell argument quoting guidance to prevent special char errors
+
+When models pass arguments containing special characters (parentheses,
+backticks, single quotes, dollar signs, etc.) to shell commands like
+`gh pr create --body &#39;...&#39;`, bash can misinterpret them as shell syntax,
+causing the command to fail with cryptic errors.
+
+Add an explicit quoting guide to `getShellToolDescription()` covering:
+- Single quotes: pass everything literally but cannot contain `&#39;`
+- ANSI-C quoting (`$&#39;...&#39;`): supports escape sequences including `\&#39;`
+- Heredoc: the most robust approach for multi-line or mixed-quote text,
+  with a concrete `gh pr create` example
+
+Fixes #3300
+
+* test: update shell tool description snapshots
+
+- docs: update authentication methods to reflect OAuth discontinuation (#3325)
+
+* docs: update authentication methods to reflect OAuth discontinuation
+
+Remove deprecated Qwen OAuth references and update documentation to
+direct users to valid authentication methods (API Key, Coding Plan,
+or Local Inference) following the OAuth free tier discontinuation on
+2026-04-15.
+
+Closes #3316
+
+* docs: fix quickstart auth description to match actual /auth UI
+
+The /auth command shows three options: Alibaba Cloud Coding Plan,
+API Key, and Qwen OAuth (discontinued). Updated quickstart.md to
+accurately reflect this UI instead of splitting into Option A/B/C.
+
+Also updated settings.md, commands.md, and troubleshooting.md with
+minor OAuth-related cleanups.
+
+* docs: update .qwen workspace description in quickstart
+
+Remove reference to &#39;Qwen account&#39; since OAuth is discontinued.
+The .qwen directory is created by Qwen Code itself for storing
+credentials, configuration, and session data.
+
+* docs: fix warning block formatting in quickstart
+
+- Add missing &#39;&gt;&#39; continuation for the OAuth discontinuation warning block
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+* docs: update README Qwen3.6-Plus description
+
+- Remove mention of running Qwen3.6-Plus locally via Ollama/vLLM
+- Keep only the Alibaba Cloud ModelStudio API key option
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+* docs: address review feedback - remove Local Inference from auth, add dual-region links
+
+- Local Inference removed from auth method lists, kept as separate
+  &#39;Local Model Setup&#39; section with detailed Ollama/vLLM config examples
+- All links now provide dual-region URLs (Beijing + intl)
+- .qwen workspace note restored to original meaning (cost tracking)
+- Device auth flow error kept scoped to legacy OAuth
+- API setup guide links updated with confirmed intl URL
+
+---------
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+- fix(core): strip thinking blocks from history on model switch (#3304) (#3315)
+
+When switching models mid-session, reasoning_content fields from
+thinking-capable models leaked into API requests sent to the new
+provider, causing 422 errors on strict OpenAI-compatible endpoints.
+
+Call stripThoughtsFromHistory() in handleModelChange() so thought parts
+are removed before the next request is built for the new model.
+
+- fix(core): limit skill watcher depth to prevent FD exhaustion (#3320)
+
+* fix(core): limit skill watcher depth to prevent FD exhaustion (#3289)
+
+The chokidar file watcher in SkillManager.updateWatchersFromCache() had
+no depth limit or ignored paths. When skill directories contained heavy
+subtrees like node_modules, chokidar recursively watched every file,
+exhausting file descriptors and breaking child-process I/O (node-pty
+onData/onExit callbacks silently stop firing).
+
+Fix: set depth to 2 (skills use a fixed &lt;skill-name&gt;/SKILL.md layout)
+and add an ignored function that filters out special file types (sockets,
+FIFOs, devices) and .git directories.
+
+Made-with: Cursor
+
+* fix(core): use path.join in watcher test for Windows compat
+
+The watcherIgnored test used hardcoded forward-slash paths which don&#39;t
+split correctly on Windows where path.sep is backslash.
+
+Made-with: Cursor
+
+- feat(cli): support multi-line status line output (#3311)
+
+* feat(cli): support multi-line status line output (#3211)
+
+Remove the single-line hard limit (.split(&#39;\n&#39;)[0]) from the status line
+hook so user scripts can output multiple rows. Footer renders each line
+as a separate &lt;Text wrap=&#34;truncate&#34;&gt; element, preserving per-line
+horizontal truncation. Ink&#39;s virtual DOM handles re-rendering without
+manual ANSI cursor management.
+
+* feat(cli): cap status line output at 3 lines
+
+Prevent runaway scripts from flooding the footer — lines beyond the
+third are silently discarded.
+
+* docs: mention 3-line cap in status line docs and agent prompt
+
+* fix(cli): cap status line at 2 lines to keep footer within 3 rows
+
+Footer has a fixed bottom row (hint/mode indicator), so status line
+gets at most 2 lines to keep the total footer height at 3 rows max.
+
+* test(cli): improve useStatusLine coverage to 100% lines
+
+Add tests for: per-model metrics payload, contextWindowSize/version/
+model fallbacks, config removal with pending debounce, command change
+cancelling pending debounce.
+
+* docs: update status line ASCII diagram for multi-line layouts
+
+Also fix TS error in test (null → null as never for mock return).
+
+* refactor(cli): return string[] from useStatusLine, filter empty lines
+
+Address review feedback:
+- Hook returns `lines: string[]` instead of `text: string | null`,
+  eliminating the join/split round-trip with Footer.
+- Filter empty lines before slicing so leading blanks don&#39;t eat real
+  content (e.g. &#34;\n\nreal content&#34; no longer yields [&#34;&#34;, &#34;&#34;]).
+- Export MAX_STATUS_LINES with comment explaining the 3-row constraint.
+- Use `status-line-${i}` as React key for clarity.
+
+* test(cli): add Footer multi-line rendering, \r\n, and pure-newline tests
+
+Address remaining review feedback:
+- Footer test: mock useStatusLine, verify multi-line rendering and
+  hint suppression.
+- useStatusLine test: add \r\n line ending and pure-newline edge case.
+
+* fix(cli): align right footer indicators to top
+
+When the status line has multiple rows, the left column becomes taller
+than the right section. The outer Box defaults to `alignItems: stretch`
+which caused the indicators to visually center; add `alignItems=&#34;flex-start&#34;`
+on the right Box so they stay anchored to the top row.
+
+Reported via e2e test in #3311.
+
+- docs: fix Windows install command to work in both CMD and PowerShell (#3252)
+
+-   test(core): stabilize glob truncation tests (#3322)
+
+* test(core): stabilize glob truncation tests
+
+  Mock glob results in truncation-specific tests instead of creating large
+  numbers of real files. This keeps the tests focused on GlobTool boundary
+  logic and avoids filesystem timing issues on Windows CI.
+
+* test(cli): stabilize selection list scroll test
+
+  Wait for the newly active item to render after rerendering the list so the
+  scroll assertions do not read a stale frame on slower Windows CI runs.
+
+- fix(cli): defer update notifications until model response completes (#3046) (#3321)
+
+When a background auto-update finished while the model was streaming,
+the success/failure notification was inserted mid-conversation via
+addItem(), disrupting the user&#39;s reading flow.
+
+Introduce a &#34;defer until idle&#34; mechanism in setUpdateHandler():
+- Accept an `isIdleRef` param that tracks whether StreamingState is Idle
+- Queue notifications in a `pendingNotifications` array when not idle
+- Expose a `flush()` method that drains the queue once idle
+- AppContainer keeps `isIdleRef.current` in sync with `streamingState`
+  and calls `flush()` via a useEffect when transitioning back to Idle
+
+All four event types (update-received, update-success, update-failed,
+update-info) are routed through the same addItemOrDefer() helper.
+The third parameter defaults to `{ current: true }` for backward
+compatibility.
+
+Co-authored-by: 思晗 &lt;housihan.hsh@alibaba-inc.com&gt;
+
+- feat(memory): managed auto-memory and auto-dream system (#3087)
+
+* docs: add auto-memory implementation log
+
+* feat(core): add managed auto-memory storage scaffold
+
+* feat(core): load managed auto-memory index
+
+* feat(core): add managed auto-memory recall
+
+* feat(core): add managed auto-memory extraction
+
+* feat(cli): add managed auto-memory dream commands
+
+* feat(core): add auxiliary side-query foundation
+
+* feat(memory): add model-driven recall selection
+
+* feat(memory): add model-driven extraction planner
+
+* feat(core): add background task runtime foundation
+
+* feat(memory): schedule auto dream in background
+
+* feat(core): add background agent runner foundation
+
+* feat(memory): add extraction agent planner
+
+* feat(core): add dream agent planner
+
+* feat(core): rebuild managed memory index
+
+* feat(memory): add governance status commands
+
+* feat(memory): add managed forget flow
+
+* feat(core): harden background agent planning
+
+* feat(memory): complete managed parity closure
+
+* test(memory): add managed lifecycle integration coverage
+
+* feat: same to cc
+
+* feat(memory-ui): add memory saved notification and memory count badge
+
+Feature 3 - Memory Saved Notification:
+- Add HistoryItemMemorySaved type to types.ts
+- Create MemorySavedMessage component for rendering &#39;● Saved/Updated N memories&#39;
+- In useGeminiStream: detect in-turn memory writes via mapToDisplay&#39;s
+  memoryWriteCount field and emit &#39;memory_saved&#39; history item after turn
+- In client.ts: capture background dream/extract promises and expose
+  via consumePendingMemoryTaskPromises(); useGeminiStream listens
+  post-turn and emits &#39;Updated N memories&#39; notification for background tasks
+
+Feature 4 - Memory Count Badge:
+- Add isMemoryOp field to IndividualToolCallDisplay
+- Add memoryWriteCount/memoryReadCount to HistoryItemToolGroup
+- Add detectMemoryOp() in useReactToolScheduler using isAutoMemPath
+- ToolGroupMessage renders &#39;● Recalled N memories, Wrote N memories&#39; badge
+  at the top of tool groups that touch memory files
+
+Fix: process.env bracket-access in paths.ts (noPropertyAccessFromIndexSignature)
+Fix: MemoryDialog.test.tsx mock useSettings to satisfy SettingsProvider requirement
+
+* fix(memory-ui): auto-approve memory writes, collapse memory tool groups, fix MEMORY.md path
+
+Problem 1 - Auto-approve memory file operations:
+- write-file.ts: getDefaultPermission() checks isAutoMemPath; returns &#39;allow&#39;
+  for managed auto-memory files, &#39;ask&#39; for all other files
+- edit.ts: same pattern
+
+Problem 2 - Feature 4 UX: collapse memory-only tool groups:
+- ToolGroupMessage: detect when all tool calls have isMemoryOp set (pure memory
+  group) and all are complete; render compact &#39;● Recalled/Wrote N memories
+  (ctrl+o to expand)&#39; instead of individual tool call rows
+- ctrl+o toggles expand/collapse when isFocused and group is memory-only
+- Mixed groups (memory + other tools) keep badge-at-top behaviour
+- Expanded state shows individual tool calls with &#39;● Memory operations
+  (ctrl+o to collapse)&#39; header
+
+Problem 3 - MEMORY.md path mismatch:
+- prompt.ts: Step 2 now references full absolute path ${memoryDir}/MEMORY.md
+  so the model writes to the correct location inside the memory directory,
+  not to the parent project directory
+
+Fix tests:
+- write-file.test.ts: add getProjectRoot to mockConfigInternal
+- prompt.test.ts: update assertion to match full-path section header
+
+* fix(memory-ui): fix duplicate notification, broken ctrl+o, and Edit tool detection
+
+- Remove duplicate &#39;Saved N memories&#39; notification: the tool group badge already
+  shows &#39;Wrote N memories&#39;; the separate HistoryItemMemorySaved addItem after
+  onComplete was double-counting. Keep only the background-task path
+  (consumePendingMemoryTaskPromises).
+
+- Remove ctrl+o expand: Ink&#39;s Static area freezes items on first render and
+  cannot respond to user input. useInput/useState(isExpanded) in a Static item
+  is a no-op. Removed the dead code; memory-only groups now always render as
+  the compact summary (no fake interactive hint).
+
+- Fix Edit tool detection: detectMemoryOp was checking for &#39;edit_file&#39; but the
+  real tool name constant is &#39;edit&#39;. Also removed non-existent &#39;create_file&#39;
+  (write_file covers all writes). Now editing MEMORY.md is correctly identified
+  as a memory write op, collapses to &#39;Wrote N memories&#39;, and is auto-approved.
+
+* fix(dream): run /dream as a visible submit_prompt turn, not a silent background agent
+
+The previous implementation ran an AgentHeadless background agent that could
+take 5+ minutes with zero UI feedback — user saw a blank screen for the entire
+duration and then at most one line of text.
+
+Fix: /dream now returns submit_prompt with the consolidation task prompt so it
+runs as a regular AI conversation turn. Tool calls (read_file, write_file, edit,
+grep_search, list_directory, glob) are immediately visible as collapsed tool
+groups as the model works through the memory files — identical UX to Claude Code.
+
+Also export buildConsolidationTaskPrompt from dreamAgentPlanner so dreamCommand
+can reuse the same detailed consolidation prompt that was already written.
+
+* fix(memory): auto-allow ls/glob/grep on memory base directory
+
+Add getMemoryBaseDir() to getDefaultPermission() allow list in ls.ts,
+glob.ts, and grep.ts — mirrors the existing pattern in read-file.ts.
+
+Without this, ListFiles/Glob/Grep on ~/.qwen/* would trigger an
+approval dialog, blocking /dream at its very first step.
+
+* fix(background): prevent permission prompt hangs in background agents
+
+Match Claude Code&#39;s headless-agent intent: background memory agents must never
+block on interactive permission prompts.
+
+Wrap background runtime config so getApprovalMode() returns YOLO, ensuring any
+ask decision is auto-approved instead of hanging forever. Add regression test
+covering the wrapped approval mode.
+
+* fix(memory): run auto extract through forked agent
+
+Make managed auto-memory extraction follow the Claude Code architecture:
+background extraction now uses a forked agent to read/write memory files
+directly, instead of planning patches and applying them with a separate
+filesystem pipeline.
+
+Keep the old patch/model path only as fallback if the forked agent fails.
+Add regression tests covering the new execution path and tool whitelist.
+
+* refactor(memory): remove legacy extract fallback pipeline
+
+Delete the old patch/model/heuristic extraction path entirely.
+Managed auto-memory extract now runs only through the forked-agent
+execution flow, with no planner/apply fallback stages remaining.
+
+Also remove obsolete exports/tests and update scheduler/integration
+coverage to use the forked-agent-only architecture.
+
+* refactor(memory): move auxiliary files out of memory/ directory
+
+meta.json, extract-cursor.json, and consolidation.lock are internal
+bookkeeping files, not user-visible memories. Move them one level up
+to the project state dir (parent of memory/) so that the memory/
+directory contains only MEMORY.md and topic files, matching the
+clean layout of the upstream reference implementation.
+
+Add getAutoMemoryProjectStateDir() helper in paths.ts and update the
+three path accessors + store.test.ts path assertions accordingly.
+
+* fix(memory): record lastDreamAt after manual /dream run
+
+The /dream command submits a prompt to the main agent (submit_prompt),
+which writes memory files directly. Because it bypasses dreamScheduler,
+meta.json was never updated and /memory always showed &#39;never&#39;.
+
+Fix by:
+- Exporting writeDreamManualRunToMetadata() from dream.ts
+- Adding optional onComplete callback to SubmitPromptActionReturn and
+  SubmitPromptResult (types.ts / commands/types.ts)
+- Propagating onComplete through slashCommandProcessor.ts
+- Firing onComplete after turn completion in useGeminiStream.ts
+- Providing the callback in dreamCommand.ts to write lastDreamAt
+
+* fix(memory): remove scope params from /remember in managed auto-memory mode
+
+--global/--project are legacy save_memory tool concepts. In managed
+auto-memory mode the forked agent decides the appropriate type
+(user/feedback/project/reference) based on the content of the fact.
+
+Also improve the prompt wording to explicitly ask the agent to choose
+the correct type, reducing the tendency to default to &#39;project&#39;.
+
+* feat(ui): show &#39;✦ dreaming&#39; indicator in footer during background dream
+
+Subscribe to getManagedAutoMemoryDreamTaskRegistry() in Footer via a
+useDreamRunning() hook. While any dream task for the current project is
+pending or running, display &#39;✦ dreaming&#39; in the right section of the
+footer bar, between Debug Mode and context usage.
+
+* refactor(memory): align dream/extract infrastructure with Claude Code patterns
+
+Five improvements based on Claude Code parity audit:
+
+1. Memoize getAutoMemoryRoot (paths.ts)
+   - Add _autoMemoryRootCache Map, keyed by projectRoot
+   - findCanonicalGitRoot() walks the filesystem per call; memoize avoids
+     repeated git-tree traversal on hot-path schedulers/scanners
+   - Expose clearAutoMemoryRootCache() for test teardown
+
+2. Lock file stores PID + isProcessRunning reclaim (dreamScheduler.ts)
+   - acquireDreamLock() writes process.pid to the lock file body
+   - lockExists() reads PID and calls process.kill(pid, 0); dead/missing
+     PID reclaims the lock immediately instead of waiting 2h
+   - Stale threshold reduced to 1h (PID-reuse guard, same as CC)
+
+3. Session scan throttle (dreamScheduler.ts)
+   - Add SESSION_SCAN_INTERVAL_MS = 10min (same as CC)
+   - Add lastSessionScanAt Map&lt;projectRoot, number&gt; to ManagedAutoMemoryDreamRuntime
+   - When time-gate passes but session-gate doesn&#39;t, throttle prevents
+     re-scanning the filesystem on every user turn
+
+4. mtime-based session counting (dreamScheduler.ts)
+   - Replace fragile recentSessionIdsSinceDream Set in meta.json with
+     filesystem mtime scan (listSessionsTouchedSince)
+   - Mirrors Claude Code&#39;s listSessionsTouchedSince: reads session JSONL
+     files from Storage.getProjectDir()/chats/, filters by mtime &gt; lastDreamAt
+   - Immune to meta.json corruption/loss; no per-turn metadata write
+   - ManagedAutoMemoryDreamRuntime accepts injectable SessionScannerFn
+     for clean unit testing without real session files
+
+5. Extraction mutual exclusion extended to write_file/edit (extractScheduler.ts)
+   - historySliceUsesMemoryTool() now checks write_file/edit/replace/create_file
+     tool calls whose file_path is within isAutoMemPath()
+   - Previously only detected save_memory; missed direct file writes by
+     the main agent, causing redundant background extraction
+
+* docs(memory): add user-facing memory docs, i18n for all locales, simplify /forget
+
+- Add docs/users/features/memory.md: comprehensive user-facing guide covering
+  QWEN.md instructions, auto-memory behaviour, all memory commands, and
+  troubleshooting; replaces the placeholder auto-memory.md
+- Update docs/users/features/_meta.ts: rename entry auto-memory → memory
+- Update docs/users/features/commands.md: add /init, /remember, /forget,
+  /dream rows; fix /memory description; remove /init duplicate
+- Update docs/users/configuration/settings.md: add memory.* settings section
+  (enableManagedAutoMemory, enableManagedAutoDream) between tools and permissions
+- Remove /forget --apply flag: preview-then-apply flow replaced with direct
+  deletion; update forgetCommand.ts, en.js, zh.js accordingly
+- Add all auto-memory i18n keys to de, ja, pt, ru locales (18 keys each):
+  Open auto-memory folder, Auto-memory/Auto-dream status lines, never/on/off,
+  ✦ dreaming, /forget and /remember usage strings, all managed-memory messages
+- Remove dead save_memory branch from extractScheduler.partWritesToMemory()
+- Add ✦ dreaming indicator to Footer.tsx with i18n; fix Footer.test.tsx mocks
+- Refactor MemoryDialog.tsx auto-dream status line to use i18n
+- Remove save_memory tool (memoryTool.ts/test); clean up webui references
+- Add extractionPlanner.ts, const.ts and associated tests
+- Delete stale docs/users/configuration/memory.md and
+  docs/developers/tools/memory.md (content superseded)
+
+* refactor(memory): remove all Claude Code references from comments and test names
+
+* test(memory): remove empty placeholder test files that cause vitest to fail
+
+* fix eslint
+
+* fix test in windows
+
+* fix test
+
+* fix(memory): address critical review findings from PR #3087
+
+- fix(read-file): narrow auto-allow from getMemoryBaseDir() (~/.qwen) to
+  isAutoMemPath(projectRoot) to prevent exposing settings.json / OAuth
+  credentials without user approval (wenshao review)
+
+- fix(forget): per-entry deletion instead of whole-file unlink
+  - assign stable per-entry IDs (relativePath:index for multi-entry files)
+    so the model can target individual entries without removing siblings
+  - rewrite file keeping unmatched entries; only unlink when file becomes
+    empty (wenshao review)
+
+- fix(entries): round-trip correctness for multi-entry new-format bodies
+  - parseAutoMemoryEntries: plain-text line closes current entry and opens
+    a new one (was silently ignored when current was already set)
+  - renderAutoMemoryBody: emit blank line between adjacent entries so the
+    parser can detect entry boundaries on re-read (wenshao review)
+
+- fix(entries): resolve two CodeQL polynomial-regex alerts
+  - indentedMatch: \s{2,}(?:[-*]\s+)? → [\t ]{2,}(?:[-*][\t ]+)?
+  - topLevelMatch: :\s*(.+)$ → :[ \t]*(\S.*)$
+  (github-advanced-security review)
+
+- fix(scan.test): use forward-slash literal for relativePath expectation
+  since listMarkdownFiles() normalises all separators to &#39;/&#39; on all
+  platforms including Windows
+
+* fix(memory): replace isAutoMemPath startsWith with path.relative()
+
+Using path.relative() instead of string startsWith() is more robust
+across platforms — it correctly handles Windows path-separator
+differences and avoids potential edge cases where a path prefix match
+could succeed on non-separator boundaries.
+
+Addresses github-actions review item 3 (PR #3087).
+
+* feat(telemetry): add auto-memory telemetry instrumentation
+
+Add OpenTelemetry logs + metrics for the five auto-memory lifecycle
+events: extract, dream, recall, forget, and remember.
+
+Telemetry layer (packages/core/src/telemetry/):
+- constants.ts: 5 new event-name constants
+  (qwen-code.memory.{extract,dream,recall,forget,remember})
+- types.ts: 5 new event classes with typed constructor params
+  (MemoryExtractEvent, MemoryDreamEvent, MemoryRecallEvent,
+   MemoryForgetEvent, MemoryRememberEvent)
+- metrics.ts: 8 new OTel instruments (5 Counters + 3 Histograms)
+  with recordMemoryXxx() helpers; registered inside initializeMetrics()
+- loggers.ts: logMemoryExtract/Dream/Recall/Forget/Remember() — each
+  emits a structured log record and calls its recordXxx() counterpart
+- index.ts: re-exports all new symbols
+
+Instrumentation call-sites:
+- extractScheduler.ts ManagedAutoMemoryExtractRuntime.runTask():
+  emits extract event with trigger=auto, completed/failed status,
+  patches_count, touched_topics, and wall-clock duration
+- dream.ts runManagedAutoMemoryDream():
+  emits dream event with trigger=auto, updated/noop status,
+  deduped_entries, touched_topics, and duration; covers both
+  agent-planner and mechanical fallback paths
+- recall.ts resolveRelevantAutoMemoryPromptForQuery():
+  emits recall event with strategy, docs_scanned/selected, and
+  duration; covers model, heuristic, and none paths
+- forget.ts forgetManagedAutoMemoryEntries():
+  emits forget event with removed_entries_count, touched_topics,
+  and selection_strategy (model/heuristic/none)
+- rememberCommand.ts action():
+  emits remember event with topic=managed|legacy at command
+  invocation time (before agent decides the actual memory type)
+
+* refactor(telemetry): remove memory forget/remember telemetry events
+
+Remove EVENT_MEMORY_FORGET and EVENT_MEMORY_REMEMBER along with all
+associated infrastructure that is no longer needed:
+
+- constants.ts: remove EVENT_MEMORY_FORGET, EVENT_MEMORY_REMEMBER
+- types.ts: remove MemoryForgetEvent, MemoryRememberEvent classes
+- metrics.ts: remove MEMORY_FORGET_COUNT, MEMORY_REMEMBER_COUNT constants,
+  memoryForgetCounter, memoryRememberCounter module vars,
+  their initialization in initializeMetrics(), and
+  recordMemoryForgetMetrics(), recordMemoryRememberMetrics() functions
+- loggers.ts: remove logMemoryForget(), logMemoryRemember() functions
+  and their imports
+- index.ts: remove all re-exports for the above symbols
+- memory/forget.ts: remove logMemoryForget call-site and import
+- cli/rememberCommand.ts: remove logMemoryRemember call-sites and import
+
+* change default value
+
+* fix forked agent
+
+* refactor(background): unify fork primitives into runForkedAgent + cleanup
+
+- Merge runForkedQuery into runForkedAgent via TypeScript overloads:
+  with cacheSafeParams → GeminiChat single-turn path (ForkedQueryResult)
+  without cacheSafeParams → AgentHeadless multi-turn path (ForkedAgentResult)
+- Delete forkedQuery.ts; move its test to background/forkedAgent.cache.test.ts
+- Remove forkedQuery export from followup/index.ts
+- Migrate all callers (suggestionGenerator, speculation, btwCommand, client)
+  to import from background/forkedAgent
+- Add getFastModel() / setFastModel() to Config; expose in CLI config init
+  and ModelDialog / modelCommand
+- Remove resolveFastModel() from AppContainer — now delegated to config.getFastModel()
+- Strip Claude Code references from code comments
+
+* fix(memory): address wenshao&#39;s critical review findings
+
+- dream.ts: writeDreamManualRunToMetadata now persists lastDreamSessionId
+  and resets recentSessionIdsSinceDream, preventing auto-dream from firing
+  again in the same session after a manual /dream
+- config.ts: gate managed auto-memory injection on getManagedAutoMemoryEnabled();
+  when disabled, previously saved memories are no longer injected into new sessions
+- rememberCommand.ts: remove legacy save_memory branch (tool was removed);
+  fall back to submit_prompt directing agent to write to QWEN.md instead
+- BuiltinCommandLoader.ts: only register /dream and /forget when managed
+  auto-memory is enabled, matching the feature&#39;s runtime availability
+- forget.ts: return early in forgetManagedAutoMemoryMatches when matches is
+  empty, avoiding unnecessary directory scaffolding as a side effect
+
+* fix test
+
+* fix ci test
+
+* feat(memory): align extract/dream agents to Claude Code patterns
+
+- fix(client): move saveCacheSafeParams before early-return paths so
+  extract agents always have cache params available (fixes extract never
+  triggering in skipNextSpeakerCheck mode)
+
+- feat(extract): add read-only shell tool + memory-scoped write
+  permissions; create inline createMemoryScopedAgentConfig() with
+  PermissionManager wrapper (isToolEnabled + evaluate) that allows only
+  read-only shell commands and write/edit within the auto-memory dir
+
+- feat(extract): align prompt to Claude Code patterns — manifest block
+  listing existing files, parallel read-then-write strategy, two-step
+  save (memory file then index)
+
+- feat(dream): remove mechanical fallback; runManagedAutoMemoryDream is
+  now agent-only and throws without config
+
+- feat(dream): align prompt to Claude Code 4-phase structure
+  (Orient/Gather/Consolidate/Prune+Index); add narrow transcript grep,
+  relative→absolute date conversion, stale index pruning, index size cap
+
+- fix(permissions): add isToolEnabled() to MemoryScopedPermissionManager
+  to prevent TypeError crash in CoreToolScheduler._schedule
+
+- test: update dreamScheduler tests to mock dream.js; replace removed
+  mechanical-dedup test with scheduler infrastructure verification
+
+* move doc to design
+
+* refactor(memory): unify extract+dream background task management into MemoryBackgroundTaskHub
+
+- Add memoryTaskHub.ts: single BackgroundTaskRegistry + BackgroundTaskDrainer shared
+  by all memory background tasks; exposes listExtractTasks() / listDreamTasks()
+  typed query helpers and a unified drain() method
+- extractScheduler: ManagedAutoMemoryExtractRuntime accepts hub via constructor
+  (defaults to defaultMemoryTaskHub); test factory gets isolated fresh hub
+- dreamScheduler: same pattern — sessionScanner + hub injection; BackgroundTask-
+  Scheduler initialized from injected hub; test factory gets isolated hub
+- status.ts: replace two separate getRegistry() calls with defaultMemoryTaskHub
+  typed query methods
+- Footer.tsx (useDreamRunning): subscribe to shared registry, filter by
+  DREAM_TASK_TYPE so extract tasks do not trigger the dream spinner
+- index.ts: re-export memoryTaskHub.ts so defaultMemoryTaskHub/DREAM_TASK_TYPE/
+  EXTRACT_TASK_TYPE are available as top-level package exports
+
+* refactor(background): introduce general-purpose BackgroundTaskHub
+
+Replace memory-specific MemoryBackgroundTaskHub with a domain-agnostic
+BackgroundTaskHub in the background/ layer. Any future background task
+runtime (3rd, 4th, …) plugs in by accepting a hub via constructor
+injection — no new infrastructure required.
+
+Changes:
+- Add background/taskHub.ts: BackgroundTaskHub (registry + drainer +
+  createScheduler() + listByType(taskType, projectRoot?)) and the
+  globalBackgroundTaskHub singleton. Zero knowledge of any task type.
+- Delete memory/memoryTaskHub.ts: its narrow listExtractTasks /
+  listDreamTasks helpers are replaced by the generic listByType() call.
+- Move EXTRACT_TASK_TYPE to extractScheduler.ts (owned by the runtime
+  that defines it); replace 3 hardcoded string literals with the const.
+- Move DREAM_TASK_TYPE to dreamScheduler.ts; use hub.createScheduler()
+  instead of manually wiring new BackgroundTaskScheduler(reg, drain).
+- status.ts: globalBackgroundTaskHub.listByType(EXTRACT_TASK_TYPE, ...)
+- Footer.tsx: globalBackgroundTaskHub.registry (shared, filtered by type)
+- index.ts: export background/taskHub.js; drop memory/memoryTaskHub.js
+
+* test(background): add BackgroundTaskHub unit tests and hub isolation checks
+
+- background/taskHub.test.ts (11 tests):
+  - createScheduler(): tasks registered via scheduler appear in hub registry;
+    multiple calls return distinct scheduler instances
+  - listByType(): filters by taskType, filters by projectRoot, returns []
+    for unknown types, two types co-exist in registry but stay separated
+  - drain(): resolves false on timeout, resolves true when tasks complete,
+    resolves true immediately when no tasks in flight
+  - isolation: tasks in hubA do not appear in hubB
+  - globalBackgroundTaskHub: is a BackgroundTaskHub instance with registry/drainer
+
+- extractScheduler.test.ts (+1 test):
+  - factory-created runtimes have isolated registries; tasks in runtimeA
+    are invisible to runtimeB; all tasks carry EXTRACT_TASK_TYPE
+
+- dreamScheduler.test.ts (+1 test):
+  - factory-created runtimes have isolated registries; tasks in runtimeA
+    are invisible to runtimeB; all tasks carry DREAM_TASK_TYPE
+
+* refactor(memory): consolidate all memory state into MemoryManager
+
+Replace BackgroundTaskRegistry/Drainer/Scheduler/Hub helper classes and
+module-level globals with a single MemoryManager class owned by Config.
+
+## Changes
+
+### New
+- packages/core/src/memory/manager.ts — MemoryManager with:
+  - scheduleExtract / scheduleDream (inline queuing + deduplication logic)
+  - recall / forget / selectForgetCandidates / forgetMatches
+  - getStatus / drain / appendToUserMemory
+  - subscribe(listener) compatible with useSyncExternalStore
+  - storeWith() atomic record registration (no double-notify)
+  - Distinct skippedReason &#39;scan_throttled&#39; vs &#39;min_sessions&#39; for dream
+- packages/core/src/utils/forkedAgent.ts — pure cache util (moved from background/)
+- packages/core/src/utils/sideQuery.ts — pure util (moved from auxiliary/)
+
+### Deleted
+- background/taskRegistry, taskDrainer, taskScheduler, taskHub and all tests
+- background/forkedAgent (moved to utils/)
+- auxiliary/sideQuery (moved to utils/)
+- memory/extractScheduler, dreamScheduler, state and all tests
+
+### Modified
+- config/config.ts — Config owns MemoryManager instance; getMemoryManager()
+- core/client.ts — all memory ops via config.getMemoryManager()
+- core/client.test.ts — mock MemoryManager instead of individual modules
+- memory/status.ts — accepts MemoryManager param, drops globalBackgroundTaskHub
+- index.ts — memory exports reduced from 14 modules to 5 (manager/types/paths/store/const)
+- cli/commands/dreamCommand.ts — via config.getMemoryManager()
+- cli/commands/forgetCommand.ts — via config.getMemoryManager()
+- cli/components/Footer.tsx — useSyncExternalStore replacing setInterval polling
+- cli/components/Footer.test.tsx — add getMemoryManager mock
+
+-   fix(cli): remember &#34;Start new chat session&#34; until summary changes (#3308)
+
+* fix(cli): remember &#34;Start new chat session&#34; until summary changes
+
+  Persist a project-scoped Welcome Back restart choice keyed to the
+  current PROJECT_SUMMARY fingerprint.
+
+  This suppresses the Welcome Back dialog after choosing &#34;Start new chat
+  session&#34;, while still showing it again after the project summary is
+  updated.
+
+* fix conflict
+
+- fix(cli): catch sync exec throw in statusline to prevent crash (#3264) (#3310)
+
+child_process.exec() throws synchronously for spawn errors libuv does not
+report via the async &#39;error&#39; event (EBADF, EINVAL, …). On macOS with Node
+22, EBADF can surface during stdio pipe setup, and the uncaught throw
+escapes the debounce setTimeout callback and crashes the CLI.
+
+Wrap the exec call in try/catch so a failing statusline degrades to no
+output while the rest of the CLI keeps running.
+
+- fix(sdk): avoid leaking process exit listeners in ProcessTransport (#3295)
+
+* fix(sdk): avoid leaking process exit listeners in ProcessTransport
+
+* Strengthen ProcessTransport cleanup during process exit.
+
+  This updates the shared process-exit cleanup path to use a best-effort
+  SIGTERM/SIGKILL sequence and adds coverage to verify the global exit
+  handler terminates all active child processes.
+
+  It keeps the listener leak fix in place while closing the remaining gaps
+  found in review.
+
+- feat(hooks): Add HTTP Hook, Function Hook and Async Hook support (#2827)
+
+* add http/async/function type
+
+* fix url error
+
+* resolve comment
+
+* align cc non blocking error
+
+* fix hookRunner for async
+
+* fix(hooks): update hook type validation to support http and function types
+
+- Change validated hook types from [&#39;command&#39;, &#39;plugin&#39;] to [&#39;command&#39;, &#39;http&#39;, &#39;function&#39;]
+- Add validation for HTTP hooks requiring url field
+- Add validation for function hooks requiring callback field
+- Add comprehensive test coverage for all hook type validations
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+* fix(hooks): align SSRF protection with Claude Code behavior
+
+- Allow 127.0.0.0/8 (loopback) for local dev hooks
+- Allow localhost hostname for local dev hooks
+- Allow ::1 (IPv6 loopback) for local dev hooks
+- Add 100.64.0.0/10 (CGNAT) to blocked ranges (RFC 6598)
+- Update tests to match Claude Code&#39;s ssrfGuard.ts behavior
+
+This fixes HTTP hooks failing to connect to local dev servers.
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+* refactor(hooks): align HTTP hook security with Claude Code behavior
+
+- Add CRLF/NUL sanitization for env var interpolation (header injection)
+- Implement combined abort signal (external signal + timeout)
+- Upgrade SSRF protection to DNS-level with ssrfGuard
+  - Allow loopback (127.0.0.0/8, ::1) for local dev hooks
+  - Block CGNAT (100.64.0.0/10) and IPv6 private ranges
+- Increase default HTTP hook timeout to 10 minutes
+- Fix VS Code hooks schema to support http type
+  - Add url, headers, allowedEnvVars, async, once, statusMessage, shell fields
+  - Note: &#34;function&#34; type is SDK-only (callback cannot be serialized to JSON)
+
+* feat(hooks): enhance Function Hook with messages, skillRoot, shell, and matcher support
+
+- Add MessagesProvider for automatic conversation history passing to function hooks
+- Add FunctionHookContext with messages, toolUseID, and signal
+- Add skillRoot support for skill-scoped session hooks
+- Add shell parameter support for command hooks (bash/powershell)
+- Add regex matcher support for hook pattern matching
+- Add statusMessage to CommandHookConfig
+- Change default function hook timeout from 60s to 5s
+- Add comprehensive unit tests for all new features
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+* add session hook for skill
+
+* fix function hook parsing
+
+* refactor ui for http hook/async hook/function hook
+
+* update doc and add integration test
+
+* change telemetryn type and refactor SSRF
+
+* fix project level bug
+
+---------
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+- feat: optimize compact mode UX — shortcuts, settings sync, and safety (#3100)
+
+* feat: optimize compact mode UX — shortcuts, settings sync, and safety improvements
+
+- Add Ctrl+O to keyboard shortcuts list (?) and /help command
+- Sync compact mode toggle from Settings dialog with CompactModeContext
+- Protect tool approval prompts from being hidden in compact mode
+  (MainContent forces live rendering during WaitingForConfirmation)
+- Remove snapshot freezing on toggle — treat as persistent preference,
+  not temporary peek (differs from Claude Code&#39;s session-scoped model)
+- Add compact mode tip to startup Tips rotation for non-intrusive discovery
+- Remove compact mode indicator from footer to reduce UI clutter
+- Add competitive analysis design doc (EN + ZH) comparing with Claude Code
+- Update user docs (settings.md) and i18n translations (en/zh/ru/pt)
+
+Relates to #3047, #2767, #2770
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor: remove frozenSnapshot dead code and Chinese design doc
+
+- Remove frozenSnapshot state, useEffect, and all related logic from
+  AppContainer, MainContent, CompactModeContext, and test files
+- Simplify MainContent to always render live pendingHistoryItems
+- Delete compact-mode-design-zh.md (redundant Chinese translation)
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: address PR review feedback for compact mode optimization
+
+- Add refreshStatic() call after setCompactMode in SettingsDialog
+  so already-rendered Static history updates immediately
+- Fix outdated column split comment in KeyboardShortcuts (5+4+4)
+- Update design doc: remove all frozenSnapshot references, renumber
+  optimization recommendations, fix file reference descriptions
+- Add missing i18n keys for de.js and ja.js locales
+- Add test for SettingsDialog compact mode sync with CompactModeContext
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: prevent subagent confirmation from being hidden in compact mode
+
+hasConfirmingTool only checks ToolCallStatus.Confirming, but subagent
+approvals arrive via resultDisplay.pendingConfirmation while the tool
+status remains Executing. Add hasSubagentPendingConfirmation to the
+showCompact guard so tool groups with pending subagent confirmations
+are always force-expanded.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: force show subagent confirmation result in compact mode
+
+The previous fix (47ee03c) correctly force-expanded the tool group
+wrapper when a subagent had pending confirmation, but each inner
+ToolMessage still hid its resultDisplay due to compactMode check,
+which hid the AgentExecutionDisplay containing the inline confirmation
+UI.
+
+Add isAgentWithPendingConfirmation to forceShowResult conditions so
+the inner AgentExecutionDisplay is rendered even in compact mode.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(compact-mode): merge consecutive tool groups across hidden items
+
+In compact mode, sequential tool calls across multiple LLM turns each
+produced a separate bordered box, defeating the &#34;compact&#34; intent. The
+model typically emits a `gemini_thought` between consecutive tool calls,
+which is hidden in compact mode — so visually the boxes look adjacent,
+but in `history` they are separated by hidden items.
+
+This commit adds render-time merging of consecutive tool_group history
+items, where &#34;consecutive&#34; allows hidden-in-compact items
+(`gemini_thought`, `gemini_thought_content`) between them.
+
+Key pieces:
+- New `mergeCompactToolGroups` utility that merges adjacent mergeable
+  tool_groups, skipping hidden items between them. Force-expand
+  conditions (Confirming/Error tools, subagent pending confirmation,
+  user-initiated, focused embedded shell) preserve group boundaries so
+  authorization prompts, errors, and shell focus stay visible.
+- `MainContent.tsx` applies the merger only when `compactMode === true`
+  (verbose mode is unchanged) and calls `refreshStatic()` when a merge
+  consolidates items, because Ink&#39;s `&lt;Static&gt;` is append-only and
+  cannot replace already-committed terminal content.
+- `CompactToolGroupDisplay.tsx` shows a `× N` count when a merged
+  group contains more than one tool, matching the existing single-turn
+  multi-tool display style.
+- 19 unit tests covering empty/single/multiple groups, hidden-item
+  skipping (the 8-tool real-world scenario), force-expand boundaries,
+  mixed tool types, and complex sequences.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: 秦奇 &lt;gary.gq@alibaba-inc.com&gt;
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- feat(acp): add complete hooks support for ACP integration (#3248)
+
+* complete hooks for acp
+
+* resolve comment
+
+* reslove test
+
+* resolve comment for SessionEnd/SessionStart/PostToolUseFailure/PostToolUse
+
+- fix(cli): block discontinued qwen-oauth model selection in ModelDialog (#3299)
+
+PR #3291 discontinued the Qwen OAuth free tier but intentionally left the
+ModelDialog unchanged, relying on server rejection for qwen-oauth models.
+This follow-up adds proper UI handling consistent with the AuthDialog:
+
+- Mark qwen-oauth model entries with &#34;(Discontinued)&#34; label and warning color
+- Replace descriptions with &#34;Discontinued — switch to Coding Plan or API Key&#34;
+- Block selection with inline error message instead of calling switchModel
+- Show ⚠ discontinuation notice in the detail panel for highlighted entries
+- Runtime OAuth models (existing cached tokens) remain selectable until server
+  rejects them (soft cutoff principle from PR #3291)
+- Add i18n strings for the new error message across all 7 locale files
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+- chore(release): bump version to 0.14.5 (#3298)
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+- fix(channels/dingtalk): prioritize senderStaffId over senderId for allowedUsers matching (#3294)
+
+DingTalk provides two user identifiers: `senderId` (an internal platform ID
+like `$:LWCP_v1:xxx`) and `senderStaffId` (the human-readable staff/employee
+ID). The current code uses `senderId` first when constructing the Envelope,
+which means `allowedUsers` configuration cannot match against the staff ID
+that users actually know and configure.
+
+Swap the priority so `senderStaffId` is preferred when available, falling back
+to `senderId` only when `senderStaffId` is absent.
+
+Made-with: Cursor
+
+- feat(auth): discontinue Qwen OAuth free tier (2026-04-15 cutoff) (#3291)
+
+* feat(auth): discontinue Qwen OAuth free tier (2026-04-15 cutoff)
+
+The Qwen OAuth free tier has reached its end-of-life date. This updates
+all client-side messaging, blocks new OAuth signups, and guides existing
+users to alternative providers.
+
+* fix(test): add getModelsConfig mock and update QWEN_OAUTH test expectations
+
+- Add getModelsConfig() to Config mocks in gemini.test.tsx (3 failures)
+- Update validateNonInterActiveAuth test to expect exit for QWEN_OAUTH
+  since validateAuthMethod now returns an error for discontinued free tier
+
+- fix(cli): ignore literal Tab input in BaseTextInput (#3270)
+
+* refactor(BaseTextInput): ignore literal Tab input in keyboard handler
+
+- Prevent insertion of literal tab characters in the BaseTextInput component
+- Require consumers to intercept Tab via onKeypress for custom behavior
+- Ensure smoother handling of Tab key without affecting buffer content
+
+* fix(cli): preserve tabbed paste in paste workaround
+
+- Mark single-line raw chunks containing tabs as paste events in the pasteWorkaround path
+- Keep a literal Tab key as a non-paste keypress
+- Add KeypressContext coverage for literal Tab keys and single-line tab-separated raw chunks
+
+- feat(acp): LLM-based message rewrite middleware with custom prompts (#3191)
+
+* feat(acp): LLM-based message rewrite middleware
+
+Add MessageRewriteMiddleware that intercepts ACP messages and appends
+LLM-rewritten versions with _meta.rewritten=true at turn boundaries.
+
+Original messages pass through unmodified. At the end of each turn
+(before tool calls or at response end), accumulated thought/message
+chunks are sent to LLM for rewriting into business-friendly text.
+
+- TurnBuffer: accumulates chunks per turn
+- LlmRewriter: calls LLM with configurable prompt
+- MessageRewriteMiddleware: orchestrates intercept → buffer → rewrite → emit
+- BaseEmitter.sendUpdate: routes through middleware when configured
+- Session: initializes middleware from settings.messageRewrite config
+
+Enable via settings.json:
+{
+  &#34;messageRewrite&#34;: {
+    &#34;enabled&#34;: true,
+    &#34;target&#34;: &#34;both&#34;,
+    &#34;prompt&#34;: &#34;custom system prompt for rewriter&#34;
+  }
+}
+
+Rewritten messages carry _meta.rewritten=true for frontend to
+prioritize display. Original messages remain for debugging.
+
+* fix: TypeScript 编译错误修复 + 优化默认改写 prompt（参考竞品风格）
+
+* fix: 从 user/workspace originalSettings 读取 messageRewrite 配置（绕过 schema 校验）
+
+* feat: 非交互 CLI 模式也支持 message rewrite（eval 可用）
+
+* fix: 禁用 rewriter LLM 的 thinking，过滤 thought 部分只取纯文本输出
+
+* fix: cron 路径补齐 message rewrite flush + 代码质量优化
+
+- Session.ts cron 路径添加 messageRewriter.flushTurn() 调用
+- nonInteractiveCli.ts cron 路径添加 turnBuffer 累积 + flush + rewrite
+- 提取 loadRewriteConfig() 共享函数，消除两处重复配置读取
+- 主路径和 cron 路径添加 turnBuffer.markToolCall()
+- rewrite 调用添加 30s 超时保护（AbortSignal.timeout）
+- 修复 import 语句被 const 声明分割的问题
+
+* feat: rewrite 支持 async/sync 模式（默认 async，不增加执行时间）
+
+* feat: rewrite prompt 通用化 + 上下文连贯 + promptFile + async 修复
+
+- 默认 prompt 改为通用英文版（适配任意 coding agent，不绑定数据分析场景）
+- 支持 promptFile 配置项，从文件加载自定义 prompt（优先于 inline prompt）
+- 上下文连贯性：lastOutput 记录上一轮改写结果，拼接到下一轮输入，
+  避免连续 turn 间信息重复
+- 修复 CLI 非交互模式 async rewrite 丢失：void doRewrite() 改为
+  pendingRewrites 数组 + emitResult 前 Promise.allSettled
+- 增加 debug logging：REWRITE INPUT/OUTPUT 完整内容 + prev_output 长度
+
+* refactor: remove sync rewrite mode, always use async (non-blocking) rewrite
+
+- Remove `async` field from MessageRewriteConfig
+- MessageRewriteMiddleware.flushTurn() always fires in background
+- nonInteractiveCli.ts main &amp; cron paths always push to pendingRewrites
+- No user-facing latency from rewrite calls
+
+* fix: address review feedback — trust check, timeout, history replay
+
+1. loadRewriteConfig: skip workspace settings when !isTrusted, preventing
+   untrusted repos from enabling rewriter with a custom prompt
+2. MessageRewriteMiddleware.flushTurn: always enforce 30s timeout internally,
+   even when caller provides no AbortSignal (interactive path)
+3. Install rewriter AFTER history replay completes (Session.installRewriter),
+   so historical messages are never rewritten on session load
+
+* fix: address second round review — target filter, timeout, rewrite queue
+
+1. nonInteractiveCli: apply rewriteConfig.target filter to accumulation
+   (main path and cron path), matching MessageRewriteMiddleware behavior
+2. nonInteractiveCli: add 30s AbortSignal.timeout to rewrite calls in
+   both main and cron paths
+3. MessageRewriteMiddleware: replace single pendingRewrite slot with
+   pendingRewrites array + Promise.allSettled, ensuring all rewrites
+   complete before session exits
+
+* test: add unit tests for TurnBuffer, loadRewriteConfig, MessageRewriteMiddleware
+
+- TurnBuffer: flush, reset, isEmpty, markToolCall, whitespace filtering (12 tests)
+- loadRewriteConfig: isTrusted gating, workspace/user precedence (5 tests)
+- MessageRewriteMiddleware: target filtering, tool_call boundary flush,
+  pendingRewrites queue, rewrite metadata (9 tests)
+
+* fix: config.test.ts use unknown cast for LoadedSettings stub (fix tsc --build)
+
+* fix: filter LLM literal &#34;empty string&#34; responses in rewriter output
+
+LLM sometimes outputs &#34;（空字符串）&#34; or similar text instead of actual
+empty string when instructed to &#34;return empty string&#34;. Add regex patterns
+to catch common variants and treat them as null (skip rewrite output).
+
+* revert: remove LLM empty-string pattern defense, rely on prompt fix instead
+
+* fix: prevent async rewrite from corrupting adapter state + honor config.model
+
+1. nonInteractiveCli: rewrite promises now return data only, adapter
+   emission happens synchronously via emitSettledRewrites() at safe
+   boundaries (before next turn starts, before cron next turn, before
+   final result). Prevents concurrent startAssistantMessage corruption.
+2. LlmRewriter: use rewriteConfig.model when set, fallback to
+   config.getModel(). Previously model field was defined but ignored.
+
+* docs: add messageRewrite configuration guide to settings.md
+
+* Revert &#34;docs: add messageRewrite configuration guide to settings.md&#34;
+
+This reverts commit ecd57e2d5a9433e8a6ee69583225970291276944.
+
+* feat: add contextTurns config for rewrite history context
+
+Allow configuring how many previous rewrite outputs are included as
+context when rewriting a new turn:
+- contextTurns: 1 (default) = last rewrite only
+- contextTurns: 0 = no context
+- contextTurns: N = last N rewrites
+- contextTurns: &#34;all&#34; = all previous rewrites
+
+* refactor: rename target &#39;both&#39; to &#39;all&#39; + add LlmRewriter unit tests
+
+- Rename target value &#39;both&#39; → &#39;all&#39; for future extensibility (e.g. &#39;tool&#39;)
+- Add LlmRewriter tests: contextTurns (0/1/N/all), model override, filtering
+- Total: 35 tests across 4 test files
+
+* refactor: remove message rewrite from non-interactive CLI mode
+
+Non-interactive mode (qwen -p &#34;...&#34; --output-format json) consumers are
+scripts/programs that don&#39;t need user-friendly rewrites. Additionally,
+the JSON output adapter doesn&#39;t support _meta fields, so rewritten text
+was silently mixed into normal assistant messages without any marker.
+
+Rewrite middleware is now ACP-only (Session path).
+
+* revert: restore package-lock.json and nonInteractiveCli.ts to main state
+
+* docs: add README for message rewrite middleware
+
+Explain the feature purpose (business-oriented output customization),
+mark it as a temporary solution, and reference the hook-based
+alternative (#3266) for future discussion.
+
+* docs: move temporary-solution notice to top of README
+
+* docs: simplify temporary-solution notice in rewrite README
+
+- fix(cli): make /bug easier to open in terminals without hyperlink support (#3257)
+
+- fix(core): allow thought-only responses in GeminiChat stream validation (#3251)
+
+Models using thinking/reasoning modes may emit only thought content
+without explicit text output. The stream validation previously rejected
+these as &#39;empty&#39; responses. Now accepts responses that contain either
+text content or thought content when a finish reason is present.
+
+(cherry picked from commit a0b13911f41d2d1878bb12999e4794785a8f75e3)
+
+Co-authored-by: mingholy.lmh &lt;mingholy.lmh@alibaba-inc.com&gt;
+
+- fix(core): respect custom Gemini baseUrl from modelProviders (#3212)
+
+* fix(core): pass gemini baseUrl via httpOptions
+
+---------
+
+Co-authored-by: QwenCode &lt;qwen-coder@alibabacloud.com&gt;
+
+- fix(vscode): limit session tab title length to prevent tab bar overflow (#3249)
+
+* fix(vscode): limit session tab title length to prevent tab bar overflow
+
+- Extract truncatePanelTitle() into panelTitleUtils.ts; operates on
+  Unicode code points to avoid splitting surrogate pairs (e.g. emoji);
+  truncates to first 50 code points + &#39;…&#39;
+- Apply truncation uniformly in WebViewProvider for all updatePanelTitle
+  messages, covering both createOrShowPanel and restorePanel paths
+- Remove redundant 50-char truncation in SessionMessageHandler; panel
+  title truncation is now the sole responsibility of WebViewProvider
+- Align getSessionTitle() to use the same limit (50 code points + &#39;…&#39;)
+  for visual consistency between session list and tab title
+- Add unit tests for truncatePanelTitle covering empty string, boundary,
+  long title, and emoji surrogate-pair edge cases
+
+Fixes #2873
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* refactor(vscode): reuse truncatePanelTitle in getSessionTitle and fix fallback title logic
+
+---------
+
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix(core): detect rate-limit errors from streamed SSE frames (#3246)
+
+DashScope throttling (`Throttling.AllocationQuota`) surfaces as an
+SSE `event:error` frame mid-stream with `:HTTP_STATUS/429` as a
+comment and a non-numeric `code` in the payload. The existing
+detection paths missed it, so subagents failed immediately with
+`Failed to run subagent: id:1 event:error ...` instead of retrying.
+
+- `getErrorStatus`: add a final fallback that parses `HTTP_STATUS/NNN`
+  out of `error.message`, bounded by `\b` and the 100-599 range, so
+  streamed errors where the SDK never sees a real HTTP status can
+  still be classified.
+- `getErrorCode`: fix three `|| null` early-returns that swallowed
+  later fall-through paths when the provider code was non-numeric
+  (`isApiError` top-level, `isApiError` JSON-in-message, and
+  `isStructuredError`). The branches now fall through on non-numeric
+  values so `.status` or the new `HTTP_STATUS/NNN` fallback can
+  recover the real code.
+
+- feat(vscode-ide-companion): add /account for account display (#2984)
+
+* feat(vscode-ide-companion): add /account for account display
+
+* fix(account): intercept typed /account command and read session-level config
+
+1. Handle literal /account in useMessageSubmit.ts so typing it triggers
+   the account dialog instead of sending it as a chat message.
+2. Pass sessionId through extMethod params and read from session config
+   instead of agent-level config, so /account reflects model changes
+   made via /model within the current session.
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+---------
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+- feat(core): implement fork subagent for context sharing (#2936)
+
+* feat(core): implement fork subagent for context sharing
+
+- Make subagent_type optional in AgentTool
+- Add forkSubagent.ts to build identical tool result prefixes
+- Run fork processes in the background to preserve UX
+
+* fix(core): fix test failures related to root execution and optional subagent_type
+
+- Skip pathReader and edit tool permission tests when running as root
+- Fix agent.test.ts to correctly mock execute call with extraHistory
+- Remove unused imports in forkSubagent.ts
+
+* fix(core): fix fork subagent bugs and add CacheSafeParams integration
+
+Bug fixes:
+- Fix AgentParams.subagent_type type: string -&gt; string? (match schema)
+- Fix undefined agentType passed to hook system (fallback to subagentConfig.name)
+- Fix hook continuation missing extraHistory parameter
+- Fix functionResponse missing id field (match coreToolScheduler pattern)
+- Fix consecutive user messages in Gemini API (ensure history ends with model)
+- Fix duplicate task_prompt when directive already in extraHistory
+- Fix FORK_AGENT.systemPrompt empty string causing createChat to throw
+- Fix redundant dynamic import of forkSubagent.js (merge into single import)
+- Fix non-fork agent returning empty string on execution failure
+- Fix misleading fork child rule referencing non-existent system prompt config
+- Fix functionResponse.response key from {result:} to {output:} for consistency
+
+CacheSafeParams integration:
+- Retrieve parent&#39;s generationConfig via getCacheSafeParams() for cache sharing
+- Add generationConfigOverride to CreateChatOptions and AgentHeadless.execute()
+- Add toolsOverride to AgentHeadless.execute() for parent tool declarations
+- Fork API requests now share byte-identical prefix with parent (DashScope cache hits)
+- Graceful degradation when CacheSafeParams unavailable (first turn)
+
+Docs:
+- Add Fork Subagent section to sub-agents.md user manual
+- Add fork-subagent-design.md design document
+
+* fix(core): apply subagent tool exclusion to forked agents
+
+Fork children were inheriting parent&#39;s cached tool declarations directly,
+bypassing prepareTools() filtering and gaining access to AgentTool and
+cron tools. Extract EXCLUDED_TOOLS_FOR_SUBAGENTS as a shared constant
+and apply it to forkToolsOverride.
+
+* fix(core): skip env history whenever extraHistory is provided
+
+Previously gated on generationConfigOverride, which meant the no-cache
+fallback path (CacheSafeParams unavailable) still ran getInitialChatHistory
+and duplicated env bootstrap messages already present in the parent&#39;s
+history. Gate on extraHistory instead so both fork paths skip env init.
+
+* fix(core): use explicit skipEnvHistory flag for fork env handling
+
+The previous fix gated env-init skipping on the presence of extraHistory,
+but agent-interactive (arena) also passes extraHistory — its chatHistory is
+env-stripped by stripStartupContext() and DOES need fresh env init for the
+child&#39;s working directory. Skipping env there broke the interactive path.
+
+Replace the implicit gate with an explicit skipEnvHistory option that only
+fork sets (when extraHistory is present, since fork&#39;s history comes from
+getHistory(true) and already contains env).
+
+* fix(core): defend skipEnvHistory gate against empty extraHistory
+
+Edge case: when the parent&#39;s rawHistory ends with a user message and has
+length 1, extraHistory becomes []. The previous gate (extraHistory !==
+undefined) would set skipEnvHistory: true, leaving the fork with neither
+env bootstrap nor parent history. Check length &gt; 0 so empty arrays fall
+through to the normal env-init path.
+
+* fix(core): apply skipEnvHistory to stop-hook retry execute
+
+The second subagent.execute() call in the SubagentStop retry loop was
+missing skipEnvHistory, so on retry the fork&#39;s env context would be
+duplicated — same bug as the initial tanzhenxin report, just on a less
+common code path.
+
+- feat(cli): add startup performance profiler (#3232)
+
+ feat(cli): add startup performance profiler (#3219)
+
+  Add a lightweight startup profiler activated via QWEN_CODE_PROFILE_STARTUP=1.
+  When enabled, collects performance.now() timestamps at 7 key phases in main()
+  and writes a JSON report to ~/.qwen/startup-perf/. Also records
+  process.uptime() at T0 to capture module loading time not covered by
+  checkpoint-based measurement.
+
+  Key design decisions:
+  - Only profiles inside sandbox child process to avoid duplicate reports
+  - initStartupProfiler() is idempotent (resets state on each call)
+  - Filename uses report.sessionId for consistency with JSON content
+  - Zero overhead when disabled (single env var check)
+
+  Initial measurement: module loading ~1342ms (94%), main() ~85ms (6%),
+  confirming barrel exports and eager dependency loading as primary
+  optimization targets for #3011.
+
+  Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+- feat(cli/sdk): expose /context usage data in non-interactive mode and SDK API (#2916)
+
+* feat(cli): implement non-interactive /context output and diagnostic
+
+- Extract collectContextData() from contextCommand.ts for shared usage.
+- Register /context in ALLOWED_BUILTIN_COMMANDS_NON_INTERACTIVE.
+- Extend SDK control protocol with GET_CONTEXT_USAGE request.
+- Implement handleGetContextUsage in SystemController for programmatic token queries.
+- Expose getContextUsage() method in the TypeScript SDK Query interface.
+
+* fix: address review feedback and fix critical bugs in context usage feature
+
+- Add missing `get_context_usage` route in ControlDispatcher (SDK calls would throw)
+- Fix `executionMode` defaulting: use `?? &#39;interactive&#39;` to match other commands
+- Validate dynamic import of `collectContextData` before invoking
+- Preserve original error message in handleGetContextUsage catch block
+- Add ControlDispatcher test for get_context_usage routing
+- Add JSDoc comment for context command in non-interactive allowlist
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: re-check abort signal after async operations in handleGetContextUsage
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs: add getContextUsage() to SDK TypeScript documentation
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs: clarify getContextUsage showDetails is a display hint, not a data filter
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: make showDetails affect response shape, add getContextUsage test
+
+- When showDetails is false, return empty detail arrays instead of full
+  data so /context and /context detail produce different payloads
+- Add unit test for Query.getContextUsage() covering request payload
+  and response handling
+
+* fix: strip UI type from SDK response, sync Java SDK protocol
+
+- Remove leaked `type: &#39;context_usage&#39;` from control response payload
+- Add GET_CONTEXT_USAGE to Java SDK protocol mirror (enum, interface,
+  union type)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- docs: update quota exceeded alternatives to OpenRouter and Fireworks (#3217)
+
+* docs: update quota exceeded alternatives to OpenRouter and Fireworks
+
+- Update README.md news section to recommend OpenRouter and Fireworks
+  as primary alternatives, with ModelStudio as third option
+- Update retry.ts quota error message to include OpenRouter and
+  Fireworks URLs for users whose OAuth quota has been exhausted
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+* fix(test): update retry test assertions to match new quota error message
+
+* docs: update free tier quota to 100 req/day with sunset notice and alternatives
+
+Update all references to reflect the Qwen OAuth free tier policy change:
+- 1,000 → 100 requests/day across code, i18n, and docs
+- Add 2026-04-15 sunset date everywhere
+- Guide users to OpenRouter, Fireworks AI, or ModelStudio in docs
+- Remove CHANGELOG.md
+
+---------
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+Co-authored-by: tanzhenxin &lt;tanzhenxing1987@gmail.com&gt;
+
+- feat(core): add microcompaction for idle context cleanup (#3006)
+
+* feat(core): add microcompaction for idle context cleanup
+
+Clear old tool result content from chat history when the user returns
+after an idle period (default 60 min). Replaces functionResponse output
+with a sentinel string for compactable tools (read_file, shell, grep,
+glob, web_fetch, web_search, edit, write_file), keeping the N most
+recent results intact (default 5). Runs before full compression so it
+can shed tokens cheaply without an API call.
+
+- Time-based trigger reuses lastApiCompletionTimestamp from thinking cleanup
+- Per-part counting so keepRecent applies to individual tool results
+  even when batched in parallel
+- Preserves tool error responses (only clears successful outputs)
+- Configurable via settings.json (context.microcompaction) with env var
+  overrides for E2E testing
+- Enabled by default
+
+* refactor(config): unify idle cleanup settings under clearContextOnIdle
+
+Consolidate thinking block cleanup and tool results microcompaction
+config into a single `context.clearContextOnIdle` settings group:
+
+  {
+    &#34;context&#34;: {
+      &#34;clearContextOnIdle&#34;: {
+        &#34;thinkingThresholdMinutes&#34;: 5,
+        &#34;toolResultsThresholdMinutes&#34;: 60,
+        &#34;toolResultsNumToKeep&#34;: 5
+      }
+    }
+  }
+
+- Use -1 on either threshold to disable that cleanup (no enabled bool)
+- Remove separate `microcompaction` and `gapThresholdMinutes` settings
+- Thinking cleanup: 5 min default (unchanged)
+- Tool results cleanup: 60 min default
+- Preserve tool error responses (only clear successful outputs)
+
+* feat(vscode-ide-companion): add clearContextOnIdle settings configuration
+
+- Add gapThresholdMinutes settings for thinking blocks, tool results, and retention count
+- Remove deprecated gapThresholdMinutes from root settings level
+
+This reorganizes the context clearing settings into a dedicated clearContextOnIdle object with configurable thresholds for thinking blocks and tool results.
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+* fix(core): restrict microcompaction to user-initiated messages only
+
+Move microcompactHistory() inside the UserQuery/Cron guard so model
+latency during tool-call loops doesn&#39;t count as user idle time.
+
+* docs: update settings docs for clearContextOnIdle config rename
+
+Replace stale `context.gapThresholdMinutes` entry with the new
+`context.clearContextOnIdle.*` settings group introduced in the
+microcompaction feature.
+
+* fix(core): address review comments on microcompaction PR
+
+- Guard against NaN in toolResultsNumToKeep with Number.isFinite()
+- Report effective keepRecent (after Math.max) in meta, not raw config
+- Fix comment to mention cron messages alongside user messages
+
+---------
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+- fix(core): allow Unicode characters in agent names (#3194)
+
+The agent name validation regex only permitted ASCII letters, numbers,
+hyphens, and underscores, silently rejecting agents with non-ASCII names
+(e.g., Chinese &#34;项目管理&#34;). Replace the regex with Unicode property
+escapes (\p{L}\p{N}) to allow letters and numbers from any script.
+
+Also guard the lowercase naming convention warning so it only fires when
+the name contains ASCII letters, since case is meaningless for CJK
+scripts.
+
+Fixes #3149
+
+- feat(subagents): add disallowedTools field to agent definitions (#3064)
+
+* feat(subagents): add disallowedTools field to agent definitions
+
+Add a `disallowedTools` blocklist to agent frontmatter, letting agents
+specify tools they should not have access to. Supports exact tool names,
+MCP server-level patterns (e.g., `mcp__slack`), and display name aliases.
+
+Applied as a post-filter in AgentCore.prepareTools() after the existing
+`tools` allowlist. Persisted through serialize/parse roundtrips.
+
+* docs: document disallowedTools and MCP tool behavior for subagents
+
+Add Tool Configuration section to sub-agents docs explaining:
+- tools allowlist and disallowedTools blocklist
+- How MCP tools follow the same allowlist/blocklist rules
+- MCP server-level patterns in disallowedTools
+
+* fix(subagents): validate disallowedTools in SubagentValidator
+
+Reuse the existing validateTools() method to validate disallowedTools
+entries at config validation time, catching non-string and empty entries
+before they reach runtime.
+
+* test: remove flaky BaseSelectionList scroll test on Windows
+
+- feat(cli): support bare exit/quit commands to exit the CLI (#3201)
+
+Typing `exit`, `quit`, `:q`, `:q!`, `:wq`, or `:wq!` at the prompt now
+exits the CLI — same as `/quit`. This matches Claude Code behavior and
+helps users on mobile (e.g. Termux) where Ctrl+C is harder to type.
+
+Closes #3169
+
+- fix(cli): stop refilling input with prior prompt on cancel (#3208)
+
+When ESC (or Ctrl+C) cancelled an in-progress model response, the
+input buffer was being repopulated with the just-submitted prompt.
+The handler unconditionally read userMessages.at(-1) and called
+buffer.setText with it, surprising users who expected ESC to leave
+the input clean. The previous prompt is still recoverable via Up
+arrow / Ctrl+P history navigation.
+
+Queued follow-up messages still get moved into the buffer for
+editing on cancel, but now via the atomic popAllMessages helper,
+and any in-progress draft the user typed is preserved by prepending
+the queued text instead of clobbering it (matching the existing
+popQueueIntoInput convention in InputPrompt).
+
+Fixes #3204
+
+- chore: bump version to 0.14.4 (#3209)
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+- fix(cli): honor --openai-api-key in non-interactive auth validation (#3187)
+
+validateAuthMethod&#39;s pre-flight check only inspected OPENAI_API_KEY (and
+settings.security.auth.apiKey), so credentials supplied via --openai-api-key
+were rejected even though refreshAuth would have accepted them. macOS users
+were unaffected because OPENAI_API_KEY is commonly exported in their shell
+profile; on Linux without that env var, the CLI failed to start.
+
+hasApiKeyForAuth now prefers the API key already resolved into
+generationConfig.apiKey when a Config is provided. The unified resolver
+folds CLI flags, env vars, settings, and modelProvider envKey lookups into
+this single value, so validation matches runtime behavior.
+
+Fixes #3171
+
+- fix(core): show clear error when MCP server cwd does not exist (#3192)
+
+* fix(core): show clear error when MCP server cwd does not exist
+
+Validate that the configured cwd directory exists before spawning the
+MCP server process. Previously, a non-existent cwd caused Node.js to
+emit &#34;spawn &lt;cmd&gt; ENOENT&#34; — indistinguishable from the command binary
+being missing. Now throws a descriptive error naming the server and
+the missing path.
+
+Fixes #3163
+
+* test(core): add test for MCP stdio transport without cwd
+
+- feat(skills): add model override support via skill frontmatter (#2949)
+
+* feat(skills): add model override support via skill frontmatter
+
+Allow skills to specify a `model` field in YAML frontmatter to override
+which model is used for subsequent turns within the same agentic loop.
+The override flows through ToolResult → ToolCallResponseInfo →
+SendMessageOptions and naturally expires when the loop ends.
+
+Resolves #2052
+
+* fix(core): only include modelOverride in response when defined
+
+Fixes strict equality test failures in nonInteractiveToolExecutor.test.ts
+where the extra undefined modelOverride field caused object mismatch.
+
+* fix(skills): fix model override pipeline issues
+
+- Wire up modelOverride in interactive CLI path (useGeminiStream)
+- Fix inherit/no-model unable to clear a prior override by using
+  &#39;in&#39; operator instead of truthiness checks in scheduler and CLI
+- Reject empty/whitespace model strings in parseModelField()
+- Extract shared parseModelField() to deduplicate skill-load and
+  skill-manager parsing logic
+- Propagate modelOverride through stop-hook continuation in client
+
+* fix(skills): persist model override across turns in interactive and cron paths
+
+The interactive path stored the skill model override in a local variable,
+causing it to be lost when subsequent non-skill tool turns ran. Use a ref
+to persist the override for the duration of the agentic loop, resetting on
+new user messages. Also propagate modelOverride in the cron execution loop
+for consistency with the main non-interactive path.
+
+* fix(skills): preserve model override on retry and add unit tests
+
+Retry in interactive mode was clearing modelOverrideRef, causing the
+skill-selected model to silently fall back to session default. Guard
+the reset so retries preserve the active override.
+
+Add unit tests for parseModelField (edge cases, type validation) and
+modelOverride propagation through the skill tool result path.
+
+- fix(core): respect respectGitIgnore setting in @file injection path (#3197)
+
+pathReader.ts hardcoded respectGitIgnore: true when filtering files for
+@{path} injection (used by slash commands), ignoring the user&#39;s
+context.fileFiltering.respectGitIgnore setting. This meant gitignored
+files were silently dropped even when the user explicitly set the
+setting to false.
+
+Now reads the filtering options from config instead of hardcoding.
+
+Fixes #3142
+
+- feat(subagents): propagate approval mode to sub-agents (#3066)
+
+* feat(subagents): propagate approval mode to sub-agents
+
+Replace hardcoded PermissionMode.Default with resolution logic:
+- Permissive parent modes (yolo, auto-edit) always win
+- Plan-mode parents keep sub-agents in plan mode
+- Agent definitions can declare approvalMode in frontmatter
+- Default fallback is auto-edit in trusted folders
+- Untrusted folders block privileged mode escalation
+
+Also maps Claude permission aliases (acceptEdits, bypassPermissions,
+dontAsk) to qwen-code approval modes in the converter.
+
+* fix(subagents): correct dontAsk mapping and add approval mode resolution tests
+
+Map Claude&#39;s `dontAsk` to `default` instead of `auto-edit` — `dontAsk`
+denies prompts (restrictive) so `default` is a closer semantic match.
+
+Add 9 unit tests covering the full `resolveSubagentApprovalMode` decision
+matrix: permissive parent override, agent-declared modes, trusted/untrusted
+folder blocking, and plan-mode fallback.
+
+* test: remove flaky InputPrompt tab-suggestion test on Windows
+
+- feat: add contextual tips system with post-response context awareness (#2904)
+
+* feat: add contextual tips system with post-response context awareness
+
+Add a context-aware tips system that proactively shows helpful tips based
+on session state. Post-response tips warn when context usage exceeds 80%
+or 95%, suggesting /compress. Startup tips rotate across sessions via LRU
+scheduling with cross-session persistence (~/.qwen/tip_history.json).
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: use value import for runtime values in useContextualTips
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: address PR review feedback
+
+- Use lastSessionTimestamp instead of totalShown for cross-session LRU
+- Move getTipHistory singleton from Tips.tsx to services/tips/index.ts
+- Defer TipHistory.load() when hideTips is true (no side effects)
+- Use os.tmpdir() in tests for cross-platform portability
+- Add proper translations for de/ja/pt/ru locale files
+- Accept TipHistory | null in useContextualTips
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: address Copilot review feedback
+
+- Validate tips field type in TipHistory.load() to handle corrupted JSON
+- Split approval-mode tip into platform-specific variants using ctx.platform
+- Add afterEach cleanup for temp files in all test suites
+- Guard useContextualTips against null tipHistory
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: import shared DEFAULT_TOKEN_LIMIT, harden tipHistory, set file permissions
+
+- Import DEFAULT_TOKEN_LIMIT from @qwen-code/qwen-code-core instead of
+  hardcoding 1_048_576 in tipRegistry.ts and useContextualTips.ts
+- Add normalizeEntry() to defensively handle corrupted tip history entries
+- Write tip_history.json with mode 0o600 for privacy on multi-user systems
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: remove unused compressionThreshold from TipContext
+
+compressionThreshold was defined in TipContext but never used by any tip&#39;s
+isRelevant check. Remove it to avoid misleading consumers into thinking
+tips respect the user&#39;s compression settings.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: sanitize sessionCount and getLastShown against corrupted tip history
+
+- Validate sessionCount is finite and non-negative in TipHistory.load()
+- Use normalizeEntry() in getLastShown() for corrupted lastSessionTimestamp
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs: add contextual tips user documentation
+
+Add docs/users/features/tips.md covering startup tips, post-response
+context warnings, tip history persistence, and the hideTips setting.
+Update settings.md description and register the new page in _meta.ts.
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- ci(release): parallelize release validation (#3132)
+
+* ci(release): parallelize release validation
+
+* ci(release): allow publish when tests are skipped
+
+* ci(release): drop planning artifact from workflow PR
+
+* ci(release): address workflow review findings
+
+* ci(release): fix quality job bootstrap
+
+* ci(release): fix docker test and dry-run notify flow
+
+- fix(cli): set qwen3.5-plus as default model for Coding Plan (#3193)
+
+- Change default model from qwen3.6-plus to qwen3.5-plus for both China and Global regions
+- qwen3.6-plus requires Pro subscription, Lite users cannot use it
+- Add description to qwen3.6-plus indicating Pro subscription requirement
+- Update MAINLINE_CODER_MODEL to qwen3.5-plus for OpenAI-compatible API default
+
+Fixes #3037
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+- refactor: merge test-utils package into core (#3200)
+
+* refactor: merge test-utils package into core
+
+Consolidate the standalone @qwen-code/qwen-code-test-utils package
+into packages/core/src/test-utils/, eliminating the need for a
+separate package that only provided createTmpDir, cleanupTmpDir,
+and FileSystemStructure type.
+
+Changes:
+- Move file-system-test-helpers.ts into core/src/test-utils/
+- Re-export from core&#39;s test-utils index
+- Update 3 core test files to use relative imports
+- Update cli useAtCompletion test to import from @qwen-code/qwen-code-core
+- Remove test-utils devDependency from core and cli package.json
+- Delete packages/test-utils/ directory
+
+All affected tests pass (fileSearch, crawler, ignore, useAtCompletion).
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+* fix: remove deleted test-utils from build order
+
+The test-utils package was merged into core but the build script still
+tried to build it separately, causing CI failures.
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+---------
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+- chore: remove legacy directories (.gcp, .aoneci, hello, .allstar) (#3199)
+
+Remove directories and files that are no longer needed for Qwen Code:
+
+- .gcp/: Google Cloud Platform build configs (legacy from Gemini CLI)
+- .aoneci/: Alibaba AoneCI workflow (replaced by GitHub Actions)
+- hello/: Example extension template (not needed in repo root)
+- .allstar/: Google Allstar security policy config (Google legacy artifact)
+
+These artifacts are either obsolete or superseded by
+GitHub Actions workflows and the current Dockerfile.
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+- fix(cli): recover from stuck bracketed-paste mode and keep Ctrl+C reachable (#3181)
+
+* fix(cli): recover from stuck bracketed-paste mode and keep Ctrl+C reachable
+
+If bracketed-paste-start (`ESC[200~`) arrives but paste-end (`ESC[201~`)
+is lost — for example on Ghostty + Sogou pinyin on macOS, which a user
+reported in a working directory with only three files — `isPaste` stays
+`true` forever. The order of checks inside `handleKeypress`:
+
+  1. `key.name === &#39;paste-start&#39;`  → set isPaste = true, return
+  2. `key.name === &#39;paste-end&#39;`    → reset + flush + return
+  3. `if (isPaste) { pasteBuffer.append; return }`
+  4. backslash / return handling
+  5. arrow keys
+  6. Ctrl+C
+
+means that every subsequent key — **including Ctrl+C** — is appended to
+the paste buffer and silently returned. The user has no keyboard escape
+hatch; they must kill the process / restart the terminal.
+
+Two layered fixes:
+
+1. **Ctrl+C escape hatch.** Move the Ctrl+C check above the `isPaste`
+   branch and clear paste state when it fires. Ctrl+C now always reaches
+   the broadcast regardless of any stuck paste state.
+
+2. **Idle timeout auto-recovery.** Add `PASTE_IDLE_TIMEOUT_MS = 1000`.
+   Start the timer on paste-start, reset it on each paste content byte,
+   clear it on paste-end. If the timer fires, force-flush the paste
+   buffer as a regular paste event and reset `isPaste`. A
+   `pasteAlreadyFlushed` flag guards against a stale paste-end event
+   arriving later and broadcasting a spurious empty/image paste.
+
+Two regression tests cover both paths:
+- `Ctrl+C escapes a paste mode that never received its paste-end marker`
+- `auto-recovers from a stuck paste mode via idle timeout`
+
+Both fail on main and pass with this change. Full cli test suite:
+3968 pass / 7 skipped, no regressions.
+
+* test(cli): derive paste idle-timeout wait from PASTE_IDLE_TIMEOUT_MS
+
+Address review feedback: the auto-recovery regression test hard-coded a
+1500ms sleep instead of referencing the production constant. Import
+PASTE_IDLE_TIMEOUT_MS and derive the wait as `constant + 200ms buffer`
+so the test stays in sync if the production timeout is ever tuned.
+
+* docs(cli): clarify paste state-machine comments from review feedback
+
+Address review bot nits:
+- forceFlushStuckPaste: explain why the empty-guard is asymmetric
+  (isPaste/buffer can be out of sync after a Ctrl+C vs idle-timeout race)
+- paste-end handler: note that pasteAlreadyFlushed=false is the reset
+  for the next paste cycle
+- auto-recovers test: frame it as the &#34;automatic recovery safety net&#34;
+  counterpart to the manual Ctrl+C escape test above
+
+Comments only, no behavioural change.
+
+- docs(readme): add announcement for Qwen OAuth free tier policy adjustment (#3207)
+
+Add news item about:
+- Daily quota reduced from 1,000 to 100 requests/day
+- Free tier discontinuation on 2026-04-15
+- Migration path to Alibaba Cloud Coding Plan
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+- feat(core): intelligent tool parallelism with Kind-based batching and shell read-only detection (#2864)
+
+* feat(core): implement intelligent tool parallelism via Kind-based batching
+
+Replace the hard-coded Agent-vs-others split with consecutive batching
+based on tool Kind. Read-only tools (Read, Search, Fetch, Think) now
+execute in parallel; mutating tools (Edit, Execute) run sequentially.
+
+- Add CONCURRENCY_SAFE_KINDS set to tools.ts
+- Add partitionToolCalls() for consecutive batch grouping
+- Add isConcurrencySafe() helper (Agent name + Kind check)
+- Add runConcurrently() with configurable concurrency cap
+  (QWEN_CODE_MAX_TOOL_CONCURRENCY env var, default 10)
+- Update MockTool to support custom Kind for testing
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(core): add conditional concurrency for shell read-only commands
+
+Shell commands detected as read-only (e.g., git log, cat, ls) now run
+concurrently with other safe tools instead of breaking parallel batches.
+
+Uses the existing isShellCommandReadOnly() checker (synchronous,
+fail-closed). Commands that can&#39;t be verified as read-only remain
+sequential.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: address Copilot review on tool parallelism
+
+- Remove Kind.Think from CONCURRENCY_SAFE_KINDS (save_memory and
+  todo_write write to disk)
+- Use .finally() instead of .then() in runConcurrently for cleanup
+- Validate maxConcurrency (clamp to &gt;= 1, default 10)
+- Add comment explaining why sync checker is used over async AST
+- Add test for mixed safe/unsafe tool batch partitioning
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: update comment to match CONCURRENCY_SAFE_KINDS (remove Think)
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: remove abort break in runConcurrently to prevent stuck scheduled calls
+
+Let all calls go through executeSingleToolCall which handles abort
+internally, ensuring every tool reaches a terminal state.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* test: isolate concurrency tests from QWEN_CODE_MAX_TOOL_CONCURRENCY env
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: address Copilot review - comment, test label, shell test
+
+- Update batching comment to clarify Execute conditional safety
+- Rename describe block to &#34;Concurrent tool execution&#34;
+- Add test for shell read-only concurrency (git log + ls parallel,
+  npm install sequential)
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: add indexOf !== -1 guards to concurrency test assertions
+
+Prevents false-positive test passes when expected log entries are
+missing (indexOf returns -1 which is always &lt; any positive index).
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- feat: add stopFailure and postCompact (#2825)
+
+- feat(cli): warn when workspace overrides global modelProviders (#3148)
+
+* feat(cli): warn when workspace overrides user modelProviders
+
+* fix(cli): align modelProviders warning with current merge behavior
+
+---------
+
+Co-authored-by: jinye.djy &lt;jinye.djy@alibaba-inc.com&gt;
+
+- feat(cli): support tools.sandboxImage in settings (#3146)
+
+Co-authored-by: jinye.djy &lt;jinye.djy@alibaba-inc.com&gt;
+
+- feat(channels): add voice message support in TelegramAdapter (#3150)
+
+Add handler for message:voice in Telegram channel adapter.
+Voice messages are downloaded via Telegram Bot API and passed as
+audio attachments in the Envelope, matching the existing pattern
+for document handling.
+
+This enables users to send voice messages through Telegram which
+can then be processed by the model or transcription skills.
+
+Co-authored-by: Teafey &lt;Teafey@users.noreply.github.com&gt;
+
+- fix(followup): fix follow-up suggestions not working on OpenAI-compatible providers (#3151)
+
+* fix(followup): fix follow-up suggestions not working on OpenAI-compatible providers
+
+- Respect request.model in pipeline so fastModel setting takes effect
+- Skip empty tools array to avoid 400 errors from providers
+- Override enable_thinking/reasoning from extra_body when thinking is
+  explicitly disabled for suggestion generation
+- Filter thought parts from response text in both forkedQuery and
+  baseLlm paths to prevent thinking content leaking into suggestions
+- Add debug logging (tag: FOLLOWUP) for suggestion generation diagnostics
+
+* fix(followup): validate fastModel belongs to current authType
+
+When the configured fastModel is from a different auth type/provider
+than the main model, the API call silently fails because the current
+content generator rejects unknown model IDs. Fall back to the main
+model in that case so suggestion generation stays functional.
+
+Reported by @yiliang114 in #3151.
+
+- fix(core): handle empty OAuth refresh response body (#3123)
+
+* fix(core): handle empty OAuth refresh response body
+
+When Qwen&#39;s OAuth server returns 200 with an empty body (e.g., stale
+refresh token), response.json() throws &#39;Expecting value: line 1 column 1
+(char 0)&#39; instead of a usable error message. This forces users to
+re-authenticate with no indication of what went wrong.
+
+Fix: read response.text() first, then JSON.parse with a try/catch that
+clears credentials and provides a clear error message.
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+* fix(core): address review feedback on OAuth refresh error handling
+
+- Don&#39;t clear credentials on malformed 200 responses (treat as retryable)
+- Clear credentials on explicit 400/401 auth-invalid responses
+- Add text() to all refresh-path test mocks
+- Add regression tests for malformed 200 and 401 responses
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+---------
+
+Co-authored-by: Qwen-Coder &lt;qwen-coder@alibabacloud.com&gt;
+
+- fix(core): fall back to CLI confirmation when IDE diff open fails (#3031)
+
+* refactor: centralize IDE diff interaction in CoreToolScheduler
+
+- Move openDiff/confirmation handling from edit.ts and write-file.ts into
+  CoreToolScheduler.openIdeDiffIfEnabled(), called after permission hooks
+- Use structuredClone in buildInvocation to prevent params mutation leaking
+  to LLM history (fixes #2709 token waste)
+- Use confirmationDetails as single data source for IDE diff content,
+  only rely on ModifyContext.createUpdatedParams() for parameter transform
+- Skip inline modify when IDE content unchanged, preserving original tool
+  params for multi-edit-on-same-file scenarios (mitigates #2702)
+- Remove ideConfirmation field from ToolEditConfirmationDetails
+- Remove dead resolveIdeDiffForOutcome from ACP Session.ts
+- Fix memory tool scope fallback in createUpdatedParams
+
+Closes #2709
+Closes #2673
+
+* fix(core): fall back to CLI confirmation when IDE diff open fails
+
+* fix(core): narrow IDE diff error handling scope
+
+---------
+
+Co-authored-by: 胡玮文 &lt;huweiwen.hww@alibaba-inc.com&gt;
+Co-authored-by: tanzhenxin &lt;tanzhenxing1987@gmail.com&gt;</div>
+</div>
+
+<a href="../project/QwenLM_qwen-code.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

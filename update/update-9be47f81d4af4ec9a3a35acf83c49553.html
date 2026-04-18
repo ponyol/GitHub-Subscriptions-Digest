@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (48 commits) - yamadashy/repomix - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (48 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/yamadashy_repomix.html">yamadashy/repomix</a> /
+    Updates in main (48 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/yamadashy_repomix.html">yamadashy/repomix</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-04-18 05:40 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/yamadashy/repomix/commits/main" target="_blank">https://github.com/yamadashy/repomix/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Этот апдейт вносит значительные улучшения в наблюдаемость и производительность сервера. Наблюдаемость улучшена за счет унифицированных событий `pack_completed` с подробными исходами и метаданными источника Cloudflare для обнаружения ботов и аналитики, а также путем регистрации метрик задержки для всех сбоев упаковки. Прирост производительности обусловлен оптимизацией токенизации вывода с помощью нового быстрого пути, распараллеливанием основных задач и снижением накладных расходов профайлера во время проверок безопасности. Обновление также включает оптимизированные конфигурации мониторинга и обновления зависимостей.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Merge pull request #1483 from yamadashy/feat/log-cloudflare-source
+
+feat(server): Log Cloudflare source and metadata for bot detection
+
+- docs(server): Clarify PACK_EVENT naming and cached=false rationale
+
+intent(readability): address non-blocking reviewer observations — add
+  one-line notes where the current behavior looks like an oversight on
+  first read: (1) why `pack_completed` covers non-completion outcomes
+  like `rate_limited`, and (2) why `processZipFile` hardcodes
+  `cached: false` while `remoteRepo` uses the cache
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- perf(server): Memoize getClientInfo on the Hono context
+
+intent(cleanliness): eliminate the 3x duplicate getClientInfo call per
+  request (cloudLogger, rateLimit, packAction each ran ~7 header
+  lookups). Not a performance issue at current scale, but the
+  redundancy makes tracing &#34;which field came from which call&#34; harder
+decision(lazy-memoization): add the cache inside getClientInfo rather
+  than a dedicated middleware. cloudflareGuardMiddleware is the first
+  consumer on /api/* but runs before cloudLogger, so a &#34;populate
+  clientInfo here&#34; middleware would need to be inserted in front of it.
+  Lazy memoization keeps existing call sites unchanged and just makes
+  subsequent calls cheap
+decision(stash-type): declare `clientInfo` in hono&#39;s ContextVariableMap
+  in clientInfo.ts itself, next to the type it stashes — colocating the
+  augmentation with the type keeps future schema changes in one file
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(server): Emit durationMs on pack_error for latency breakdown
+
+intent(observability): make pack failure latency visible in the
+  pack_duration distribution metric so fast errors (permission / invalid
+  ref) can be distinguished from slow errors (timeouts, OOM-triggered
+  terminations). Previously only `success` emitted durationMs
+decision(startTime-scope): move `startTime` declaration outside the
+  try block so the catch path can reference it — keeps the single
+  source of truth for the pack-operation timer
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(server): Address PR review feedback
+
+Addresses PR #1483 review comments from coderabbitai, devin-ai-integration,
+and claude.
+
+intent(observability): unify the pack_completed log schema across all
+  emitters so every log-based metric label (`source`, `outcome`,
+  `limitKind`) actually populates — previously `source` was only emitted
+  by rateLimit.ts, and the `pack_requests` metric would have had empty
+  `source` labels on 95%+ of events
+decision(schema-location): extract PACK_EVENT + PackOutcome + getRepoHost
+  to `actions/packEventSchema.ts` (new) and packRequestSchema to
+  `actions/packRequestSchema.ts` (new). This addresses three reviewer
+  findings at once: (1) PACK_EVENT duplicated across packAction and
+  rateLimit, (2) PackOutcome union missing &#39;rate_limited&#39;, (3)
+  packAction.ts exceeding the 250-line project limit (276 → 204)
+decision(buildCfLogField-location): move `buildCfLogField` from
+  cloudLogger.ts to logger.ts so rateLimit.ts can reuse it — rate-limit
+  hits are exactly the events where Cloudflare country/ASN matters most
+  for triage (bots disproportionately hit the limit). Also added early-
+  return for the all-undefined case per the review suggestion
+decision(validation-error-source): move `getClientInfo(c)` above the
+  try/catch in packAction so the validation_error log can attach
+  `source` (the other labels — inputType/repoHost/format — genuinely
+  can&#39;t exist before validation, so they&#39;re only on success/pack_error)
+decision(clientInfo-caveat): add explicit NOTE comment stating cf-ray /
+  cf-ipcountry / cf-asn / source are spoofable and must never be used
+  for auth or rate-limiting. Trust is anchored by cloudflareGuard +
+  CLOUDFLARE_ORIGIN_SECRET, not these headers
+rejected(getRepoHost-fallback-rename): keep the fallback default
+  &#39;github.com&#39; for unparseable URLs. Repomix&#39;s own shorthand accepts
+  &#39;owner/repo&#39; and resolves to github.com — the fallback matches that
+  behavior. Changing to &#39;github.com (shorthand)&#39; would create two
+  semantically-identical buckets in the metric
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- chore(monitoring): Keep dashboard only, drop metric YAMLs
+
+intent(scope-reduction): this repo operates a single GCP project — IaC
+  for log-based metrics adds maintenance cost (Console drift, stale
+  YAMLs) without payoff. Metrics are recreated ad-hoc from the Console
+  when needed
+decision(keep-dashboard): the dashboard definition is still worth
+  committing because it&#39;s the user-facing layout, easy to damage by
+  accidental Console edit, and trivial to restore via
+  `gcloud monitoring dashboards create --config-from-file=dashboard.json`
+decision(readme-slim): strip README to just the restore command —
+  longer prose belonged to the earlier IaC-lite layout that&#39;s now gone
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Merge pull request #1485 from yamadashy/renovate/docker-build-push-action-7.x
+
+chore(deps): update docker/build-push-action action to v7.1.0
+
+- Merge pull request #1486 from yamadashy/renovate/docker-login-action-4.x
+
+chore(deps): update docker/login-action action to v4.1.0
+
+- chore(deps): update docker/login-action action to v4.1.0
+
+- chore(deps): update docker/build-push-action action to v7.1.0
+
+- chore(monitoring): Add log-based metric definitions and apply script
+
+intent(observability): make the new pack_completed / source / durationMs
+  log fields queryable as time series in Cloud Monitoring without
+  re-running ad-hoc gcloud logging read pipelines during incidents
+decision(iac-lite): store metric definitions as standalone YAMLs under
+  website/server/monitoring/metrics/ + an idempotent bash apply script,
+  rather than Terraform. The project has no existing IaC for monitoring
+  and adding a full Terraform setup would dwarf the actual change
+decision(labels): constrain pack_requests labels to
+  outcome/source/input_type/cached/format (max 96 time series). Omitted
+  repoHost because its cardinality is unbounded — raw value remains in
+  the log jsonPayload for ad-hoc queries
+decision(oom-split): separate oom_terminations and container_killed
+  counters. They fire on distinct textPayloads from Cloud Run&#39;s memory
+  enforcement paths; keeping them separate makes alert tuning easier
+rejected(repoHost-as-label): too many unique hostnames — would create a
+  time series per repo host and cost scale with traffic diversity
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [autofix.ci] apply automated fixes
+
+- feat(server): Add unified pack_completed event with outcome labels
+
+intent(observability): make pack-request analytics queryable without
+  log-regex-spelunking — one event name `pack_completed` + an `outcome`
+  label covers the full terminal states (success / validation_error /
+  pack_error / rate_limited), enabling log-based metrics by outcome
+  without rewriting filters each time
+decision(schema): add `event`, `outcome`, `repoHost`, `durationMs`,
+  `cached` as top-level jsonPayload fields so Cloud Logging log-based
+  metrics can extract them as labels directly. `durationMs` is numeric
+  (in addition to the existing human-readable `duration`) so it can be
+  used as a DISTRIBUTION metric value. `repoHost` captures the pack
+  target&#39;s hostname (or `upload` for ZIP) — useful to spot &#34;all traffic
+  to one repo&#34; (bot signal) vs organic diversity
+decision(cache-reporting): thread a `cached: boolean` flag through
+  processRemoteRepo/processZipFile by returning `ProcessPackResult =
+  { result, cached }` instead of `PackResult` directly. Previously cache
+  hits were invisible in logs; now we can measure cache hit rate per
+  outcome/repoHost
+decision(rate-limit-logging): emit a `pack_completed` log entry on 429
+  paths too (both short-term and daily), keyed by `limitKind`. Without
+  this the rate-limit outcome was invisible in aggregate analytics
+rejected(metadata-polluting): attaching `cached` to PackResult.metadata
+  — that type represents data returned to the client, and a behavioral
+  flag shouldn&#39;t leak into the API response
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Merge pull request #1481 from yamadashy/renovate/root-non-major-dependencies
+
+fix(deps): update root non-major dependencies
+
+- Merge pull request #1482 from yamadashy/renovate/crate-ci-typos-1.x
+
+chore(deps): update crate-ci/typos action to v1.45.0
+
+- Merge pull request #1480 from yamadashy/renovate/website-non-major-dependencies
+
+chore(deps): update website non-major dependencies
+
+- Merge pull request #1479 from yamadashy/renovate/browser-non-major-dependencies
+
+chore(deps): update browser non-major dependencies
+
+- feat(server): Log Cloudflare source and metadata for bot detection
+
+intent(observability): make bot-vs-legit traffic filterable in Cloud Logging
+  without per-IP whois/ASN lookups — distinguish Cloudflare-proxied requests
+  from direct-to-origin hits (which are typically bots that found the Cloud
+  Run URL and spoof the Host header)
+decision(log-schema): add top-level `source` (&#39;cloudflare&#39; | &#39;direct&#39;) plus
+  nested `cf.{ray,country,asn}` so queries like
+  `jsonPayload.source=&#34;direct&#34;` or `jsonPayload.cf.country=&#34;SG&#34;` work
+  without parsing user agents
+constraint(cf-asn): `cf-asn` is not a default Cloudflare header — it
+  requires a Transform Rule injecting `ip.src.asnum`; the field is logged
+  only when present so nothing breaks before the rule is configured
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- chore(deps): update crate-ci/typos action to v1.45.0
+
+- fix(deps): update root non-major dependencies
+
+- chore(deps): update browser non-major dependencies
+
+- Merge pull request #1471 from yamadashy/dependabot/npm_and_yarn/npm_and_yarn-547bcd74f8
+
+chore(deps): Bump the npm_and_yarn group across 2 directories with 1 update
+
+- Merge pull request #1472 from yamadashy/renovate/homebrew-actions-digest
+
+chore(deps): update homebrew/actions digest to 98cfa07
+
+- Merge pull request #1473 from yamadashy/renovate/anthropics-claude-code-action-1.x
+
+chore(deps): update anthropics/claude-code-action action to v1.0.93
+
+- chore(deps): update website non-major dependencies
+
+- chore(deps): update anthropics/claude-code-action action to v1.0.93
+
+- chore(deps): update homebrew/actions digest to 98cfa07
+
+- chore(deps): Bump the npm_and_yarn group across 2 directories with 1 update
+
+Bumps the npm_and_yarn group with 1 update in the / directory: [hono](https://github.com/honojs/hono).
+Bumps the npm_and_yarn group with 1 update in the /website/server directory: [hono](https://github.com/honojs/hono).
+
+
+Updates `hono` from 4.12.12 to 4.12.14
+- [Release notes](https://github.com/honojs/hono/releases)
+- [Commits](https://github.com/honojs/hono/compare/v4.12.12...v4.12.14)
+
+Updates `hono` from 4.12.12 to 4.12.14
+- [Release notes](https://github.com/honojs/hono/releases)
+- [Commits](https://github.com/honojs/hono/compare/v4.12.12...v4.12.14)
+
+---
+updated-dependencies:
+- dependency-name: hono
+  dependency-version: 4.12.14
+  dependency-type: indirect
+  dependency-group: npm_and_yarn
+- dependency-name: hono
+  dependency-version: 4.12.14
+  dependency-type: direct:production
+  dependency-group: npm_and_yarn
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+
+- Merge pull request #1469 from yamadashy/perf/reduce-module-overhead
+
+perf(core): Remove redundant minimatch and parallelize wrapper tokenization
+
+- docs(search): Add comment explaining why ignore-pattern check is unnecessary
+
+Clarify that globby with patterns like `dist/**` excludes both directory
+contents and the directory entry itself, so no additional filtering is
+needed in findEmptyDirectories.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- perf(metrics): Parallelize wrapper tokenization with file metrics
+
+Dispatch wrapper tokenization immediately via Promise.all instead of
+waiting for file metrics to complete first. This allows an idle worker
+to process the wrapper while other workers still handle file metrics.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- perf(search): Remove redundant minimatch check from findEmptyDirectories
+
+The findEmptyDirectories function re-checked each directory against
+ignore patterns using minimatch(), but directories were already filtered
+by globby&#39;s ignore option and .gitignore/.repomixignore patterns.
+Removing this eliminates the minimatch import (~7ms module load).
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Merge pull request #1467 from yamadashy/perf/prefetch-sort-data
+
+perf(core): Prefetch git sort data to overlap with file search and collection
+
+- fix(core): Add trace log for prefetch sort data failure
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- perf(core): Prefetch git sort data to overlap with file search and collection
+
+Launch git --version + git log --name-only subprocesses early in the
+pipeline so that sortOutputFiles hits the in-memory cache instead of
+spawning ~15ms of subprocess overhead on the critical path.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Merge pull request #1457 from yamadashy/perf/fast-output-tokenization
+
+perf(core): Skip redundant full-output tokenization via wrapper-extraction fast path (-13.2%)
+
+- refactor(metrics): Rename stale selective variable to allFileMetrics
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- refactor(metrics): Rename fastWrapper to outputWrapper
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(metrics): Rename misleading fastOutputToken to singleOutput
+
+The variable holds the full output string, not a token. Renamed for clarity.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(metrics): Address PR review feedback
+
+- Fix calculateMetrics test to use parsableStyle: true so it exercises
+  the fallback path (calculateOutputMetrics mock) instead of accidentally
+  hitting the fast path
+- Correct packager comment to clarify that git-log is cached but the
+  array sort itself runs twice (negligible cost)
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- test(metrics): Add tests for extractOutputWrapper and canUseFastOutputTokenPath
+
+Export the two helper functions and add 13 unit tests covering:
+- extractOutputWrapper: normal extraction, missing content (null),
+  empty files, identical content, wrong order, no files, no wrapper
+- canUseFastOutputTokenPath: each style variant, splitOutput,
+  parsableStyle
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(metrics): Address PR review feedback
+
+- Remove stale &#34;selective metrics run&#34; comment
+- Add trace log when fast-path falls back to full output tokenization
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- refactor(metrics): Rename calculateSelectiveFileMetrics to calculateFileMetrics
+
+The function now always calculates metrics for all files, so the
+&#34;Selective&#34; prefix no longer reflects its behavior.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- refactor(metrics): Always calculate per-file token counts for all files
+
+Previously, per-file tokenization was only done for all files when
+`tokenCountTree` was enabled; otherwise only the top N files (by char
+count) were tokenized for the &#34;Top Files&#34; display. But output
+tokenization always processes all file contents anyway, so the
+&#34;selective&#34; path was not saving any work — it just prevented the fast
+output-token path from being used.
+
+Now we always tokenize every file individually, which:
+- Enables the wrapper-extraction fast path regardless of tokenCountTree
+- Simplifies the metrics pipeline by removing the conditional branching
+- Provides complete per-file token data for all downstream consumers
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- perf(core): Skip redundant full-output tokenization via wrapper-extraction fast path (-13.2%)
+
+When `tokenCountTree` is enabled `calculateSelectiveFileMetrics` already
+tokenizes every file individually on the primary worker pool. The original
+`calculateOutputMetrics` then re-tokenized the full output a second time, split
+into 200 KB chunks, to compute `totalTokens`. On large repos with the tree
+display enabled, this second pass was the single longest task in the
+`calculateMetrics` `Promise.all`, consuming roughly 1 second of worker time
+that duplicated work already done for the per-file counts.
+
+This change introduces a fast path for the common case (xml / markdown / plain
+output, non-parsable, single-part): walk the generated output with
+`indexOf(file.content, cursor)` once per file to splice file contents out of
+the output, tokenize only the remaining &#34;wrapper&#34; (template boilerplate +
+directory tree + git diff/log + per-file headers), and compute
+`totalTokens = Σ per-file tokens + wrapper tokens`.
+
+The accuracy delta versus the old 200 KB-chunk approach is bounded by BPE
+merges across file↔wrapper boundaries; on the repomix repository itself the
+measured error was 309 / 1,284,067 tokens ≈ 0.024 %, comparable to the chunk
+boundary error the existing approach already accepts.
+
+## Implementation
+
+- `src/core/metrics/calculateMetrics.ts`
+  - Add `extractOutputWrapper(output, processedFilesInOutputOrder)` which
+    walks the output with a single forward cursor. Returns `null` and
+    triggers a fall back to `calculateOutputMetrics` if any file content is
+    not found (e.g., template escaped it, output was split, order mismatch).
+  - Add `canUseFastOutputTokenPath(config)` gate: only enabled when
+    `tokenCountTree` is truthy, `splitOutput` is undefined, `parsableStyle`
+    is false, and the style is `xml` / `markdown` / `plain`. JSON output
+    and parsable XML go through `JSON.stringify` / `fast-xml-builder` which
+    escape file contents, so `indexOf(content)` would miss them.
+  - In `calculateMetrics`, when the fast path is available and wrapper
+    extraction succeeds, replace `outputMetricsPromise` with a promise that
+    awaits the already-running `selectiveFileMetricsPromise`, sums the
+    per-file token counts, and dispatches a single `runTokenCount` on the
+    extracted wrapper string. The rest of the `Promise.all` is unchanged.
+
+- `src/core/packager.ts`
+  - Call `sortOutputFiles(filteredProcessedFiles, config)` once in `pack`
+    immediately after suspicious-file filtering and use its result as
+    `processedFiles` downstream (for `produceOutput`, `calculateMetrics`,
+    and the final result object). `generateOutput` internally calls
+    `sortOutputFiles` as well, which is stable and memoized via
+    `fileChangeCountsCache`, so the two now share the single git-log
+    subprocess result and consumers see files in the exact order they
+    appear in the output. This is a precondition for the fast path&#39;s
+    forward-walk extraction.
+  - Expose `sortOutputFiles` on `defaultDeps` so existing packager unit
+    tests can inject their own implementation.
+
+- `tests/core/packager/diffsFunctionality.test.ts`
+  - Extend the `gitRepositoryHandle.js` `vi.mock` to also stub
+    `isGitInstalled` and `getFileChangeCount`, since `sortOutputFiles`
+    resolves its default dependencies from that module at module load time.
+
+All 1102 existing tests pass unchanged; lint is clean.
+
+## Benchmark
+
+Interleaved 30-run benchmark against the repomix repo itself (1018 files,
+~4 MB xml output, `tokenCountTree: 50000`, `sortByChanges: true`, `includeDiffs`
+and `includeLogs` enabled via the repo&#39;s own `repomix.config.json`):
+
+    base median: 2735.2 ms  [2389 - 3528]  IQR=367 ms
+    opt  median: 2373.6 ms  [2125 - 2653]  IQR=293 ms
+    delta:       -361.6 ms  (-13.22%)
+
+Verbose trace before/after (single run, representative):
+
+    before:
+      Selective metrics calculation completed in 639 ms
+      Output token count completed in      1046 ms
+      Calculate Metrics wall:               1296 ms
+
+    after:
+      Selective metrics calculation completed in 579 ms
+      Fast-path output tokens: files=1017293, wrapper=33678 (126996 chars)
+      Calculate Metrics wall:                ~580 ms
+
+The savings are concentrated in the `calculateMetrics` phase, which was the
+dominant critical path in the final `Promise.all` for tokenCountTree runs on
+large repos.
+
+- Merge pull request #1456 from yamadashy/perf/security-neutralize-profiler-via-perf-hooks
+
+perf(security): Patch perf_hooks.performance.mark to neutralize duplicate @secretlint/profiler singletons
+
+- fix(security): Scope performance.mark patch to worker threads only
+
+Address two review findings on #1456:
+
+- Critical (devin-ai-integration): This module is also imported from
+  src/mcp/tools/fileSystemReadFileTool.ts in the MCP server main
+  process. Applying the `Object.defineProperty` at module load would
+  silently replace `performance.mark` process-wide, affecting any
+  other code in the main process that relies on the Node built-in.
+  Gate the patch on `!isMainThread` from `node:worker_threads` so it
+  only runs inside Tinypool security-check worker threads, where this
+  module is the sole runtime. In the MCP main-process path only a
+  handful of files are linted per call, so leaving the profiler
+  active there has no measurable cost.
+
+- Defensive (gemini-code-assist): Restore the try/catch around the
+  `Object.defineProperty` call so a future Node.js version making
+  `performance.mark` non-configurable would skip the optimization
+  rather than crashing every security worker at load time.
+
+- perf(security): Patch perf_hooks.performance.mark to neutralize duplicate @secretlint/profiler singletons
+
+The previous @secretlint/profiler optimization (cfc626a) silently regressed
+after the merge from main upgraded @secretlint/core to 11.5.0. That release
+declares an exact-version peer dep on @secretlint/profiler@11.5.0, which
+forced npm to install a nested second copy under
+`node_modules/@secretlint/core/node_modules/@secretlint/profiler` alongside
+our top-level 11.4.1 profiler. The worker&#39;s
+`import { secretLintProfiler } from &#39;@secretlint/profiler&#39;` resolved to the
+11.4.1 singleton, so the `Object.defineProperty(secretLintProfiler, &#39;mark&#39;, ...)`
+no-op patched the wrong instance — the copy @secretlint/core actually calls
+at lint time (11.5.0) kept running its O(n^2) PerformanceObserver bookkeeping.
+As a result the security phase was back to ~2.2s wall time on a 1000-file
+repo (matching pre-cfc626a behaviour) while the commit&#39;s benchmark numbers
+implied it was still ~270ms.
+
+Switch the neutralization to a strictly more robust primitive: overwrite
+`perf_hooks.performance.mark` with a no-op inside the worker thread. Every
+copy of @secretlint/profiler — hoisted, nested, or future — calls
+`this.perf.mark(...)` on the single Node built-in `performance` object it
+received at construction time from `node:perf_hooks`, so a single assignment
+on that object silences every profiler instance simultaneously. Because the
+patch targets the runtime primitive rather than a specific module graph
+node, it no longer depends on npm&#39;s dedupe behaviour or the exact layout of
+`node_modules`. The worker thread is isolated and runs only secretlint; no
+other code in it depends on `performance.mark`, so there is no observable
+side effect.
+
+Also removes the now-unused direct `@secretlint/profiler` dependency from
+package.json.
+
+1. Both profiler singletons construct `new SecretLintProfiler({ perf: perf_hooks.performance, ... })`
+2. Both call `this.perf.mark(marker.type)` for every event
+3. Overwriting `perf_hooks.performance.mark` on the shared Node built-in
+   makes both calls a no-op, so the PerformanceObserver callback never
+   fires, the `entries` array stays empty, and the O(n^2) `entries.find()`
+   scan is eliminated
+
+Verified on this host (4-core Linux container) against origin/main, which
+is what the CI `perf-benchmark.yml` workflow compares. Interleaved pairs,
+no verbose mode, 40 runs.
+
+| Stat         | main (ms) | PR (ms) | Δ               |
+|--------------|-----------|---------|-----------------|
+| min          | 1965      | 1914    | -51ms (-2.60%)  |
+| median       | 2181      | 2066    | -115ms (-5.27%) |
+| trimmed mean | 2216      | 2103    | -113ms (-5.11%) |
+| mean         | 2282      | 2159    | -123ms (-5.38%) |
+
+| Stat         | main (ms) | PR (ms) | Δ               |
+|--------------|-----------|---------|-----------------|
+| min          | 2445      | 2309    | -136ms (-5.56%) |
+| median       | 2628      | 2495    | -133ms (-5.06%) |
+| trimmed mean | 2624      | 2509    | -114ms (-4.36%) |
+| mean         | 2658      | 2518    | -141ms (-5.29%) |
+
+| Phase              | branch pre-fix | PR       | Δ          |
+|--------------------|----------------|----------|------------|
+| File collection    | ~471 ms        | ~446 ms  | ~-25 ms    |
+| File processing    | ~103 ms        | ~95 ms   | ~-8 ms     |
+| **Security check** | **~2229 ms**   | **~217 ms** | **~-2012 ms** |
+| Git log tokens     | ~446 ms        | ~451 ms  | ~0         |
+| Selective metrics  | ~454 ms        | ~455 ms  | ~0         |
+| Output token count | ~610 ms        | ~610 ms  | ~0         |
+
+In non-verbose mode the security-phase work overlaps heavily with other
+async phases, so end-to-end savings are smaller than the phase-timer drop.
+Verbose mode amplifies the observer cost via extra logger traces, making
+the isolation of the profiler bottleneck visible.
+
+- [x] `npm run lint` — 0 errors, 2 pre-existing warnings in unrelated files
+- [x] `npm run test` — 1102/1102 tests pass
+- [x] Secret detection still works end-to-end (verified by packing a
+      fixture file containing an RSA private key block; secretlint still
+      flags and excludes it)</div>
+</div>
+
+<a href="../project/yamadashy_repomix.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

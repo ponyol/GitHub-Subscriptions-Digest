@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (25 commits) - facebookresearch/faiss - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (25 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a> /
+    Updates in main (25 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-04-18 02:09 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/facebookresearch/faiss/commits/main" target="_blank">https://github.com/facebookresearch/faiss/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This Faiss update significantly enhances robustness, correctness, and code quality through fixes such as resolving `int`/`size_t` mismatches, ensuring proper `reset()` behavior, and preventing out-of-memory issues from corrupted index files. It introduces substantial performance optimizations, particularly for RaBitQ FastScan (2-5x speedups, reduced memory) and by hoisting SIMD dispatches out of hot loops. Additionally, the release improves cross-platform compatibility by removing SSE3 intrinsics, adds filtered search for cuVS indexes, and enables a new centroid-only distance mode for Scalar Quantizers.
+
+---
+
+**Russian translation:**
+
+Это обновление Faiss значительно повышает надежность, корректность и качество кода за счет исправлений, таких как разрешение несоответствий типов `int`/`size_t`, обеспечение правильной работы функции `reset()` и предотвращение ошибок нехватки памяти из-за поврежденных файлов индекса. Оно включает существенные оптимизации производительности, особенно для RaBitQ FastScan (ускорение в 2-5 раз, сокращение потребления памяти) и за счет вынесения SIMD-диспетчеризации за пределы горячих циклов. Кроме того, релиз улучшает кроссплатформенную совместимость путем удаления инструкций SSE3, добавляет поддержку фильтрованного поиска для индексов cuVS и включает новый режим расстояния только до центроидов для скалярных квантайзеров.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Fix int/size_t signedness mismatches in HNSW add (#5116)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5116
+
+The `hnsw_add_vertices()` function in both `IndexHNSW.cpp` and `IndexBinaryHNSW.cpp` accepts `size_t n0` and `size_t n` parameters, but the loop variables and counters inside were declared as `int`. This caused signed/unsigned comparison mismatches and implicit narrowing conversions. This diff fixes all such mismatches with six targeted changes:
+
+1. **Loop variables `i0`, `i1`, `j` changed from `int` to `size_t`; OpenMP loop variable `i` changed from `int` to `int64_t`**: These variables derive from `n` (which is `size_t`) and are used as indices into `std::vector&lt;int&gt; order(n)`. Using `int` produced signed/unsigned comparison warnings in loop conditions (`j &lt; i1`, `i &lt; i1`) and risked undefined behavior via signed integer overflow for indices above `INT_MAX` (~2.1B). The outer variables use `size_t` to match the function parameter types. The OpenMP `for` loop variable uses `int64_t` because MSVC enforces that OpenMP loop counters must have signed integral types (`error C3016`), and `size_t` (unsigned) violates this requirement. `int64_t` is signed, 64-bit, and compatible with both the `size_t` loop bounds and MSVC OpenMP.
+
+2. **`int n0 = ntotal` changed to `size_t n0 = ntotal` in `add()` methods**: `ntotal` is `idx_t` (`int64_t`), and `n0` is passed directly to `hnsw_add_vertices(..., size_t n0, ...)`. The `int` declaration caused an implicit 64-to-32-bit narrowing conversion at the call site.
+
+3. **`printf` format specifiers changed from `%d` to `%zu`**: Required to match the new `size_t` types. Using `%d` with `size_t` arguments is undefined behavior per the C standard.
+
+4. **`prev_display` sentinel logic refactored**: The old pattern used `int prev_display = verbose ? 0 : -1` with a `prev_display &gt;= 0` guard, encoding a boolean in a signed integer sentinel. This was incompatible with the `size_t` migration (cannot represent -1). Replaced with an explicit `bool do_display` flag and `size_t prev_display = 0`, which is semantically identical and clearer.
+
+5. **`std::make_unique&lt;IndexBinaryFlat&gt;(d_).release()` simplified to `new IndexBinaryFlat(d_)`**: The `make_unique().release()` pattern creates a `unique_ptr` only to immediately release ownership, which is equivalent to `new` but with unnecessary intermediate allocation tracking. Since `storage` is a raw pointer with `own_fields = true` ownership semantics (deleted in the destructor), plain `new` matches the established Faiss ownership pattern used throughout the codebase.
+
+6. **`static_cast&lt;int&gt;` added at `rand_int()` call sites**: The `int`-to-`size_t` migration changed `i1 - j` from `int` to `size_t`, introducing a new `clang-diagnostic-shorten-64-to-32` warning when passed to `rand_int(int max)`. The explicit cast documents the intentional narrowing. The value is safe: `i1 - j` represents the remaining elements in a single HNSW level bucket, bounded well below `INT_MAX`.
+
+All changes are mechanical. No functional changes.
+
+Reviewed By: junjieqi
+
+Differential Revision: D101353511
+
+fbshipit-source-id: a4a44b6a5436a77d97d47389db52b8721b2f97c4
+
+- Remove use of __AMDGCN_WAVEFRONT_SIZE macro with it being deprecated in ROCm 7 (#4619)
+
+Summary:
+Usage of `__AMDGCN_WAVEFRONT_SIZE` is a compilation error when using amdclang++ shipped with ROCm 7.x.x. For versions &gt;= 7 we delegate to rocprim to get the right constexpr value that can be used in device code. We continue using __AMDGCN_WAVEFRONT_SIZE for older ROCm versions to maintain compatibility.
+
+Note that the usage of kWarpSize in host code is still non-sensical however the current usage of this variable seems to always be in device functions.
+
+See https://rocm.docs.amd.com/en/latest/about/release-notes.html#amdgpu-wavefront-size-compiler-macro-deprecation for deprecation notice.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4619
+
+Reviewed By: mnorris11
+
+Differential Revision: D95327171
+
+Pulled By: subhadeepkaran
+
+fbshipit-source-id: f1a7b7d67a7c5a6c2a8068f4608d23873d21ff40
+
+- Add braces around single-line control flow statements
+
+Summary: Fix 136 `readability-braces-around-statements` lint warnings by adding braces to all single-line `if`, `else`, `for`, and `while` statements across 4 files: `IndexLSH.cpp` (14 issues), `IndexIVFPQ.cpp` (36 issues), `IndexPQ.cpp` (25 issues), and `VectorTransform.cpp` (61 issues). This improves code readability and prevents bugs from accidentally adding statements to unbraced blocks.
+
+Reviewed By: mnorris11
+
+Differential Revision: D100580151
+
+fbshipit-source-id: 79a0ad79aa6a705552c7bbbd3d3f78ffde94b2c4
+
+- Validate k_factor during deserialization to prevent search-time OOM (#5104)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5104
+
+Add deserialization-time validation for the `k_factor` field in
+IndexRefine (IxRF), IndexRefinePanorama (IxRP), and IndexIVFPQR
+(IwQR) to reject corrupted or malicious index files that would
+cause out-of-memory crashes during search.
+
+`k_factor` is read from the serialized file via `READ1()` without
+validation. At search time, `k_base = k * k_factor` drives
+allocations of `n * k_base` elements for labels and distances
+arrays. A crafted file with an enormous `k_factor` value causes
+these allocations to exhaust available memory.
+
+Fix: Add validation after both `READ1(k_factor)` call sites,
+rejecting values outside the finite range [1, 1000]. The cap
+follows the same pattern as `beam_factor` validation for
+`ResidualCoarseQuantizer`. The value 1000 provides ample headroom
+beyond any known usage (defaults are 1 for IndexRefine and 4 for
+IndexIVFPQR; AutoTune explores powers-of-two up to 64) while
+blocking OOM from crafted files.
+
+Reviewed By: mnorris11
+
+Differential Revision: D100855031
+
+fbshipit-source-id: ead0d3a89dd8368699f543ecc79acfe09168442b
+
+- Hoist SIMD dispatch out of approx_topk hot loops (#5073)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5073
+
+Three call sites dispatch SIMD level inside hot loops via
+HeapWithBuckets::bs_addn(), which calls with_simd_level_256bit on
+every invocation. The SIMD level is constant for the process lifetime,
+so this is pure overhead.
+
+- LocalSearchQuantizer::icm_encode_step: dispatch was inside
+  n × n_iters × M loop. Wrap omp parallel for in
+  with_simd_level_256bit, call HeapWithBucketsCMaxFloat&lt;16,1,SL&gt;
+  directly.
+
+- residual_quantizer_encode_steps.cpp (2 call sites): dispatch per
+  iteration of n-parallel loops. Hoist outside omp loop. For the
+  second site, merge with the existing with_simd_level_256bit for
+  compute_cent_distances_simd.
+
+- Add approx_topk_by_mode&lt;SL&gt;() helper to approx_topk.h to
+  consolidate the duplicated switch(approx_topk_mode) blocks.
+
+Reviewed By: mdouze
+
+Differential Revision: D100169491
+
+fbshipit-source-id: d734db1b368cad99c7add3e007e5c99145296415
+
+- Replace SSE3 intrinsics in Index2Layer with portable scalar code (#5076)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5076
+
+Index2Layer&#39;s distance computers (DistanceXPQ4, Distance2xXPQ4) used raw
+SSE3 intrinsics guarded by #ifdef __SSE3__, with the #else branch throwing
+&#34;not implemented for non-x64 platforms&#34;. Since pq.dsub is always 4, the
+inner loop is just 4 float ops per sub-vector — scalar code is simple and
+the compiler will auto-vectorize it. This makes Index2Layer work on ARM
+and removes the last raw SSE3 usage from the codebase.
+
+Reviewed By: mdouze
+
+Differential Revision: D100144911
+
+fbshipit-source-id: 6caa70f2fbc110246068f0defb9af2cb674bfb9d
+
+- Optimize RaBitQ FastScan LUT construction for high-dimensional data (#5110)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5110
+
+IndexIVFRaBitQFastScan performs poorly relative to IndexIVFRaBitQ at high nprobe values when dimensionality is large (e.g., d=768, M=192 sub-quantizers). At nprobe=64, FastScan was 13% slower than the non-FastScan baseline. This diff identifies the root causes and applies three optimizations that make FastScan consistently 2-4x faster.
+
+Problem analysis:
+For high-dimensional RaBitQ (d=768), the number of PQ4 sub-quantizers M=d/4=192 is much larger than typical PQFS (M=16-32). This causes two scaling issues in the base class compute_LUT_uint8:
+1. The float lookup table (n * nprobe * M * 16 floats) grows to ~7.5 GB at n=10K, nprobe=64, d=768. Both the float table and the uint8 output table exist simultaneously during quantization, reaching ~9.5 GB peak memory. This far exceeds cache capacity and causes severe memory pressure.
+2. The LUT construction loop uses a triple-nested scalar loop with per-iteration branching to build 16 entries per sub-quantizer, which is inefficient for M=192.
+
+Optimization 1: Branchless LUT construction
+Replace the triple-nested loop (M * 16 * 4 iterations with branching) in compute_residual_LUT with a subset-sum construction. For each sub-quantizer covering 4 dimensions, the 16 LUT entries are all possible sums of 4 base values. These are computed with 15 additions and no branches, extracted into a reusable write_subset_sum_lut() helper.
+
+Optimization 2: Fused compute_LUT_uint8 override
+Override compute_LUT_uint8 in IndexIVFRaBitQFastScan to eliminate the massive float table allocation. Instead of computing all float LUTs upfront then quantizing, the override processes one query at a time: compute the float LUT for all probes of that query into a small per-thread buffer (~786 KB), quantize to uint8 immediately, then reuse the buffer for the next query. The float LUT never exceeds one query&#39;s worth per thread. The quantization logic mirrors the 3D path of quantize_LUT_and_bias, computing a shared scale factor across all probes of a query and producing per-probe uint16 biases.
+
+Optimization 3: Scanner path optimization
+Rewrite IVFRaBitQFastScanScanner to allocate all buffers (float LUT, quantized LUT, rotated query, centroid, mins array) once in the constructor and reuse them across set_list calls. The set_list method calls compute_residual_LUT directly instead of going through the base class compute_LUT_uint8, avoiding the OMP region overhead and unnecessary allocations for the single-query, single-probe case. The inline quantization is simplified for the single-probe case (no 3D bias computation needed). The distance computer for distance_to_code reuses the centroid buffer already populated by compute_residual_LUT.
+
+Changes:
+- IndexIVFFastScan.h: make compute_LUT_uint8 virtual to allow override
+- IndexIVFRaBitQFastScan.h: declare compute_LUT_uint8 override and move compute_residual_LUT to public (needed by the scanner)
+- IndexIVFRaBitQFastScan.cpp: branchless LUT construction via write_subset_sum_lut helper, new compute_LUT_uint8 override with per-query float LUT buffer, rewritten scanner with pre-allocated buffers
+
+Speedup vs IndexIVFRaBitQ (n=160K, nq=10K, d=768, nlist=256, qb=4, 1-bit):
+  nprobe=1:  3.10x -&gt; 4.21x
+  nprobe=4:  1.42x -&gt; 2.43x
+  nprobe=16: 1.13x -&gt; 2.09x
+  nprobe=32: 0.97x -&gt; 2.06x (was slower, now 2x faster)
+  nprobe=64: 0.87x -&gt; 2.04x (was 13% slower, now 2x faster)
+
+No recall change at any nprobe value.
+
+Reviewed By: mnorris11
+
+Differential Revision: D101086249
+
+fbshipit-source-id: a48e8898baf33a8906ecf738157de758ddab6946
+
+- Add QT_0bit to ScalarQuantizer for centroid-only IVF distance (#5079)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5079
+
+Adds a new ScalarQuantizer::QT_0bit type that encodes 0 bits per component, enabling IndexIVFScalarQuantizer to operate in centroid-only distance mode (code_size=0). In this mode, distance_to_code() returns the coarse distance from the quantizer, no per-vector data is stored, and reconstruction returns the centroid vector.
+
+This is useful for IVF configurations where only query-to-centroid distances are needed (e.g., Unicorn&#39;s SQ0 use case).
+
+Changes:
+- Add QT_0bit enum to ScalarQuantizer::QuantizerType
+- Add IVFCoarseDistanceScanner that returns coarse_dis from set_list()
+- Handle code_size=0 in encode/decode/reconstruct/add paths
+- Add &#39;SQ0&#39; to index_factory
+- Force by_residual=false for QT_0bit
+- Guard memcpy in ArrayInvertedLists for code_size=0
+- Handle QT_0bit in index_read.cpp validation switch
+- Add tests for L2, IP, and index_factory
+ ---
+
+Reviewed By: ALittleYam
+
+Differential Revision: D100348052
+
+fbshipit-source-id: 9d57aa71d154e604bda71c131757f993a9e04f39
+
+- Set code_size on IVFRaBitQFastScanScanner (#5099)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5099
+
+As titled, add missing code_size. Unicorn needs code_size to be populated to pass some assertions used in code, e.g.:
+
+https://www.internalfb.com/code/fbsource/[b7f23f05067d]/fbcode/unicorn/features/encoders/IvfEncoder.cpp?lines=1516-1519
+
+Reviewed By: alibeklfc
+
+Differential Revision: D100840815
+
+fbshipit-source-id: 4f1b485b32d486414fedd75e1b657962f5ba6bcc
+
+- fix: GPU CAGRA copyFrom host-memory lifetime dependency and add regression test (#4968)
+
+Summary:
+This PR fixes https://github.com/facebookresearch/faiss/issues/4742, a crash where a `faiss::gpu::GpuIndexCagra` (and binary variant) created via `copyFrom` / `index_cpu_to_gpu` could retain shallow references to CPU-side dataset buffers. If the source CPU `IndexHNSWCagra` was destroyed, subsequent GPU searches could trigger CUDA illegal memory access / invalid device ordinal errors.
+
+The PR also fixes an out-of-bounds write in the dense kNN-graph construction in `GpuIndexCagra::copyFrom_ex` and adds a regression test that explicitly deletes the CPU source index before running GPU search.
+
+## Changes
+- Ensure `GpuIndexCagra::copyFrom_ex` performs an owning copy of the training dataset into `GpuIndexCagra`-owned storage for:
+  - Float32
+  - Float16
+  - Int8 (decoded)
+- Fix dense kNN-graph allocation in `GpuIndexCagra::copyFrom_ex` by using `resize()` (previously `reserve()` + indexed writes was UB).
+- Apply the same dataset-ownership fix to `GpuIndexBinaryCagra::copyFrom`.
+- Clear owned host storage on `reset()` for both float and binary CAGRA GPU indices.
+- Update CAGRA GPU unit tests to delete the source CPU index immediately after `copyFrom` and then run search, matching the reported repro scenario.
+
+## Reproduction
+build GPU index → `copyTo` CPU → `copyFrom` back to GPU → destroy CPU index → search on GPU.
+
+## Testing
+- Added/updated GPU regression tests in `TestGpuIndexCagra.cu` to cover “CPU source deleted after copyFrom”.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4968
+
+Reviewed By: alibeklfc
+
+Differential Revision: D97767287
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 11f4892e4bb48cd4f99ba07779ed9b5d3860a596
+
+- Add filtered search for cuVS indexes (#4858)
+
+Summary:
+This PR adds support for pre-filtering search on cuVS indexes, using IDSelector. It also includes C++ tests for this feature.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4858
+
+Reviewed By: limqiying
+
+Differential Revision: D96034911
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 1deaf78b9ba3d54b0f49925f6f0ef0b1f98e0f91
+
+- Remove RaBitQStats debug counters from all RaBitQ handlers (#5102)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5102
+
+### THIS DIFF
+Remove the `RaBitQStats` struct, global variable, and all `#ifndef NDEBUG` stat-tracking blocks from the four RaBitQ index implementations:
+- `IndexRaBitQ` (non-FastScan flat)
+- `IndexIVFRaBitQ` (non-FastScan IVF)
+- `RaBitQHeapHandler` (FastScan flat, in IndexRaBitQFastScan.h)
+- `IVFRaBitQHeapHandler` (FastScan IVF, in IndexIVFRaBitQFastScan.h)
+
+The stats (`n_1bit_evaluations`, `n_multibit_evaluations`) were gated behind `#ifndef NDEBUG` and only available in dev builds. They tracked how many candidates passed the 1-bit lower-bound filter vs required full multibit refinement. While useful during initial development, they add per-vector overhead in dev builds (counter increments + two `omp atomic` updates per handle() call) and are no longer needed for ongoing work.
+
+All references are removed: the header, source file, SWIG bindings, xplat.bzl, and CMakeLists.txt registrations.
+
+### CONTEXT
+Profiling of `IVFRaBitQHeapHandler::handle()` showed that debug stat tracking contributes measurable overhead in dev builds. Removing them simplifies the handler code and eliminates a source of noise in performance measurements. The filtering effectiveness can be measured externally via search result analysis when needed.
+
+Reviewed By: ALittleYam
+
+Differential Revision: D100931175
+
+fbshipit-source-id: 7d148b63c5fca1b5f0e09040db2e3d77ffad7cbb
+
+- Fix IndexBinaryMultiHash::reset() not clearing hash maps and avoid unnecessary copies (#5100)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5100
+
+Fix two issues in `IndexBinaryMultiHash` related to incorrect use of range-based for loops over the `maps` member (`std::vector&lt;std::unordered_map&lt;idx_t, std::vector&lt;idx_t&gt;&gt;&gt;`).
+
+## Bug 1: `reset()` does not actually clear the hash maps (correctness)
+
+In `IndexBinaryMultiHash::reset()`, the loop `for (auto map : maps)` iterates by **value**, copying each `unordered_map` into a local variable. `map.clear()` clears the copy; the original maps in the vector are never modified.
+
+This is a direct consequence of C++ range-based for semantics ([stmt.ranged]): `auto map` deduces to `Map` (value type), and copy-initialization creates an independent object. Mutations to `map` do not affect the container element.
+
+**Proof:**
+```cpp
+std::vector&lt;std::unordered_map&lt;int, int&gt;&gt; v(1);
+v[0][42] = 1;
+for (auto m : v) { m.clear(); }
+assert(v[0].size() == 1);  // original untouched
+
+for (auto&amp; m : v) { m.clear(); }
+assert(v[0].size() == 0);  // original cleared
+```
+
+**Impact:** After `reset()` + `add()`, stale hash map entries still point to old vector IDs. Search returns phantom results from pre-reset data — silent data corruption.
+
+**Fix:** `for (auto map : maps)` → `for (auto&amp; map : maps)`.
+
+## Bug 2: `hashtable_size()` copies all hash maps unnecessarily (performance)
+
+Same `for (auto map : maps)` pattern copies each entire `unordered_map` (with all buckets and stored `vector&lt;idx_t&gt;` values) just to call `.size()`. O(total entries) of needless allocation per call.
+
+**Fix:** `for (auto map : maps)` → `for (const auto&amp; map : maps)`. `const` is correct since `hashtable_size()` is a `const` method.
+
+## Test
+
+Added `MultiHashResetClearsMaps` unit test with three phases:
+
+1. **Pre-reset**: Add a vector, assert `hashtable_size() &gt; 0` (precondition — maps are populated).
+2. **Reset verification**: Call `reset()`, assert `ntotal == 0` and `hashtable_size() == 0`. Then search for the old vector, assert `labels[0] == -1` (not found).
+3. **Post-reset smoke test**: Add a different vector, search for it, assert exact match at ID 0 — verifies the index is fully functional after reset.
+
+Reviewed By: limqiying
+
+Differential Revision: D100797480
+
+fbshipit-source-id: 7313d103371a8442c00bbff5d0c60b6bead8e7c6
+
+- fix: cagra bug (#4963)
+
+Summary:
+**Summary**
+Resolved https://github.com/facebookresearch/faiss/issues/4927.
+- Fixes base-level-only `IndexHNSWCagra::range_search` to return results without an entry point.
+- Adds a C++ unit test reproducing the base-level-only range search case and a GPU interop Python test.
+
+**Changes**
+- Implement base-level-only range search path in `IndexHNSWCagra` using per-query range handlers.
+- Add C++ helper to copy level-0 graph only and a new test for base-level-only range search.
+- Add GPU interop Python test for base-level-only range search.
+
+**Tests**
+- `docker build -f docker/Dockerfile.dev -t faiss-dev:local --build-arg UID=&#34;$(id -u)&#34; --build-arg GID=&#34;$(id -g)&#34; .`
+- `docker run --rm -v &#34;$PWD:/workspace&#34; -w /workspace faiss-dev:local bash -lc &#34;cmake -B build-docker -G Ninja -DFAISS_ENABLE_GPU=OFF -DFAISS_ENABLE_PYTHON=ON -DBUILD_TESTING=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo . &amp;&amp; cmake --build build-docker -j --target faiss faiss_test swigfaiss &amp;&amp; ./build-docker/tests/faiss_test --gtest_filter=HNSW.Test_IndexHNSWCagra_BaseLevelOnly_RangeSearch&#34;`
+
+**Notes**
+- The Python GPU test is skipped without CUVS/GPU support; it is included for GPU-enabled CI.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4963
+
+Reviewed By: alibeklfc
+
+Differential Revision: D97766638
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 3bd50fa783d3ddfab14e0485ef975c821732ff6c
+
+- Add value-initialization to uninitialized member variables (#5089)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5089
+
+Fix 59 `cppcoreguidelines-pro-type-member-init` lint warnings by adding `{}` value-initialization to uninitialized member fields across 17 files. This ensures all members are zero/null-initialized by default, preventing potential use of uninitialized values.
+
+Affected files: Index.cpp, Index2Layer.cpp, IndexAdditiveQuantizer.cpp, IndexAdditiveQuantizerFastScan.h, IndexBinaryHash.h, IndexBinaryIVF.cpp, IndexFastScan.h, IndexHNSW.h, IndexIVF.h, IndexIVFAdditiveQuantizer.cpp, IndexIVFFastScan.h, IndexIVFFlat.h, IndexIVFPQ.cpp, IndexIVFPQ.h, IndexPQ.cpp, IndexPQ.h, IndexRowwiseMinMax.cpp.
+
+Reviewed By: mnorris11
+
+Differential Revision: D100577736
+
+fbshipit-source-id: 3b059f49d2c75f16d4eaadf48125daaa150034bd
+
+- Optimize multibit sign-bit unpacking in RaBitQ FastScan handlers (#5097)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5097
+
+Replace `CodePackerRaBitQ::unpack_1()` with `rabitq_utils::unpack_sign_bits_from_packed()` in both `RaBitQHeapHandler` and `IVFRaBitQHeapHandler` multibit refinement paths.
+
+The old path called `pq4_get_packed_element` twice per output byte, each call recomputing the vector&#39;s in-block position from scratch (division, modulo, branches). The new function precomputes the PQ4 address once and iterates with simple strided byte loads. It also skips the unnecessary auxiliary data copy that `unpack_1` performed.
+
+Micro-benchmark results (unpack-only, median ns/call):
+
+| d    | Old (ns) | New (ns) | Speedup |
+|------|----------|----------|---------|
+| 64   | 627      | 166      | 3.8x    |
+| 128  | 1204     | 279      | 4.3x    |
+| 256  | 2329     | 525      | 4.4x    |
+| 512  | 4583     | 996      | 4.6x    |
+| 768  | 6731     | 1376     | 4.9x    |
+| 1024 | 9344     | 1819     | 5.1x    |
+
+End-to-end (unpack + SIMD distance) speedup is 1.4-1.6x.
+
+Additional cleanup: removed `CodePacker` heap allocation and virtual dispatch from both handlers.
+
+Reviewed By: ALittleYam
+
+Differential Revision: D100718832
+
+fbshipit-source-id: 28d1f6510072aa21f05b7478d0fd269d0eb3b1b7
+
+- Thread qb/centered search params through FastScan LUT and handler (#5095)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5095
+
+D100399519 added IVFRaBitQSearchParameters support to the FastScan scanner
+but only patched the distance_to_code fallback path. The main search path
+(LUT construction and SIMD distance correction in handle()) still read
+qb/centered from the index, ignoring the search params override.
+
+This diff completes the fix by:
+1. Adding qb/centered fields to FastScanDistancePostProcessing context
+2. Threading them through compute_LUT → compute_residual_LUT
+3. Reading them from context in the handler&#39;s handle() method
+4. Extracting them from IVFRaBitQSearchParameters in search_preassigned
+
+Reviewed By: mnorris11
+
+Differential Revision: D100674751
+
+fbshipit-source-id: 72139ed1311f9422f8701933bf0464c411764d05
+
+- Fix orphaned OpenMP directives in IndexRowwiseMinMax training functions (#5096)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5096
+
+The `train_inplace_impl` and `train_impl` template functions in `IndexRowwiseMinMax.cpp` used `#pragma omp for` without an enclosing `#pragma omp parallel` region. The `omp for` directive is a work-sharing construct that distributes loop iterations among threads that are already within a parallel region. When used as an orphaned directive (outside any parallel region), it simply executes the loop sequentially on the calling thread — the parallelization that was clearly intended never actually happens.
+
+This affects both training code paths for `IndexRowwiseMinMax` and `IndexRowwiseMinMaxFP16`:
+- `train_inplace_impl`: normalizes vectors in-place before training the sub-index
+- `train_impl`: creates a normalized copy of the input data before training
+
+Both loops are embarrassingly parallel (each iteration processes an independent vector), so `#pragma omp parallel for` is the correct directive.
+
+Additionally, the rescale-back loop in `train_inplace_impl` (which reverses the normalization after sub-index training) was not parallelized at all. Since it is also embarrassingly parallel, this change adds `#pragma omp parallel for` to it as well.
+
+For large training sets, these loops can be a meaningful fraction of the total training time, so enabling actual parallelization improves training throughput on multi-core systems.
+
+Reviewed By: mnorris11
+
+Differential Revision: D100610547
+
+fbshipit-source-id: fab8dc49c5c849090ff3300a8d04d7e13325bec0
+
+- Support IVFRaBitQSearchParameters in RaBitQFastScan scanner (#5081)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5081
+
+Pass qb and centered from IVFRaBitQSearchParameters to the
+IVFRaBitQFastScanScanner, matching the behavior of IndexIVFRaBitQ&#39;s
+get_InvertedListScanner. Previously the scanner always used
+index.qb/index.centered, ignoring search params.
+
+Reviewed By: alibeklfc
+
+Differential Revision: D100399519
+
+fbshipit-source-id: 9eaaee4fdd25f4b1a54d2a46a27e71076e182a71
+
+- Fix FastScan for indices without own inverted lists + performance optimizations in RaBitQ handler (#5080)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5080
+
+When IndexIVFFastScan is created with own_invlists=false (e.g., in unicorn
+where posting lists are managed externally), two things crash:
+
+1. init_code_packer() asserts that invlists is a BlockInvertedLists, but it&#39;s
+   an ArrayInvertedLists. Fix: skip when invlists is not block-packed.
+
+2. RaBitQ scan_codes calls set_list_context which reads from invlists to get
+   factor data. But invlists is empty. Fix: guard the invlists access, and
+   fall back to the codes pointer passed to scan_codes (which already
+   contains the block data with embedded factors).
+
+Reviewed By: alibeklfc
+
+Differential Revision: D100354524
+
+fbshipit-source-id: 39c1ba2b024aa8237528edec4e8e9968bd1ec68c
+
+- Use std:: qualified math functions to avoid float-to-double promotion (#5088)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5088
+
+Fix 4 `performance-type-promotion-in-math-fn` lint warnings by using `std::floor`, `std::fabs`, and `std::pow` instead of the unqualified C versions. The unqualified versions promote `float` arguments to `double`, causing unnecessary precision loss and performance overhead. Also added missing `#include &lt;cmath&gt;` in `IndexIVFSpectralHash.cpp`.
+
+Reviewed By: mnorris11
+
+Differential Revision: D100576274
+
+fbshipit-source-id: f491b1e9432a42f56a5660002f5b10ed0f594f4c
+
+- Suppress unused static constexpr variable warnings (#5087)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5087
+
+Fix 2 `clang-diagnostic-unused-const-variable` lint warnings by adding `[[maybe_unused]]` to `static constexpr int impl` in `IndexIVFPQFastScan.cpp` and `IndexIVFRaBitQFastScan.cpp`. The variable serves as documentation about the search implementation being used, so it is kept rather than removed.
+
+Reviewed By: mnorris11
+
+Differential Revision: D100575853
+
+fbshipit-source-id: 1c42958b1de1b663dc8f2eadfff345d27583b8a2
+
+- Replace typedef with using declarations (#5086)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5086
+
+Fix 6 `modernize-use-using` lint warnings by replacing C-style `typedef` declarations with modern C++ `using` declarations in `IndexBinaryHNSW.h`, `IndexHNSW.h`, and `IndexRefine.cpp`.
+
+___
+
+overriding_review_checks_triggers_an_audit_and_retroactive_review
+Oncall Short Name: faiss
+
+Differential Revision: D100575482
+
+fbshipit-source-id: 8dcf6295c9f6669aff02e4ad62e88025f993c9b5
+
+- Remove extra semicolons after inline member function definitions (#5085)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5085
+
+Fix 4 `clang-diagnostic-extra-semi` lint warnings in `IndexBinary.h`. The extra semicolons after the closing braces of inline member function definitions (`train_ex`, `add_ex`, `add_with_ids_ex`, `search_ex`) are unnecessary and flagged by clang-tidy.
+
+___
+
+overriding_review_checks_triggers_an_audit_and_retroactive_review
+Oncall Short Name: ml_infra_bootcamp
+
+Differential Revision: D100575086
+
+fbshipit-source-id: 3ecfe85d06bfeab61804e4173d92165f3d1bd043
+
+- use `level` but not `0` in neighbor_range(i, level, &amp;begin, &amp;end) (line 198) (#5005)
+
+Summary:
+just like line 95-103 in same file (\faiss\impl\HNSW.cpp):
+```
+void HNSW::clear_neighbor_tables(int level) {
+    for (size_t i = 0; i &lt; levels.size(); i++) {
+        size_t begin, end;
+        neighbor_range(i, level, &amp;begin, &amp;end);  // ✅ right：use `level`
+        // ...
+    }
+}
+```
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5005
+
+Reviewed By: alibeklfc
+
+Differential Revision: D100557031
+
+Pulled By: mnorris11
+
+fbshipit-source-id: b248a93a0d1385ef72b22962027586308800ac75</div>
+</div>
+
+<a href="../project/facebookresearch_faiss.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
