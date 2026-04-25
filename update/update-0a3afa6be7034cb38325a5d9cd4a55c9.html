@@ -1,0 +1,1328 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in litellm_internal_staging (100 commits) - BerriAI/litellm - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in litellm_internal_staging (100 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/BerriAI_litellm.html">BerriAI/litellm</a> /
+    Updates in litellm_internal_staging (100 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/BerriAI_litellm.html">BerriAI/litellm</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-04-25 01:38 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/BerriAI/litellm/commits/litellm_internal_staging" target="_blank">https://github.com/BerriAI/litellm/commits/litellm_internal_staging</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Прокси LiteLLM теперь включает новый API `/v1/memory` для хранения пар ключ/значение с привязкой к пользователю/команде и опциональными JSON-метаданными, предоставляя полный функционал CRUD и интуитивно понятный пользовательский интерфейс для управления. Эта функция была значительно улучшена за счет глобальной уникальности ключей, серверной пагинации и строгой авторизации записи, предотвращающей несанкционированные изменения личных или командных записей. Обновление также добавляет поддержку новых моделей GPT-5.5 и механизм защиты LLM-as-a-Judge.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- feat(proxy): add /v1/memory CRUD endpoints (#26218)
+
+* feat(proxy): add /v1/memory CRUD endpoints with user/team scoping
+
+New LiteLLM_MemoryTable stores user/team-scoped key/value entries with
+optional JSON metadata. Value is a String (LLM-readable text) and metadata
+is an optional Json? envelope, matching the Letta + mem0 hybrid model so
+future structured fields can be added without a schema migration.
+
+Endpoints:
+  POST   /v1/memory         - create
+  GET    /v1/memory         - list (caller-scoped; admins see all)
+  GET    /v1/memory/{key}   - fetch one
+  PUT    /v1/memory/{key}   - upsert
+  DELETE /v1/memory/{key}   - delete
+
+Non-admin callers cannot set a user_id/team_id other than their own.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(proxy/memory): omit metadata field when None on create
+
+Prisma&#39;s Python client rejects `metadata=None` on a `Json?` field with
+&#34;A value is required but not set&#34; — the field must be omitted from the
+`data` dict entirely to store SQL NULL. Build the create payload
+conditionally in both `create_memory` and the PUT-create branch of
+`upsert_memory`.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(ui): add Memory page to view/manage /v1/memory entries
+
+Adds a new &#34;Memory&#34; sidebar item under Tools so users can see what their
+agents have stored. Lists all memories visible to the caller (scoped by
+the backend), with a key-search filter, preview column, scope tags, and
+view/edit/delete actions. Create modal accepts optional JSON metadata.
+
+- networking.tsx: fetchMemoryList / createMemory / updateMemory / deleteMemory
+  wired to the /v1/memory CRUD endpoints.
+- MemoryView + MemoryEditModal: new antd-based components (per CLAUDE.md:
+  use antd for new UI, not tremor).
+- page.tsx + leftnav.tsx: wire the &#34;memory&#34; route + sidebar entry.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(memory): add key_prefix filter + promote Memory to AI GATEWAY nav
+
+Backend:
+- GET /v1/memory now accepts `key_prefix` for Redis-style namespace
+  scans (e.g. `?key_prefix=user:`). When both `key` and `key_prefix`
+  are passed, `key_prefix` wins.
+- Prefix filter sits under the visibility filter in the Prisma where
+  clause, so it can never leak rows across user/team scopes.
+- New tests: prefix match, and cross-scope isolation (another user&#39;s
+  `user:*` rows must not appear in the caller&#39;s results).
+
+UI:
+- Memory moved from a Tools submenu to a top-level AI GATEWAY item
+  (alongside Agents, MCP Servers, Skills) — it&#39;s an API primitive,
+  not a tool-management surface.
+- Search box now drives prefix search, matching the Redis mental
+  model (&#34;type the namespace, see everything under it&#34;).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(memory): enforce unique key per scope by using NULLS NOT DISTINCT
+
+The unique constraint `(key, user_id, team_id)` on LiteLLM_MemoryTable
+silently allowed duplicates when user_id or team_id was NULL, because
+Postgres treats every NULL as distinct by default (ANSI semantics). A
+caller with no team_id could POST the same key three times and get
+three rows.
+
+Migration:
+1. Dedupe existing rows, keeping the most recent per (key, user_id,
+   team_id), using `IS NOT DISTINCT FROM` so NULL == NULL.
+2. Drop the old unique index.
+3. Recreate it with `NULLS NOT DISTINCT` (Postgres 15+).
+
+No code change: POST already returns 409 on unique-violation error
+messages — it just wasn&#39;t firing before because the constraint didn&#39;t
+catch the NULL-team case.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(memory): make key globally unique, 409 on any duplicate
+
+Switches from the compound unique `(key, user_id, team_id)` to a simple
+`key @unique`. The compound form silently allowed duplicates when
+user_id or team_id was NULL (Postgres treats each NULL as distinct), so
+callers could POST the same key repeatedly. Globally-unique key means
+one row per key, period — any duplicate create → 409.
+
+- schema.prisma (×3): `key String @unique`, drop `@@unique(...)`.
+- initial add_memory_table migration: unique index on (key) only.
+- Remove the now-unused follow-up NULLS NOT DISTINCT migration.
+- Endpoint error message simplified (&#34;already exists&#34; — no &#34;for this scope&#34;).
+- Test fake&#39;s create() now enforces global key uniqueness.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(ui/memory): full-width layout + user/teams-style columns
+
+- Add `w-full` to the MemoryView outer div so the page fills the
+  flex-flex-1 container (was collapsing to intrinsic width).
+- Replace the combined &#34;Scope&#34; column with separate User ID / Team ID
+  columns, matching the layout of the Users / Teams pages: ID, Name,
+  Preview, User ID, Team ID, Updated, Actions.
+- IDs render with a truncated mono label + copy-to-clipboard button,
+  same pattern as view_users.
+- Detail drawer now shows Memory ID / User ID / Team ID as separate
+  fields instead of stacked color tags.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(ui/memory): use clean MCP-style ID pill, drop copy icons
+
+The ID / User ID / Team ID columns showed a mono text blob with a
+copy-to-clipboard icon next to each value — too busy compared to the
+MCP Servers page. Swap the renderer for MCP&#39;s pill style:
+
+- Truncated mono ID inside a blue Tailwind pill
+  (`font-mono text-blue-600 bg-blue-50 ... rounded-md border`).
+- No copy icon. Full ID surfaces via tooltip.
+- ID column is a button that opens the detail drawer on click;
+  user/team ID pills are static (not clickable).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(memory): address greptile review feedback
+
+Addresses 5 greptile findings (3/5 → higher confidence target):
+
+1. Identity-less orphan rows (P1): non-admin callers with no user_id AND
+   no team_id could create rows that the visibility filter would never
+   match again. Now rejected up front with 400 — caller must authenticate
+   with a scoped key or act as PROXY_ADMIN.
+
+2. Upsert race returning 500 (P1): PUT&#39;s check-then-create isn&#39;t atomic;
+   a concurrent writer could slip a row in between the 404-check and the
+   create call. Now catch unique-violation on create, re-read, and fall
+   through to update — PUT stays idempotent. If the conflicting row
+   belongs to a different scope, surface a 409 instead of 500.
+
+3. PUT-create scope inconsistency (P2): PUT&#39;s create branch always used
+   the caller&#39;s own user_id/team_id, so admins couldn&#39;t bootstrap rows
+   scoped elsewhere via PUT (only POST). Now PUT-create calls the shared
+   `_resolve_scope()` helper, matching POST semantics.
+
+4. Stale schema comment (P2): schema said &#34;Keyed by (key, user_id,
+   team_id)&#34; but `key` is globally unique. Updated all three schema
+   copies to reflect the actual design.
+
+5. UI silently truncated at 200 (P2): MemoryView fetched pageSize=200
+   with no load-more. Swapped to real server-side pagination driven by
+   `data.total`; page size is now 50 and the pager is a real AntD
+   control.
+
+Also extracts a shared `_resolve_scope()` helper and `_is_unique_violation()`
+from create_memory so POST and PUT don&#39;t drift on the scope/error logic.
+
+Tests: +3 new (identity-less 400, PUT admin bootstrap, PUT race →
+update), 18/18 pass.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(memory): typed Prisma error + explicit-null metadata on PUT
+
+Two more greptile threads from the last review:
+
+- Unique-violation detection was string-matching &#34;Unique&#34;/&#34;UniqueViolation&#34;
+  in the exception message, fragile across Prisma/driver versions. Now
+  check the typed error `code == &#34;P2002&#34;` first, with string fallback.
+
+- PUT could not distinguish &#34;metadata omitted&#34; from &#34;metadata: null&#34; —
+  both parsed as `None`, so callers had no way to clear stored metadata.
+  Switch to Pydantic v2&#39;s `model_fields_set` to tell which fields the
+  caller actually sent; explicit null now clears the column.
+
+New tests:
+- explicit null clears metadata
+- omitted metadata preserves existing value
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(ui/memory): send explicit null when user clears metadata
+
+Addresses the remaining P1 from the last greptile review:
+
+When the edit modal&#39;s metadata textarea was cleared and saved,
+`metadataParsed` stayed `undefined`, `JSON.stringify` dropped the key
+entirely, and the backend&#39;s `model_fields_set` guard therefore left
+the stored metadata untouched — UI showed success but nothing changed.
+
+Now: empty textarea on edit → send explicit `null` so the backend
+sees `metadata` in `model_fields_set` and clears the column.
+Empty textarea on create still maps to `undefined` (field omitted)
+to avoid Prisma&#39;s `Json? = None` quirk on insert.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(ui/memory): preserve slashes in key path encoding
+
+The backend route `/v1/memory/{key:path}` supports keys with slashes,
+but `encodeURIComponent` encoded `/` as `%2F`. Some proxies (nginx
+default, CloudFlare, AWS ALB) reject or re-decode `%2F` mid-flight,
+so UI update/delete calls on slash-containing keys could fail or
+silently misroute.
+
+New helper `encodeMemoryKeyForPath` splits by `/`, URL-encodes each
+segment, then rejoins with literal `/`. Every other unsafe char
+(spaces, `?`, `#`, `%`) stays encoded per-segment; slashes stay as
+path delimiters, matching what the `:path` converter expects.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(ui/memory): drop misleading client-side column sorters
+
+With server-side pagination, client sorters on `key` and `updated_at`
+only reorder the current page while pretending to sort the full
+dataset — users would see &#34;sorted by name&#34; but only the visible 50
+rows would actually be sorted.
+
+Remove the sorters. The backend already returns rows in
+`updated_at DESC` order (sensible default for a memory view), and
+users can narrow the result with the key-prefix filter.
+
+Greptile also flagged missing `@@map` on the new model as a
+&#34;consistency&#34; issue, but only 1 of 59 tables in this repo uses
+`@@map` — the dominant pattern is to rely on Prisma&#39;s default
+(model name == table name). Skipping that finding as a
+false-positive on convention.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(memory): compose visibility + key filters via explicit AND
+
+Greptile P1 (filter-fragility): `where.update(vis)` was semantically
+correct today, but dict-merging by key meant any future visibility
+filter that grew a new top-level &#34;OR&#34; would silently clobber the
+existing key filter.
+
+Compose explicitly instead:
+
+    where = {&#34;AND&#34;: [key_filter, vis]}
+
+Applied to both `list_memory` and `_find_memory_for_caller`. When
+either side is empty (admin has no visibility filter; list has no
+key filter), skip the wrapper and use the non-empty side directly
+to keep the generated SQL clean.
+
+Test fake&#39;s `_matches` now understands top-level `AND` too.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor(ui/memory): wrap write helpers with react-query useMutation
+
+Previously the Memory view read via `useQuery` but called the raw
+create/update/delete fetch helpers directly in handlers, tracking
+loading state with a local `submitting` flag and invalidating state
+via `refetch()`. That mixes two concerns:
+
+- it skips react-query&#39;s mutation state (isPending / isError / isSuccess)
+- `refetch()` only retouches the currently-mounted query instance, not
+  other cached pages, so navigating back to an older page could show
+  stale rows
+
+Switch the three write paths to `useMutation`:
+
+- `createMutation`, `updateMutation`, `deleteMutation` — each owns
+  the mutation fn, success toast, and error toast.
+- Success handlers invalidate the whole `[&#34;memoryList&#34;, ...]` prefix
+  via `queryClient.invalidateQueries`, so every cached page refetches
+  (pagination + filter-aware).
+- Refresh button now invalidates instead of `refetch()`, keeping all
+  behavior consistent.
+- handleSave/handleDelete become thin adapters that call `.mutateAsync`;
+  their errors are swallowed locally since the mutation&#39;s onError has
+  already surfaced the toast.
+
+Also tightened the edit modal&#39;s key-field tooltip to reflect the
+actual global-unique semantics (was &#34;Unique per user/team scope&#34;).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(memory): close cross-user write gap + sanitize 500 errors (Veria)
+
+Addresses two Veria findings:
+
+**High — cross-user memory tampering via team membership.** The
+visibility filter uses an OR (`user_id == caller OR team_id == caller`)
+so team members can SEE each other&#39;s team-scoped rows. That&#39;s
+intentional for list/get. But because PUT/DELETE used the same filter
+to find the target row, any team member could overwrite or delete a
+teammate&#39;s *personal* row whenever both `user_id` and `team_id` were
+stamped on it — broader visibility was being silently treated as
+broader authority.
+
+New `_assert_write_access(row, caller)` enforces ownership for
+mutations. Non-admin rules:
+
+- The row&#39;s `user_id` must match the caller (personal ownership), OR
+- The row has no `user_id` and its `team_id` matches the caller&#39;s
+  team (a &#34;pure team row&#34; intended for shared writes).
+
+Admins bypass the check. The same gate runs in PUT (both regular
+and post-race-recovery branches) and DELETE.
+
+**Medium — DB internals leaked through 500 detail.** Every `except`
+block was raising `HTTPException(500, detail=str(e))`, which surfaces
+Prisma error strings (table/column names, host:port, error class
+names) to API callers. New `_internal_error()` helper logs the real
+exception server-side and returns a generic, caller-safe `detail`.
+Applied to create, list, upsert (general fallthrough), and delete.
+
+Also tightened the race-recovery 409 message to drop the &#34;in a
+different scope&#34; wording — the caller never needs to know whose
+scope it lives in.
+
+Tests (+5):
+- teammate cannot overwrite personal row → 403
+- teammate cannot delete personal row → 403
+- teammate CAN modify pure team row (no user_id stamped) → 200
+- admin bypasses write-auth → 200
+- 500 response never echoes Prisma internals (table/host/class names)
+
+25/25 unit tests pass.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(memory): require team admin to modify pure team rows
+
+Tightens the write-authorization rule for &#34;pure team rows&#34; (rows with
+no user_id stamped, only team_id) to match the pattern used by
+team-management endpoints (`_is_user_team_admin` + `_is_user_org_admin_for_team`):
+
+- Plain team members can READ team rows via the OR visibility filter
+  (intentional, unchanged).
+- Only PROXY_ADMIN, team admins of the row&#39;s team_id, or org admins
+  for the team&#39;s organization may MODIFY them. Plain members get 403.
+
+`_assert_write_access` is now async and takes the prisma_client so it
+can fetch the team and run the existing `_is_user_team_admin` /
+`_is_user_org_admin_for_team` helpers from
+`litellm.proxy.management_endpoints.common_utils`. The org-admin path
+is best-effort: it calls `get_user_object`, which depends on the
+proxy_server module being initialized, so any exception there is
+treated as &#34;not an org admin&#34; rather than crashing the request.
+
+Tests:
+- team admin can modify pure team row → 200
+- plain team member cannot modify pure team row → 403
+- plain team member cannot delete pure team row → 403
+
+Updates the test fake to add a tiny `litellm_teamtable.find_unique`
+implementation and a `_make_team(team_id, admin_user_ids=[...])`
+helper.
+
+27/27 unit tests pass.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: mypy + UI page-metadata sync for memory page
+
+Two CI failures:
+
+1. mypy: `_find_memory_for_caller` had `key_filter` inferred as
+   `dict[str, str]` (literal type) and the conditional `{&#34;AND&#34;: [key_filter, vis]}`
+   returned `dict[str, list[...]]`, so the join site failed
+   `dict-item` typing. Annotate both intermediates as `dict` so mypy
+   widens the value type.
+
+2. UI test (`page_utils.test.ts &gt; should have descriptions for all
+   pages`): every leftnav entry must have a description in
+   `page_metadata.ts`, and `memory` was missing. Added a one-line
+   description, matching the style of neighboring entries.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [Feat] Day-0 support for GPT-5.5 and GPT-5.5 Pro (#26449)
+
+* feat(openai): day-0 support for GPT-5.5 and GPT-5.5 Pro
+
+Add pricing + capability entries for the new GPT-5.5 family launched by
+OpenAI on 2026-04-24:
+
+- gpt-5.5 / gpt-5.5-2026-04-23 (chat): $5/$30/$0.50 per 1M
+  input/output/cached input
+- gpt-5.5-pro / gpt-5.5-pro-2026-04-23 (responses-only): $60/$360/$6
+  per 1M input/output/cached input
+
+Other fees (long-context &gt;272k, flex, batches, priority, cache
+discounts) follow the same ratios as GPT-5.4, with context window
+retained at 1.05M input / 128K output.
+
+No transformation / classifier code changes are required:
+OpenAIGPT5Config.is_model_gpt_5_4_plus_model() already matches 5.5+ via
+numeric version parsing, and model registration is driven from the
+JSON. The existing responses-API bridge for tools + reasoning_effort
+(litellm/main.py:970) already covers gpt-5.5-pro.
+
+Tests:
+- GPT5_MODELS regression list now covers gpt-5.5-pro and dated variants
+- New test_generic_cost_per_token_gpt55_pro cost-calc test
+- Updated test_generic_cost_per_token_gpt55 for long-context fields
+
+* fix(openai): mirror reasoning_effort flags onto gpt-5.5 dated variants
+
+gpt-5.5-2026-04-23 and gpt-5.5-pro-2026-04-23 were missing the
+supports_none_reasoning_effort, supports_xhigh_reasoning_effort, and
+supports_minimal_reasoning_effort flags that their non-dated
+counterparts define. Reasoning-effort routing in OpenAIGPT5Config is
+fully capability-driven from these JSON flags — since an absent flag
+is treated as False for opt-in levels (xhigh), users pinning to a
+dated snapshot would silently lose xhigh support and diverge from the
+base alias on logprobs + flexible temperature handling.
+
+Copy the flags onto both dated variants so every dated snapshot
+inherits the base model&#39;s reasoning-effort capability profile.
+
+Adds a parametrized regression test that asserts
+supports_{none,minimal,xhigh}_reasoning_effort parity between each
+dated variant and its non-dated counterpart, preventing future drift
+when new snapshots are added.
+
+* fix(schema): close LiteLLM_MemoryTable model brace dropped during merge
+
+The rebase against `litellm_internal_staging` (which added
+`LiteLLM_AdaptiveRouterState` / `LiteLLM_AdaptiveRouterSession`) left
+the closing brace of `LiteLLM_MemoryTable` missing in all three
+schema copies — the next model declaration ended up parsed as a field
+of the memory table, surfacing as the CI prisma error:
+
+    error: This line is not a valid field or attribute definition.
+      --&gt;  schema.prisma:1250
+       |
+    1249 | // Per-(router, request_type, model) Beta posterior for the adaptive router.
+    1250 | model LiteLLM_AdaptiveRouterState {
+
+Add the missing `}` (and the standard blank line) after the memory
+table&#39;s `@@index([team_id])` in `schema.prisma`,
+`litellm/proxy/schema.prisma`, and
+`litellm-proxy-extras/litellm_proxy_extras/schema.prisma`.
+
+`prisma generate --schema litellm/proxy/schema.prisma` now runs clean;
+27/27 memory unit tests pass.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+Co-authored-by: Mateo Wang &lt;277851410+mateo-berri@users.noreply.github.com&gt;
+
+- fix(proxy): single-team DB fallback when JWT has no team_id (#26418)
+
+* fix(proxy): infer team from DB when JWT has no team and user has one team
+
+- When team_id is unset after JWT auth but the user row has exactly one
+  team, set team_id, team_object, and team_membership from DB.
+- Skip when zero or multiple teams (ambiguous).
+- Add parametrized unit tests in test_handle_jwt.py.
+
+Made-with: Cursor
+
+* fix(proxy): JWT single-team DB fallback: catch errors, tests match get_team_object
+
+- Wrap get_team_object + get_team_membership in one try/except; log and skip on failure (stale/missing team id no longer fails auth).
+- Parametrize tests: HTTP 404/500, membership error; use side_effect not return_value=None for missing team row.
+
+Made-with: Cursor
+
+* refactor(jwt): extract single-team fallback into _resolve_single_team_fallback helper
+
+Made-with: Cursor
+
+- Merge pull request #25677 from BerriAI/litellm_migration_projects
+
+[Refactor] Proxy: move projects management to enterprise package
+
+- Merge pull request #25808 from BerriAI/litellm_sendInviteEmailToggle
+
+[Feature] UI - Users: Add Send Invitation Email Toggle
+
+- feat(guardrails): LLM-as-a-Judge guardrail (#26360)
+
+* feat(guardrails): add LLM_AS_A_JUDGE to SupportedGuardrailIntegrations
+
+* feat(types): add EvalVerdict, StandardLoggingEvalInformation; wire eval_information into SpendLogsMetadata
+
+* feat(guardrails): add self-contained llm_as_a_judge guardrail hook
+
+* fix(a2a): filter agent-only litellm_params from acompletion kwargs; pass agent_id into body
+
+* feat(ui): add LLMJudgeFields criteria builder component
+
+* feat(ui): wire LLM-as-a-Judge into add guardrail form
+
+* feat(ui): update EvalViewer — title &#39;LLM Judge Results&#39;, weighted score column, summary row
+
+* fix(ui): wire EvalViewer into LogDetailContent to show LLM judge results on logs page
+
+* fix(guardrails-ui): route llm_as_a_judge to criteria builder step; rename to LiteLLM LLM as a Judge; add litellm logo
+
+* fix(guardrail-viewer): stack lifecycle + eval details vertically to avoid badge overflow in narrow drawer
+
+* fix(guardrail-create): surface config validation errors on create instead of silently orphaning guardrail in DB
+
+* fix(guardrail-registry): hardcode llm_as_a_judge in initializer registry so it loads regardless of package install path
+
+* fix(llm-as-a-judge): fix P1 code quality issues - validate weights/on_failure, guard pre_call, handle multimodal, move imports to module level, fix spurious finally logging
+
+* fix(guardrail_endpoints): use correct PK field in rollback delete and log rollback failure
+
+* fix(llm_as_a_judge): support Pydantic object in _get_litellm_param fallback chain
+
+* fix(LLMJudgeFields): replace @tremor/react Button with antd Button
+
+* fix(llm_as_a_judge): remove dead registry dicts, fix KeyError in prompt builder, set correct status on judge failure
+
+* test(llm_as_a_judge): add unit tests for guardrail hook
+
+* fix(llm_as_a_judge): remove @log_guardrail_information decorator to fix duplicate guardrail_information entries
+
+The decorator and the manual finally block both called add_standard_logging_guardrail_information_to_request_data, producing two entries per request. The decorator also misclassified HTTPException(422) blocks as guardrail_failed_to_respond (it checks for 400). The finally block correctly tracks status throughout, so removing the decorator is sufficient.
+
+* fix(test_gcs_pub_sub): ignore metadata.eval_information in comparison
+
+* fix(test_spend_management): ignore metadata.eval_information in payload comparison
+
+* fix(types/guardrails): add input_type and messages to ApplyGuardrailRequest
+
+* fix(guardrail_endpoints): pass input_type and messages through apply_guardrail endpoint
+
+* fix(guardrail_endpoints): auto-detect post_call guardrails and use input_type=response
+
+* fix(a2a_endpoints): merge agent litellm_params guardrails into data before post_call hooks
+
+* fix(llm_as_a_judge): use float sum with tolerance for weight validation
+
+* fix(guardrail_registry): split long import line for black formatting
+
+* fix(llm_as_a_judge): guard guardrail_name Optional for mypy
+
+* fix(llm_as_a_judge): set guardrail_status=guardrail_intervened when score fails, regardless of on_failure mode
+
+* fix(a2a_endpoints): use try/finally so deferred spend log fires even when guardrail blocks with 422
+
+* fix(litellm_logging): declare _defer_async_logging and _enqueue_deferred_logging on Logging class for mypy
+
+* fix(logging_worker): restore queue.join() in flush() to wait for in-flight callbacks
+
+- Merge pull request #26457 from BerriAI/litellm_enterpriseLicenseMetadata
+
+[Infra] Declare proprietary license in litellm-enterprise metadata
+
+- Merge pull request #26438 from BerriAI/litellm_fix-jwt-admin-bypass
+
+fix(jwt-auth): apply team TPM/RPM + attribution for admins using x-litellm-team-id
+
+- fix(vertex passthrough): log :embedContent and :batchEmbedContents responses (#26146)
+
+* fix(vertex passthrough): log :embedContent and :batchEmbedContents responses
+
+* test(vertex passthrough): add unit tests for :embedContent and :batchEmbedContents logging
+
+* fix(vertex passthrough): extract input text from request body for embedContent token counting
+
+* fix(vertex passthrough): add embedContent and batchEmbedContents to TRACKED_VERTEX_ROUTES
+
+* fix(vertex passthrough): detect Google AI Studio URLs in embedContent handler
+
+* test(vertex passthrough): add unit test for Google AI Studio URL embedContent provider detection
+
+* style: black format vertex_passthrough_logging_handler
+
+- Merge remote-tracking branch &#39;origin/litellm_internal_staging&#39; into litellm_sendInviteEmailToggle
+
+- chore(packaging): declare proprietary license in litellm-enterprise metadata
+
+The enterprise package ships under the BerriAI Enterprise License defined
+in enterprise/LICENSE.md, which is not an SPDX-listed license. Declare it
+via PEP 639&#39;s LicenseRef-Proprietary expression so metadata-reading tools
+(PyPI classifiers, Nexus IQ, pip-licenses) resolve it instead of reporting
+License-None. The existing license-files entry already ships the full terms.
+
+- Merge pull request #26454 from BerriAI/litellm_remove_docs_repo_moved
+
+[Infra] Remove docs/my-website, point contributors to litellm-docs repo
+
+- fix(jwt-auth): soft-fail unresolvable x-litellm-team-id for admins
+
+Previously, an admin JWT sending a stale/typo&#39;d/missing x-litellm-team-id
+on an LLM API route received a hard 404 from get_team_object, blocking the
+request. Restore pre-PR admin behavior: if the header can&#39;t be resolved,
+skip team attribution and proceed with admin access, logging a warning
+with the header value and route so the misconfigured caller is diagnosable.
+
+- ci: check out litellm-docs directly into docs/my-website
+
+Replaces the rm-and-symlink hack with a plain actions/checkout
+using path: docs/my-website. The previous approach failed on this
+branch because docs/my-website no longer exists in the repo (its
+parent docs/ directory was also removed), so ln -s had nowhere
+to create the symlink.
+
+Also adds the same checkout step to test-unit-documentation.yml,
+which was silently relying on docs/my-website existing in-tree
+for test_env_keys.py and test_router_settings.py.
+
+- docs: remove docs/my-website, point contributors to litellm-docs
+
+The documentation source has moved to a separate repository,
+BerriAI/litellm-docs, served at docs.litellm.ai. This PR removes
+docs/my-website/ from this repo and updates README.md, AGENTS.md,
+and CLAUDE.md to direct doc contributions to the new repo.
+
+Also fixes a broken relative link in
+litellm/integrations/levo/README.md.
+
+The existing CI symlink in .github/workflows/test-code-quality.yml
+(which clones litellm-docs and symlinks docs/my-website to it for
+tests/documentation_tests/*) continues to work without change.
+
+- Preserve UISettings docstring on effective class for GET schema
+
+create_model does not inherit the base class docstring, so once an
+extension registered a field the effective class had no description.
+The UI renders schema.description as a header paragraph — losing it
+broke the &#39;Configuration for UI-specific flags&#39; text. Pass __doc__
+through explicitly and add a regression test.
+
+- chore: fix linting (ruff PLR0915, black) on admin team-header fix
+
+Extract the admin team-header attachment into a helper so
+auth_builder stays under the 50-statement lint threshold; apply
+black formatting to the two files flagged on the prior commit.
+No behavior change.
+
+- Type _get_effective_ui_settings_class as Type[UISettings] for mypy
+
+- Validate UI settings PATCH body against effective class
+
+GET /get/ui_settings returns a schema built from the effective UISettings
+class (base + enterprise-registered fields), but PATCH /update/ui_settings
+declared its body as the base UISettings. Enterprise fields still worked
+via extra=&#34;allow&#34;, but the OpenAPI schema was asymmetric between GET and
+PATCH.
+
+Accept the body as a dict and validate with the effective class so both
+sides are in sync and enterprise-registered fields are type-checked.
+
+- Remove stale test_project_endpoints_prisma.py path from proxy-db workflow
+
+The file was moved to tests/enterprise/litellm_enterprise/proxy/management_endpoints/
+and is covered by the CircleCI litellm_mapped_enterprise_tests job. The stale path
+was causing pytest to error with &#39;file or directory not found&#39;.
+
+- Merge remote-tracking branch &#39;origin/litellm_internal_staging&#39; into litellm_migration_projects
+
+# Conflicts:
+#	litellm/proxy/ui_crud_endpoints/proxy_setting_endpoints.py
+#	uv.lock
+
+- Merge pull request #24374 from BerriAI/litellm_staging_03_22_2026
+
+Litellm staging 03 22 2026
+
+- Merge pull request #25359 from BerriAI/litellm_Sameerlite/openai-chat-to-responses
+
+feat(openai): add route_all_chat_openai_to_responses global flag
+
+- Merge pull request #26362 from BerriAI/litellm_fix_proxy_test_master_key_leak
+
+[Fix] Tests - Proxy: Isolate master_key/prisma_client module globals between tests
+
+- docs(proxy): clarify x-litellm-model-group vs provider model id (#25497)
+
+Made-with: Cursor
+
+- Merge pull request #25842 from BerriAI/litellm_docs-gemini3-thinking-defaults
+
+docs(gemini): Gemini 3 thinking_level defaults and release note
+
+- Merge pull request #25932 from BerriAI/litellm_docs-code-block-padding-parity
+
+feat(docs): align fenced code block padding on blog and doc pages
+
+- Merge pull request #25935 from BerriAI/litellm_anthropic-stream-strip-gemini-thought-tool-id
+
+fix(anthropic): strip Gemini thought suffix from streaming tool_use id
+
+- Merge pull request #26221 from BerriAI/litellm_responses_strip_custom_tool_call_namespace
+
+feat(responses): strip custom_tool_call namespace for all providers
+
+- Merge pull request #26248 from BerriAI/litellm_anthropic_messages_call_type_fix
+
+fix(proxy): preserve anthropic_messages call type for /v1/messages logging
+
+- fix(jwt-auth): apply team TPM/RPM + attribution for admins using x-litellm-team-id
+
+Scope the header-driven team fetch to LLM API routes so admin
+management routes keep the pre-existing bypass behavior (no
+phantom teams, no 404s on mgmt calls). Team context is threaded
+onto UserAPIKeyAuth so spend logs, rate limits, and team_models
+attribution are correctly applied when admins act on behalf of
+a team via x-litellm-team-id.
+
+- Merge remote-tracking branch &#39;origin/litellm_internal_staging&#39; into litellm_docs-gemini3-thinking-defaults
+
+- Merge remote-tracking branch &#39;origin/litellm_internal_staging&#39; into litellm_docs-code-block-padding-parity
+
+- Merge pull request #26115 from BerriAI/litellm_gpt54_mini_nano_versioned_models
+
+feat(models): add versioned GPT-5.4 mini/nano snapshots
+
+- fix(responses): enforce spec object on completion bridge (#26327)
+
+Ensure Chat Completions -&gt; Responses bridge always emits object=&#34;response&#34; so non-native providers return the same top-level schema as native OpenAI Responses.
+
+Made-with: Cursor
+
+- Merge remote-tracking branch &#39;origin/litellm_internal_staging&#39; into litellm_gpt54_mini_nano_versioned_models
+
+- feat(pricing): gemini-embedding-2 GA cost map, blog, and test (#26391)
+
+* feat(pricing): gemini-embedding-2 GA cost map, blog, and test
+
+- Add model_prices entries for gemini-embedding-2 (Gemini + Vertex paths)
+- Add docs blog gemini_embedding_2_ga with LiteLLM proxy curl examples
+- Add test_gemini_embedding_2_ga_in_cost_map in test_utils
+
+Made-with: Cursor
+
+* Fix greptile reviews
+
+- fix(proxy): respect object-level permissions for managed vector store endpoints (#26351)
+
+* fix(proxy): honor object_permission for managed vector store access
+
+* perf(proxy): preload team object_permission on UserAPIKeyAuth
+
+Populate team_object_permission during virtual-key and JWT auth when the
+team is loaded, so can_user_access_vector_store uses it in memory first
+and only falls back to get_object_permission by id when missing.
+
+Made-with: Cursor
+
+- Merge branch &#39;litellm_internal_staging&#39; into litellm_staging_03_22_2026
+
+- fix(team_endpoints): auto-add SSO team members to org on move (proxy admin only) (#26377)
+
+* fix(team_endpoints): auto-add SSO team members to org for proxy admins
+
+* test: proxy_admin vs team_admin security boundary for team→org move
+
+* screenshots: before/after for team-org SSO fix
+
+* fix(team_endpoints): restore staging security features dropped in SSO commit
+
+Co-Authored-By: Ishaan Jaff &lt;ishaan@berri.ai&gt;
+
+* style: black formatting for team_endpoints
+
+- Merge pull request #25346 from BerriAI/litellm_Sameerlite/responses-bridge-optin
+
+feat(responses): add use_chat_completions_api flag for openai/ models with custom api_base
+
+- Merge pull request #26367 from BerriAI/litellm_/split-mcp-routes-management-vs-inference
+
+Split MCP routes into inference vs management (unblock Admin UI on DISABLE_LLM_API_ENDPOINTS nodes)
+
+- Merge pull request #26381 from BerriAI/litellm_internal_staging
+
+merge main
+
+- FIx black formatinig
+
+- Merge remote-tracking branch &#39;origin/litellm_internal_staging&#39; into litellm_fix_proxy_test_master_key_leak
+
+# Conflicts:
+#	tests/test_litellm/proxy/realtime_endpoints/test_realtime_webrtc_endpoints.py
+
+- Merge pull request #26356 from BerriAI/litellm_cci_gha_dedup_and_shard
+
+[Infra] Remove CCI/GHA test duplication and semantically shard proxy DB tests
+
+- Merge pull request #25746 from BerriAI/litellm_vector-store-team-byok-model-none
+
+  fix(router): restore BYOK key injection for vector store endpoints with team-scoped deployments
+
+- Merge branch &#39;litellm_internal_staging&#39; into litellm_vector-store-team-byok-model-none
+
+- chore: apply black formatting to _types.py management_routes block
+
+- rerun tests
+
+- rerun tests
+
+- Merge pull request #26370 from BerriAI/litellm_version_bump
+
+[Infra] Bump version 1.83.12 → 1.83.13
+
+- Merge pull request #26207 from BerriAI/litellm_team_member_total_spend_frontend
+
+Surface per-member budget cycle in Teams &gt; Members tab
+
+- restore budget_reset_at on TeamMembership type
+
+Members tab column reads this field; dropping it from the type in the
+previous revert broke the type check without affecting the reverted
+render logic.
+
+- revert TeamInfo budget reset display changes
+
+Out of scope for the members-tab feature and regressed legacy teams
+whose budget_reset_at is null (duration was previously shown as a
+fallback).
+
+- add uv
+
+- bump: version 1.83.12 → 1.83.13
+
+- Split MCP routes into inference vs management categories
+
+MCP server CRUD endpoints (/v1/mcp/server*) were bundled with MCP
+tool-call / passthrough endpoints under llm_api_routes, so setting
+DISABLE_LLM_API_ENDPOINTS=true on admin-only nodes also blocked the
+Admin UI from listing, adding, or attaching MCP servers.
+
+Separate mcp_inference_routes (data-plane, gated by
+DISABLE_LLM_API_ENDPOINTS) from mcp_management_routes (control-plane,
+gated by DISABLE_ADMIN_ENDPOINTS). Keep mcp_routes as a union for
+backward compat with allowed_routes=[&#34;mcp_routes&#34;] virtual key configs.
+
+Upgrade is_management_route to pattern-aware matching so
+/v1/mcp/server/{path:path} resolves for concrete IDs.
+
+- Merge remote-tracking branch &#39;origin/litellm_internal_staging&#39; into litellm_team_member_total_spend_frontend
+
+- Merge pull request #26346 from BerriAI/litellm_reset_budget_is_not_null
+
+[Fix] Reset budget windows failing due to Prisma Json? null filter
+
+- [Infra] Stop attaching push-only postgres workflows to a GHA environment
+
+The `_test-unit-services-base.yml` reusable workflow attached every job
+to the `integration-postgres` GHA environment to read three &#34;secrets&#34;:
+DATABASE_URL, POSTGRES_USER, POSTGRES_PASSWORD. These are not secrets —
+the postgres service container is spawned per-job on localhost and
+destroyed with the job, so the user/password are bootstrap values for a
+throwaway container and the URL is always `postgresql://…@localhost:…`.
+
+Each environment attachment produces a &#34;temporarily deployed to
+integration-postgres&#34; deployment record, which the PR timeline renders
+as a message per matrix shard per push. With 14 proxy-db shards that&#39;s
+~14 notifications per push, drowning the PR conversation.
+
+Changes:
+* Hardcode POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB and the derived
+  DATABASE_URL in `_test-unit-services-base.yml`.
+* Delete the `environment: integration-postgres` attachment.
+* Delete the `secrets:` declarations on the reusable workflow and on
+  the two callers (test-unit-proxy-db.yml, test-unit-security.yml).
+* The `services:` container still starts a fresh postgres per job;
+  the connection string now matches what the container boots up with.
+
+Security review: no regression. The environment wasn&#39;t gating anything
+real — no protection rules configured, no approval gates, and the
+branch restriction is already enforced by `on: push: branches: [...]`
+on both caller workflows. Zizmor pedantic-mode findings are identical
+before and after (same 6 pre-existing findings, zero new ones).
+
+The `integration-postgres` environment and its three &#34;secrets&#34; in repo
+settings are now unreferenced and can be deleted from repo admin.
+
+- [Infra] Run schema-migration shard serially (workers: 0)
+
+test_db_schema_migration.py has exactly one test, and that test is mostly
+waiting on prisma subprocesses (~170s: prisma migrate deploy + prisma
+migrate diff). No CPU-bound Python work inside the test body, and only
+one test in the file means xdist&#39;s parallelism is unused regardless.
+
+Previous run on commit 5df9f397e6: 10.0m wall-clock for the shard, of
+which 4:56 was silence between step start and pytest banner — the cost
+of 4 xdist workers each cold-starting (pytest plugin load + litellm
+import + pytest-cov instrumentation) so that exactly one of them could
+pick up the single test.
+
+Switching to workers: 0 takes the serial pytest branch in the base
+workflow, which already handles this case correctly (no -n, no --dist).
+Single-process startup instead of 4. Expected wall-clock: ~6m.
+
+- fix(mcp): share temporary MCP OAuth sessions across instances via Redis (#26162) (#26318)
+
+Temporary MCP OAuth sessions were kept in process-local memory, so on
+multi-instance/LB proxy deployments a session created on instance A could
+not be found when the follow-up /server/oauth/{server_id}/... request
+landed on instance B.
+
+Persist temporary session records to Redis (encrypted with the existing
+proxy encryption helpers) as a best-effort L2 cache alongside the current
+in-memory L1. Convert get_cached_temporary_mcp_server to async and await
+it from the authorize/token/register OAuth endpoints.
+
+Made-with: Cursor
+
+- Merge pull request #26349 from BerriAI/litellm_deflakeSpendTests
+
+[Fix] Deflake spend tracking tests
+
+- Merge remote-tracking branch &#39;origin/litellm_internal_staging&#39; into litellm_fix_proxy_test_master_key_leak
+
+- Merge pull request #26359 from BerriAI/litellm_fixCreateReleasePerms
+
+[Fix] Infra: grant contents:write to create-release-branch caller job
+
+- fix(vertex_ai): use aiplatform.{geo}.rep.googleapis.com for multi-region locations (#26281)
+
+Vertex multi-region endpoints (e.g. us, eu) use the rep host pattern, not
+{geo}-aiplatform.googleapis.com. Regional IDs still contain a hyphen.
+
+common_utils.get_vertex_base_url centralizes the rule for SDK/API URL building.
+Proxy pass-through duplicates the same branching in a local get_vertex_base_url
+(with trailing slashes) to avoid importing from common_utils there; live
+WebSocket passthrough uses the same multi-region host logic for wss://.
+
+Tests cover us/eu for the common_utils helper.
+
+Made-with: Cursor
+
+- Show absolute date in Budget Reset column
+
+Relative labels (&#34;today&#34;, &#34;in 2 days&#34;, &#34;on May 12, 2026&#34;) mixed three
+shapes in one column, breaking scannability. Always render MMM D, YYYY
+for consistency and easier at-a-glance comparison across members.
+
+- [Infra] Match xdist workers to runner cores; revert test_proxy_utils -k split
+
+Two changes:
+
+1. workers: 8 -&gt; 4 on every non-serial proxy-db shard. ubuntu-latest is a
+   4-core runner; -n 8 oversubscribes 2x and workers block each other
+   during their cold-start imports (pytest-cov instruments every litellm
+   module per worker). Measured ~441% CPU locally with -n 8 on 8 cores
+   (i.e. ~55% effective). Matching -n to physical cores should give
+   ~2x faster worker startup, which is where most of the ~9m wall-clock
+   per shard goes (7+ minutes is plugin load + xdist imports before any
+   test runs).
+
+2. Revert the -k split on test_proxy_utils.py. It was split into
+   proxy-utils-a-h / proxy-utils-i-z as a semantic-adjacent hack; merge
+   back to a single proxy-utils shard. Still uses --dist=worksteal so
+   xdist can balance the 188 parametrized cases across workers.
+
+Also drops the now-unused `keyword` input from _test-unit-services-base.yml
+and its matching matrix field across all proxy-db entries.
+
+Shard count: 14 -&gt; 13 (+ the assert-shard-coverage guard).
+
+- Merge pull request #26355 from BerriAI/litellm_fixFlakyTpmRoutingTest
+
+[Fix] Tests - drain logging worker in test_router_caching_ttl to fix flakiness
+
+- test: isolate proxy master_key/prisma_client module globals between tests
+
+Sibling tests were mutating litellm.proxy.proxy_server.master_key and
+prisma_client with raw setattr. Values leaked across tests in the same
+xdist worker, flipping the auth short-circuit in user_api_key_auth and
+causing unrelated tests (e.g. test_ui_view_session_spend_logs_pagination)
+to return 401 instead of 200.
+
+Replace raw setattr with monkeypatch in the two offending files and add
+an autouse conftest fixture that snapshots/restores the known-leaky
+module globals for every proxy test.
+
+- [Infra] Clean up proxy-db matrix job display names
+
+Default GHA matrix job names join every matrix field, producing unreadable
+check labels like:
+  &#39;proxy-db (logging-misc, tests/proxy_unit_tests/test_proxy_reject_logging.py
+   tests/proxy_unit_tests/test_audit_logs_proxy.py ..., 8, loadscope, &#34;&#34;, 15)&#39;
+
+Set the job&#39;s display name to &#39;${{ matrix.test-group }}&#39; so each check
+shows just &#39;logging-misc&#39;, &#39;proxy-utils-a-h&#39;, etc.
+
+- [Infra] Split slow proxy-db shards to hit 7m wall-clock target
+
+Previous run (13.8m total) was bottlenecked by shards with 9-12m wall-clock.
+Setup + xdist spawn + coverage teardown is ~3m per shard, so each shard&#39;s
+pytest runtime must stay under ~4m to fit inside 7m total.
+
+Observed per-shard pytest times (before split):
+  db-and-spend            9:08   (170s outlier: test_aaaasschema_migration_check)
+  proxy-server            7:15
+  logging-and-callbacks   6:45
+  guardrails-budget-hooks 6:37
+  proxy-utils             6:23
+  auth-and-jwt            6:54
+
+Split 6 shards into 12, keeping key-generation and endpoints-and-responses
+(already &lt;7m). Adds a `keyword` input to _test-unit-services-base.yml so
+test_proxy_utils.py can be split by -k expression (same file, two runners).
+New matrix entries:
+
+  auth-and-jwt           -&gt; auth-checks + jwt-and-keys
+  proxy-server           -&gt; proxy-server-core + proxy-runtime
+  logging-and-callbacks  -&gt; custom-logging + logging-misc
+  db-and-spend           -&gt; schema-migration (isolated 170s test) + db-and-spend
+  guardrails-budget-hooks-&gt; guardrails-hooks + budgets
+  proxy-utils            -&gt; proxy-utils-a-h + proxy-utils-i-z (-k split)
+
+The -k expression split is verified to cover every one of the 64 test
+functions in test_proxy_utils.py exactly once. The assert-shard-coverage
+guard still catches any file not in any shard.
+
+- [Fix] Infra: grant contents:write to create-release-branch caller job
+
+The create-branch job in create-release.yml calls the reusable
+create-release-branch.yml workflow, which requires contents: write.
+The top-level permissions: {} blocks the inherited default, and only
+the release job overrode it, so the nested call failed with:
+
+  The nested job &#39;create-branch&#39; is requesting &#39;contents: write&#39;,
+  but is only allowed &#39;contents: none&#39;.
+
+Add the permission at the calling job level so the reusable
+workflow is granted what it needs.
+
+- fix: make LoggingWorker.flush() wait for in-flight callbacks
+
+The previous `while not self._queue.empty(): await self._queue.join()`
+pattern skipped the join entirely when the worker had already dequeued a
+task but not yet called task_done(). asyncio.Queue.join() tracks
+_unfinished_tasks (incremented by put, decremented by task_done), not
+queue depth, so it already handles that case on its own.
+
+- fix(tests): restore proxy_server.master_key in realtime fixture; add shard-coverage guard
+
+Two fixes to proxy-db CI:
+
+1. test_realtime_webrtc_endpoints.py&#39;s `proxy_app` fixture mutated the
+   module-global `proxy_server.master_key` without restoring it, leaking
+   state into any test that shared the same xdist worker. Under
+   --dist=loadscope with 2 workers (GHA proxy-endpoints), this caused the
+   google_endpoints tests to fail with &#34;No api key passed in.&#34; because
+   user_api_key_auth saw a set master_key and a missing API key on the
+   test request. The fixture now saves and restores the original value.
+
+2. Address the Greptile note that the semantic shard design has no
+   catch-all, so a new test file added to tests/proxy_unit_tests/ without
+   a matrix entry would silently skip CI. Adds an assert-shard-coverage
+   job that enumerates test_*.py files and fails the workflow if any are
+   not referenced by a matrix entry, with a clear message telling the
+   author which semantic shard to place it in. All proxy-db shards now
+   depend on this guard.
+
+- Merge pull request #26204 from BerriAI/litellm_budgetLimitFix
+
+Fix bugs that bypasses per-team member budget limit
+
+- [Infra] Remove CCI/GHA test duplication and semantically shard proxy DB tests
+
+Split into two related cleanups:
+
+1. Delete CCI jobs that duplicate GHA coverage:
+   - mcp_testing (tests/mcp_tests) — already run by test-mcp.yml
+   - litellm_mapped_tests_proxy_part1/part2 (tests/test_litellm/proxy) —
+     already run across test-unit-proxy-auth.yml, test-unit-proxy-endpoints.yml,
+     and test-unit-proxy-infra.yml
+   Add rag_endpoints and realtime_endpoints to test-unit-proxy-endpoints.yml
+   (they were only covered by the deleted CCI part2 job).
+   Remove the corresponding workflow wiring, coverage combine entries, and
+   upload-coverage dependencies in .circleci/config.yml.
+
+2. Re-shard test-unit-proxy-db.yml from 4 alphabetic buckets to 8 semantic
+   ones (auth-and-jwt, proxy-server, logging-and-callbacks, db-and-spend,
+   guardrails-budget-hooks, endpoints-and-responses, plus the existing
+   serial key-generation and test_proxy_utils.py shards). New test files are
+   placed in whichever group they belong to instead of reshuffling slices.
+   Add a dist input to _test-unit-services-base.yml so the test_proxy_utils.py
+   shard can use --dist=worksteal to spread its ~64 (many parametrized)
+   functions across workers; the default --dist=loadscope pins a single file
+   to a single worker, which was the root cause of that shard running 10m+.
+
+- fix: drain logging worker in test_router_caching_ttl to remove flake
+
+The mocked async_increment_cache_pipeline is invoked from Router&#39;s
+deployment_callback_on_success, registered as an async success callback.
+Those callbacks are enqueued to GLOBAL_LOGGING_WORKER and run on a
+background task, so the mock may not have been called yet when the test
+asserts on it. Flush the worker before asserting.
+
+- Merge pull request #26348 from BerriAI/support-gpt-5-5-main
+
+feat: add gpt-5.5 to model cost map
+
+- [Fix] Drop orphan teardown step from Greptile merge
+
+Previous commit from greptile-apps added a new `when: always` teardown
+step without removing the prior `name:`-only step, leaving a `- run`
+block with no `command:` — CircleCI config validation rejects that.
+Collapse back to a single teardown step that runs on success and
+failure.
+
+- Apply suggestion from @greptile-apps[bot]
+
+Co-authored-by: greptile-apps[bot] &lt;165735046+greptile-apps[bot]@users.noreply.github.com&gt;
+
+- Merge pull request #26342 from BerriAI/litellm_create_release_branch_gha
+
+[Infra] Add standalone create-release-branch workflow
+
+- [Fix] Deflake spend tracking tests
+
+Two independent deflakes:
+
+1. test_ui_view_spend_logs_unauthorized (unit) was returning 400 instead
+   of 401/403 when earlier tests in the file left proxy-auth globals
+   (prisma_client, master_key, user_custom_auth, general_settings,
+   user_api_key_cache) in a state that let invalid tokens pass auth and
+   fall through to the endpoint&#39;s own start_date/end_date validation.
+   Add an autouse fixture that pins those globals to their import-time
+   defaults for every test in the file. Harden the assertion to include
+   response body so future flakes are diagnosable.
+
+2. test_basic_spend_accuracy (CI job proxy_spend_accuracy_tests) depends
+   on the Redis transaction buffer flushing spend to Postgres. The buffer
+   uses a single global pod-lock key (cronjob_lock:db_spend_update_job)
+   and a single global buffer list key. Pointing the proxy at the shared
+   remote Redis means concurrent CI pipelines contend for the same lock
+   and can drain each other&#39;s buffer into the wrong database. Add a
+   start_redis reusable command that boots a per-job redis:7-alpine
+   container (digest-pinned), and switch proxy_spend_accuracy_tests to
+   REDIS_HOST=host.docker.internal:6379 so lock and buffer state are
+   isolated per CI run.
+
+- test: add gpt-5.5 coverage for model cost map and gpt-5 routing
+
+- Add gpt-5.5 to GPT5_MODELS parametrized list so both OpenAIGPT5Config
+  and AzureOpenAIGPT5Config routing tests cover the new model.
+- Add test_generic_cost_per_token_gpt55 verifying the new entry&#39;s
+  cost-map values ($5/$0.50/$30 per 1M) and that generic_cost_per_token
+  returns the expected prompt/completion costs.
+
+- feat: add gpt-5.5 to model cost map
+
+Add gpt-5.5 entry with pricing from OpenAI flagship page:
+input $5/1M, cached input $0.50/1M, output $30/1M, 272K context.
+
+- feat: add gpt-5.5 to model cost map (#26345)
+
+* feat: add gpt-5.5 to model cost map
+
+Add gpt-5.5 entry with pricing from OpenAI flagship page:
+input $5/1M, cached input $0.50/1M, output $30/1M, 272K context.
+
+* test: add gpt-5.5 coverage for model cost map and gpt-5 routing
+
+- Add gpt-5.5 to GPT5_MODELS parametrized list so both OpenAIGPT5Config
+  and AzureOpenAIGPT5Config routing tests cover the new model.
+- Add test_generic_cost_per_token_gpt55 verifying the new entry&#39;s
+  cost-map values ($5/$0.50/$30 per 1M) and that generic_cost_per_token
+  returns the expected prompt/completion costs.
+
+- fix(budget_reset): use raw SQL for IS NOT NULL filter on Json? columns
+
+The periodic budget-window reset job filtered keys/teams with
+`where={&#34;budget_limits&#34;: {&#34;not&#34;: None}}`. The prisma-client-python
+library does not support null-filtering on `Json?` columns (no
+DbNull/JsonNull sentinel — upstream issue #714). The client drops the
+`None` value during serialization and the engine rejects the query with
+`MissingRequiredValueError: where.budget_limits.not: A value is
+required but not set`, so neither the key nor team reset path runs.
+
+Switch those two `find_many` calls to `query_raw` with
+`WHERE budget_limits IS NOT NULL`, selecting only the PK and the
+`budget_limits` column. Writes still go through the ORM. Add unit tests
+covering the expired/unexpired paths for keys and teams, string-encoded
+JSON payloads, empty payloads, error isolation between the two paths,
+and a regression guard asserting the query still uses `IS NOT NULL`.
+
+- fix linting
+
+- Merge pull request #26336 from BerriAI/litellm_yj_apr22
+
+[IInfra] Merge dev branch
+
+- [Infra] Add standalone create-release-branch workflow
+
+Extracts release branch creation into a separate reusable workflow
+(create-release-branch.yml) that can be triggered independently via
+workflow_dispatch or called from other workflows via workflow_call.
+
+create-release.yml now dispatches it as a dependent job after the
+release publishes, keeping both workflows decoupled.
+
+- fix: correct image size limit enforcement and vertex_location None passthrough
+
+token_counter.py: the previous size-limit raises were inside except Exception: pass,
+so they were silently swallowed. The post-read raise was worse — img_data was already
+assigned the full body before the raise, so the oversized value was used downstream.
+Restructured to only assign img_data when the body is within bounds.
+
+vertex_ai/common_utils.py and llm_passthrough_endpoints.py: the is-not-None guard
+skipped validation for None, falling through to produce &#34;https://None-aiplatform...&#34;
+Added explicit None check that raises before the regex guard.
+
+- Merge pull request #26293 from BerriAI/litellm_img_edit_file_input_validation
+
+[Fix] Image edit endpoints: enforce multipart-only file inputs
+
+- Merge pull request #26286 from BerriAI/litellm_/unify_uv_cache
+
+[Infra] CCI: cache, cleanup, anchors, install-path parity, Python 3.12, Ruby/Node pins
+
+- Merge pull request #26300 from BerriAI/litellm_oss_staging_04_22_2026
+
+Litellm oss staging 04 22 2026
+
+- fix(dashscope): fail fast on image generation API errors
+
+Prevent silent empty image responses by raising provider errors for non-200 HTTP statuses and DashScope API-level error payloads, with regression tests covering both paths.
+
+Made-with: Cursor
+
+- Fix black
+
+- Merge pull request #25767 from vinhphamhuu-ct/main
+
+feat: Expand VideoMetadata support to all Gemini Models.
+
+- FIx mypy issues
+
+- [Infra] CCI: run RVM install from its own checkout dir
+
+The rvm/install script sources scripts/functions/installer using
+paths relative to the caller&#39;s working directory (not $0), so
+invoking /tmp/rvm/install from /home/circleci/project fails with
+&#39;No such file or directory&#39;. Switch to (cd /tmp/rvm &amp;&amp; ./install).
+
+- [Infra] CCI: pin Ruby and Node.js installs in proxy_pass_through_endpoint_tests
+
+Align the Ruby, Node.js, and npm install path with the rest of the
+config. Three separate upstream installers were being invoked via
+\`curl ... | bash\` or unlocked \`npm install\`:
+
+- RVM&#39;s \`get.rvm.io/stable\` installer (mutable upstream script).
+  Replace with a shallow git clone of the rvm/rvm repo at tag 1.29.12
+  and verify HEAD matches the published commit SHA before running the
+  local \`./install\` script. Same pattern already used for the
+  helm-unittest plugin in .github/workflows/helm_unit_test.yml.
+- NodeSource&#39;s \`deb.nodesource.com/setup_18.x\` piped into sudo bash.
+  Replace with a direct download of the Node.js 18.20.8 linux-x64
+  tarball from nodejs.org, verified against the published
+  SHASUMS256.txt digest before extraction.
+- \`npm install @google-cloud/vertexai @google/generative-ai\` and
+  \`--save-dev jest\` resolved fresh from the npm registry on every
+  run. Add \`tests/pass_through_tests/package.json\` with pinned
+  direct-dep versions and commit the generated package-lock.json, then
+  switch CI to \`npm ci\` (exact lockfile install, fails on drift).
+
+Also scopes the Ruby+JS test runners to \`tests/pass_through_tests/\`
+so they pick up the committed package.json rather than writing
+node_modules at repo root.</div>
+</div>
+
+<a href="../project/BerriAI_litellm.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

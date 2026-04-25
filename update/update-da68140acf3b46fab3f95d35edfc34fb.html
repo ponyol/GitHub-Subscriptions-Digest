@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in master (13 commits) - editor-code-assistant/eca-emacs - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in master (13 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/editor-code-assistant_eca-emacs.html">editor-code-assistant/eca-emacs</a> /
+    Updates in master (13 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/editor-code-assistant_eca-emacs.html">editor-code-assistant/eca-emacs</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-04-23 17:54 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/editor-code-assistant/eca-emacs/commits/master" target="_blank">https://github.com/editor-code-assistant/eca-emacs/commits/master</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Значительно улучшена производительность потоковой передачи чата за счет отложенной разметки шрифтов, что снижает нагрузку на процессор и повышает отзывчивость. Индикатор доверия в строке режима был упрощен до использования понятных символов эмодзи (🔥 для &#34;включено&#34;, 🛡️ для &#34;выключено&#34;) для универсальной ясности без дополнительной настройки. Выравнивание таблиц Markdown теперь учитывает фактическую отображаемую ширину, обеспечивая визуальную точность даже со сложным форматированием, а также исправлен конфликт диагностики между `flycheck` и `flymake`.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- perf(chat): defer fontification during streaming
+
+`eca-chat--render-content&#39; called `font-lock-ensure&#39; on the whole
+chat buffer after every streamed assistant chunk.  With fast models
+that emit many tiny chunks (e.g. gpt-5.3-codex at ~30 chunks/sec, or
+MiniMax variants) this caused hundreds of full-buffer
+refontifications per response and substantial CPU / GC pressure
+during streaming, which on some setups (e.g. with `valign`) could
+make Emacs visibly unresponsive.
+
+Instead, schedule intermediate fontification via a debounced idle
+timer in a new `eca-chat--schedule-fontify&#39; helper and run a single
+guaranteed `font-lock-ensure&#39; at end-of-stream, before table
+alignment so the table beautifier still sees fully-fontified text.
+Visible-area fontification continues to work lazily via jit-lock&#39;s
+after-change hook.
+
+The debounce interval is configurable via the new
+`eca-chat-fontify-debounce-interval&#39; custom (default 0.15s; `nil&#39;
+disables intermediate fontify entirely and relies on jit-lock plus
+the final ensure).
+
+Benchmarked on a 20x10 markdown table prompt, same prompt run
+back-to-back:
+
+gpt-5.3-codex (~1020 chunks of ~3 chars, 32 chunks/sec):
+  font-lock-ensure calls  1022   -&gt; 52        (-95%)
+  font-lock-ensure CPU    2.260s -&gt; 0.007s    (-99.7%)
+  render-content CPU      2.563s -&gt; 0.269s    (-89.5%)
+  Total Emacs CPU         15.8s  -&gt; 4.3s      (-73%)
+
+opus-4.7 (~50 chunks of ~56 chars):
+  font-lock-ensure calls  51     -&gt; 51        (unchanged)
+  font-lock-ensure CPU    0.081s -&gt; 0.013s    (-84%)
+  per-call cost           1.59ms -&gt; 0.25ms    (-84%)
+  Total Emacs CPU         6.52s  -&gt; 2.73s     (-58%)
+
+Two compounding wins: fast streamers get a ~95% call-count drop (the
+idle timer rarely fires during bursts, so effectively one final
+ensure per response); slow streamers keep the same call count but
+each call is ~6x cheaper because fontify now runs from an idle
+timer, giving jit-lock time to do incremental work between chunks
+so most calls just verify already-fontified text.
+
+🤖 Generated with [eca](https://eca.dev)
+
+Co-Authored-By: eca-agent &lt;git@eca.dev&gt;
+
+- Simplify mode-line trust indicator to emoji-only
+
+After shipping 6bf962d with optional nerd-icons / all-the-icons
+integration, the extra complexity (soft-detect branches, helper
+defun, toggle defcustom) offered marginal benefit over a simple
+emoji pair that works for every user without any package install
+or font setup.
+
+The indicator now uses:
+
+- 🔥 (fire) for ON — &#34;auto-accepting is the hot/risky state&#34;.
+- 🛡️ (shield) for OFF — &#34;guarded, tool calls need approval&#34;.
+
+The shield carries U+FE0F so it is rendered as a color emoji,
+consistent with 🔥 (which has emoji presentation by default).
+
+Glyphs remain user-customizable via `eca-chat-trust-on-symbol&#39; /
+`eca-chat-trust-off-symbol&#39;. The `eca-chat--trust-mode-line-str&#39;
+helper and `eca-chat-trust-use-icon-library&#39; defcustom are removed;
+the `:trust&#39; mode-line branch is inlined again, using `let*&#39; to
+bind `trust?&#39; once for cleanliness.
+
+Click-to-toggle, `C-c C-t&#39; keybinding, faces, tooltip wording, and
+protocol messages are unchanged.
+
+🤖 Generated with [eca](https://eca.dev)
+
+Co-Authored-By: eca-agent &lt;git@eca.dev&gt;
+
+- Improve mode-line trust indicator with shield icon support
+
+The previous indicator used the same &#34;⬤&#34; disc for both ON and OFF
+and relied solely on face color to distinguish states, which emoji
+and color fonts frequently override - making the two look nearly
+identical in practice.
+
+Now the indicator prefers a real shield glyph, with graceful
+degradation:
+
+- `nerd-icons&#39; shield-check / shield-off when available (works in
+  both GUI and terminal with a Nerd Font).
+- `all-the-icons&#39; material shield / unlock in GUI as a second choice.
+- Otherwise falls back to filled `●&#39; and hollow `○&#39; discs rendered
+  with `eca-chat-trust-on-face&#39; / `eca-chat-trust-off-face&#39;.
+
+Both icon libraries remain soft/optional (no new Package-Requires).
+Set `eca-chat-trust-use-icon-library&#39; to nil to force the text
+fallback; customize the fallback glyphs via
+`eca-chat-trust-on-symbol&#39; / `eca-chat-trust-off-symbol&#39;.
+
+Tooltip text also now matches the eca-webview wording for both
+states.
+
+🤖 Generated with [eca](https://eca.dev)
+
+Co-Authored-By: eca-agent &lt;git@eca.dev&gt;
+
+- Merge pull request #226 from DavidVujic/fix-eglot-with-flycheck-vs-flymake
+
+fix(diagnostics): eglot with flycheck vs flymake
+
+- Merge pull request #222 from plux/improve-markdown-table-align
+
+Add display-width-aware markdown table alignment
+
+- test(eca-edito): add unit tests for the &#39;is flycheck active&#39; function
+
+- fix(diagnostics): disable flymake diagnostics if flycheck is the active tool
+
+- Preserve separator alignment markers and align content cells
+
+Parse colon markers (:---, ---:, :---:) from separator rows and
+re-emit them when rebuilding the table. Apply left/right/center
+padding to content cells based on the alignment spec.
+
+Add eca-table--parse-separator-alignments, eca-table--make-separator-cell,
+and eca-table--insert-cell helpers with tests.
+
+- Make separator-row-p validate each cell individually
+
+Validate each cell between pipes against the separator grammar
+(:?--+:?) instead of matching the whole line loosely. This
+prevents data rows like &#34;| - | - |&#34; from being misclassified
+as separators.
+
+- Fix parse-row for missing pipes and trailing backslash
+
+- Handle rows without leading pipe by initializing cell-start
+  at content start
+- Push trailing cell content when row lacks a trailing pipe
+- Guard forward-char 2 on backslash to avoid end-of-buffer error
+
+- Forward-declare eca-chat-parent-mode with safe fallback
+
+Add defvar for eca-chat-parent-mode to prevent byte-compile
+warnings when eca-table.el is loaded before eca-chat.el.
+Use (or eca-chat-parent-mode &#39;gfm-mode) as fallback in
+the font-lock buffer setup.
+
+- Fix display-width test for link content
+
+The visible text of &#34;PR [#1084](...)&#34; is &#34;PR #1084&#34; which is 8
+characters, not 9.
+
+- Add display-width-aware markdown table alignment
+
+Use font-lock in a temp buffer to measure the actual display width
+of cell content, accounting for characters that markdown-mode hides
+(bold/italic markers, link URLs, code span backticks, etc.). This
+ensures table columns align visually even when cells contain rich
+markdown syntax.
+
+- Add eca-table--display-width using font-lock + invisible-p
+- Add eca-table--parse-row, eca-table--separator-row-p
+- Add eca-table--align-at-point replacing markdown-table-align
+- Add comprehensive tests for display-width, parse-row, separator</div>
+</div>
+
+<a href="../project/editor-code-assistant_eca-emacs.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

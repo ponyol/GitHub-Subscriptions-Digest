@@ -1,0 +1,2134 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (79 commits) - gastownhall/beads - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (79 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/gastownhall_beads.html">gastownhall/beads</a> /
+    Updates in main (79 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/gastownhall_beads.html">gastownhall/beads</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-04-24 23:15 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/gastownhall/beads/commits/main" target="_blank">https://github.com/gastownhall/beads/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This release significantly improves the `bd` CLI&#39;s stability, performance, and user experience, with a strong focus on Dolt database integration and shared worktree support. Key updates include critical fixes for database compatibility migrations, pre-push integrity checks, and performance enhancements for wisp routing and remote synchronization. Additionally, new commands like `bd prune` and `bd gate create` offer more control, alongside structured JSON output and refined handling of Git hooks and various integrations.
+
+---
+
+**Russian Translation:**
+
+Этот релиз значительно улучшает стабильность, производительность и пользовательский опыт CLI `bd`, уделяя особое внимание интеграции с базой данных Dolt и поддержке общих рабочих деревьев (worktrees). Ключевые обновления включают критические исправления для миграций совместимости базы данных, проверки целостности перед отправкой (pre-push integrity checks), а также улучшения производительности для маршрутизации wisp-ов и удаленной синхронизации. Кроме того, появились новые команды `bd prune` и `bd gate create`, которые предоставляют больше контроля, наряду со структурированным выводом JSON и улучшенной обработкой Git-хуков и различных интеграций.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Release 1.0.3
+
+- Add PR preflight and contributor intake guidance (#3470)
+
+* Handle legacy PR status contexts
+
+* docs: add contributor PR intake checklist
+
+* docs: wire PR preflight into agent guidance
+
+- fix: wire embedded backend compat migrations by relocating runner (#3413)
+
+The embedded Dolt backend open path ran only the embedded SQL
+migrations via schema.MigrateUp. The defensive backward-compat
+migration runner was invoked only from the server-mode path in
+dolt.initSchemaOnDB. Pre-existing embedded databases opened by a
+newer bd binary therefore skipped every compat migration 001-017,
+leaving missing columns and tables unrepaired.
+
+The runner itself has no coupling to package dolt -- it drives
+idempotent migration functions that already live in the migrations/
+subpackage. Relocating CompatMigration, compatMigrationsList,
+RunCompatMigrations, and ListCompatMigrations into package migrations
+puts them alongside the functions they drive, and lets both the
+server and embedded backends share them without a cross-backend
+import.
+
+Changes:
+- New internal/storage/dolt/migrations/runner.go with the runner,
+  registry list, and the exported List function.
+- internal/storage/dolt/migrations.go trimmed to CreateIgnoredTables.
+- internal/storage/dolt/store.go and cmd/bd/migrate.go updated to
+  call through package migrations.
+- internal/storage/embeddeddolt/store.go opens a fresh sql.DB after
+  the schema-migration tx commits and calls RunCompatMigrations.
+- Regression test: synthetic old-schema DB (drop issues.started_at),
+  reopen, assert the compat runner re-adds the column.
+
+Refs GH#3412.
+
+Hook-bypass-reason: local pre-commit hook fails on Windows with
+CGO_ENABLED=0 because cmd/bd/init.go references sanitizeDBName,
+defined in cmd/bd/store_factory.go which is gated //go:build cgo.
+Reproduced against pristine origin/main; not introduced by this
+change. Upstream fix in flight at GH#3402 / GH#3403.
+
+- perf(storage): amortize per-ID wisp routing via WispIDSetInTx (#3453)
+
+* perf(storage): amortize per-ID wisp routing via WispIDSetInTx
+
+Implements D2 build per ADR be-nu4 §4.D2 (bead be-nu4.2.1).
+
+Add WispIDSetInTx helper that returns the set of currently-active
+wisp IDs, consistent for the tx&#39;s lifetime under Dolt MVCC. The hot
+batch-routing paths (GetLabelsForIssuesInTx, GetIssuesByIDsInTx)
+gain a trailing wispSet parameter; callers that pass nil trigger a
+single internal SELECT id FROM wisps rather than the N-per-ID
+IsActiveWispInTx loop the helpers previously ran.
+
+IsActiveWispInTx is retained unchanged for single-ID callers
+(AddLabelInTx etc.) per the ADR audit note.
+
+Mixed-ID routing is the sacred invariant (ADR §11.5); covered by a
+new hard-gate test TestWispIDSetInTx_HardGate that exercises both
+refactored helpers with a permanent issue and an active wisp in the
+same input slice. Pure-fn unit coverage (partitionByWispSet) runs
+without a testcontainer.
+
+Adds BenchmarkGetLabelsForIssues_Mixed and
+BenchmarkGetIssuesByIDs_Mixed at 1K / 10K / 50K with 25% wisp share.
+
+Note for reviewer: two additional per-ID hot loops share the same
+pattern (GetDependencyRecordsForIssuesInTx,
+GetBlockingInfoForIssuesInTx in dependency_queries.go) and would
+benefit from the same treatment. Left alone here to respect ADR
+scope; flagged for a follow-up bead.
+
+Dolt testcontainer runs flaky on this worktree (Docker 29.4 + ryuk
+0.13.0). TESTCONTAINERS_RYUK_DISABLED=true works when infra
+cooperates; unit-level coverage (TestPartitionByWispSet) runs
+container-free and is green.
+
+Refs: be-nu4.2.1, be-nu4
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* chore: release gate PASS for be-eqw
+
+* fix(storage): scope WispIDSetInTx to input IDs
+
+Reviewer maphew on #3453 flagged that the new default helper builds
+the active wisp set with an unscoped SELECT id FROM wisps for
+nil-set callers. That turns a small hydration batch (N IDs) into a
+full scan of the wisps table (W rows), which is worse than the
+pre-PR per-ID IsActiveWispInTx path for small N against large W.
+
+Scope the helper query to the input IDs so cost becomes O(N·log W)
++ 1 round-trip — strictly better than both the old per-ID path and
+the current unscoped path.
+
+Signature change: WispIDSetInTx now takes ids []string. Both
+internal call sites (GetIssuesByIDsInTx, GetLabelsForIssuesInTx)
+pass their input IDs through; all 13 existing nil-set callers
+continue to pass nil and get a scoped internal build. Doc updated
+on the wispSet parameter to reflect &#34;set scoped to cover these
+IDs.&#34;
+
+Note: committed with --no-verify (authorized) because release/be-eqw
+inherits a pre-existing pre-commit hook blocker — sanitizeDBName is
+only defined in the cgo-tagged store_factory.go and the hook runs the
+linter under CGO_ENABLED=0. be-4lf (on main) deletes the duplicate
+extraction file; once release/be-eqw rebases onto main post-merge the
+hook passes naturally. Green-field build/vet/gofmt and all wisp
+routing tests were run locally before committing.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* test(storage): be-rgm WispIDSetInTx scoped path + small-N bench
+
+be-3l2 fills the codecov gap on PR #3453 flagged by maphew:
+WispIDSetInTx scope-to-input-IDs (14 missing lines on
+wisp_routing.go, 0% on dependencies.go/labels.go hydration paths).
+
+New tests in internal/storage/dolt/wisp_set_scoped_test.go:
+- TestWispIDSetInTx_Scoped_ReturnsOnlyInputIDs — &#34;lock the fix&#34;
+  regression: seeds 5 wisps, passes 1 ID, asserts the other 4
+  are NOT in the set. Reverting to `SELECT id FROM wisps` fails this.
+- TestWispIDSetInTx_Scoped_AcrossBatchBoundary — 250 wisps (past
+  queryBatchSize=200) all pass through the batched IN-clause loop.
+- TestWispIDSetInTx_Scoped_UnknownIDsReturnEmpty — unknown IDs
+  return empty set; a bait wisp outside the input must not leak.
+- TestGetLabelsForIssuesInTx_SmallInputLargeWispTable — end-to-end
+  hydration with nil wispSet against 20 noise wisps; exercises the
+  dependencies.go/labels.go callers that pass input IDs through.
+- TestGetIssuesByIDsInTx_SmallInputLargeWispTable — same shape for
+  issue hydration.
+
+New benches in internal/storage/dolt/dolt_benchmark_test.go:
+- BenchmarkGetLabelsForIssues_SmallNLargeW_10_5K / _10_10K / _100_5K
+- BenchmarkGetIssuesByIDs_SmallNLargeW_10_5K / _10_10K / _100_5K
+These measure the maphew regression shape: small input batch
+against a large wisps table. Local 10_5K: ~2.6 ms/op, confirming
+the scoped N·log(W) path wins cleanly over the pre-be-rgm
+full-scan path (existing Mixed10K is ~1.35 s/op for the full
+hydration, but that loads 10K not 10).
+
+Note: committed with --no-verify (authorized). release/be-eqw
+inherits a pre-existing pre-commit hook blocker — golangci-lint
+on the hook is built with go1.25 while go.mod targets 1.26.2,
+so the lint step errors before seeing the diff. Green-field
+go vet, go build, and all five new tests pass locally against
+an isolated Dolt test container.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Jim Wordelman &lt;jim@wordelman.name&gt;
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix packaging and windows install regressions
+
+Fixes #3388
+Fixes #3399
+Fixes #3404
+Fixes #3454
+
+Co-authored-by: jasononeil &lt;315158+jasononeil@users.noreply.github.com&gt;
+Co-authored-by: seanmartinsmith &lt;114885497+seanmartinsmith@users.noreply.github.com&gt;
+
+- fix remote sync follow-ups
+
+- test: fix regression workflow gate
+
+- ci: install dolt in regression workflow
+
+- fix: bd dolt pull fails when remote added without branch tracking (#3443)
+
+* fix: fall back to DOLT_FETCH+DOLT_MERGE when DOLT_PULL fails on missing branch tracking
+
+When a remote is added via bd dolt remote add (rather than bd bootstrap
+or dolt clone), repo_state.json has an empty &#34;branches&#34; map. DOLT_PULL
+then fails with &#34;did not specify a branch&#34; even when the branch is
+passed explicitly, because Dolt checks upstream tracking config first.
+
+This fix detects that specific error in pullWithAutoResolve and falls
+back to the DOLT_FETCH + DOLT_MERGE approach already used by
+versioncontrolops.Pull (GH#3144). The fallback preserves the existing
+metadata conflict auto-resolution logic.
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* test(dolt): add regression tests for GH#3144 branch-tracking fallback
+
+pullWithAutoResolve_BranchTrackingFallback (no build tag) injects the
+exact Dolt tracking-error text via a stored procedure SIGNAL, then
+verifies pullWithAutoResolve enters the DOLT_FETCH + DOLT_MERGE fallback
+path (confirmed by the &#39;fetch from&#39; error when no remote is configured).
+Covers lines A–D of the fallback block.
+
+pullWithAutoResolve_BranchTrackingSuccess (//go:build integration)
+reproduces the real failure scenario end-to-end: a remote is added via
+DOLT_REMOTE(&#39;add&#39;, ...) rather than clone, leaving repo_state.json with
+an empty &#39;branches&#39; map, causing DOLT_PULL to fail with the tracking
+error. The test then verifies pullWithAutoResolve succeeds via the
+DOLT_FETCH + DOLT_MERGE fallback. Covers lines E–I of the fallback block.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- Skip Dolt remote registration for plain git source repos during init (#3357)
+
+bd init unconditionally registered the parent git repo&#39;s origin URL as a
+Dolt remote whenever origin existed, even when the remote had no Dolt data
+(refs/dolt/data). For plain Git source repos (e.g. gastownhall/beads
+itself), this caused every subsequent Dolt fetch to fail, generating
+orphaned tmp_pack_* files that accumulated at ~15 GB/day (#3354).
+
+Gate AddRemote and sync.remote persistence on either:
+- syncFromRemote (remote confirmed to have refs/dolt/data), or
+- syncURLFromConfig (URL came from explicit sync.remote config)
+
+Auto-detected git origin URLs that lack Dolt data are no longer
+registered as Dolt remotes or persisted to config.yaml.
+
+This matches the stricter behavior already used by bd bootstrap&#39;s
+detectBootstrapAction, which only sets SyncRemote when
+refs/dolt/data exists.
+
+Fixes #3356
+
+- fix: don&#39;t normalize user-provided sync.remote URLs (GH#3339) (#3432)
+
+normalizeRemoteURL() converts http:// to git+http://, which breaks Dolt
+remotesapi endpoints. Stop normalizing URLs from sync.remote (user
+explicitly chose the format) while keeping normalization for auto-detected
+git origin URLs. Also add git+http to allowedSchemes in remotecache so
+ValidateRemoteURL accepts it.
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(init): refuse --force when remote has Dolt history (#3455)
+
+* fix(init): refuse --force when remote has Dolt history
+
+bd init --force in a repo whose origin has refs/dolt/data silently
+skipped the bootstrap-from-remote path and then wired origin as a Dolt
+remote anyway. The next write auto-pushed an orphan history, failing
+with &#34;no common ancestor&#34;. Recovery options were all destructive.
+
+This change:
+
+- Adds --reinit-local (named-intent replacement for --force) and
+  --discard-remote (explicit cross-boundary authorization).
+- Routes --force to --reinit-local with a DeprecationWarning. --force
+  continues to work for ≥2 releases.
+- Refuses bd init --force / --reinit-local when origin has
+  refs/dolt/data, unless --discard-remote is also passed. Exit code 10
+  (ExitRemoteDivergenceRefused).
+- Adds stable numeric exit codes for init refusals (10/11/12).
+- Adds bd init-safety documenting the full flag surface and the
+  destroy-token format.
+- Adds an internal race-safety re-check: if remote state changes
+  during the TTY confirmation window, abort rather than overwrite.
+- Retrofits the existing destroy-token echo at init.go:231 to not
+  print a copy-pasteable destructive invocation, matching the new
+  error-text-no-echo ADR invariant.
+
+Adds:
+- cmd/bd/init_safety.go — CheckRemoteSafety chokepoint (pure fn).
+- cmd/bd/init_safety_test.go — guard matrix (13 cases) + subprocess
+  regression test with a synthetic refs/dolt/data fixture.
+- docs/adr/0002-init-safety-invariants.md — ADR encoding the five
+  invariants (single-source identity, scope-bound --force, central
+  chokepoint, error-text-no-echo, race-safety).
+- docs/RECOVERY.md — named recovery playbooks per refusal exit code.
+- .github/CODEOWNERS — review ownership for init*.go pointing at the
+  ADR so future flags must extend the guard matrix.
+
+Historical pattern (git log for cmd/bd/init.go): 8+ prior commits
+patched individual surfaces of this class without encoding the
+invariant. The guard matrix test is the structural hedge — adding a
+new flag or data source is a signal to extend the table, not to add
+another `&amp;&amp; !someFlag` at the call site.
+
+(bd-q83)
+
+* fix(init): satisfy lint for origin safety helpers (bd-main-nwo)
+
+---------
+
+Co-authored-by: matt wilkie &lt;maphew@gmail.com&gt;
+
+- fix(dolt): disable auto-push by default; require explicit opt-in (#3446)
+
+Auto-push was enabled whenever an &#34;origin&#34; remote existed. At any
+concurrency above one writer, git+ssh remotes have no chunk-level
+upload atomicity: concurrent dolt pushes race on the remote manifest
+and can leave it referencing chunks that were never uploaded. Any
+subsequent clone/fetch/push then propagates the dangling reference.
+
+Change the default to off. Set dolt.auto-push=true in
+.beads/config.yaml (or BD_DOLT_AUTO_PUSH=true) to restore auto-push
+on single-writer setups.
+
+Rename TestIsDoltAutoPushEnabled_DefaultNoStore to _DefaultOff —
+the test now documents the intended default, not a nil-store edge case.
+
+Co-authored-by: gastown/crew/woodhouse &lt;5449665+ckumar1@users.noreply.github.com&gt;
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix: remove duplicate database name helper (bd-rrt)
+
+- docs: update user-facing URLs from steveyegge/beads to gastownhall/beads
+
+Co-authored-by: Ben Madore &lt;823868+madorb@users.noreply.github.com&gt;
+
+- feat: add --exclude-label flag to bd ready and bd list
+
+Co-authored-by: Robin Carswell &lt;2803445+rjc123@users.noreply.github.com&gt;
+
+- fix: make beads-mcp shared-worktree aware
+
+Co-authored-by: Okano, Osamu &lt;19066+osamu2001@users.noreply.github.com&gt;
+
+- fix: avoid false shared-server bootstrap no-op for synthesized worktrees
+
+Co-authored-by: Okano, Osamu &lt;19066+osamu2001@users.noreply.github.com&gt;
+
+- Tier embedded Dolt CI for PRs (bd-0gz) (#3459)
+
+- fix(gate): keep dry-run checks write-free
+
+* fix(gate): avoid await_id writes during dry-run check (beads-0vhw)
+
+intent(gate): keep bd gate check --dry-run preview-only even when gh:run gates use workflow-name hints
+decision(gate-check): thread a persistDiscoveredRunID flag through checkGHRun so dry-run can reuse discovery without calling UpdateIssue
+constraint(gate-check): close and non-dry-run gate evaluation still need to persist discovered numeric run IDs for later checks
+
+* fix(cmd): share sanitizeDBName across build tags (beads-nyfc)
+
+intent(cmd-init): keep no-cgo lint and hook runs from failing on init.go&#39;s sanitizeDBName reference
+decision(build-tags): move sanitizeDBName into an untagged helper file and move its unit test beside it so cgo and no-cgo builds compile the same symbol
+constraint(testing): leave cgo-specific store migration tests in store_factory_test.go while the shared helper test lives outside build tags
+
+* Add gate check coverage for workflow discovery persistence
+
+* test(gate): cover extracted gh run status helper
+
+intent(gate-check): cover the extracted gh run status helper so the PR no longer leaves the Codecov patch line uncovered
+decision(gate-tests): reuse cmd/bd/gate_test.go with a PATH-injected fake gh binary instead of adding a broader integration case
+
+- fix(config): reject issue-prefix config set
+
+* fix(config): reject &#39;bd config set issue-prefix&#39; with actionable error
+
+&#39;bd config set&#39; landed the value in DB key &#34;issue-prefix&#34; (dash), while
+&#39;bd create&#39; reads YAML &#34;issue-prefix&#34; then DB &#34;issue_prefix&#34; (underscore) —
+a third key no reader consults. The result was a silent-success write
+that left users unable to create issues after what looked like a successful
+config change (bd-f4m).
+
+Reject both dash and underscore forms at the top of the config-set handler
+and point the user at the three commands that own the prefix lifecycle
+(bd init --prefix / bd bootstrap / bd rename-prefix). A unit test locks
+in the rejected keys, the required error substrings, and a control set
+of adjacent keys that must continue to work.
+
+* fix(errors): mention &#39;bd bootstrap&#39; in &#39;issue_prefix is missing&#39; hint
+
+The fresh-clone flow lands here when a user clones a repo but has no
+local database yet. The existing hint only mentioned &#39;bd init --prefix&#39;,
+which is the wrong answer for that scenario — &#39;bd bootstrap&#39; is what
+reconstitutes a database from the remote. Add it to the hint alongside
+&#39;bd init --prefix&#39; so both the new-project and fresh-clone paths are
+directed at the right command (bd-f4m, AC bullet 4).
+
+* fix(config): drop private tracker IDs from issue-prefix rejection comments
+
+Strips internal bead tracker IDs from code comments and a test
+message. Private tracker IDs have no meaning to external reviewers,
+so they should not ship in the repository.
+
+No behavior change.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Fix worktree-aware config.yaml resolution (#3265)
+
+* Fix worktree-aware config.yaml resolution
+
+* fix: honor shared worktree config resolution
+
+* fix(doctor-fix): resolve shared-worktree beads paths
+
+intent(doctor-fix): review-fix-loop found that doctor --fix should keep working when a worktree uses a shared .beads directory with no local path
+constraint(doctor-fix): permission fixes must still skip chmod on local symlinked .beads directories when they exist
+decision(doctor-fix): centralize resolved workspace lookup in a helper and route fix handlers through it instead of rebuilding path/.beads ad hoc
+
+* test(doctor-fix): cover shared-worktree path resolution
+
+intent(doctor-fix): review-fix-loop needed regressions that prove fix handlers operate on the shared workspace when a worktree has no local .beads
+decision(doctor-fix): cover one config-regeneration path and two file-mutation paths so future regressions fail close to the real worktree behavior
+learned(doctor-fix): metadata regeneration, stale lock cleanup, and permission repair all exercised separate path assumptions inside the fix package
+
+* test(doctor-fix): strengthen workspace validation coverage
+
+Why:
+- shared-worktree fix coverage still left validateBeadsWorkspace edge cases loosely asserted
+- fix package had no direct test for resolvedWorkspaceBeadsDir local vs shared precedence
+
+What:
+- add focused tests for resolvedWorkspaceBeadsDir local/shared selection
+- make validateBeadsWorkspace reject file-backed and file-symlinked .beads explicitly
+
+Refs:
+- beads-xc4
+
+* refactor(doctor-fix): share workspace beads dir resolution
+
+Why:
+- fix package resolved local and shared .beads paths in multiple steps even though they come from the same workspace root
+- permissions handling was correct but harder to follow because local/resolved values were stitched together at the call site
+
+What:
+- extract a package-local helper that returns both local and resolved .beads paths from one workspace lookup
+- make Permissions reuse that helper and add direct tests for local path behavior
+
+Refs:
+- beads-rim
+
+* fix(config): remove shared-worktree import cycle
+
+Why:
+- shared-worktree config fallback in internal/config imported internal/beads
+- that pulled internal/utils back into internal/utils test setup through storage/dolt and caused PR #37 CI import cycle failures
+
+What:
+- keep worktree fallback resolution inside internal/config
+- reuse the repo-scoped git-dir fallback for config.yaml discovery without importing internal/beads
+
+Refs:
+- beads-3ix
+
+* fix(doctor): resolve database-integrity against shared worktrees
+
+intent(doctor): keep integrity recovery from reading a nonexistent worktree-local .beads during shared-worktree repairs
+decision(database-integrity): resolve config and dolt paths from resolvedWorkspaceBeadsDir while keeping bd init --force anchored to the worktree repo root
+learned(shared-worktree): the server-mode guard must inspect shared config or it can silently bypass the configured database safety check
+
+* fix(doctor): honor shared worktrees in remote-consistency
+
+intent(doctor): keep remote reconciliation pointed at the active shared workspace state during worktree repairs
+decision(remote-consistency): resolve shared-worktree config and dolt paths once before comparing SQL and CLI remotes
+constraint(remote-consistency): the fixer still runs from the worktree repo path but cannot derive paths from repoPath/.beads when that directory is absent
+
+* fix(doctor): align shared worktree resolution (beads-u8z)
+
+* test(config): cover shared worktree config precedence (beads-7kw)
+
+intent(config): lock down shared worktree config resolution so future fallback fixes do not silently write or read the wrong file
+decision(config-tests): cover both write precedence and Initialize() local override behavior in worktree-specific tests
+constraint(shared-worktree): runtime resolution can legitimately target either worktree-local or shared .beads, so the regression coverage must assert both paths explicitly
+
+* Add worktree path coverage for beads dir resolution
+
+* Avoid creating .beads on normal Dolt store opens
+
+* Prefer loaded worktree config when finding project config
+
+* test(worktree): add shared config regression coverage (beads-z65b)
+
+intent(worktree-config): keep shared-worktree sync.remote persistence covered at both the YAML helper and CLI command layers
+
+decision(regression-tests): pair a loaded-state config test with a bd subprocess test because the original regression crossed initialization and command execution
+constraint(cmd-bd): use the repo CGO test wrapper for command coverage because raw go test ./cmd/bd requires local ICU setup outside the supported path
+
+* fix(doctor): sweep shared-worktree resolver into remaining checks (beads-3y9p)
+
+intent: keep this PR&#39;s worktree bugfix coherent by removing the last redirect-only doctor resolution paths
+
+decision: route standalone doctor checks through ResolveBeadsDirForRepo and add shared-worktree regressions for locks, mq cleanup, hook migrations, and remote consistency
+
+constraint: leave local-only semantics alone and validate with targeted doctor tests instead of broad environment-sensitive full-suite expectations
+
+* test(worktree): strengthen resolver regression coverage (beads-i9x1)
+
+intent(worktree-coverage): raise patch coverage for the shared-worktree resolver PR on branches introduced by this change set
+decision(config-tests): cover worktree config helpers directly in internal/config so fallback and loaded-state branches stay deterministic
+decision(storage-tests): exercise lazy federation credential-key initialization with one server-backed peer lifecycle instead of broader end-to-end sync flows
+constraint(doctor-tests): verify tracked runtime cleanup from the resolved main repo because shared .beads lives outside the worktree root
+
+* fix(bootstrap): persist sync remote in resolved config
+
+intent(bootstrap): fresh worktree bootstrap should finalize the shared workspace config instead of failing on a local .beads stub
+decision(config-resolution): add a targeted yaml writer for an explicit beads directory so bootstrap can reuse the resolved workspace path
+constraint(worktree-config): bare-parent and shared worktree setups can expose a local .beads directory that must not shadow the canonical config.yaml during finalize
+
+* test(config): cover worktree resolution edge paths (beads-adan)
+
+intent(codecov): PR #3265 needed patch coverage above the Codecov complaint on config/worktree resolution changes
+decision(tests): add unit coverage in existing config, doctor/fix, and credentials suites instead of broader e2e coverage
+constraint(tests): keep sanitizeDBName available to nocgo typecheck because init.go calls it outside cgo-only files
+
+* test(embedded): allow concurrent dolt status
+
+---------
+
+Co-authored-by: matt wilkie &lt;maphew@gmail.com&gt;
+
+- [codex] Diagnose Dolt journal corruption and init lock hangs (#3457)
+
+* fix: diagnose Dolt journal corruption on startup
+
+* fix: prevent embedded init CI hang
+
+* test(init): bound concurrent embedded init subprocesses
+
+* test: align embedded dolt status concurrency expectation
+
+- fix(worktree): don&#39;t prefer inherited .beads/ over shared fallback (#3425)
+
+* fix(worktree): don&#39;t prefer inherited .beads/ over the shared fallback
+
+`bd worktree create --help` promises that worktrees &#34;automatically share
+the same beads database as the main repository via git common directory
+discovery — no manual redirect configuration needed.&#34; That promise is
+broken when the parent repo commits its `.beads/` artifacts (metadata.json,
+config.yaml, issues.jsonl, etc.) — a common setup because these files are
+the portable/durable record of the beads project. `git worktree add` checks
+out those tracked files into the worktree&#39;s `.beads/`, but the gitignored
+`.beads/dolt/` data directory is not checked out. `FindBeadsDir` sees the
+worktree-local `.beads/` with its inherited metadata.json and returns it,
+instead of falling back to the shared `.beads/` with the actual database.
+bd then tries to auto-start a Dolt server against an empty data directory,
+which fails with:
+
+    failed to open database: database &#34;&lt;proj&gt;&#34; not found on Dolt server
+    at 127.0.0.1:&lt;port&gt;
+
+...and every subsequent `bd` invocation from inside the worktree errors.
+
+Two root causes, both fixed here:
+
+1. `FindBeadsDir` step 2 walks up from CWD with a boundary check at
+   `git.GetRepoRoot()`. On macOS, `os.Getwd()` returns unresolved
+   `/var/folders/...` while `git rev-parse --show-toplevel` returns the
+   canonical `/private/var/folders/...`. The `dir == walkBoundary`
+   comparison silently never matches; the walk overshoots the worktree
+   root, finds the inherited `.beads/` at the worktree root, and returns
+   it — never reaching the worktree-fallback logic in step 3.
+
+   Fix: canonicalize both `cwd` and `walkBoundary` (and the step 4
+   `extendedRoot`) before comparison.
+
+2. `FindBeadsDir` step 3b accepted the worktree-local `.beads/` as
+   separate-DB if `hasBeadsProjectFiles` returned true. That check matches
+   on metadata.json alone, so tracked-artifact dirs pass. The shared-DB
+   fallback (3c) was never reached.
+
+   Fix: add `hasBeadsDatabase` (strict — requires dolt/, embeddeddolt/, or
+   *.db). Step 3b now requires a real database for the separate-DB verdict.
+   If the worktree-local .beads/ lacks a database but the shared fallback
+   has one, fall through to 3c. The lenient check is preserved when no
+   fallback exists with a real database (so `bd init` in a fresh worktree
+   can still bootstrap).
+
+Tests: two new regression tests under `internal/beads/` —
+TestFindBeadsDir_WorktreeWithInheritedArtifacts reproduces the bug (fails
+on unpatched main) and TestFindBeadsDir_WorktreeSeparateDBPreservesLocal
+guards against regressing genuine separate-DB mode.
+
+* fix(where): fall through BEADS_DIR shortcut when env has no redirect
+
+Addresses review follow-ups on this PR. Four changes in one commit:
+
+1. cmd/bd/where.go: findOriginalBeadsDir&#39;s BEADS_DIR fast-path used to
+   return &#34;&#34; unconditionally when BEADS_DIR was set but the env&#39;d
+   directory had no redirect file. Since #3230 rebinds BEADS_DIR to the
+   post-redirect target during command startup, that shortcut silently
+   hid the redirect source from `bd where` output — `bd where` inside a
+   redirecting worktree rendered without its &#34;(via redirect from ...)&#34;
+   footnote. Fall through to the filesystem walk instead; keep the
+   fast-path&#39;s positive branch so a user-set BEADS_DIR pointing at a
+   redirecting directory is still returned directly.
+
+   Regression tests in cmd/bd/where_test.go cover both directions:
+   BEADS_DIR set + no redirect → walk finds the redirect source;
+   BEADS_DIR set + has redirect → env value returned directly.
+
+2. internal/beads/beads_inherited_artifacts_test.go: close the codecov
+   gap in hasBeadsDatabase by exercising the dolt/ and embeddeddolt/
+   directory branches (previously only *.db was covered). Add a
+   table-driven runWorktreeSeparateDBPreservedTest helper so the three
+   variants share setup.
+
+3. internal/beads/beads_inherited_artifacts_test.go: new test
+   TestFindBeadsDir_WorktreeNoDatabaseAnywhereFallsBackToLocal exercises
+   the lenient-escape-hatch path in FindBeadsDir step 3b: when neither
+   the worktree nor the shared fallback has a database, return the
+   worktree-local .beads/ so a fresh `bd init` can bootstrap.
+
+4. internal/beads/beads.go findDatabaseInTree: apply the same
+   CanonicalizePath treatment as FindBeadsDir so the gitRoot boundary
+   comparison is robust against /var → /private/var and
+   case-insensitive-filesystem mismatches. Not a bug fix (this path
+   requires an actual *.db to match, so inherited metadata can&#39;t
+   masquerade as a real project), but consistency with the sibling
+   resolver closes a latent pitfall.
+
+- ci: install dolt binary on Linux and macOS test runners (#3440)
+
+* ci: install dolt binary on Linux and macOS test runners
+
+Install dolt via the official install.sh on Linux and via Homebrew on
+macOS so the main test job can exercise the ~24 test gates that
+previously silently skipped on every PR when dolt was absent from PATH.
+
+Matches the installation pattern already used by nightly.yml.
+Docker-testcontainer gates (testDoltServerPort == 0 skips) remain
+skipped — a known GitHub Actions hang documented in
+scripts/repro-dolt-hang/INCIDENT-REPORT.md and nightly.yml:37-41
+prevents enabling testcontainers here.
+
+* test: require dolt binary under GITHUB_ACTIONS
+
+Add testutil.RequireDoltBinary: skips when the dolt CLI is absent
+locally but fails the test under GITHUB_ACTIONS. Replace bare
+exec.LookPath(&#34;dolt&#34;) skip-gates with the helper so ~24 tests that
+previously fell through silently in CI now run — and hard-fail if
+the CI workflow ever drops the dolt install step.
+
+tests/regression/regression_test.go uses an inline variant because
+its gate lives in TestMain, and internal/remotecache/cache_test.go
+duplicates the helper inline to avoid an import cycle
+(testutil -&gt; doltutil -&gt; remotecache).
+
+- fix: support Jira Cloud token pagination (#3456)
+
+- fix(dolt): pre-push integrity check via dolt fsck (#3447)
+
+Add a pre-push fsck check to prevent propagating dangling chunk
+references from the local noms store to the remote. Concurrent
+pushes to GitHub git+ssh remotes can race on the manifest, leaving
+the remote with chunk references that were never uploaded — and any
+agent that fetches then re-pushes faithfully carries the corruption.
+
+`dolt fsck --quiet` runs before every CLI push (doltCLIPush and
+doltCLIPushToPeer). If any chunk is missing, ErrDanglingReference is
+returned and the push is aborted before touching the network.
+
+The check is skipped when CLIDir is empty or .dolt/noms does not
+exist (uninitialized or SQL-only paths).
+
+Co-authored-by: gastown/crew/woodhouse &lt;5449665+ckumar1@users.noreply.github.com&gt;
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- feat(prune): add `bd prune` for deleting closed non-ephemeral beads (#3353)
+
+* feat(prune): add `bd prune` for deleting closed non-ephemeral beads
+
+`bd purge` is scoped to closed ephemeral beads (wisps, transient
+molecules). That leaves no built-in way to trim the usual long-lived
+cruft: closed tasks/features/bugs/chores that stick around forever,
+bloat auto-export, and make `bd list` and other queries slower over
+time. Users who don&#39;t care about closed history eventually want a way
+to drop it.
+
+Add `bd prune` with the same surface as `bd purge` but the opposite
+scope — closed non-ephemeral beads.
+
+- Extracted runPurgeOrPrune from the purgeCmd closure. Both commands
+  now share filter plumbing, preview/dry-run/force semantics, stats
+  printing, and embedded-mode commit-flush. The two cobra commands
+  differ only in name, scope, messaging, and safety gate.
+- purge&#39;s filter stays `Ephemeral: &amp;true`; prune&#39;s is `Ephemeral:
+  &amp;false`. Scopes are deliberately disjoint: prune never touches what
+  purge would, and vice versa.
+- Safety gate: `bd prune` requires `--older-than` or `--pattern`. A
+  muscle-memory `bd prune --force` would otherwise wipe every closed
+  bead in the repo. `--older-than 1d` is the documented escape hatch
+  for &#34;sweep everything closed for at least a day&#34;.
+- Shared flags: --force, --dry-run, --older-than, --pattern. Same
+  dependency/label/event reporting, pinned-bead skipping, and
+  commandDidWrite tracking as purge.
+
+`bd purge --help` now cross-references `bd prune` (and vice versa) so
+users find the right command for their scope.
+
+Tests (cmd/bd/prune_embedded_test.go, gated by BEADS_TEST_EMBEDDED_DOLT=1
+like the existing purge tests):
+
+- prune_requires_older_than_or_pattern — safety gate rejects bare
+  `--force` and leaves data intact.
+- prune_deletes_closed_non_ephemeral — happy path: scoped prune
+  removes the target.
+- prune_leaves_closed_ephemeral_for_purge — cross-scope invariant:
+  prune must not touch wisps; they remain visible to `bd purge`.
+- prune_leaves_open_beads_alone — open beads survive even under a
+  matching pattern.
+- prune_dry_run_reports_without_deleting — dry-run prints preview
+  and keeps data intact.
+- prune_preview_fails_without_force — preview mode (no --force)
+  aborts with a preview message, no data lost.
+- prune_older_than_skips_recent — `--older-than 30d` excludes
+  just-closed beads.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* Fix prune test and polish output
+
+Replace the broken list --ephemeral assertion with a purge dry-run check, and make prune&#39;s JSON and help text match its scope.
+
+Co-authored-by: Jim Wordelman &lt;91582+quad341@users.noreply.github.com&gt;
+
+* Tighten prune ephemeral assertion
+
+Assert prune skips closed wisps by scope without relying on a later purge process that auto-imports from issues.jsonl.
+
+Co-authored-by: Jim Wordelman &lt;91582+quad341@users.noreply.github.com&gt;
+
+---------
+
+Co-authored-by: Jim Wordelman &lt;jim@wordelman.name&gt;
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+Co-authored-by: matt wilkie &lt;maphew@gmail.com&gt;
+Co-authored-by: Jim Wordelman &lt;91582+quad341@users.noreply.github.com&gt;
+
+- fix(admin,dolt): allow admin + dolt show/status in embedded mode (#3330)
+
+* fix(admin): remove embedded-mode block; cleanup/compact/reset work fine
+
+The admin parent command rejected every invocation in embedded mode with
+&#34;&#39;bd admin&#39; is not yet supported in embedded mode&#34;, but all three
+subcommands (cleanup, compact, reset) only use operations that work in
+embedded mode:
+
+- reset: removes files on disk, no store access
+- cleanup: uses generic SearchIssues + deleteBatch
+- compact: uses CheckEligibility, GetTier{1,2}Candidates, ApplyCompaction
+  — all implemented on EmbeddedDoltStore
+
+The block was a &#34;skip admin&#34; placeholder added during the embedded-mode-
+by-default transition (a35edfd2) and never lifted. Drop it so users on
+the default (embedded) backend can run routine Dolt maintenance without
+dropping to direct SQL, which bypasses the audit trail.
+
+Closes gastownhall/beads#3313
+
+* fix(dolt): make &#39;bd dolt show&#39; and &#39;bd dolt status&#39; embedded-aware
+
+Both commands previously returned &#34;&#39;bd dolt X&#39; is not supported in
+embedded mode (no Dolt server)&#34;, which is actively misleading: embedded
+mode is a first-class Dolt mode (the engine runs in-process), remotes
+are configured and used (git+ssh://), and &#39;bd dolt push&#39; works. The
+error made users debugging their sync think no server = nothing synced.
+
+Changes:
+- &#39;bd dolt show&#39;: drop the embedded-mode block; showDoltConfig now
+  prints &#34;Mode: embedded (in-process Dolt engine)&#34; plus the data dir
+  (.beads/embeddeddolt/), and still lists remotes. Server-only fields
+  (host/port/user, connection test) are omitted in embedded mode.
+- &#39;bd dolt status&#39;: drop the error; report &#34;Dolt engine: embedded
+  (in-process, no server)&#34; with the data directory. JSON output gets
+  {&#34;mode&#34;:&#34;embedded&#34;,&#34;running&#34;:false,&#34;data_dir&#34;:...,&#34;data_dir_exists&#34;:...}.
+
+Server-only commands (set, test, start, stop, killall, clean-databases)
+remain blocked — they genuinely need a dolt sql-server.
+
+Updates TestDoltShowConfigDefaultMode: after the embedded-by-default
+transition, the &#34;default mode&#34; case IS embedded, so the test expectation
+of server Host/Port/User output was stale.
+
+Addresses review follow-up on gastownhall/beads#3313.
+
+* test(dolt): update TestEmbeddedDolt for unblocked show/status
+
+Remove &#34;status&#34; and &#34;show&#34; from serverOnlyCmds — they&#39;re no longer
+server-only after the previous commit. Add embedded_status and
+embedded_show positive-case subtests that assert the new embedded-mode
+output (must contain &#34;embedded&#34; for status, &#34;Mode:&#34; + &#34;embedded&#34; for
+show).
+
+Addresses review feedback from @maphew on #3330.
+
+* Clarify embedded dolt status JSON
+
+---------
+
+Co-authored-by: matt wilkie &lt;maphew@gmail.com&gt;
+
+- fix: promote gate to built-in type so formula pour works (#3382)
+
+* fix: promote gate to built-in type so formula pour works (GH#3213)
+
+bd mol pour fails with &#39;invalid issue type: gate&#39; when a formula step
+has a gate field. The pour pipeline creates companion beads of type
+&#34;gate&#34;, but gate was removed from the built-in types list. Since bd
+gate create/check/resolve commands already hardcode IssueType(&#34;gate&#34;),
+gate should be built-in like molecule and event.
+
+Adds TypeGate constant and includes it in IsValid(). This is the same
+pattern used to re-promote molecule for swarm coordination.
+
+Fixes #3213
+
+* fix: update TestEventTypeValidation for gate as built-in
+
+The test asserted gate is NOT built-in, but we promoted it. Flip the
+assertion to match the new behavior.
+
+* fix: suppress gosec G304 false positive in hookWorkTreeRoot
+
+The path is filepath.Join(os.Getenv(&#34;GIT_DIR&#34;), &#34;gitdir&#34;) — reading a
+well-known git internal file from a trusted environment variable set by
+git itself during hook execution. Not a user-controlled file inclusion.
+
+This false positive causes the Lint CI check to fail on every PR in
+the repo, masking real lint issues.
+
+- fix: pass CLI filters through tree mode recursive walk (#3384)
+
+* fix: pass CLI filters through tree mode recursive walk (GH#3350)
+
+bd list --tree --parent &lt;id&gt; --type task (or --status, --labels, etc.)
+silently drops all filters except --parent. findAllDescendants builds
+a fresh IssueFilter{ParentID: &amp;id} at each level, discarding the
+caller&#39;s filter entirely.
+
+Thread the baseFilter through getHierarchicalChildren and
+findAllDescendants so --type, --status, --labels, and other CLI
+filters apply at every level of the tree walk. Set Limit=0 per
+level to avoid truncating intermediate results.
+
+Fixes #3350
+
+* fix: suppress gosec G304 false positive in hookWorkTreeRoot
+
+The path is filepath.Join(os.Getenv(&#34;GIT_DIR&#34;), &#34;gitdir&#34;) — reading a
+well-known git internal file from a trusted environment variable set by
+git itself during hook execution. Not a user-controlled file inclusion.
+
+This false positive causes the Lint CI check to fail on every PR in
+the repo, masking real lint issues.
+
+- fix: use routed ID resolution in bd comments (#3385)
+
+* fix: use routed ID resolution in bd comments (GH#3334)
+
+bd comments and bd comments add use utils.ResolvePartialID which only
+checks the local store. When an issue lives in a routed database
+(via routes.jsonl or contributor auto-routing), the local resolution
+fails with &#34;no issue found&#34; even though bd show resolves the same ID.
+
+Switch both code paths to resolveAndGetIssueWithRouting, matching
+the pattern used by bd comment, bd show, and bd update. This ensures
+consistent ID resolution across all comment commands.
+
+Fixes #3334
+
+* fix: suppress gosec G304 false positive in hookWorkTreeRoot
+
+The path is filepath.Join(os.Getenv(&#34;GIT_DIR&#34;), &#34;gitdir&#34;) — reading a
+well-known git internal file from a trusted environment variable set by
+git itself during hook execution. Not a user-controlled file inclusion.
+
+This false positive causes the Lint CI check to fail on every PR in
+the repo, masking real lint issues.
+
+- Merge pull request #3434 from coffeegoddd/db/bump-go
+
+/{examples,go.mod}: bump go
+
+- /.github/workflows/ci.yml: update comment
+
+- /default.nix: update vendor hash
+
+- /{examples,go.mod}: bump go
+
+- feat: support Unix domain sockets for Dolt server connections (#3300)
+
+Add ServerSocket config field and BEADS_DOLT_SERVER_SOCKET env var to
+connect to Dolt via unix sockets instead of TCP. This eliminates port
+conflicts between concurrent projects and simplifies sandbox integration.
+
+- Wire --server-socket CLI flag through bd init and bd dolt set (dolt.socket)
+- Add GetDoltServerSocket() to configfile with env var precedence
+- Socket mode disables auto-start with socket-specific error hints
+- TLS settings honored regardless of transport
+- Integration test: starts dolt sql-server --socket, verifies end-to-end SQL
+- Document in README.md server mode table
+
+Closes #2939
+
+- fix(hooks): preserve husky v8/v9 hook layout when copying to .beads/hooks/ (#3197)
+
+* fix(hooks): preserve husky v8/v9 hook layout when copying to .beads/hooks/ (GH#3132)
+
+When beads sets core.hooksPath=.beads/hooks/ and copies hooks from a
+husky-managed directory, two bugs break the preserved hooks:
+
+Bug 1 (v8): Husky v8 hooks source $(dirname &#34;$0&#34;)/_/husky.sh, but the
+_/ helper directory was skipped by preservePreexistingHooks (which skips
+directories). Fix: create a relative symlink from .beads/hooks/_/ to the
+original _/ directory.
+
+Bug 2 (v9): Husky v9 sets core.hooksPath=.husky/_/ where each hook is a
+shim that sources an &#34;h&#34; dispatcher. The dispatcher uses
+dirname(dirname($0)) to resolve user hooks in the parent .husky/
+directory — this path math breaks when the shim is relocated. Fix: detect
+v9 shims and replace them with the actual user hook content from .husky/,
+then remove the now-unnecessary h dispatcher.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(hooks): ignore os.Remove error for husky h-dispatcher cleanup
+
+errcheck flagged the unchecked os.Remove call. Failure here is harmless
+(the h dispatcher is a stale artifact of husky v9 shim replacement), so
+explicitly discard the error using the `_ = os.Remove(...)` convention
+used elsewhere in the package (e.g. export_auto.go, rules.go, edit.go).
+
+* fix(hooks): make husky v9 shim replacement actually run
+
+TestInstallHooksBeads_HuskyV9Shims was failing on CI because the Bug 2
+fix in fixHuskyHookLayout had two detection bugs that made it a no-op:
+
+1. It keyed off targetDir/h to detect v9, but preservePreexistingHooks
+   intentionally skips copying the `h` dispatcher to the target — so the
+   detection always failed and the function returned early.
+
+2. Even once detection is fixed, it then checked each target file for
+   the shim source line (`. &#34;$(dirname &#34;$0&#34;)/h&#34;`) before replacing, but
+   sanitizeHuskyHook has already stripped that exact line during copy,
+   so the content check would never match.
+
+Fix both:
+- Detect v9 from sourceDir/h (always present when source is .husky/_/).
+- Iterate sourceDir entries instead of targetDir and drop the content
+  check — in a v9 source every non-`h` file is a shim by construction,
+  so the source-entry → user-hook mapping is unambiguous.
+
+Also remove the now-dead `os.Remove(hPath)` that tried to clean up the
+target `h` that was never copied.
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- feat: BD_JSON_ENVELOPE=1 opt-in for uniform JSON wrapping (#3393)
+
+* feat: add BD_JSON_ENVELOPE=1 opt-in for uniform JSON wrapping
+
+Follow-up to #3368 as discussed with @maphew. Adds the envelope format
+that wraps all --json output as {&#34;schema_version&#34;: N, &#34;data&#34;: &lt;payload&gt;},
+gated behind BD_JSON_ENVELOPE=1 to avoid breaking existing consumers.
+
+Legacy mode (default): unchanged behavior from #3368 — objects get
+schema_version injected inline, arrays pass through raw.
+
+Envelope mode (BD_JSON_ENVELOPE=1): uniform wrapping for all types.
+The original payload is untouched inside .data — no type corruption,
+no field injection. A one-time deprecation notice is emitted to stderr
+when --json is used without the env var.
+
+Timeline: envelope becomes default in v2.0, with BD_JSON_ENVELOPE=0
+as a temporary escape hatch for one release cycle.
+
+Includes:
+- wrapWithSchemaVersion dual-mode logic
+- outputJSONError and buildJSONError envelope support
+- Deprecation notice on stderr (once per process)
+- Tests for both legacy and envelope modes
+- Migration guide in docs/JSON_SCHEMA.md
+
+* fix: suppress deprecation notice when stderr is not a TTY
+
+Gate emitEnvelopeDeprecation() on ui.IsStderrTerminal() so the
+&#34;NOTE: bd --json output format will change in v2.0&#34; message only
+appears in interactive terminals. Test harnesses and pipelines
+capture stderr via CombinedOutput(), and the trailing notice after
+the JSON closing brace caused json.Unmarshal to fail with
+&#34;invalid character &#39;N&#39; after top-level value&#34; in 15 CI tests.
+
+Follows the same TTY-gating pattern used by ShouldUseColor and
+ShouldUseEmoji.
+
+* fix: suppress gosec G304 false positive in hookWorkTreeRoot
+
+The path is filepath.Join(os.Getenv(&#34;GIT_DIR&#34;), &#34;gitdir&#34;) — reading a
+well-known git internal file from a trusted environment variable set by
+git itself during hook execution. Not a user-controlled file inclusion.
+
+This false positive causes the Lint CI check to fail on every PR in
+the repo, masking real lint issues.
+
+- feat: JSON schema contract, bd ping, structured errors, import enhancements (#3368)
+
+* feat: add schema_version to all --json output (beads-5uh)
+
+All bd commands that emit --json output now include a schema_version
+field so consumers (Jawnt MCP, BeadsX, gt mail, sync scripts) can
+detect format changes without silently breaking.
+
+- Object output: schema_version injected as top-level field
+- Array output: wrapped as {&#34;schema_version&#34;: 1, &#34;items&#34;: [...]}
+- Error output: schema_version added to stderr JSON
+
+Central implementation in outputJSON() via wrapWithSchemaVersion()
+means all 272 call sites get the field automatically.
+
+Includes:
+- Unit tests for wrapping logic (object, struct, slice, nil, roundtrip)
+- Updated protocol contract tests for new envelope format
+- New schema_version presence test across list/ready/show
+- docs/JSON_SCHEMA.md documenting the field contract per command
+
+* feat: add ready/blocked JSON contract tests (beads-clt)
+
+bd ready --json and bd blocked --json already return full issue objects
+with dependency counts and blocked_by fields. Add protocol contract
+tests to pin this behavior:
+
+- TestJSONContract_ReadyOutputHasFullObjects: verifies dependency_count,
+  dependent_count fields on ready items
+- TestJSONContract_BlockedOutputHasBlockedBy: verifies blocked_by and
+  blocked_by_count fields on blocked items
+
+Update docs/JSON_SCHEMA.md with blocked output contract.
+
+* feat: add bd ping lightweight health-check command (beads-8cc)
+
+New minimal command that confirms bd can reach its database:
+1. Resolves the .beads workspace
+2. Opens the store (embedded or server)
+3. Runs a trivial query (SearchIssues with Limit=1)
+4. Reports timing breakdown
+
+Supports --json for structured output with resolve_ms, store_ms,
+query_ms, and total_ms fields. Exit 0 on success, 1 on failure.
+
+Registered as read-only command (no auto-push, no file writes).
+Includes protocol contract test for JSON output.
+
+* feat: structured JSON errors on stderr when --json active (beads-06n)
+
+All fatal error functions (FatalError, FatalErrorWithHint,
+FatalErrorRespectJSON, FatalErrorWithHintRespectJSON) now emit
+structured JSON with schema_version when --json is active:
+
+  {&#34;schema_version&#34;: 1, &#34;error&#34;: &#34;message&#34;, &#34;hint&#34;: &#34;optional&#34;}
+
+Centralized via jsonStderrError() and jsonStdoutError() helpers.
+Replaces ad-hoc json.MarshalIndent calls scattered across error
+functions with a consistent, schema-versioned format.
+
+Includes unit tests and updated protocol contract test verifying
+schema_version presence in error JSON output.
+
+* feat: enhance bd import with stdin, --dedup, --json (beads-c6i)
+
+Enhance the existing bd import command for bulk JSONL ingest:
+
+- Stdin support: bd import - reads JSONL from stdin for piped workflows
+- --dedup flag: skips lines whose title matches an existing open issue
+  (case-insensitive) to prevent duplicate creation
+- --json flag: structured output with created/skipped counts and IDs
+
+Refactored import to use runImportFromReader() for unified file/stdin
+handling. Added filterDuplicatesByTitle() for dedup logic. Updated
+docs/JSON_SCHEMA.md with import output contract.
+
+Backward compatible: existing bd import [file] and --dry-run work
+exactly as before.
+
+* fix: update tests for schema_version envelope in JSON output
+
+Three test files expected raw JSON arrays or map[string]string, which
+broke when schema_version (a number) was added to the output envelope:
+
+- ado_test.go: parse envelope with items array instead of raw []json.RawMessage
+- bootstrap_embedded_test.go: use map[string]interface{} for mixed types
+- where_embedded_test.go: same map[string]interface{} fix
+
+* fix: drop array envelope wrapping to fix 200+ test failures
+
+The schema_version envelope was wrapping arrays as
+{&#34;schema_version&#34;: N, &#34;items&#34;: [...]} which broke every integration
+test that parses --json array output. Objects (show, create, ping)
+still get schema_version injected. Arrays (list, ready, blocked)
+now pass through unchanged for backwards compatibility.
+
+Also fixes: gofmt on import.go, doc-flags reference to bd import,
+uses importIssuesCore result to satisfy unparam lint.
+
+* fix: update remaining tests for schema_version number field
+
+config_embedded_test.go, kv_embedded_test.go, config_nodb_embedded_test.go,
+and show_test.go all parsed JSON output into map[string]string but
+schema_version is a number. Parse to map[string]interface{} and
+skip/assert schema_version appropriately.
+
+---------
+
+Co-authored-by: kev &lt;kglynn@pryoninc.com&gt;
+
+- fix(export): scrub git hook env and skip cross-worktree git-add (GH#3311) (#3347)
+
+When export.git-add=true (the v1.0.1+ default), the pre-commit hook in
+a worktree stages a spurious issues.jsonl at the repo root instead of
+(or in addition to) .beads/issues.jsonl. The ghost file lands in the
+commit&#39;s diff but not on disk — easy to miss and painful to clean up.
+
+Root cause (not what the issue body guessed): the absolute path passed
+to `git add` was always correct. The bug is env inheritance. Git
+invokes the pre-commit hook with GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE/
+GIT_COMMON_DIR/GIT_PREFIX set in the environment, and bd&#39;s git-add
+subprocesses inherit them.
+
+Both call sites set `cmd.Dir = filepath.Dir(fullPath)` (= `.beads/`).
+With GIT_DIR set in the environment and GIT_WORK_TREE unset, git
+defaults the work-tree to cwd. So the subprocess&#39;s git sees `.beads/`
+as the work-tree root and records `.beads/issues.jsonl` at the root of
+that broken view — which ends up in the worktree&#39;s actual index as a
+bare `issues.jsonl`. Verified empirically: with GIT_DIR set and
+cwd=`.beads/`, `git rev-parse --show-toplevel` returns the `.beads/`
+directory itself.
+
+Fix, in two parts:
+
+ 1. scrubGitHookEnv() strips the vars that poison repo/worktree
+    auto-discovery, index routing, object routing, and config
+    injection:
+      - discovery: GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_PREFIX,
+        GIT_CEILING_DIRECTORIES, GIT_DISCOVERY_ACROSS_FILESYSTEM
+      - index: GIT_INDEX_FILE
+      - objects: GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES
+      - config: the whole GIT_CONFIG* family (covers the case where the
+        parent invoked `git -c core.worktree=… commit`, which sets
+        GIT_CONFIG_PARAMETERS / GIT_CONFIG_COUNT in the child env)
+    With these cleared, git rediscovers the repo/worktree from cwd.
+
+ 2. hookWorkTreeRoot() reads the inherited GIT_DIR to determine the
+    worktree whose hook is currently firing. If the target path is
+    outside that worktree, gitAddFile returns without staging. This
+    prevents a narrower but real regression that would otherwise land
+    after part 1 alone: in the .beads/redirect configuration, fullPath
+    points into the main repo (not the worktree), and post-scrub git
+    would silently stage the file into main&#39;s index from a worktree
+    hook. The existing preCommitHookBody template (init_git_hooks.go)
+    documents the same intent: &#34;For worktrees: .beads is in the main
+    repo&#39;s working tree... we skip it.&#34;
+
+The guard uses pathInsideDir which handles the macOS symlinked-parent
+case: on /tmp → /private/tmp, a fresh-file target expressed as
+/tmp/.../new.txt compared against a worktree root resolved to
+/private/tmp/... would otherwise misclassify as outside the worktree.
+pathInsideDir resolves the parent of each side via EvalSymlinks and
+reattaches the basename — sufficient for the real caller shapes, since
+gitAddFile&#39;s parent directory (beadsDir or the export output dir)
+always exists at call time.
+
+Also fixes the variant reported in a follow-up comment where the
+.beads/redirect workaround did not resolve the root ghost: the env
+pollution broke git-add inside the `bd export -o` subprocess spawned
+from exportJSONLForCommit (that subprocess has BD_GIT_HOOK stripped,
+but git env vars preserved, so its PostRun auto-export hits the same
+bug via the shared gitAddFile).
+
+Deduplicates the parallel git-add invocation in exportJSONLForCommit
+by delegating to gitAddFile, so both call sites share the env scrub
+and the cross-worktree guard.
+
+Adds:
+ - TestGitAddFile_InWorktreeHook_StagesCorrectPath — end-to-end
+   worktree regression test; fails on main, passes with the fix.
+ - TestGitAddFile_RedirectCase_DoesNotStageInMainRepo — verifies
+   the cross-worktree skip does not pollute main&#39;s index when a
+   worktree has .beads/redirect pointing into main.
+ - TestGitAddFile_NonHookContext_GuardDoesNotFire — regression guard
+   confirming the cross-worktree skip is a no-op outside git hooks.
+ - TestScrubGitHookEnv — unit test for the env scrub helper, covering
+   the discovery/index/object vars and the GIT_CONFIG* family, and
+   verifying non-discovery vars (author/committer/editor/pager) pass
+   through untouched.
+ - TestPathInsideDir — covers structural cases plus the macOS
+   fresh-file + symlinked-parent regression.
+ - TestHookWorkTreeRoot — covers linked-worktree gitdir file,
+   plain-repo .git, bare/unrecognized, and not-a-hook contexts.
+
+Workaround for users on older releases remains `BD_EXPORT_GIT_ADD=false`.
+
+Closes GH#3311
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(autopush): bound auto-push, throttle failed attempts (#3370) (#3381)
+
+Consolidates two independently-developed fixes into a single commit.
+
+Behavior:
+- Bound st.Push() with configurable timeout (dolt.auto-push-timeout,
+  default 30s) so an unreachable remote cannot hang bd indefinitely.
+- Bound the HasRemote() auto-detection check with a separate 5s timeout.
+- On push failure, persist the LastPush timestamp (but NOT LastCommit)
+  so subsequent bd commands in the 5-min debounce window skip the
+  attempt. When the remote recovers, change-detection still fires
+  because LastCommit was never bumped.
+- On deadline-exceeded, emit a specific &#34;remote may be unreachable&#34;
+  warning rather than the generic push error.
+
+Closes #3331. Supersedes #3371.
+
+Co-authored-by: woodhouse &lt;cherub.chopra@gmail.com&gt;
+Co-authored-by: kev &lt;kglynn@pryoninc.com&gt;
+
+- fix(config): default Dolt database name when metadata.json is missing (#3380)
+
+The PersistentPreRun block in cmd/bd/main.go warned when configfile.Load
+returned (nil, nil) — i.e., the .beads/ directory had a database
+subdirectory but no metadata.json — but never populated doltCfg.Database.
+embeddeddolt.New then rejected the empty name with:
+
+    embeddeddolt: database name must not be empty
+    (caller should default to &#34;beads&#34;)
+
+The error message prescribes the fix. The sibling factories
+newDoltStoreFromConfig (cmd/bd/store_factory.go:74) and
+newReadOnlyStoreFromConfig (store_factory.go:146) already apply
+configfile.DefaultDoltDatabase when cfg is nil; this path was missed
+(likely predates the GH#2988 fix that established the pattern).
+
+Fix: in the nil-cfg branch, set doltCfg.Database = DefaultDoltDatabase
+and update the warning to name the default. Also defend the cfgErr != nil
+branch (config present but failed to parse) so the store-open error
+surfaces the real problem rather than the confusing empty-name error.
+
+Repro before the fix:
+    mkdir -p /tmp/bd-repro/.beads/embeddeddolt
+    cd /tmp/bd-repro
+    bd info
+    # warning: no beads configuration found in .beads; database name may default incorrectly
+    # Error: failed to open database: embeddeddolt: database name must not be empty
+    #   (caller should default to &#34;beads&#34;)
+
+After the fix:
+    # warning: no beads configuration found in .beads; using default database name &#34;beads&#34;
+    # Beads Database Information
+    # ===========================
+    # Database: /tmp/bd-repro/.beads/embeddeddolt
+    # Mode: direct
+    # Issue Count: 0
+
+- fix(ci): unblock main — gosec G122 + credentials_test signatures (#3389)
+
+* fix(lint): silence G122 on dolt cache cleanup remove
+
+golangci-lint v2.11.4 (released recently) enabled a new gosec check:
+
+    G122: Filesystem operation in filepath.Walk/WalkDir callback uses
+    race-prone path; consider root-scoped APIs (e.g. os.Root) to prevent
+    symlink TOCTOU traversal (gosec)
+
+This flags the `os.Remove(path)` inside cleanGitRemoteCacheGarbage.
+Main went red on the Lint job with no code change to blame — it broke
+on every PR that rebased past the golangci-lint bump.
+
+The warning is not applicable here: the walk root is
+`&lt;beadsDir&gt;/&lt;database&gt;/.dolt/git-remote-cache/`, owned by the user
+running bd. An attacker who can symlink-swap a tmp_pack_*/tmp_idx_*
+file mid-walk already has write access to the Dolt data directory,
+which is a much bigger compromise than cache_cleanup.go doing anything
+unsafe.
+
+Add a targeted `#nosec G122` with justification rather than refactor
+to `os.Root`-scoped APIs, which would be a larger change against a
+file that exists to clean up a 102 GB leak (GH#3354) and shouldn&#39;t
+take on additional complexity for a hypothetical threat. Matches the
+project&#39;s existing pattern of per-site gosec exceptions with rationale.
+
+Verification:
+    golangci-lint run --timeout=5m --build-tags=gms_pure_go ./...
+    # 0 issues.
+
+* fix(dolt): update shared-server credential tests for new per-remote signatures
+
+Two tests added by #3223 (f9ec9859, 2026-04-13) were not updated when
+#3211 (73d72ec0, 2026-04-20) widened the credential-routing guards to
+take per-remote parameters. The resulting signature drift landed on
+main and broke the build on ubuntu-latest and macos-latest:
+
+    internal/storage/dolt/credentials_test.go:445:39: not enough
+      arguments in call to store.shouldUseCLIForCredentials
+    internal/storage/dolt/credentials_test.go:486:6: not enough
+      arguments in call to store.shouldUseCLIForCloudAuth
+
+Fix:
+- TestCredentialCLIRoutingSharedServerUsesSharedDoltRoot:
+  pass store.remote and store.mainRemoteCredentials() to match the
+  new shouldUseCLIForCredentials(ctx, remote, creds) signature,
+  matching the pattern already used by the sibling
+  TestCredentialCLIRoutingExternalServer/NoRemote tests.
+
+- TestCloudAuthCLIRoutingSharedServerUsesSharedDoltRoot:
+  pass store.remote to the new shouldUseCLIForCloudAuth(remote)
+  signature, and change the dolt remote URL from https:// to az://.
+  The old global &#34;any cloud env var triggers CLI routing&#34; heuristic
+  was replaced by per-scheme matching (AZURE_STORAGE_* only triggers
+  for az:// remotes, etc. — see the positive/negative cases in
+  TestCloudAuthCLIRouting). The test sets AZURE_STORAGE_ACCOUNT, so
+  the remote must be az:// for the assertion to hold.
+
+Verification: both tests pass locally (`go test -tags gms_pure_go
+-run &#39;SharedServerUsesSharedDoltRoot&#39; ./internal/storage/dolt/`).
+
+- ci: don&#39;t fail workflows when codecov upload has no token (#3386)
+
+Forked-PR workflow runs don&#39;t have access to CODECOV_TOKEN, so the
+codecov/codecov-action@v6 Upload steps exit with &#34;Token length: 0&#34; and
+the action&#39;s internal CLI fails. Despite fail_ci_if_error: false, the
+action still surfaces a non-zero exit to the job, causing Test
+(ubuntu-latest) to appear red on every external-contributor PR.
+
+Add continue-on-error: true at the step level on all three codecov
+Upload steps (ci.yml Upload coverage, ci.yml Upload test results,
+nightly.yml Upload coverage). This guarantees the step is treated as
+successful regardless of what the action&#39;s internal wrapper does —
+belt-and-suspenders on top of fail_ci_if_error: false.
+
+Verified against multiple affected PRs:
+ - 3300 (taheris, Unix socket support)
+ - 3214 (pstradowski, formula custom types — merged anyway)
+ - 3255 (harry-miller, Linear round-trip — merged anyway)
+ - 3197 (sjsyrek, husky hook layout)
+
+All had their actual go test step pass; only codecov upload failed.
+
+This is workflow-only; no Go code changes.
+
+- add Thread to community tools - analytics and observability (#3329)
+
+- Add Linear round-trip fidelity integration test (upstream #3187) (#3255)
+
+Add TestLinearRoundTripCoreFields which verifies that a push→pull
+round-trip through Linear preserves title, description, priority,
+status, and external_ref. Uses a stateful mock GraphQL server that
+only stores what the client actually sends.
+
+Also adds TestLinearRoundTripRelationships as a skipped spec test
+documenting that parent-child, blocking deps, and issue type don&#39;t
+yet survive the round-trip (push doesn&#39;t send these fields). This
+becomes a regression gate when those features land.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+- fix(formula): auto-register custom types used by formula gate steps (#3214)
+
+When a formula step has `gate = { type = &#34;human&#34; }`, the cook pipeline
+creates a companion bead with IssueType &#34;gate&#34;. But &#34;gate&#34; was
+intentionally removed from the built-in type whitelist (see types.go
+comment at the IssueType const block) and moved to a custom type that
+requires explicit `types.custom` configuration. Without that config,
+`bd mol pour` fails with:
+
+  validation failed for issue : invalid issue type: gate
+
+This forces operators to run `bd config set types.custom &#39;[&#34;gate&#34;]&#39;`
+before pouring any formula with gate steps — a papercut that blocks
+first-time formula users.
+
+Fix: add `ensureSubgraphCustomTypes` in `cloneSubgraph` (template.go)
+that scans the template issues for non-built-in types and auto-registers
+any missing ones via `SetConfig(&#34;types.custom&#34;, ...)` before the clone
+transaction creates the issues. This is the same store path that
+`bd config set` uses, which triggers `SyncCustomTypesTable` to populate
+the normalized `custom_types` table consumed by `PrepareIssueForInsert →
+ValidateWithCustom`.
+
+Also add `EnsureCustomTypeInTx` helper in issueops/config_helpers.go
+for callers that already hold a transaction (not used by this fix but
+provides a lower-level primitive for future use).
+
+The fix applies to both `bd mol pour` (persistent) and `bd mol wisp`
+(ephemeral) since both call `cloneSubgraph`.
+
+Fixes #3213
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Add ADO round-trip integration tests and config documentation (#3305)
+
+Add TestADORoundTripCoreFields, TestADORoundTripBlockedStatus,
+TestADORoundTripLossyPriority, and TestADORoundTripLabels which verify
+push→pull fidelity through a stateful mock ADO REST server.
+
+Key findings documented in tests:
+- Core fields (title, priority, status, type) survive round-trip
+- Blocked status preserves via beads:blocked tag mechanism
+- Priority 4 (Backlog) is lossy: degrades to P3 after fresh pull
+- User labels survive; internal beads:* tags filtered on pull
+
+Also add docs/ADO_CONFIG.md with comprehensive configuration reference
+covering connection settings, filter options, default mappings for all
+three process templates (Agile/Scrum/CMMI), state transition handling,
+sync options, and troubleshooting guidance.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+- docs: add missing workflow features to docs and regenerate llms-full.txt (#3250)
+
+Add documentation for features implemented in Go source but missing
+from the website docs:
+
+formulas.md:
+- Convoy formula type (multi-agent coordination)
+- Formula inheritance (extends field)
+- Conditional steps (condition field with truthy/negated/equality)
+- Loop/iteration (count, range, until with max)
+- Runtime expansion (on_complete with for_each)
+- bd cook command (compile-time vs runtime modes)
+- Expanded gate types and aspect composition
+
+wisps.md:
+- Squash lifecycle (bd mol squash - promote to persistent)
+- Burn lifecycle (bd mol burn - delete without trace)
+- Garbage collection (bd mol wisp gc)
+- Corrected storage model (Ephemeral=true in main DB)
+- Updated commands to match actual CLI surface
+
+index.md:
+- Added swarm commands (validate, create, status, list)
+- Added cook command
+- Added wisp lifecycle commands (squash, burn, gc)
+- Added bond and formula list commands
+
+Regenerated website/static/llms-full.txt via scripts/generate-llms-full.sh.
+
+Before: 0 hits for swarm, convoy, cook, extends, condition, loop,
+squash, burn, promote, for_each in llms-full.txt.
+After: all terms present with substantive documentation.
+
+Closes #3244
+
+- docs: trim getting-started docs ~3x per internal audit (#3249)
+
+Apply findings from docs/GETTING_STARTED_ANALYSIS.md:
+- installation.md (261-&gt;81): Remove IDE section (duplicates ide-setup.md),
+  remove updating section (duplicates upgrading.md), consolidate platforms,
+  move CGO/build deps below happy path
+- quickstart.md (370-&gt;115): Remove Notion sync, database maintenance,
+  database migration, database location sections. Trim role config and
+  init options. Keep core flow: init, create, deps, ready, work, sync
+- ide-setup.md (204-&gt;80): Remove bd prime internals, trim MCP duplication,
+  condense per-editor sections to command + verify pattern
+- upgrading.md (135-&gt;39): Consolidate table with detailed sections,
+  trim troubleshooting to essentials
+
+Total: 970 lines -&gt; 315 lines (3.1x reduction)
+
+Closes #3245
+
+- fix(formula): carry step metadata through cook and pour (GH#3341) (#3359)
+
+TOML and JSON formulas accepted `metadata = { ... }` on a step
+without error, but the field was silently dropped:
+
+  - `formula.Step` had no `Metadata` field, so the TOML/JSON parsers
+    discarded the table during decode.
+  - `processStepToIssue` built the template issue with no metadata.
+  - `cloneSubgraph` omitted `Metadata` when spawning the mol/wisp,
+    so even if the template carried it, the poured bead did not.
+
+Add `Step.Metadata map[string]interface{}` so the parser keeps the
+table, marshal it to JSON in `processStepToIssue`, and copy the raw
+bytes through in `cloneSubgraph`. `bd cook` now shows `metadata`
+under each step, and `bd mol pour` / `bd mol wisp` land the bead
+with the declared keys.
+
+- feat: add starter formula examples (#3248)
+
+Add 3 example .formula.toml files to examples/formulas/:
+- feature-workflow: design, implement, review, merge
+- release: bump version, test, tag, publish
+- quick-check: lint, test, build (designed for wisp use)
+
+These serve as documentation-by-example and give new users
+a starting point for creating their own formulas.
+
+Closes #3246
+
+- feat(gate): add &#39;bd gate create&#39; for ad-hoc blocking gates (#3257)
+
+* feat(gate): add &#39;bd gate create&#39; for ad-hoc blocking gates
+
+Add a &#39;create&#39; subcommand to &#39;bd gate&#39; that creates ad-hoc gate issues
+which block other issues from appearing in &#39;bd ready&#39;.
+
+Previously, blocking gates could only be created through the formula/
+molecule system (via [steps.gate] in .formula.toml files). This left no
+CLI path to create a blocking gate on an arbitrary issue outside the
+formula system.
+
+The new command supports all gate types (human, timer, gh:run, gh:pr)
+and creates a DepBlocks dependency between the gate and the target issue.
+
+Usage:
+  bd gate create --blocks &lt;issue-id&gt; [--type=human] [--reason=...] [--timeout=2h]
+
+The gate is resolved with the existing &#39;bd gate resolve&#39; command.
+
+* test(gate): add comprehensive tests for &#39;bd gate create&#39;
+
+Add TestEmbeddedGateCreate with 9 subtests covering:
+- Default human gate creation with text and JSON output
+- Timer gate with timeout and reason
+- gh:pr gate with await-id
+- Gate blocks issue from bd ready
+- Resolving gate unblocks issue in bd ready
+- Missing --blocks flag error
+- Nonexistent target issue error
+- Gate appears in bd gate list
+
+All tests use the embedded Dolt test pattern with isolated databases.
+
+- feat: add --remote flag to bd dolt push/pull commands (#3211)
+
+Add PushRemote/PullRemote methods to RemoteStore interface, allowing
+push/pull to target a specific named remote instead of the default.
+
+Implementation:
+- Refactor Push/ForcePush/Pull to delegate to internal pushToRemote/
+  pullFromRemote methods with parameterized remote name
+- Parameterize credential routing (isGitProtocolRemote,
+  shouldUseCLIForCredentials, shouldUseCLIForCloudAuth) to accept
+  remote name instead of using s.remote
+- Make shouldUseCLIForCloudAuth per-scheme-aware: Azure env vars only
+  trigger CLI routing for az:// remotes, not dolthub:// remotes
+- Add credentialsForRemote() helper that only returns creds when the
+  target remote matches the default remote (prevents sending wrong
+  creds to wrong host)
+- Add --remote flag to doltPushCmd and doltPullCmd in CLI
+- Implement PushRemote/PullRemote on EmbeddedDoltStore
+
+Backwards compatibility:
+- Push(ctx)/Pull(ctx)/ForcePush(ctx) signatures unchanged
+- No --remote flag = exact same behavior as today
+- PushTo/PullFrom for federation peers unchanged
+
+Closes: bd-4v3
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+- fix(dolt): bd dolt status recognizes externally-hosted Dolt servers (#3362)
+
+* fix(dolt): bd dolt status recognizes externally-hosted Dolt servers
+
+Previously, `bd dolt status` always inspected the local PID/port files
+written by a beads-managed dolt process. With dolt_mode=server pointing
+at a remote dolt_server_host (e.g. Hosted Dolt, shared team server), it
+would unconditionally report &#34;not running&#34; even though CRUD commands
+authenticated and connected to the server just fine.
+
+When cfg.IsDoltServerMode() is true and the configured host is not local
+(localhost / 127.0.0.1 / ::1 / 0.0.0.0 / empty), dispatch to a new
+runExternalDoltStatus helper that pings the configured endpoint via SQL
+using the same DSN resolution as the CRUD path (host, resolved runtime
+port, user, password via GetDoltServerPasswordForPort, TLS). Reports
+reachability, host/port/database/user/TLS, and the remote server version
+from `SELECT @@version`. For --json, emits a structured object including
+`mode: &#34;external&#34;` and `running` (bool) so automation can act on it.
+
+The local PID-file path is preserved unchanged for beads-managed and
+local shared-server setups.
+
+Includes a unit test for the isLocalHost helper covering IPv4/IPv6
+loopback, 0.0.0.0, case-insensitive localhost, whitespace, and remote
+hosts.
+
+Verified against an externally-hosted Dolt server with TLS and
+credentials in ~/.config/beads/credentials:
+  bd dolt status      -&gt; &#34;Dolt server: running (external)&#34; with version
+  bd dolt status --json -&gt; structured result with running=true, version
+
+Fixes bd-q35w.
+
+Made-with: Cursor
+
+* test(dolt): cover runExternalDoltStatus output paths
+
+Addresses codecov feedback on PR #3362 — the external-server status
+path in cmd/bd/dolt.go was sitting at 11% patch coverage because the
+isLocalHost unit test did not exercise runExternalDoltStatus itself.
+
+Adds TestRunExternalDoltStatus_Unreachable which invokes the helper
+against 127.0.0.1:1 (connection refused — no timeout penalty) with
+two sub-tests:
+
+- text output: asserts the &#34;not reachable (external)&#34; banner plus
+  Host/Database/User/TLS/Error fields are all rendered.
+- json output: asserts the JSON body contains mode=external,
+  running=false, the configured host/port/user/database, tls=true,
+  and an error field.
+
+This exercises the DSN construction, GetDoltServerPasswordForPort
+credential lookup, ping-failure branch, and both output modes
+without requiring a running Dolt server.
+
+Made-with: Cursor
+
+- fix(bootstrap): clone via SQL server in external server mode (#3346)
+
+When dolt_mode=server is configured in metadata.json (e.g. for an
+externally managed dolt sql-server), bd bootstrap was cloning to the
+local .beads/dolt/ directory instead of letting the server handle the
+clone. The server never discovered the database, causing bd ready to
+return empty results.
+
+Root cause: cloneFromRemote() used isEmbeddedMode() which checks
+runtime globals not yet initialized during bootstrap, defaulting to
+embedded mode. finalizeSyncedBootstrap() had the same issue, resetting
+dolt_mode back to embedded.
+
+Fix:
+- cloneFromRemote() now uses doltserver.ResolveServerMode() which reads
+  metadata.json directly to determine the server lifecycle mode
+- In ServerModeExternal, connects to the running server via MySQL and
+  executes CALL DOLT_CLONE so the server places the database in its
+  own data directory
+- finalizeSyncedBootstrap() uses cfg.IsDoltServerMode() to preserve
+  the server mode from the loaded config
+- Added tests for both server-mode clone routing and mode preservation
+
+Fixes #3343
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+- fix(doctor): resolve Dolt password/TLS for externally-hosted servers (#3361)
+
+* fix(doctor): resolve Dolt password/TLS for externally-hosted servers
+
+bd doctor failed against externally-hosted Dolt servers (dolt_mode=server
+with a remote dolt_server_host) while bd create/list/close all succeeded.
+The CRUD path in cmd/bd/main.go set ServerPassword (via
+GetDoltServerPasswordForPort) and ServerTLS explicitly, but several doctor
+code paths either hardcoded os.Getenv(&#34;BEADS_DOLT_PASSWORD&#34;) only or
+omitted the password/TLS entirely. This produced &#34;Access denied for user
+root&#34; on the lock check, &#34;Unable to open database&#34; on the database check,
+&#34;Unable to verify Dolt server-backed database permissions&#34;, and
+false-positive &#34;Fresh clone detected&#34; warnings for users whose
+credentials live in ~/.config/beads/credentials.
+
+Root cause: applyResolvedConfig in internal/storage/dolt/open.go populated
+Host/Port/User from metadata.json but never Password or TLS, so any
+caller that went through NewFromConfigWithOptions (notably doctor&#39;s
+SharedStore) got an unauthenticated DSN.
+
+Changes:
+
+- internal/storage/dolt/open.go: applyResolvedConfig now resolves
+  ServerPassword via GetDoltServerPasswordForPort(cfg.ServerPort) and
+  ServerTLS from fileCfg, matching the CRUD path in main.go. This alone
+  fixes Database, Permissions, Repo Fingerprint, and Project Identity
+  checks for the SharedStore-based doctor checks.
+
+- cmd/bd/doctor/dolt.go, doctor/server.go, doctor/perf_dolt.go: use
+  cfg.GetDoltServerPasswordForPort(port) instead of reading only
+  BEADS_DOLT_PASSWORD. The helper already checks the env var first so
+  behavior is a strict superset. Drop now-unused &#34;os&#34; import where
+  applicable.
+
+- cmd/bd/doctor_health.go: include Password in the DSN (it was omitted).
+
+- cmd/bd/doctor/legacy.go (CheckFreshClone): look up the password using
+  the resolved runtime port instead of cfg.GetDoltServerPassword(), which
+  internally uses cfg.GetDoltServerPort() and defaults to 3307 when
+  metadata.json omits dolt_server_port. Credentials are keyed by
+  [host:port], so the mismatched-port lookup returned empty and caused a
+  spurious &#34;Fresh clone detected&#34; warning.
+
+Using GetDoltServerPasswordForPort (not GetDoltServerPassword) is
+important because the resolved runtime port from the port file may
+differ from cfg.GetDoltServerPort(), matching the approach already used
+in cmd/bd/main.go.
+
+Verified end-to-end against an external Dolt server using TLS with
+credentials in ~/.config/beads/credentials: bd doctor goes from
+65 passed / 7 warn / 2 error to 69 passed / 5 warn / 0 error, with all
+remaining warnings reflecting genuine project state (missing
+fingerprint, uncommitted working tree, etc.), not bugs.
+
+Tests: go test ./cmd/bd/ ./cmd/bd/doctor/ ./internal/storage/dolt/ pass.
+Made-with: Cursor
+
+* test(doctor): cover external-server credential resolution paths
+
+Adds targeted unit tests for the four doctor code paths flagged by
+codecov on PR #3361 (bd-h5k7 / bd-tzo9):
+
+- TestCheckFreshClone_ServerModeUnreachable: exercises the
+  GetDoltServerPasswordForPort(port) branch in legacy.go and the
+  FR-030 fall-through when the configured external Dolt server is
+  unreachable.
+- TestCheckDoltVersion_Unreachable: exercises the credential
+  resolution and DSN build in doctor/server.go with a guaranteed-
+  unreachable port via BEADS_DOLT_SERVER_PORT=1.
+- TestRunDoltServerDiagnostics_Unreachable: loads metadata.json so
+  runDoltServerDiagnostics pulls user/tls/password through
+  configfile.Load before the ping fails.
+- TestRunCheckHealth_UnreachableServer: smoke-tests runCheckHealth
+  to cover the Password field in doctor_health.go&#39;s DSN.
+
+All four tests run without a real Dolt server by pointing at an
+unreachable loopback port so CI does not need docker.
+
+Made-with: Cursor
+
+* ci: retrigger unrelated audit concurrency flake
+
+Made-with: Cursor
+
+- fix: bd update --type honors custom types (fixes #3030) (#3093)
+
+Move type validation from CLI-level (update.go) to storage layer
+(UpdateIssueInTx), matching the create path. The CLI-level validation
+failed when GetCustomTypes() was unavailable (subprocess context,
+circuit breaker) and config.yaml lacked types.custom (because bd config
+set only writes to Dolt). The storage layer reads custom types within
+the same transaction, so it always works.
+
+Co-authored-by: mayor &lt;rastislav.marko@panzarobotics.com&gt;
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Fix git-remote-cache tmp_pack file leak in embedded mode (#3355)
+
+The embedded Dolt backend accumulates orphaned tmp_pack_* files in
+.dolt/git-remote-cache/*/repo.git/objects/pack/ when git fetch operations
+fail or are interrupted. Dolt&#39;s built-in cleanup (GitBlobstore.maybeRunGC,
+gated to once per 24h) either never fires in embedded mode or cannot keep
+pace with the accumulation rate.
+
+On a real machine with normal beads usage across ~10 workspaces, this leak
+consumed 102 GB (412 files) in 7 days, filling the disk to capacity and
+causing cascading system failures (swap exhaustion, shell temp file errors,
+app crashes).
+
+Add cleanGitRemoteCacheGarbage() to EmbeddedDoltStore that walks the
+git-remote-cache pack directories and removes tmp_pack_*/tmp_idx_* files
+older than 5 minutes (preserving in-progress fetches). The method is:
+
+- Called from Close() to clean up on store teardown
+- Called from withDBConn() deferred cleanup (covers fetch/push paths)
+- Rate-limited to once per 10 minutes via a package-level throttle to
+  avoid filesystem thrashing on hot paths
+
+Fixes #3354
+
+Co-authored-by: kev &lt;kglynn@pryoninc.com&gt;
+
+- fix(init): skip hooks during from-jsonl bootstrap commit (#3342)
+
+- fix: bd config set --db &lt;path&gt; now resolves BEADS_DIR for yaml-only keys (#3348) (#3379)
+
+When bd config set was invoked with --db and a yaml-only key (like
+dolt.auto-commit), configCommandCanRunWithoutStore returned early
+before prepareSelectedCommandContext set BEADS_DIR. This caused
+findProjectConfigYaml to look for config.yaml relative to CWD instead
+of the --db target.
+
+Fix: when --db is provided and the command can run without a store,
+resolve the beads dir and call prepareSelectedCommandContext so
+BEADS_DIR points to the correct .beads directory.
+
+Co-authored-by: kev &lt;kglynn@pryoninc.com&gt;
+
+- fix: warn on unrecognized config keys in bd config set (#3293) (#3377)
+
+* fix: warn on unrecognized config keys in bd config set (#3293)
+
+bd config set accepted any key silently, causing typos to become
+persistent no-ops with no indication the key was wrong. One user
+spent 5 minutes debugging why a config change had no effect — the key
+was &#39;export.auto-export&#39; instead of &#39;export.auto&#39;.
+
+Add key validation against known namespaces (export.*, dolt.*, jira.*,
+etc.) and standalone keys (no-git-ops, actor, etc.). The custom.*
+namespace remains exempt for user-extensible settings.
+
+When an unrecognized key is detected:
+- Warn on stderr (still writes, preserving backwards compat)
+- Use Levenshtein distance to suggest the closest valid key
+- Point user to &#39;bd config --help&#39;
+
+Example:
+  $ bd config set exprot.auto false
+  Warning: &#34;exprot.auto&#34; is not a recognized config key.
+    Did you mean &#34;export.auto&#34;?
+  Run &#39;bd config --help&#39; for valid namespaces.
+  Set exprot.auto = false
+
+* style: fix gofmt alignment in config key map
+
+---------
+
+Co-authored-by: kev &lt;kglynn@pryoninc.com&gt;
+
+- fix: no-git-ops=true now implies export.git-add=false (#3314) (#3376)
+
+When no-git-ops=true is set, bd still attempted to git add the
+auto-export file on every write, producing a warning on every
+invocation. Users had to set both no-git-ops=true and
+export.git-add=false separately.
+
+Check the no-git-ops flag in both the auto-export path
+(export_auto.go) and the pre-commit hook export path (hooks.go).
+When no-git-ops is true, skip the git add without warning.
+
+Co-authored-by: kev &lt;kglynn@pryoninc.com&gt;
+
+- fix: show (none) placeholder when description is empty in bd show (#3336) (#3375)
+
+bd show &lt;id&gt; printed no DESCRIPTION section at all when the description
+was null/empty. Users could not distinguish &#34;empty&#34; from &#34;tool is
+hiding the description&#34; — one user spent a full investigation round
+debugging this misdiagnosis.
+
+Always render the DESCRIPTION header. When the body is empty, show
+&#34;(none)&#34; in muted text.
+
+Co-authored-by: kev &lt;kglynn@pryoninc.com&gt;
+
+- fix: bd list --parent no longer echoes parent when it has no children (#3349) (#3374)
+
+The tree path in getHierarchicalChildren unconditionally seeded the
+parent into the result set, making it impossible for the &#34;has no
+children&#34; message at line 876 to ever trigger. Text output always
+showed at least 1 result (the parent), disagreeing with --json and
+--flat which correctly returned empty.
+
+Fix: only include the parent in the tree result when actual descendants
+exist. When descendants are empty, return nil so the caller prints the
+existing &#34;has no children&#34; message. This aligns text, JSON, and flat
+output semantics.
+
+Co-authored-by: kev &lt;kglynn@pryoninc.com&gt;
+
+- fix(dolt): exit 0 when push/pull finds no remote configured (GH#3031) (#3194)
+
+bd dolt push and bd dolt pull now exit 0 with an informational message
+when no Dolt remote is configured, instead of exiting 1 with an error.
+This makes the session close protocol safe for agents to follow
+regardless of whether the user has set up Dolt replication.
+
+Also deduplicates the &#34;no remote&#34; guidance that was copy-pasted across
+the force-push and regular-push branches into a shared helper, and
+applies the same treatment to bd dolt pull.
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix: remove orphan detection from compat migration hot path (#3344) (#3378)
+
+DetectOrphanedChildren ran a full table scan with a LEFT JOIN on every
+store open (every bd command), logging up to 107 orphan warnings per
+invocation. At ~90 connections/sec in polled environments, this drove
+sustained backend CPU load and trained users to ignore stderr.
+
+Replace with a no-op. Orphan detection already lives in bd doctor
+(--deep and --check=conventions) where it belongs as an on-demand
+diagnostic, not a recurring side effect.
+
+Co-authored-by: kev &lt;kglynn@pryoninc.com&gt;
+
+- fix: skip DOLT_COMMIT when compat migrations produce no changes (#3366) (#3373)
+
+RunCompatMigrations unconditionally called DOLT_COMMIT(&#39;-m&#39;, &#39;schema:
+auto-migrate&#39;) on every store open, even when all migrations were
+already applied (the common case). The Dolt server logs each no-op as
+a WARNING, flooding the server log — one user reported 103K &#34;nothing
+to commit&#34; warnings out of 110K total log lines (94%).
+
+Fix: check dolt_status for dirty tables before staging and committing.
+When all compat migrations are no-ops and no schema tables are dirty,
+skip the DOLT_ADD/DOLT_COMMIT entirely. Falls back to the original
+behavior if dolt_status is unavailable (older servers).
+
+Co-authored-by: kev &lt;kglynn@pryoninc.com&gt;
+
+- fix: cross-rig prefix routing for issue resolution via routes.jsonl (#2954)
+
+* fix: cross-rig prefix routing for issue resolution via routes.jsonl
+
+When bd runs from a redirected .beads directory (e.g., crew/beercan →
+town/.beads), issue IDs with prefixes mapped to other rigs in routes.jsonl
+were not resolved. The local store (hq database) was queried, the issue
+wasn&#39;t found, and only contributor auto-routing was tried as fallback.
+
+Add resolveViaPrefixRouting to the resolution chain in routed.go:
+1. Try local store (existing)
+2. Try prefix routing via routes.jsonl (NEW)
+3. Try contributor auto-routing (existing)
+
+The prefix router extracts the prefix from the bead ID, looks up the
+matching route in routes.jsonl, opens the target rig&#39;s .beads directory
+to read its dolt_database from metadata.json, temporarily overrides
+BEADS_DOLT_SERVER_DATABASE, and opens a read-only store for that database.
+
+This unblocks cross-rig operations like bd show, bd update, convoy creation,
+and auto-dispatch for multi-rig Gas Town deployments.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(doctor): add auto-fix for Dolt Format warning (seed .bd-dolt-ok marker)
+
+The &#34;Dolt Format&#34; doctor check detected pre-0.56 dolt databases but had
+no automatic fix — it fell through to the default &#34;No automatic fix
+available&#34; case. The remedy is trivial: create the .bd-dolt-ok marker
+file, which is exactly what ensureDoltInit does non-destructively.
+
+Add a DoltFormat fix function and wire it into the doctor_fix switch.
+In server mode the .beads/dolt/.dolt/ directory is vestigial; seeding
+the marker acknowledges the database without any destructive action.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(vc): bd vc commit now includes config table changes
+
+bd vc commit called store.Commit() which intentionally skips the config
+table (GH#2455) to prevent sweeping stale config during auto-commits.
+But bd vc commit is an explicit user action — it should commit everything
+visible in bd vc status, including config changes from bd config set.
+
+Switch to CommitPending which calls CommitWithConfig internally, ensuring
+all dirty tables including config are committed.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: suppress gosec G304 warnings for trusted beads paths
+
+The paths are constructed internally from the beads directory, not from
+user input. Add nolint:gosec annotations matching the rest of the codebase.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(test): accept both committed outcomes in vc commit_json test
+
+bd create auto-commits in embedded mode, so a subsequent bd vc commit
+may find nothing pending. CommitPending correctly returns committed=false
+in this case. The test now accepts both outcomes, matching the pattern
+used by commit_with_message.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(export): add _type discriminator to JSONL issue lines (#3272)
+
+* fix(export): add _type discriminator to JSONL issue lines (GH#3271)
+
+bd export produces JSONL with mixed schemas: issue lines and memory lines.
+Memory lines carry &#34;_type&#34;:&#34;memory&#34; but issue lines had no _type field,
+causing downstream consumers to crash when they encounter an unexpected
+schema (e.g. json.loads(line)[&#34;status&#34;] throws KeyError on memory lines).
+
+Add &#34;_type&#34;:&#34;issue&#34; to all exported issue records via an exportIssueRecord
+wrapper struct. This makes every JSONL line self-describing without changing
+the Issue or IssueWithCounts types used elsewhere.
+
+Both export paths updated: manual (runExport) and auto (exportToFile).
+Import already handles this gracefully - unknown fields are ignored during
+json.Unmarshal into types.Issue.
+
+* test(export): add _type discriminator assertion to embedded export tests
+
+Verifies that every JSONL line from bd export carries a _type field
+(&#34;issue&#34; or &#34;memory&#34;) and that each type has its expected key fields.
+Addresses codecov 0% patch coverage flag on PR #3272.
+
+- fix(setup): skip duplicate hooks when beads plugin is installed (GH#3192) (#3196)
+
+When both the beads Claude Code plugin and `bd setup claude` are active,
+bd prime fires twice per session — wasting ~1-2k tokens each time. The
+plugin already declares identical SessionStart/PreCompact hooks in its
+plugin.json, so project-level hooks are redundant.
+
+Now `bd setup claude` detects the plugin via enabledPlugins in settings
+files and skips writing hooks when the plugin is already providing them.
+The CLAUDE.md integration section is still installed since the plugin
+does not provide that. `bd setup claude --check` reports &#34;plugin-managed&#34;
+as a valid success state instead of &#34;No hooks installed&#34;.
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(setup): add alwaysApply frontmatter to Cursor rules template (GH#3191) (#3193)
+
+Without YAML frontmatter, Cursor defaults .mdc files to Manual mode,
+requiring users to @-reference the rule explicitly. Add alwaysApply: true
+so beads context loads automatically every session, consistent with the
+Claude and Gemini integrations.
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- cleanup(agents): Delete spurious cmd/bd/@AGENTS.md file (#3198)
+
+Summary: `ls`ing around and noticed an extra file. It looks like this has been updated ~4 times and is out of date compared to `AGENTS.md`
+
+- fix(schema): repair v0.63→v1.0 upgrades where issues.started_at is missing (GH#3363) (#3365)
+
+Upgrading from v0.63.x (Go-based migrations, no schema_migrations tracking)
+to v1.0.x hits the backfillMigrations path because schema_migrations is
+empty but issues already exists. In that path runMigrations ran each
+.up.sql as a single multi-statement Exec with tolerateExisting=true.
+Migration 0027 has two ALTERs (issues, wisps); EnsureIgnoredTables has
+already added started_at to the dolt-ignored wisps table, so the second
+ALTER errors with duplicate column. Depending on driver multi-statement
+semantics this can abort the batch before the issues ALTER takes effect,
+while the version is still recorded — schema_migrations lies about what
+was applied and bd list later fails with:
+
+  Error 1105: column &#34;started_at&#34; could not be found in any table in scope
+
+Two-layer fix:
+
+- Split each migration&#39;s SQL into individual statements and execute them
+  one-by-one. Guarantees every statement is attempted regardless of
+  driver batch-abort behavior, without changing error tolerance.
+
+- Add MigrateAddStartedAtColumn compat migration (017) that idempotently
+  ensures started_at exists on issues and wisps. Runs after the SQL
+  pipeline and repairs databases already broken by the batch-abort race.
+
+Regression test covers drop → migrate → re-run idempotency.
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- ci: add nix build check to catch vendorHash drift (GH#3298) (#3364)
+
+Adds a CI job that runs `nix build .#default` on PRs touching go.mod,
+go.sum, default.nix, flake.nix, or flake.lock, so dependabot bumps
+that invalidate vendorHash fail loudly in CI instead of silently
+breaking Nix users on main (as happened in GH#3221).
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix: auto-sanitize hyphenated dolt_database on embedded-mode upgrade (#3231) (#3232)
+
+Auto-sanitize hyphenated `dolt_database` names on embedded-mode upgrade. Projects initialized before #2142 retain hyphenated names in `metadata.json`; after the 1.0.0 embedded-mode default flip, those names are rejected by the embedded Dolt engine. This change detects legacy names on store open, renames the database directory, persists the fix to `metadata.json`, and adds a doctor check + init guard for future prevention.
+
+Closes #3231. Related: #2142, #2160, #3128, #3129.
+
+Thanks @kevglynn for the thorough fix, migration safety (collision detection, crash-safe ordering), and test coverage.
+
+- fix(ado): use date-only format for WIQL ChangedDate queries (#3345)
+
+Thanks @harry-miller-trimble for the clean fix and thorough test updates!
+
+- fix(linear): harden push against data clobbering (#3328)
+
+Closes #3289, #3309, #3252, #3253 — hardens Linear push: requires explicit linear.state_map.* config, rejects ambiguous state resolution, narrows push dedup to pushable fields, blocks unscoped project-filtered push from creating unlinked beads, and adds regression test for the orphan-ownership rule (parent-filtered push must not update external issues Beads hasn&#39;t claimed via external_ref).</div>
+</div>
+
+<a href="../project/gastownhall_beads.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
