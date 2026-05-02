@@ -1,0 +1,1311 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in develop (71 commits) - MemPalace/mempalace - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in develop (71 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/MemPalace_mempalace.html">MemPalace/mempalace</a> /
+    Updates in develop (71 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/MemPalace_mempalace.html">MemPalace/mempalace</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-01 23:28 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/MemPalace/mempalace/commits/develop" target="_blank">https://github.com/MemPalace/mempalace/commits/develop</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Эти обновления значительно повышают стабильность и надежность MemPalace, особенно в части интеграции с ChromaDB, путем устранения сбоев, связанных с функциями встраивания, разрастанием HNSW-индекса и несоответствиями метаданных. Ключевые улучшения включают надежное обнаружение расхождений в емкости с запасными вариантами, усовершенствованную интеграцию LLM для контекстно-зависимого определения происхождения корпуса и классификации сущностей, а также новые средства защиты конфиденциальности при использовании внешних API. Кроме того, проект теперь поддерживает импорт истории сессий Gemini CLI и обеспечивает улучшенную обработку стенограмм разговоров и имен разделов проектов.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Merge pull request #1303 from MemPalace/fix/mcp-server-missing-embedding-function
+
+fix(mcp_server): pass embedding_function= on collection reopen (#1299)
+
+- fix(mcp_server): address copilot review on #1303
+
+- Resolve the EF inside the two reopen branches that actually call
+  `client.get_collection` / `client.create_collection`, so warm-cache
+  reads stay zero-cost (no `MempalaceConfig()` / `_resolve_providers`
+  on every tool call).
+- Reuse `ChromaBackend._resolve_embedding_function()` instead of
+  duplicating its try/except + log message + None-fallback.
+- Reword the inline + CHANGELOG explanation to clarify that ChromaDB 1.x
+  persists the EF *identity* (its `name()`) but not the *instance/
+  configuration* — `mempalace.embedding` documents this and spoofs
+  `name()` to `&#34;default&#34;` precisely so the identity check passes; the
+  bug was the *provider list* (lazy ONNX selection) silently differing.
+
+- fix(mcp_server): pass embedding_function= on collection reopen (#1299)
+
+`mcp_server._get_collection` bypassed `ChromaBackend.get_collection`
+and called `client.get_collection` / `client.create_collection` without
+`embedding_function=`. ChromaDB 1.x does not persist the EF identity
+with the collection, so the MCP server&#39;s reopen silently bound
+chromadb&#39;s built-in `DefaultEmbeddingFunction` while the miner / Stop
+hook ingest path bound `mempalace.embedding.get_embedding_function()`.
+
+On bleeding-edge interpreters (python 3.14 + chromadb 1.5.x on Apple
+Silicon, per #1299) the default EF&#39;s lazy ONNX provider selection could
+SIGSEGV the host process on first `col.add()`, killing the MCP stdio
+server and leaving every subsequent tool call returning
+`Connection closed` until Claude Code was relaunched. Reads worked
+because `col.get(ids=...)` and metadata fetches don&#39;t invoke the EF;
+the auto-ingest path worked because mining routes through the backend
+abstraction. Diary writes were the consistent failure surface.
+
+Resolve the EF up front (matching `ChromaBackend._resolve_embedding_function`)
+and pass it into both reopen branches. Falls back to the chromadb default
+only if `mempalace.embedding.get_embedding_function` itself raises.
+
+Regression test patches the chromadb client class to capture
+`embedding_function=` on every `get_collection` / `create_collection`
+call from `_get_collection(create=True)` and `_get_collection()`, and
+fails if any call omits it.
+
+Follow-up to #1262 / #1289 (which fixed the metadata-mismatch SIGSEGV
+path); this addresses the EF-mismatch SIGSEGV path on the same surface.
+
+- Merge pull request #1289 from MemPalace/fix/mcp-server-collection-reopen-crash
+
+fix(mcp_server): split get_or_create_collection on reopen (follow-up to #1262)
+
+- fix(mcp_server): split get_or_create_collection on reopen (follow-up to #1262)
+
+#1262 split `get_or_create_collection` into `get_collection` + fallback
+`create_collection` inside `ChromaBackend.get_collection`, fixing the
+chromadb 1.5.x Rust-binding SIGSEGV that fires when stored collection
+metadata differs from the call-site&#39;s `_HNSW_BLOAT_GUARD` payload.
+
+The MCP server&#39;s `_get_collection(create=True)` carries the same metadata
+payload at `mcp_server.py:287` and routes through chromadb&#39;s Python
+client directly, bypassing the backend layer. Both `tool_add_drawer`
+and `tool_diary_write` reach this site on every invocation, and the
+Stop hook fires `mempalace_diary_write` at session end — which was
+exactly the crash path #1089 named.
+
+Apply the same try/except split here so legacy palaces whose stored
+metadata predates the bloat-guard expansion no longer crash on the
+MCP-server reopen path. Regression test patches
+`get_or_create_collection` at the chromadb client class level (not the
+instance — chromadb&#39;s mtime-change detection rebuilds the client between
+calls, so an instance-level spy doesn&#39;t survive) and asserts the second
+`_get_collection(create=True)` call never reaches it.
+
+- Merge pull request #1262 from Legion345/fix/stop-hook-crash
+
+fix(storage): stop ChromaDB from crashing when reopening an existing …
+
+- Merge pull request #1287 from messelink/fix/hnsw-divergence-scales-with-sync-threshold
+
+fix(repair): scale HNSW divergence floor with hnsw:sync_threshold
+
+- Merge pull request #1288 from MemPalace/fix/repair-max-seq-id-blob-heuristic
+
+fix(repair): decode BLOB embeddings.seq_id in max-seq-id heuristic (#1254)
+
+- fix(repair): decode BLOB embeddings.seq_id in max-seq-id heuristic (#1254)
+
+`_compute_heuristic_seq_id` ran `int(row[0])` directly on the result
+of `MAX(e.seq_id)`. On palaces where chromadb 1.5.x has been writing
+seq_ids natively (8-byte big-endian uint64 BLOB), that raises
+`ValueError: invalid literal for int() with base 10: b&#39;...&#39;` before
+the dry-run can print, leaving users with no path through the
+recovery feature added in #1135 — the only documented un-poison
+route for palaces hit by the original PR #664 shim bug.
+
+Decode BLOB return values via `int.from_bytes(val, &#34;big&#34;)` and
+keep the existing `int(val)` path for INTEGER rows. Regression
+test seeds a BLOB row in `embeddings.seq_id` and asserts the
+heuristic surfaces the correct integer.
+
+- fix(repair): scale HNSW divergence floor with hnsw:sync_threshold
+
+The capacity probe added in #1227 hardcoded a 2,000-row floor for the
+&#34;diverged&#34; decision. The comment justifying that number explicitly tied
+it to chromadb&#39;s *default* sync_threshold of 1,000 — &#34;Two synchronization
+windows worth (2 × sync_threshold = 2000) is a safe steady-state ceiling&#34;.
+
+#1191 then bumped sync_threshold to 50,000 via _HNSW_BLOAT_GUARD without
+updating the floor. Result: any palace created with the bloat guard
+flips between OK and DIVERGED on every flush cycle. Steady-state
+divergence sits at 0–50K (the natural queue depth), and the 2,000 floor
+trips the guardrail the moment the queue exceeds 10% of sqlite_count.
+The MCP server then routes search to BM25-only and disables duplicate
+detection for ~80% of the write cycle on actively-mined ≥100K palaces,
+even though chromadb is behaving correctly.
+
+This change reads the configured `hnsw:sync_threshold` from
+`collection_metadata` per palace and scales the floor to 2 × that value.
+The 10% relative term and the original #1222 detection capability are
+unchanged — a 91%-missing-of-192K palace (the actual #1222 reproducer)
+still trips, regardless of whether the collection was created with
+sync_threshold=1000 or 50000.
+
+Behavior summary:
+
+| Collection&#39;s sync_threshold | New floor | Old floor |
+|---|---|---|
+| Missing (legacy palace)     | 2000      | 2000 (unchanged)
+| 1000 (chromadb default)     | 2000      | 2000 (unchanged)
+| 50000 (#1191 bloat guard)   | 100000    | 2000 (the bug)
+
+Tests:
+- test_capacity_status_tolerates_lag_under_large_sync_threshold (regression
+  for the #1191/#1227 conflict — 100K sqlite + 50K HNSW + sync=50K → OK)
+- test_capacity_status_still_flags_real_corruption_under_large_sync (#1222
+  shape with bloat-guard collection — still detects corruption)
+- test_capacity_status_default_threshold_when_no_sync_metadata (legacy
+  palaces without the metadata row use the 2000 fallback floor)
+- test_unflushed_path_also_uses_dynamic_floor (the never-flushed branch
+  scales too — 30K under sync_threshold=50000 is no longer flagged)
+
+All 18 pre-existing tests in tests/test_hnsw_capacity.py and 45 tests
+in tests/test_backends.py still pass.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(storage): stop ChromaDB from crashing when reopening an existing palace
+
+- Merge pull request #1234 from MemPalace/feat/normalize-gemini-cli
+
+feat(normalize): Gemini CLI session JSONL adapter
+
+- fix(normalize): discard user/gemini turns before session_metadata sentinel
+
+Agent-Logs-Url: https://github.com/MemPalace/mempalace/sessions/4511e9aa-38e7-440e-a6f8-eda91e576f0f
+
+Co-authored-by: igorls &lt;4753812+igorls@users.noreply.github.com&gt;
+
+- docs(normalize): add Gemini CLI JSONL to module-level supported formats list
+
+Agent-Logs-Url: https://github.com/MemPalace/mempalace/sessions/a32f48bb-2a78-494a-9698-e69304732d3f
+
+Co-authored-by: igorls &lt;4753812+igorls@users.noreply.github.com&gt;
+
+- Merge pull request #1233 from MemPalace/feat/privacy-consent-prompt
+
+feat(privacy): blocking consent gate for env-fallback LLM API keys
+
+- feat(normalize): Gemini CLI session JSONL adapter
+
+Adds a fifth format adapter to mempalace.normalize alongside the
+existing Claude Code, Codex, Claude.ai, ChatGPT, and Slack parsers.
+After this lands, mempalace mine --mode convos ingests Gemini CLI
+session history without manual export.
+
+Why now: Claude Code and Codex CLI are already supported by convo_miner;
+adding Gemini closes the major-CLI-tool coverage gap. After this lands,
+the README&#39;s &#34;verbatim conversation history&#34; promise is honestly
+delivered for all three top-tier API-keyed coding CLIs (Claude Code,
+Codex CLI, Gemini CLI), not just two of them. This is the third leg
+of the trio Aya pushed for so the public claim matches the actual
+ingest pipeline.
+
+Gemini CLI stores sessions at ~/.gemini/tmp/&lt;project_hash&gt;/chats/ as
+JSONL. The on-disk schema (per google-gemini/gemini-cli#15292):
+
+    {&#34;type&#34;:&#34;session_metadata&#34;,&#34;sessionId&#34;:&#34;...&#34;,&#34;projectHash&#34;:&#34;...&#34;,...}
+    {&#34;type&#34;:&#34;user&#34;,&#34;id&#34;:&#34;msg1&#34;,&#34;content&#34;:[{&#34;text&#34;:&#34;Hello&#34;}]}
+    {&#34;type&#34;:&#34;gemini&#34;,&#34;id&#34;:&#34;msg2&#34;,&#34;content&#34;:[{&#34;text&#34;:&#34;Hi&#34;}]}
+    {&#34;type&#34;:&#34;message_update&#34;,&#34;id&#34;:&#34;msg2&#34;,&#34;tokens&#34;:{&#34;input&#34;:10,&#34;output&#34;:5}}
+
+The new _try_gemini_jsonl parser:
+
+  - requires a session_metadata record so it does not false-positive
+    against Claude Code or Codex JSONL passing through the dispatch
+    chain in _try_normalize_json
+  - extracts user/gemini message text from each entry&#39;s content array
+    of {&#34;text&#34;: &#34;...&#34;} blocks, joining multiple blocks per message
+    in order
+  - skips message_update entries (token-count deltas with no message
+    text) and any other unknown record types
+  - returns None when fewer than two conversational messages are
+    present, mirroring the codex parser&#39;s &gt;=2-message guard
+
+Test coverage: 9 new unit tests in tests/test_normalize.py mirroring
+the codex test pattern - happy path, multi-turn, missing session
+metadata, message_update skip, single-message rejection, multi-block
+content concatenation, empty content skip, malformed-line resilience,
+and explicit no-match against codex JSONL fixtures. Schema-level only;
+real Gemini CLI session fixtures are a follow-up once a real user file
+is available.
+
+Closes part of #59 (the Gemini CLI portion of the umbrella request).
+
+- feat(privacy): blocking consent gate for env-fallback LLM API keys
+
+Adds api_key_source provenance (&#39;flag&#39; | &#39;env&#39; | None) to LLMProvider
+so cmd_init can distinguish a key passed via --llm-api-key (explicit
+opt-in) from one silently picked up via OPENAI_API_KEY / ANTHROPIC_API_KEY
+shell env (stray credential).
+
+When the endpoint is external AND api_key_source == &#39;env&#39;, init now
+prints a blocking [y/N] prompt before any data is sent. Anything other
+than &#39;y&#39; drops the LLM and falls back to heuristics-only.
+
+Adds --accept-external-llm flag for CI / non-interactive bypass.
+
+Completes the UX gap in #1224: the URL-based warning was informational
+and init kept running, so a user who didn&#39;t notice the line had already
+leaked. The consent prompt is the actual gate; explicit flag-passed keys
+remain treated as already-consented.
+
+- Merge pull request #1191 from funguf/fix/hnsw-index-bloat-rebased
+
+fix: prevent HNSW index bloat from resize+persist cycles
+
+- Merge pull request #1135 from sha2fiddy/feature/max-seq-id-shim-fix
+
+fix: narrow `_fix_blob_seq_ids` + add `repair --mode max-seq-id`
+
+- Merge pull request #1197 from wahajahmed010/fix/1194-hyphenated-wing-tunnels
+
+fix(tunnels): normalize wing names in topic tunnel lookup for hyphenated dirs
+
+- Merge pull request #1195 from MemPalace/fix/wing-name-normalization-tunnels
+
+fix(graph): normalize wing slug at init so topic tunnels fire for hyphenated dirs (#1194)
+
+- fix(palace_graph): defer annotation eval for Python 3.9 compat
+
+``def _normalize_wing(wing: str | None) -&gt; str | None`` uses PEP 604
+union syntax which requires Python 3.10+ at runtime. The project still
+declares ``python_requires=&#34;&gt;=3.9&#34;`` and CI runs the test-linux (3.9)
+matrix, where every test in ``tests/test_palace_graph*`` errors out
+before collection with ``TypeError: unsupported operand type(s) for |``.
+
+Added ``from __future__ import annotations`` so all annotations in
+this module are evaluated lazily as strings — the union syntax is then
+accepted on 3.9 without needing to rewrite to ``Optional[str]``.
+
+Surfaced after rebasing this PR onto current develop.
+
+- test(cli): mock _run_pass_zero so wing-name test survives corpus-origin
+
+cmd_init now invokes ``_run_pass_zero`` unconditionally (#1221, #1223
+landed on develop after this PR&#39;s branch point). The pass reads sample
+content via ``builtins.open``; with that mocked to MagicMock, the
+downstream ``&#34;\\n\\n&#34;.join(samples)`` in
+``corpus_origin.detect_origin_heuristic`` raises
+``TypeError: expected str instance, MagicMock found``.
+
+This test only cares about the wing-slug write to the registry, so
+stub the pass-zero call directly rather than try to satisfy its full
+sample-gathering contract.
+
+- fix(miner,convo_miner): close remaining wing-name normalization gaps (#1194)
+
+Two follow-ups against the review on this PR:
+
+1. ``miner.load_config`` no-yaml fallback was returning the raw dirname
+   as the wing, while ``cmd_init`` writes ``topics_by_wing`` under the
+   normalized slug. A hyphenated project mined without a ``mempalace.yaml``
+   file silently lost every topic tunnel — same key-miss class as #1194,
+   just down the no-yaml branch (raised by Qodo on this PR).
+
+2. ``convo_miner`` was applying the lower/replace rule inline at one
+   call site. Now folded through ``normalize_wing_name`` so all wing-slug
+   producers — ``cmd_init``, ``room_detector_local``, ``miner.load_config``
+   fallback, ``convo_miner`` — share a single source of truth. No
+   behavior change for any input; pure consolidation.
+
+Added ``test_load_config_no_yaml_normalizes_hyphenated_wing`` to lock
+the fallback path to the normalized slug — fails on develop without
+the miner change.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(graph): normalize wing slug at init so topic tunnels fire for hyphenated dirs (#1194)
+
+`init` was recording `topics_by_wing[&lt;raw-dirname&gt;]` while `mempalace.yaml`
+got the lower-cased separator-collapsed slug. At mine time the miner
+read the slug from the yaml and missed the registry key, so
+`_compute_topic_tunnels_for_wing` returned 0 silently for every project
+whose folder contained a `-` or a space — the most common shape in the
+wild.
+
+Extracted the rule into `config.normalize_wing_name()` and routed both
+`cli.cmd_init` (registry write) and `room_detector_local.detect_rooms_local`
+(yaml write) through it. Added a regression test in `test_cli.py`
+asserting the registry call uses the normalized slug, plus four direct
+unit tests for the helper.
+
+Refs #1180.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(tunnels): normalize wing names in topic tunnel lookup for hyphenated dirs (#1194)
+
+- fix(chroma): write blob-fix marker even when narrowing skips all rows
+
+The narrowed _fix_blob_seq_ids returned early when safe_rows was empty,
+but #1177&#39;s marker contract requires the marker to be written on every
+successful pass — even no-op — so subsequent opens skip the sqlite3
+connection entirely. Without this, palaces that have no genuine 0.6.x
+BLOBs but DO have sysdb-10-prefixed rows would re-open sqlite3 on every
+call, defeating the #1090 corruption guard.
+
+Restructured the conditional so the marker write is unconditional after
+a successful sqlite scan, regardless of whether any rows were updated.
+
+Surfaced by test_fix_blob_seq_ids_writes_marker_when_already_integer
+during the develop-rebase of this PR. The author&#39;s branch predates the
+marker contract from #1177 (merged 2026-04-26), so this is a rebase-edge
+fix-up rather than a logic change to their narrowing behaviour.
+
+- fix: narrow _fix_blob_seq_ids shim + add repair --mode max-seq-id
+
+The BLOB-seq_id migration shim (PR #664) ran int.from_bytes(..., &#39;big&#39;)
+over every BLOB in max_seq_id, including chromadb 1.5.x&#39;s own native
+format (b&#39;\x11\x11&#39; + 6 ASCII digits). That conversion yields a ~1.23e18
+integer that silently suppresses every subsequent embeddings_queue write
+for the affected segment (queue filter is seq_id &gt; start), causing
+silent drawer-write drops after a 1.5.x upgrade.
+
+Two-part fix:
+
+1. Shim narrowing (mempalace/backends/chroma.py)
+   - Drop max_seq_id from the shim loop. chromadb owns that column&#39;s
+     format; we don&#39;t reinterpret it.
+   - Defense-in-depth: skip rows in embeddings whose seq_id BLOB has the
+     sysdb-10 b&#39;\x11\x11&#39; prefix rather than misconvert.
+
+2. Recovery command (mempalace/repair.py, mempalace/cli.py)
+   - mempalace repair --mode max-seq-id [--segment &lt;uuid&gt;]
+     [--from-sidecar &lt;path&gt;] [--dry-run] [--yes] [--no-backup]
+   - Detects poisoned rows via threshold (seq_id &gt; 2**53).
+   - Default heuristic: MAX(embeddings.seq_id) over the collection owning
+     the poisoned segment. Matches METADATA max exactly; VECTOR segments
+     get a few seq_ids ahead (queue skips an already-indexed window — an
+     acceptable loss vs. resetting to 0 and re-processing everything).
+   - --from-sidecar copies clean values from a pre-corruption sqlite db.
+   - Backs up chroma.sqlite3, closes chroma handles, atomic UPDATEs,
+     post-repair verification that raises MaxSeqIdVerificationError if
+     any row is still above threshold.
+
+Tests: 8 new in tests/test_repair.py (detection, heuristic, sidecar,
+dry-run, segment filter, no-op, backup, rollback-on-verify-failure).
+3 new in tests/test_backends.py (max_seq_id untouched by shim,
+sysdb-10 prefix skipped in embeddings, legacy big-endian u64 BLOBs
+still convert). Full suite: 1103 passed.
+
+- fix: prevent HNSW index bloat via batch_size + sync_threshold metadata
+
+Sets `hnsw:batch_size` and `hnsw:sync_threshold` to 50_000 at every
+collection-creation call site:
+
+* `mempalace/backends/chroma.py` — `get_collection(create=True)` and the
+  legacy `create_collection()` path. Preserves existing `hnsw:space`,
+  `hnsw:num_threads=1` (race fix from #976), and `**ef_kwargs`
+  (embedding-function plumbing from a4868a3).
+* `mempalace/mcp_server.py` — the direct `client.get_or_create_collection`
+  path used when a palace is first opened by the MCP server. Without this
+  third site, MCP-bootstrapped palaces would skip the guard and could
+  still trigger the original bloat.
+
+Without these defaults, mining ~10K+ drawers triggers ~30 HNSW index
+resizes and hundreds of persistDirty() calls. persistDirty uses relative
+seek positioning in link_lists.bin; accumulated seek drift across resize
+cycles causes the OS to extend the sparse file with zero-filled regions,
+each cycle compounding the next. Result: link_lists.bin grows into
+hundreds of GB sparse, after which `status`, `search`, and `repair` all
+segfault and the palace is unrecoverable.
+
+Empirical: rebuilt a palace from scratch on 39,792 drawers across 5
+wings with this fix applied. Final palace 376 MB, link_lists.bin stays
+at 0 bytes across both Chroma collection dirs, status and search both
+return cleanly. Same workload without the fix bloated the palace to
+565 GB sparse (30 GB on disk) and segfaulted at ~15K drawers.
+
+Migration note: chromadb 1.5.x exposes a
+`collection.modify(configuration={&#34;hnsw&#34;: {...}})` retrofit path for
+already-created collections (`UpdateHNSWConfiguration`), but this PR
+doesn&#39;t pursue it — by the time link_lists.bin has bloated the index
+is already corrupt and the only known recovery is a fresh mine.
+
+Tests assert both keys land on the persisted collection metadata in
+both `ChromaBackend` code paths, which also covers the #1161 &#34;config
+silently dropped&#34; concern at CI time. A separate smoke test was used
+to verify the metadata round-trips through `chromadb.PersistentClient`
+reopen on chromadb 1.5.8.
+
+Closes #344
+Supersedes #346
+
+Co-authored-by: robot-rocket-science &lt;robot-rocket-science@users.noreply.github.com&gt;
+
+- Merge pull request #1231 from MemPalace/fix/hooks-convos-additive-mining
+
+fix(hooks): always mine the active transcript as convos, additive to MEMPAL_DIR
+
+- test(hooks): skip bash subprocess validator test on Windows
+
+`bash` on the Windows CI runner resolves to `wsl.exe` which fails with
+&#34;Windows Subsystem for Linux has no installed distributions.&#34; The shell
+hooks themselves are POSIX-only — Windows users use the Python entry
+point — so the bash-subprocess exercise is non-applicable on win32.
+
+The static-grep validator tests still run on every platform, so the
+shell-side validation is still asserted under Windows; only the live
+bash invocation is skipped.
+
+- fix(hooks): consolidate transcript ingest, harden shell parsers (#1231 review)
+
+Address Copilot review on #1231:
+
+1. Stop double-mining the transcript on the Python side. ``_get_mine_targets``
+   now returns only the ``MEMPAL_DIR`` projects target — the convos target
+   for the transcript dir is dropped because ``_ingest_transcript`` already
+   handles it on every hook fire. The duplicate spawn was using
+   ``sys.executable`` (vs ``_mempalace_python()``) and a different ``--wing``,
+   so each Stop/PreCompact event was writing the same transcript into two
+   wings under asymmetric interpreters and overwriting the single
+   ``_MINE_PID_FILE`` lock.
+
+2. ``_maybe_auto_ingest`` and ``_mine_sync`` now spawn via
+   ``_mempalace_python()`` so the resolved interpreter matches the venv
+   that owns mempalace (matters under GUI-launched harnesses where
+   ``sys.executable`` may resolve to a system Python without chromadb).
+
+3. Replace ``eval $(...)`` in both shell hooks with a ``mapfile``-based
+   reader. Sanitized values are still emitted by the same Python parser,
+   but the shell now does plain variable assignment instead of executing
+   the parser&#39;s stdout — smaller blast radius if the sanitizer is ever
+   bypassed.
+
+4. Mirror ``_validate_transcript_path`` in the shell hooks via a
+   ``is_valid_transcript_path`` helper — extension + traversal-segment
+   rejection, parity with the Python validator. The convos mine in each
+   shell hook is now gated on the validator instead of bare ``-f``.
+
+5. Tighten the ``..`` traversal test that previously exercised the
+   suffix gate by mistake (``../../etc/passwd`` lacks ``.json[l]``).
+   Use ``.jsonl`` paths with traversal segments to actually hit the
+   ``..`` rejection branch.
+
+6. README: add a one-liner pointing at ``mempalace sweep`` for users
+   who want per-message recall on top of the file-level chunks the
+   hooks produce. The sweeper was undiscoverable previously.
+
+Tests: 1418 passed, 1 skipped (full suite minus benchmarks).
+
+- Merge pull request #1230 from MemPalace/fix/hooks-convos-mode-1232
+
+fix(hooks): pass --mode convos when mining Claude Code transcript dirs
+
+- fix(hooks): always mine the active transcript as convos, additive to MEMPAL_DIR
+
+#1230 fixed --mode convos for the case where MEMPAL_DIR was unset, but
+left two configurations broken:
+
+  - MEMPAL_DIR set to a project dir: convos never mined (MEMPAL_DIR
+    overrode the transcript path); only project files were ingested.
+  - MEMPAL_DIR set to a conversations dir per the old hooks/README: the
+    projects miner ran on JSONL — same wrong-miner behaviour.
+
+The shell hooks (mempal_save_hook.sh, mempal_precompact_hook.sh) had
+the same MEMPAL_DIR-overrides-transcript bug AND were missing --mode
+on every spawned `mempalace mine` call.
+
+Make the auto-ingest *additive*. _get_mine_dir → _get_mine_targets,
+returning a list of (dir, mode) pairs:
+
+  - MEMPAL_DIR (when valid) contributes (dir, &#34;projects&#34;)
+  - A valid transcript JSONL contributes (parent, &#34;convos&#34;)
+  - Both can appear together; the hook spawns one ingest per target
+
+Same change applied to the shell save and precompact hooks. Precompact
+also gained transcript_path parsing so it can run the convos mine
+synchronously before context is compressed. hooks/README.md updated to
+describe MEMPAL_DIR as a project-files target, never a convos target.
+
+- fix(hooks): harden _get_mine_dir path validation
+
+- Normalize MEMPAL_DIR via Path.expanduser().resolve() so ~/proj paths
+  are correctly accepted instead of falling through to transcript fallback
+- Replace bare Path.expanduser().is_file() transcript check with the
+  existing _validate_transcript_path() which adds .resolve(), enforces
+  .jsonl/.json extension, and rejects &#39;..&#39; path-traversal components
+- Update tests to compare resolved paths (cross-platform correctness)
+- Add tests for tilde expansion, path-traversal rejection, and
+  non-jsonl extension rejection in _get_mine_dir
+
+Agent-Logs-Url: https://github.com/MemPalace/mempalace/sessions/f69176c7-d752-40ef-ba71-d0e4adc3a689
+
+Co-authored-by: igorls &lt;4753812+igorls@users.noreply.github.com&gt;
+
+- fix(hooks): pass --mode convos when mining a Claude Code transcript dir
+
+The Stop and PreCompact hooks spawn `mempalace mine &lt;dir&gt;` with no
+`--mode` flag, which defaults to `projects` in cli.py. When MEMPAL_DIR
+is unset, _get_mine_dir falls back to the parent of the transcript
+JSONL — and miner.py&#39;s READABLE_EXTENSIONS includes `.jsonl`, so the
+projects miner happily ingests Claude Code session JSONL as if it were
+source code instead of conversation.
+
+Make _get_mine_dir return (dir, mode): MEMPAL_DIR keeps `projects`,
+the JSONL fallback yields `convos`. Both _maybe_auto_ingest and
+_mine_sync now thread the mode into the spawned command.
+
+- Merge pull request #1227 from MemPalace/fix/hnsw-capacity-divergence-1222
+
+fix(repair): detect HNSW capacity divergence and fall back to BM25 (#1222)
+
+- fix(repair): address Copilot review on #1227
+
+Five Copilot review issues + the Python 3.9 CI failure rolled into one
+follow-up:
+
+* Replace ``dict | None`` annotated assignment with a type-comment so
+  module load doesn&#39;t evaluate PEP 604 syntax on Python 3.9 (CI red).
+* Drop ``mempalace repair rebuild`` — the CLI only ships ``mempalace
+  repair`` (rebuild) and ``mempalace repair-status``. Updated all
+  user-facing messages, docstrings, and test assertions.
+* Replace ``_get_client()`` in ``tool_search`` with the safe
+  ``_refresh_vector_disabled_flag`` probe so the fallback isn&#39;t
+  defeated by the very chromadb client load it&#39;s trying to avoid.
+* Short-circuit ``tool_status`` to a pure-sqlite reader
+  (``_tool_status_via_sqlite``) when divergence is detected so wing /
+  room counts come back without ever opening the persistent client.
+* Wrap the recency-window query in ``_bm25_only_via_sqlite`` with an
+  ``id``-ordered fallback so legacy schemas missing ``created_at``
+  don&#39;t break BM25 search.
+
+New test covers the sqlite-status short-circuit. 1409 tests pass.
+
+- fix(repair): detect HNSW capacity divergence and fall back to BM25 (#1222)
+
+When chromadb&#39;s HNSW segment freezes at a stale max_elements while
+sqlite keeps accumulating embeddings, the next chromadb open segfaults
+the MCP server on every tool call. Adds a pure-filesystem capacity probe
+(zero chromadb interaction), a `mempalace repair-status` read-only
+health check, and a BM25-only sqlite fallback so the palace stays
+reachable even when vector search is unavailable.
+
+* `hnsw_capacity_status` reads sqlite + index_metadata.pickle directly
+  via a tight-allowlist unpickler — no hnswlib import, no segment load.
+* MCP server runs the probe at startup and after every reconnect; sets
+  `_vector_disabled` and routes search to the sqlite FTS5 + BM25 path.
+* `tool_status` and `tool_reconnect` surface the fallback state.
+* Threshold tuned for chromadb 1.5.x async-flush lag (2× sync_threshold).
+
+- Merge pull request #1225 from MemPalace/feat/privacy-warn-tailscale-cgnat
+
+feat(privacy): treat Tailscale CGNAT range (100.64.0.0/10) as local
+
+- Merge pull request #1223 from MemPalace/chore/corpus-origin-merge-followup
+
+chore(corpus-origin): tag merged evidence by tier + pin confidence-source contract
+
+- feat(privacy): treat Tailscale CGNAT range (100.64.0.0/10) as local
+
+2 files changed, 60 insertions, 0 deletions. 2 new tests (RED-first).
+
+Follow-up to #1224&#39;s privacy warning. The URL-based heuristic in
+``mempalace.llm_client._endpoint_is_local`` shipped without recognizing
+Tailscale&#39;s CGNAT range (100.64.0.0/10), so a user running LM Studio,
+Ollama, or any local LLM accessible via a Tailscale-assigned 100.x.x.x
+address would currently get a wrong privacy warning — Tailscale
+addresses are network-private (only reachable inside the user&#39;s
+Tailnet) but they&#39;re not RFC1918, so the heuristic was treating them
+as external.
+
+This PR adds CGNAT recognition: when the hostname starts with ``100.``
+AND the second octet is between 64 and 127 inclusive, it&#39;s classified
+as local. Addresses in 100.x.x.x outside that range (i.e. second octet
+&lt; 64 or &gt; 127) are regular allocated public space and remain external,
+so a user pointing at a public 100.0.0.1 still gets the warning.
+
+Concrete user impact:
+
+  Before: ``mempalace init --llm-provider openai-compat --llm-endpoint http://100.100.50.50:1234``
+          (LM Studio on Tailnet) → triggers privacy warning incorrectly.
+
+  After:  same command → no warning. data stays inside the user&#39;s
+          Tailnet, which is what the warning is supposed to protect against.
+
+TDD: 2 tests added in ``tests/test_llm_client.py``, both RED-first.
+
+1. ``test_openai_compat_provider_tailscale_cgnat_endpoint_is_local``
+   — covers three Tailscale CGNAT addresses (start, middle, near-end
+   of the range) and pins they&#39;re all classified local. This was the
+   RED that drove the implementation.
+
+2. ``test_openai_compat_provider_outside_tailscale_cgnat_is_external``
+   — pins the boundary on both sides: addresses with second octet 0-63
+   and 128-255 stay external. Prevents future &#34;treat all 100.x.x.x as
+   local&#34; overcorrection.
+
+Tests: 1388 total mempalace tests pass. 2 pre-existing environmental
+failures unrelated to this change (chromadb optional dep). Ruff check
++ format both clean.
+
+Backwards compatible: only widens the local-recognition set. Anything
+classified local before is still classified local; anything classified
+external before remains so unless it&#39;s specifically in the CGNAT range.
+
+Out of scope (tracked for future iteration based on real user feedback,
+not built speculatively): pre-init confirmation prompt before sending
+to external API, persistent ``private-only`` config flag that refuses
+external endpoints entirely, explicit cloud-provider name detection
+(&#34;Using Anthropic&#39;s hosted API at ...&#34; vs the current generic warning).
+
+- chore(corpus-origin): address Copilot review on #1223
+
+- cli.py: stringify each evidence entry exactly once before the
+  startswith check (was calling str(e) twice per element).
+- tests: replace brittle `confidence != 0.90` assertion with an
+  equality check against detect_origin_heuristic on the same samples.
+  The original would have spuriously fired if the heuristic ever
+  legitimately produced 0.90 for these samples; the new form pins the
+  contract directly.
+
+- chore(corpus-origin): tag merged evidence by tier + pin confidence-source contract
+
+Two follow-ups to PR #1221&#39;s merge-fields behavior, both raised by the
+Copilot review on that PR:
+
+- Evidence merge now prefixes each entry with `Tier-1 heuristic: ` or
+  `Tier-2 LLM: ` so the on-disk `origin.json` audit record retains tier
+  provenance. The pre-#1221 code labeled heuristic evidence; the
+  merge-fields refactor flattened that. Re-prefixing is idempotent.
+
+- Tests now assert that the merged `confidence` is the heuristic&#39;s, not
+  the LLM&#39;s. Added inline assertions to the two existing
+  contradiction/disagreement tests, plus a dedicated
+  `test_merge_tier_fields_confidence_matches_heuristic_call` that
+  compares to `detect_origin_heuristic` directly so a future regression
+  letting Tier 2 confidence leak through cannot pass silently.
+
+Tests: 1378 pass. Ruff check + format both clean (CI-pinned 0.4.x).
+
+- Merge pull request #1224 from MemPalace/feat/privacy-warn-external-llm
+
+feat(privacy): warn when LLM tier sends content to external API
+
+- feat(privacy): warn when LLM tier sends content to external API
+
+4 files changed, 248 insertions, 0 deletions. 7 new tests (4 unit + 3 integration), all RED-first.
+
+Per @milla-jovovich&#39;s question to @igorls during PR #1221 review: users
+running `mempalace init` with an external LLM provider (Anthropic API,
+OpenAI hosted, etc.) need a clear, explicit warning that their folder
+content will be sent to the provider, that MemPalace doesn&#39;t control
+how the provider logs/retains/uses that data, and how to opt out.
+@igorls confirmed this should be a small follow-up PR scoped to the
+warning itself, before the v3.3.4 tag.
+
+This PR adds:
+
+- `_endpoint_is_local(url)` helper in `mempalace/llm_client.py` —
+  URL-based heuristic returning True if the hostname is on the user&#39;s
+  machine or private network. Covers: localhost, 127.0.0.1, ::1,
+  hostnames ending in .local (mDNS/Bonjour), IPv4 RFC1918 ranges
+  (10/8, 172.16-31/12, 192.168/16), and IPv6 unique-local addresses
+  (fc00::/7).
+
+- `is_external_service` property on the `LLMProvider` base class.
+  Subclasses inherit; the URL determines (no provider-specific
+  hardcoding). This means: Ollama on localhost = local. LM Studio on
+  LAN = local. Anthropic with default `https://api.anthropic.com` =
+  external. A user proxying Anthropic through localhost (advanced
+  setup) = local, no false-positive warning.
+
+- One-line warning print in `cmd_init` after successful provider
+  acquisition, gated on `is_external_service`:
+
+      ⚠ {provider_name} is an EXTERNAL API. Your folder content will be
+      sent to the provider during init. MemPalace does not control how
+      the provider logs, retains, or uses your data. Pass --no-llm to
+      keep init fully local.
+
+  The warning fires AFTER `LLM enabled: ...` so users see both that
+  the LLM is engaged AND the privacy implications of where it lives,
+  before Pass 0 / entity detection actually runs.
+
+LOCAL providers (Ollama on localhost, LM Studio on localhost or LAN,
+llama.cpp on localhost, vLLM on localhost) DO NOT trigger the warning —
+nothing leaves the user&#39;s machine/network in those configurations.
+
+TDD: 7 tests added across 2 files.
+
+Unit tests in `tests/test_llm_client.py` (4 tests, all RED-first):
+
+1. test_ollama_provider_default_endpoint_is_local — pins that the
+   default `http://localhost:11434` is classified local.
+2. test_openai_compat_provider_localhost_endpoint_is_local — covers
+   the LM Studio / llama.cpp / vLLM common case (localhost,
+   127.0.0.1, and 192.168.x LAN).
+3. test_openai_compat_provider_cloud_endpoint_is_external — pins
+   that pointing openai-compat at https://api.openai.com (or any
+   non-local URL) classifies as external.
+4. test_anthropic_provider_default_endpoint_is_external — pins that
+   AnthropicProvider&#39;s default endpoint is external (the dominant
+   user-facing case for `--llm-provider anthropic`).
+
+Integration tests in `tests/test_corpus_origin_integration.py` (3 tests,
+RED-first; 1 was the critical RED — the other 2 passed by accident
+since nothing printed &#34;EXTERNAL API&#34; before this PR):
+
+5. test_init_prints_privacy_warning_when_provider_is_external —
+   captures stdout from cmd_init with a mocked external provider,
+   asserts the warning text contains &#34;EXTERNAL API&#34; + &#34;--no-llm&#34; +
+   language about MemPalace not controlling provider behavior.
+6. test_init_no_privacy_warning_when_provider_is_local — same flow
+   with a mocked local provider, asserts the warning text does NOT
+   appear.
+7. test_init_no_privacy_warning_with_no_llm_flag — pins the --no-llm
+   path: no provider acquisition attempted, no warning fires.
+
+Tests: 1382 total mempalace tests pass. 2 pre-existing environmental
+failures unrelated to this change (chromadb optional dep). Ruff check +
+format both clean.
+
+Backwards compatible: `is_external_service` is a new property; existing
+callers don&#39;t reference it. The warning is a new print statement that
+fires only when an external endpoint is acquired. The `--no-llm` opt-out
+existed before this PR and continues to work identically.
+
+Out of scope for follow-up (deliberately not in this PR per Igor&#39;s
+&#34;small PR&#34; guidance): Tailscale CGNAT (100.64.0.0/10) treatment,
+pre-init confirmation prompt, persistent privacy-mode config flag,
+explicit cloud-provider name detection. Tracked for future iteration.
+
+- Merge pull request #1198 from jphein/fix/tokenize-none-guard
+
+fix(searcher): tolerate None documents in BM25 reranker
+
+- Merge pull request #1201 from jphein/fix/palace-graph-none-metadata
+
+fix(palace_graph): skip None metadata in build_graph
+
+- Merge pull request #1177 from jphein/fix/blob-seq-marker-guard
+
+fix: skip _fix_blob_seq_ids sqlite open on already-migrated palaces (#1090)
+
+- Merge pull request #1221 from MemPalace/feat/corpus-origin-merge-tier-fields
+
+feat(corpus-origin): merge LLM fields into heuristic result instead of replacing
+
+- style: drop unused pathlib.Path imports in marker tests
+
+- Merge pull request #1173 from jphein/fix/quarantine-on-make-client
+
+fix: call quarantine_stale_hnsw() in make_client(); lower threshold to 5min
+
+- style: ruff format under CI-pinned 0.4.x
+
+- feat(corpus-origin): merge LLM fields into heuristic result instead of replacing
+
+2 files changed, 260 insertions, 7 deletions. 4 new tests (all RED-first).
+
+Per @igorls&#39;s review of PR #1211 (https://github.com/MemPalace/mempalace/pull/1211#issuecomment-4322762236):
+the corpus-origin Pass 0 currently lets a Tier 2 LLM result REPLACE the
+heuristic result wholesale. With ``--llm`` default-on (since #1211) and a
+small local model like Ollama gemma4:e4b, the LLM can return a wrong
+``likely_ai_dialogue=False, confidence=0.90`` that overrides a confident
+heuristic ``True``. Tier 2&#39;s persona/user/platform extraction is the whole
+reason to run it; the YES/NO call should stay with the heuristic.
+
+This PR changes ``_run_pass_zero`` in ``mempalace/cli.py`` to merge fields
+instead of replacing:
+
+  - ``likely_ai_dialogue``  → KEEP heuristic&#39;s (don&#39;t let weak LLM flip)
+  - ``confidence``          → KEEP heuristic&#39;s (paired with the bool above)
+  - ``primary_platform``    → TAKE LLM&#39;s when LLM provides one
+  - ``user_name``           → TAKE LLM&#39;s when LLM provides one
+  - ``agent_persona_names`` → TAKE LLM&#39;s when LLM provides any
+  - ``evidence``            → COMBINE both signal trails
+
+This preserves the persona-extraction value of Tier 2 (the whole point of
+running it) while preventing a weak local model from flipping a confident
+heuristic.
+
+TDD: 4 tests added in tests/test_corpus_origin_integration.py covering
+the four state combinations:
+
+1. test_merge_tier_fields_heuristic_yes_llm_no_keeps_heuristic_bool —
+   The exact failure mode Igor caught. Heuristic confidently flags
+   AI-dialogue; mocked LLM contradicts. Asserts merged result keeps
+   heuristic&#39;s True AND merges LLM&#39;s persona/user/platform fields.
+   This test was the RED that drove the implementation.
+
+2. test_merge_tier_fields_heuristic_no_no_personas_leak —
+   Both tiers agree NOT AI-dialogue, both report empty personas. Pins
+   that the merge doesn&#39;t accidentally introduce personas.
+
+3. test_merge_tier_fields_heuristic_yes_llm_yes_combines_evidence —
+   Both tiers agree AI-dialogue, LLM extracts personas. Pins that
+   evidence from BOTH tiers ends up in the merged audit trail and
+   persona/user/platform come from LLM.
+
+4. test_merge_tier_fields_no_llm_provider_returns_heuristic_only —
+   Backwards compat: with no LLM provider (``--no-llm`` path), the
+   merge logic doesn&#39;t fire and behavior is identical to v3.3.4.
+
+Tests: 1367 pass on the full mempalace suite. 2 pre-existing
+environmental failures unrelated to this change (chromadb optional
+dep). Ruff check + format both clean.
+
+- fix(blob-seq-marker): tests + style nit per @igorls #1177 review
+
+Three new tests cover the marker contract:
+
+- test_fix_blob_seq_ids_writes_marker_after_blob_path — marker is
+  written after a successful BLOB → INTEGER conversion.
+- test_fix_blob_seq_ids_writes_marker_when_already_integer — marker
+  is written even on a no-op (already-INTEGER) path. The point of
+  the marker is to skip sqlite3.connect() on subsequent calls, not
+  to record that a conversion happened.
+- test_fix_blob_seq_ids_skips_sqlite_when_marker_present — verifies
+  the load-bearing property via monkeypatched sqlite3.connect: when
+  the marker exists, the function never opens sqlite. This is the
+  bug #1090 fix — opening Python&#39;s sqlite3 against a live ChromaDB
+  1.5.x WAL DB corrupts the next PersistentClient call, and we
+  must never do it again post-migration.
+
+Also folded in @igorls&#39;s style nit:
+
+- Path(marker).touch() instead of open(marker, &#34;a&#34;).close().
+  Same effect, reads cleaner. Moved Path import to the top of the
+  module since it didn&#39;t yet exist there.
+
+35/35 backend tests pass. The &#34;Production: fresh MCP server + stop
+hook + mempalace mine subprocess&#34; checkbox in the PR body is checked
+in the PR reply — the canonical 151K palace has been running this
+fix since #1177 was filed (via Syncthing-replicated source on the
+disks daemon at v1.7.0); zero PersistentClient corruption since.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(hnsw): address @igorls&#39;s #1173 review
+
+Restore three `_pin_hnsw_threads` tests that the previous integrity-gate
+commit deleted. The function is still live code on develop (defined at
+chroma.py:207, called from chroma.py:705 + mcp_server.py), so the
+deletion left the import unused (ruff F401) and dropped coverage on a
+function unrelated to this PR&#39;s scope. Restored verbatim from main.
+
+Plus three nits @igorls flagged:
+
+- **Thread-safety doc**: `_quarantined_paths` mutation is lock-free;
+  documented that idempotency of `quarantine_stale_hnsw` is the safety
+  property (concurrent same-palace calls produce a benign redundant
+  rename attempt that no-ops, no need for a lock).
+- **Pickle protocol assumption**: `_segment_appears_healthy` requires
+  PROTO ≥ 2 (`0x80`). Documented; matches what chromadb writes today,
+  and a future protocol-0/1 emission would conservatively quarantine
+  + lazy-rebuild rather than mis-classify as healthy.
+- Class-level vs module-level scope: keeping class-level — the
+  conftest reset is the controlled case, and module-level wouldn&#39;t
+  remove the foot-gun, just relocate it. Conftest reset documented in
+  the existing comment is the right pattern for test isolation.
+
+Style nit (`Path(marker).touch()` vs `open(marker, &#34;a&#34;).close()`)
+deferred — that pattern lives in #1177&#39;s territory, not #1173&#39;s.
+
+37/37 tests pass on the PR branch.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Merge pull request #1211 from MemPalace/feat/corpus-origin
+
+feat(init): context-aware corpus detection
+
+- feat(init): context-aware corpus detection
+
+10 files changed. 2,563 insertions, 30 deletions. 48 new tests, including end-to-end coverage live-tested with Anthropic Haiku 4.5.
+
+This PR overhauls the first-run experience of `mempalace init` end-to-end, ships a new corpus-origin detection module from scratch, wires it into entity classification and LLM refinement, adds a graceful-fallback path that means `init` never crashes on a missing LLM, and ships a meta-test that prevents internal-coordination jargon from leaking into source or tests.
+
+The headline change is that `mempalace init` now understands what kind of folder you&#39;re pointing it at — AI conversations, regular writing, code, narrative — and adapts how it classifies entities accordingly. The same folder containing `Echo`, `Sparrow`, and `Cipher` (names you&#39;ve assigned to AI agents) used to dump those into your &#34;people&#34; list alongside biological humans. Now they go into a separate `agent_personas` bucket, and your `people` list stays clean.
+
+But the broader change is that `mempalace init` got upgraded across the board — smarter defaults, smarter degradation, smarter classification, smarter persistence, and a new way to refresh as your folder grows. Built and live-verified with Anthropic Haiku 4.5; runs unmodified on the local LLM runtimes mempalace already supports.
+
+## What changes for users (in order, from `pip install` onwards)
+
+**Install** — `pip install mempalace` is unchanged. The package itself didn&#39;t shift.
+
+**First run — `mempalace init &lt;folder&gt;`:**
+
+1. **`init` examines your folder before classifying anything.** A free regex heuristic decides in milliseconds: AI conversations, regular writing, narrative, or code? If an LLM is reachable, a second pass extracts the corpus author&#39;s name and any agent persona names from the dialogue. v3.3.3 had no such step — it dove straight into entity detection with no corpus context.
+
+2. **LLM-assisted classification is now ON by default.** v3.3.3 made `--llm` opt-in. The LLM-assisted path is qualitatively better (extracts persona names, refines ambiguous classifications, gives the model corpus context) so it now runs by default. The provider abstraction is unchanged from v3.3.3 — three buckets are supported by `mempalace.llm_client`:
+   - **Anthropic** (`--llm-provider anthropic` + `ANTHROPIC_API_KEY`) — the official Messages API. **This is the path live-verified end-to-end in this PR with Haiku 4.5.** Cost: ~\$0.01 per `init`.
+   - **Ollama** (`--llm-provider ollama` — the default) — local models via `http://localhost:11434`. Fully offline. Honors the &#34;zero-API required&#34; promise.
+   - **OpenAI-compatible** (`--llm-provider openai-compat` + `--llm-endpoint`) — per the v3.3.3 `mempalace/llm_client.py` docstring, this covers &#34;OpenRouter, LM Studio, llama.cpp server, vLLM, Groq, Fireworks, Together, and most self-hosted setups.&#34; We did not test each of those individually as part of this PR; the abstraction has been stable since v3.3.3. If you try this PR with a specific provider and hit a quirk, please file an issue or comment here.
+
+3. **`init` never blocks on a missing LLM.** No Ollama running, no API key set? `init` prints a one-line message pointing at `--no-llm` and falls through to the heuristic-only path. New default behavior, new graceful fallback to support it. `--no-llm` is the new explicit opt-out.
+
+4. **`init` shows you what it detected.** A one-line banner — `Detected: Claude (Anthropic) (user: Jordan, agents: Echo, Sparrow, Cipher)` or `Corpus origin: not AI-dialogue (confidence: 0.98)` — tells you at a glance whether mempalace understood your folder.
+
+5. **Entity classification gets smarter across the board.** Even non-persona candidates benefit: the LLM has corpus context (this is AI-dialogue, this is the user&#39;s name, these are agent names) and uses it to disambiguate ambiguous candidates that aren&#39;t personas at all.
+
+6. **Agent personas live in their own bucket.** Names you&#39;ve assigned to AI agents (Echo, Sparrow, Cipher) go into a new `agent_personas` bucket instead of your `people` list. Your real-person entity list stays clean.
+
+7. **Detection result persists to `&lt;palace&gt;/.mempalace/origin.json`** with a `schema_version: 1` envelope, so downstream tools can read it.
+
+8. **Re-running `init` is now idempotent.** Bug fix — running `init` twice on the same folder used to give different classification results because the detection step was sampling its own `entities.json` output. Caught by integration testing during this PR.
+
+**Later — when your folder grows:**
+
+9. **`mempalace mine --redetect-origin`** is a new flag for refreshing the stored detection without redoing the whole `init`. Heuristic-only by design (the flag is meant to be cheap). If you want the full LLM-extracted detection refreshed (persona names, user name, etc.), run `mempalace init &lt;yourfolder&gt;` again — `init` is now idempotent (item 8), so re-running it on the same folder is safe.
+
+## Behind the changes
+
+- **New module** `mempalace/corpus_origin.py` (422 lines) with two-tier detection: regex heuristic with co-occurrence rule (suppresses ambiguous terms like `Claude` / `Gemini` / `Haiku` when no unambiguous AI signal is present, so French novels, astrology forums, poetry corpora, llama-rancher journals don&#39;t false-positive), and LLM tier that extracts `user_name` and `agent_persona_names` from dialogue structure with belt-and-suspenders user-vs-agent disambiguation.
+
+- **Entity-classification consumer wiring.** `entity_detector.detect_entities` and `project_scanner.discover_entities` accept an optional `corpus_origin` kwarg. When present and the corpus is identified as AI-dialogue, candidates whose name case-insensitively matches an `agent_persona_name` are routed into the `agent_personas` bucket instead of `people`. Per-entity `type` is rewritten to `&#34;agent_persona&#34;`.
+
+- **LLM-refine consumer wiring.** `llm_refine.refine_entities` accepts the same `corpus_origin` kwarg and prepends a `CORPUS CONTEXT` preamble to its system prompt giving the LLM the platform / user / persona context. Existing `TOPIC` / `PERSON` / `PROJECT` / `COMMON_WORD` / `AMBIGUOUS` labels are unchanged.
+
+- **`init` overhaul.** Pass 0 (corpus-origin detection) inserted before existing Pass 1 (entity discovery). `--llm` flipped to default-on. `--no-llm` added. Graceful-fallback path replaces the previous hard-error on missing LLM. Provider precedence unchanged from the existing `llm_client` module.
+
+- **`mine` flag.** `mempalace mine --redetect-origin` re-runs corpus-origin detection on the current corpus state and overwrites `&lt;palace&gt;/.mempalace/origin.json`.
+
+- **`CLAUDE.md` design principle reworded** — &#34;Local-first, zero external API by default.&#34; Local LLMs running on `localhost` (Ollama, LM Studio, llama.cpp, vLLM, unsloth studio) are part of the user&#39;s machine, not external APIs. External BYOK providers (Anthropic, OpenAI, Google) are supported but always opt-in, never default, never silent fallback.
+
+## Cost story
+
+- **Anthropic (verified path):** ~\$0.01 per `init` via Haiku 4.5 with `ANTHROPIC_API_KEY`.
+- **Ollama / local LLM runtime:** zero cost. Fully offline.
+- **OpenAI-compatible service:** depends entirely on the service. The abstraction supports any service speaking the standard `/v1/chat/completions` API; specific quirks vary per provider. Try it and tell us how it goes.
+- **No LLM at all:** graceful fallback to heuristic-only. Zero cost. `init` never blocks.
+
+## Backwards compatibility
+
+- All public function signatures gained the `corpus_origin` kwarg as optional (default `None`). Callers that don&#39;t pass it see the v3.3.3 return shape unchanged — no `agent_personas` key, no behavioral change.
+- The `--llm` CLI flag is preserved as a deprecated alias of the default. Existing scripts that pass it continue to work.
+- `corpus_origin=None` keeps `llm_refine.SYSTEM_PROMPT` byte-identical to v3.3.3.
+
+## Test coverage
+
+- **19 unit tests** in `tests/test_corpus_origin.py` covering both tiers, the co-occurrence rule, ambiguous-term suppression, word-boundary brand matching, and user/persona disambiguation.
+- **29 integration tests** in `tests/test_corpus_origin_integration.py` covering end-to-end through `mempalace init`, persona reclassification, the `--redetect-origin` flag, the `--llm` default flip, graceful fallback paths, and re-init idempotency. Of those 29, five specifically cover the intersection with develop&#39;s other in-flight work (Pass 0 ↔ auto-mine ordering, topics + agent_personas bucket coexistence, entities.json shape, the `wing=` kwarg threading, llm_refine TOPIC label + corpus_origin preamble composition).
+- **1354 total mempalace tests pass.** 2 pre-existing environmental failures (`test_mcp_stdio_protection` — chromadb optional dep) unrelated to this change; they fail on plain `develop` too.
+- **Live-smoke-tested** with real Anthropic Haiku 4.5 on AI-dialogue and narrative fixtures.
+
+## Hygiene guardrail
+
+This PR also adds a meta-test (`test_no_internal_coordination_jargon_in_source_or_tests`) that walks the source tree and asserts no internal-coordination jargon (e.g. development-phase markers, internal review-section references) leaks into runtime code, comments, docstrings, or LLM prompts. RED if anything slips in. Allowlist for legitimate RFC/spec section citations in `sources/`, `backends/`, `knowledge_graph.py`, and `i18n/`.
+
+- Merge pull request #936 from shaun0927/fix/diary-topic-sanitize
+
+fix: sanitize topic parameter in tool_diary_write
+
+- fix(hnsw): integrity gate in quarantine_stale_hnsw — corruption vs flush-lag
+
+Previous: quarantine fired whenever sqlite_mtime - hnsw_mtime exceeded
+the (lowered, in #1173) 300s threshold. ChromaDB 1.5.x flushes HNSW
+asynchronously and a clean shutdown does not force-flush, so the on-
+disk HNSW is *always* meaningfully older than chroma.sqlite3 — that&#39;s
+the steady state, not corruption. Quarantine renamed valid HNSW
+segments on every cold-start, chromadb created empty replacements,
+vector recall went to 0/N until rebuild.
+
+Confirmed in production on the disks daemon journal, 2026-04-26
+06:56:45: three of three HNSW segments quarantined on cold-start with
+538-557s mtime gaps (post-clean-shutdown flush lag), leaving a
+151,478-drawer palace with vector_ranked=0. Drift directories at
+*.drift-20260426-065645/ each contained a complete 253MB data_level0.bin
+plus 18MB index_metadata.pickle — clearly healthy indexes, renamed by
+the false-positive heuristic.
+
+Fix: two-stage gate.
+
+  1. mtime gate (existing) — gap &gt; stale_seconds is necessary.
+  2. integrity gate (new) — sniff index_metadata.pickle for chromadb&#39;s
+     expected protocol/terminator bytes (PROTO 0x80 head, STOP 0x2e
+     tail) and a non-trivial size, WITHOUT deserializing the file.
+     Healthy segment with mtime drift → keep in place; truncated /
+     zero-filled / partial-flush → quarantine.
+
+Format-sniff is deliberately non-deserializing — pickle deserialization
+can execute arbitrary code, and the PROTO+STOP byte presence + size
+floor is sufficient to distinguish a complete chromadb write from
+truncation, zero-fill, or a partial flush during process kill. Real
+load failures (the rare case where the bytes look right but chromadb
+fails to load) still surface to palace-daemon&#39;s _auto_repair, which
+calls quarantine_stale_hnsw directly on observed HNSW errors and
+bypasses this gate.
+
+The cold-start gate from 70c4bc6 (row 24) remains as a perf optimization
+— even with the integrity check, repeating the sniff on every reconnect
+is unnecessary work — but its load-bearing role is now covered by this
+deeper fix.
+
+4 new tests in test_backends.py:
+
+  - test_quarantine_stale_hnsw_renames_corrupt_segment (drift + bad meta)
+  - test_quarantine_stale_hnsw_leaves_healthy_segment_with_drift_alone
+    (drift + valid meta — the production case at 06:24)
+  - test_quarantine_stale_hnsw_leaves_segment_without_metadata_alone
+    (fresh / never-flushed, no meta file)
+  - test_quarantine_stale_hnsw_renames_truncated_metadata (under-floor
+    size, partial-flush shape)
+
+Existing test_quarantine_stale_hnsw_renames_drifted_segment renamed
+to renames_corrupt_segment with explicit corrupt meta_bytes — the old
+&#34;renames any drift&#34; contract is gone.
+
+Suite 1366/1366 pass.
+
+Coordinated cross-repo with palace-daemon&#39;s auto-repair-on-startup
+workaround (separate agent&#39;s commit ed3a892). With this fork-side fix
+the auto-repair becomes belt-and-suspenders; the structural cause
+of empty-HNSW-on-restart is addressed at the quarantine layer.
+
+CLAUDE.md row 26 + README fork-change-queue row + test count
+1363→1366.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(hnsw): gate quarantine_stale_hnsw to cold-start, not every reconnect
+
+Symptom on the canonical disks daemon: drift quarantines firing every
+10–30 minutes throughout the day under steady write load. Logs show
+.drift-* directories accumulating despite the daemon being the only
+writer (no Syncthing replication of palace data).
+
+Root cause is a false-positive thrash in the quarantine heuristic:
+
+- chroma.sqlite3 mtime bumps on every write (millisecond cadence).
+- HNSW segment files (data_level0.bin) only flush to disk on
+  chromadb&#39;s internal cadence, which can lag minutes behind sqlite
+  under continuous write load.
+
+Once the gap exceeds the 300s threshold, quarantine_stale_hnsw renames
+a perfectly valid HNSW segment, chromadb rebuilds it from scratch, and
+the cycle repeats as soon as the next batch of writes lands. The 300s
+threshold (lowered from 3600s in PR #1173 after a 0.96h-drift production
+segfault) is correct for the cross-machine-replication failure mode it
+was designed for, but wrong for a daemon-strict deployment whose only
+&#34;drift&#34; source is its own benign flush lag.
+
+Fix: gate the proactive quarantine check to the first ``make_client()``
+invocation per palace per process (``ChromaBackend._quarantined_paths``
+set). Real cold-start drift (replication, partial restore, crashed-mid-
+write) still gets caught — that&#39;s exactly when a fresh daemon process
+opens the palace. Real runtime drift on observed HNSW errors still gets
+caught via palace-daemon&#39;s ``_auto_repair`` which calls
+``quarantine_stale_hnsw`` directly, bypassing this gate.
+
+Two new tests in test_backends.py verify single-fire-per-palace and
+per-palace independence. Conftest clears the gate between tests.
+
+Suite 1362/1362 pass.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix: call quarantine_stale_hnsw() in make_client(); lower threshold to 5min
+
+make_client() called _fix_blob_seq_ids but skipped quarantine_stale_hnsw,
+so every fresh process (stop hook, precompact hook, CLI) opened a drifted
+palace and segfaulted in chromadb_rust_bindings before any write-path
+protection could fire.
+
+#1062 wires the quarantine call at MCP server startup (covers long-lived
+server processes). This fix adds it to make_client() itself — the call
+site that all callers (server, hooks, CLI, tests) pass through — so every
+fresh PersistentClient open is protected regardless of entry point.
+
+Also lowers stale_seconds default from 3600 to 300: a 0.96h-drifted
+segment caused production segfaults before the 1h threshold fired.
+ChromaDB&#39;s HNSW flush cadence means legitimate drift is seconds to low
+minutes; 5min gives headroom without admitting clearly corrupt segments.
+
+- Merge pull request #1210 from MemPalace/fix/repair-extraction-cap-detection
+
+fix(repair): refuse to overwrite when extraction looks truncated (#1208)
+
+- fix(repair): refuse to overwrite when extraction looks truncated (#1208)
+
+The user-reported case in #1208: a palace with 67,580 drawers had its
+HNSW files manually quarantined to recover from corruption. ``mempalace
+repair`` then ran cleanly and reported &#34;Drawers found: 10000 ... Repair
+complete. 10000 drawers rebuilt.&#34; Backup was the v3.3.3 chroma.sqlite3
+that did contain the full 67,580 — but the rebuilt collection only had
+the first 10K. 85% data loss, no warning.
+
+Root cause: ChromaDB&#39;s collection-layer get() silently caps at
+``CHROMADB_DEFAULT_GET_LIMIT = 10_000`` rows when reading from a
+collection whose segment metadata is stale (typical post-quarantine
+state). col.count() returns the same capped value, so neither the
+loop bound nor the extraction count flagged the truncation.
+
+Fix is defense-in-depth, not a recovery mechanism. Repair now:
+
+1. After extraction, queries chroma.sqlite3 directly via a read-only
+   sqlite3 connection: COUNT(*) FROM embeddings JOIN segments JOIN
+   collections WHERE name=&#39;mempalace_drawers&#39;. If that count exceeds
+   the extracted count, abort with a clear message before any
+   destructive operation.
+2. Falls back to a weaker check when the SQLite query can&#39;t run
+   (chromadb schema drift, locked file): if extracted exactly equals
+   CHROMADB_DEFAULT_GET_LIMIT, that&#39;s a strong-enough cap signal to
+   refuse without explicit acknowledgement.
+3. Adds ``--confirm-truncation-ok`` (CLI) and ``confirm_truncation_ok``
+   (rebuild_index kwarg) to override after independent verification.
+   Useful for the rare case of a palace genuinely sized at exactly
+   10,000 drawers.
+
+The guard logic lives in ``repair.check_extraction_safety()`` so the
+two extraction paths (CLI ``cmd_repair`` and the lower-level
+``rebuild_index``) share a single implementation. Raises
+``TruncationDetected`` carrying the printable message.
+
+Tests: 9 new cases covering the safe path (counts match, SQLite
+unreadable but well under cap), both abort paths (SQLite higher than
+extracted, unreadable + at cap), the override flag, and end-to-end
+behavior of ``rebuild_index`` with the guard wired in. Plus two
+``sqlite_drawer_count`` tests for the missing-file and bad-schema
+cases.
+
+What&#39;s NOT in this PR: actually recovering the missing 57,580
+drawers from the user&#39;s case. The on-disk SQLite still holds them;
+recovery is a separate flow (direct-extract from chroma.sqlite3,
+bypass the chromadb collection layer entirely). This PR&#39;s job is
+to stop repair from making it worse.
+
+Refs #1208.
+
+- Merge pull request #935 from shaun0927/fix/repair-crash-safety
+
+fix: guard against data loss in repair, migrate, and CLI rebuild
+
+- Merge pull request #1205 from MemPalace/ci/python-313-windows-macos
+
+ci: bump Windows and macOS jobs to Python 3.13
+
+- ci: bump Windows and macOS jobs to Python 3.13
+
+3.11 is mid-life; 3.13 is already on the Linux matrix and gives ~3.5
+years of upstream support. Aligns the single-version platform jobs with
+the top of the Linux matrix. requires-python and lint job left alone.
+
+Refs #1192 (Option A).
+
+- fix(palace_graph): skip None metadata in build_graph
+
+ChromaDB can return None for drawers without metadata (legacy data,
+partial writes — same root cause as upstream #1020 / our PR #1094).
+build_graph at line 95 called meta.get(&#34;room&#34;, &#34;&#34;) unconditionally,
+which AttributeErrors on None and takes out every consumer of
+build_graph for the whole call path: graph_stats, find_tunnels,
+traverse, and (most visibly) the daemon&#39;s /stats endpoint.
+
+Caught 2026-04-25 by palace-daemon&#39;s verify-routes.sh smoke test
+against the canonical 151K-drawer palace — /stats was 500-ing on a
+single None drawer.
+
+Adds `if meta is None: continue` guard. Closes the same gap upstream&#39;s
+#999 None-metadata audit closed in searcher.py / mcp_server.py /
+miner.status, just in a different file the audit didn&#39;t reach. The
+graph-build is recoverable: skipping a single None drawer doesn&#39;t
+distort the graph since build_graph already filters
+`room and room != &#34;general&#34; and wing` — a missing-metadata drawer was
+never going to participate anyway.
+
+Test: TestBuildGraph::test_none_metadata_does_not_crash mixes a None
+entry into a 3-drawer fixture and asserts the two real drawers are
+processed normally.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix: skip _fix_blob_seq_ids sqlite open on already-migrated palaces (#1090)
+
+Opening chroma.sqlite3 via Python&#39;s sqlite3.connect() against a live
+ChromaDB 1.5.x WAL-mode database leaves state that segfaults the next
+PersistentClient call — the same failure mode tracked at #1090.
+
+_fix_blob_seq_ids runs unconditionally on every make_client() call, so
+every fresh process (MCP server, stop hook, CLI) re-triggers the sqlite
+open → corrupt → segfault cycle on palaces that have already completed
+the 0.6.x → 1.5.x seq_id migration.
+
+Guard with a .blob_seq_ids_migrated marker file in the palace directory:
+- If marker exists, return immediately — skip sqlite entirely
+- After successful migration (or confirmation that no BLOBs remain),
+  write the marker so subsequent opens take the fast path
+- Palaces that never had BLOB seq_ids also get the marker on first open,
+  so they too avoid the redundant sqlite open after that
+- Already-migrated palaces can touch the marker manually to opt in
+
+Test plan: Direct test — run _fix_blob_seq_ids twice against a fresh
+palace; second call returns immediately because marker exists. 1094
+existing tests pass.
+
+- chore: ruff format tests/test_searcher.py
+
+CI lint job runs `ruff format --check`; the new tests in TestBM25NoneSafety
+needed the standard &#34;blank line after import-inside-function&#34; + line-length
+wrap. No logic change — formatter pass only.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(searcher): tolerate None documents in BM25 reranker
+
+`_tokenize` calls `text.lower()` unconditionally; when ChromaDB returns a
+drawer with `documents` containing `None`, the hybrid-rerank path raises
+`AttributeError: &#39;NoneType&#39; object has no attribute &#39;lower&#39;`.
+
+Observed in production daemon log (2026-04-24 21:07:05) during a search
+that triggered `_hybrid_rank → _bm25_scores → _tokenize`:
+
+    File &#34;mempalace/searcher.py&#34;, line 81, in _bm25_scores
+        tokenized = [_tokenize(d) for d in documents]
+    File &#34;mempalace/searcher.py&#34;, line 52, in _tokenize
+        return _TOKEN_RE.findall(text.lower())
+    AttributeError: &#39;NoneType&#39; object has no attribute &#39;lower&#39;
+
+Closes the gap left by the upstream None-metadata audit (#999), which
+covered metadata loops but not BM25 helpers. Returns `[]` for falsy input
+so a None doc gets score 0.0 while the rest of the corpus reranks normally.
+
+Three regression tests in TestBM25NoneSafety lock the behavior and reference
+the production trace.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;</div>
+</div>
+
+<a href="../project/MemPalace_mempalace.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

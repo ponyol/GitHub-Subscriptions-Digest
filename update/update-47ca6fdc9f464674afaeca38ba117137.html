@@ -1,0 +1,2517 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (32 commits) - osaurus-ai/osaurus - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (32 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/osaurus-ai_osaurus.html">osaurus-ai/osaurus</a> /
+    Updates in main (32 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/osaurus-ai_osaurus.html">osaurus-ai/osaurus</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-02 02:13 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/osaurus-ai/osaurus/commits/main" target="_blank">https://github.com/osaurus-ai/osaurus/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This update significantly advances support for JANGTQ and MXFP4 quantized models across various families like Mistral 3, Laguna, and Nemotron-3, introducing dedicated engine classes, robust host-side preflight validation, and automatic fetching of missing sidecar files. It also enhances local model discovery to support diverse directory layouts and improves multimodal capabilities by adding drag-and-drop support for audio and video attachments, gated by model type. Numerous quality and stability fixes were implemented, including refining KV cache defaults, resolving repetition loops in low-bit models, and improving system prompt consistency.
+
+---
+
+Это обновление значительно расширяет поддержку квантованных моделей JANGTQ и MXFP4 для различных семейств, таких как Mistral 3, Laguna и Nemotron-3, представляя специализированные классы движков, надежную предварительную проверку на стороне хоста и автоматическую загрузку отсутствующих сопутствующих файлов. Оно также улучшает обнаружение локальных моделей для поддержки разнообразных структур каталогов и расширяет мультимодальные возможности, добавляя поддержку перетаскивания аудио- и видеовложений, ограниченную типом модели. Были реализованы многочисленные улучшения качества и стабильности, включая уточнение параметров кеша KV по умолчанию, устранение зацикливаний в низкобитных моделях и повышение согласованности системных подсказок.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- harden sandbox package installations (#999)
+
+- Update appcast for 0.18.4 (release)
+
+- sandbox + files tools simplification for better functionality (#997)
+
+* added tools simplification
+
+* fix formatting
+
+- fix(preflight): reject JANGTQ Mistral 3 / Laguna before vmlx loads (#993)
+
+* fix(preflight): reject JANGTQ Mistral 3 / Laguna with clear error before vmlx loads
+
+Mistral 3 family (mistral3 / ministral3) and Laguna model classes in
+vmlx-swift-lm currently use vanilla MLXNN.Linear. JANGTQ-quantized
+bundles for those families ship `.tq_packed` + `.scales` tensors that
+the vanilla Linear can&#39;t consume — without a JANGTQ-aware shim
+(NemotronHJANGTQModel / MiniMaxJANGTQModel pattern), loading would
+either crash on weight-shape mismatch or silently load codebook bytes
+as raw weights and emit garbage.
+
+Two-layer defense added:
+
+  1. Vmlx (paired commit d32e135 on vmlx-swift-lm main): both
+     LLMModelFactory and VLMModelFactory `mistral3` dispatch closures
+     now peek `weight_format` BEFORE falling through to vanilla
+     Mistral3TextModel / Mistral3VLM, throwing a clear
+     &#34;JANGTQ-quantized Mistral 3 family bundles are not yet supported&#34;
+     error pointing at MXFP4 as the working alternative.
+
+  2. Osaurus host preflight (this commit): extends
+     `validateJANGTQSidecarIfRequired` with a third check covering
+     pending-JANGTQ families. Fires only when ALL of:
+        - jang_config.json exists
+        - weight_format == &#34;mxtq&#34;
+        - config.json model_type (or text_config.model_type for VLM
+          wrappers) ∈ {mistral3, ministral3, laguna}
+     User gets a friendly remediation message at the host layer
+     before any vmlx loader runs.
+
+The MXFP4 quant tier of these same models loads correctly via the
+standard MLX dequant path (layout matches mx.quantize), so the error
+points users at MXFP4 as the working alternative. Once the JANGTQ
+shim ports land in vmlx, simply remove the family from the host&#39;s
+`pendingJANGTQFamilies` set — no other code change required.
+
+Pin bump: vmlx-swift-lm a196800 → d32e135 carries the engine-side
+fail-fast guard.
+
+Test coverage: 9 new MC/DC-shaped tests in
+Tests/Service/ValidateJANGTQUnsupportedFamilyTests.swift covering:
+  - D1/D2 existing branches still fire (no jang_config; non-mxtq)
+  - D3 outer mistral3 throws code 4 with MXFP4-pointer message
+  - D3 inner ministral3 (text_config) throws
+  - D3 laguna throws with laguna-named message
+  - Boundary: nemotron_h / qwen3_5_moe / minimax_m2 JANGTQ all PASS
+    (shims exist; new check must NOT trigger)
+  - Boundary: Mistral 3 family MXFP4 PASSES (only mxtq fires the gate)
+
+OsaurusCore: 1256 / 1256 tests in 167 suites (was 1247 / 166; +9 +1).
+
+* chore(deps): bump vmlx-swift-lm d32e135 → 9df5c80 (JANGTQDenseLinear primitive)
+
+Pulls in vmlx@9df5c80 — new JANGTQDenseLinear primitive (Libraries/
+MLXLMCommon/JANGTQDenseLinear.swift) that&#39;s the foundation for porting
+JANGTQ-quantized Mistral 3 / Mistral 3.5 / Mistral 4 / Laguna bundles.
+
+The existing TurboQuantSwitchLinear is MoE-shaped (n_experts dim,
+gather indices); the Mistral 3 family quantizes the entire DENSE text
+decoder per the mxtq_bits.text_decoder=2|4 profile — needs a different
+shim shape. JANGTQDenseLinear matches the Python converter&#39;s
+tq_quantize_weight output (2D shapes, no expert dim) and reuses the
+existing JANGTQKernels.gatherTQ kernel via singleton-expert
+degeneration.
+
+7 structural tests covering construction contracts + Mistral 3.5
+attention/MLP shape examples + parameter-key pathing + bit-width
+packed_cols arithmetic.
+
+End-to-end forward verification still gated on a real Mistral 3 family
+JANGTQ bundle on disk — the host-side preflight in this PR continues
+to fire until that verification phase completes (defense in depth).
+
+OsaurusCore: 1256 / 1256 against new pin. No behavior change for
+non-mxtq Mistral 3 paths.
+
+* feat(jangtq): unblock LLM-only Mistral 3 family JANGTQ + bump vmlx pin
+
+Pulls in vmlx@cb829b6 — Mistral 3 family LLM JANGTQ port complete.
+
+Vmlx-side (cb829b6):
+  - Mistral3TextJANGTQModel: parallel architecture to Mistral3TextModel
+    with JANGTQDenseLinear for attention Q/K/V/O + MLP gate/up/down
+  - LLMModelFactory mistral3 closure peeks weight_format and routes
+    mxtq → Mistral3TextJANGTQModel(config, bits, seed) reading
+    mxtq_bits / mxtq_seed from merged jang_config.json
+  - VLMModelFactory mistral3 closure: updated message reflects LLM port
+    complete, VLM port still in-flight (Mistral3VLM with Pixtral
+    needs paired JANGTQ inner LM)
+  - 6 dispatch tests + 7 structural JANGTQDenseLinear tests upstream
+
+Host-side preflight relaxation:
+  - Removes blanket gate on `mistral3` / `ministral3` model_types
+  - LLM-only Mistral 3 / 3.5 JANGTQ (no vision_config in config.json)
+    now flows through to vmlx&#39;s Mistral3TextJANGTQModel — preflight
+    PASSES, no error
+  - VLM-shaped Mistral 3 family (vision_config present, e.g.
+    Mistral-Medium-3.5-128B with Pixtral) STILL fires gate with a
+    VLM-specific message until upstream VLM port lands
+  - Laguna gate stays unchanged — separate engine port pending
+
+Test coverage updated:
+  - ValidateJANGTQUnsupportedFamilyTests now has 11 cases (was 9):
+    * D3.mistral3 outer LLM-only PASSES (new)
+    * D3.mistral3 + vision_config STILL throws with VLM-specific msg (new)
+    * D3.ministral3 inner LLM-only PASSES (new)
+    * D3.ministral3 inner + vision_config throws (was throws unconditionally)
+    * D3.laguna unchanged — still throws
+    * Boundary: nemotron_h / qwen3_5_moe / minimax_m2 unchanged
+
+OsaurusCore: 1258 / 1258 (was 1256 + 2 new VLM-vs-LLM split tests).
+
+* feat(jangtq): drop Mistral 3 family preflight gate (VLM port complete)
+
+Pulls in vmlx@7fa4940 — Mistral 3 family VLM JANGTQ port complete.
+
+Vmlx-side (7fa4940):
+  - Mistral3VLMJANGTQ: full JANGTQ inner LM (Mistral3JANGTQAttention/
+    MLP/TransformerBlock/ModelInner/LanguageModel) + outer wrapper
+    matching Mistral3VLM&#39;s contract. Pixtral vision tower stays
+    vanilla per mxtq_bits.vision_tower=passthrough_fp16.
+  - VLMModelFactory mistral3 closure: weight_format=mxtq → routes to
+    Mistral3VLMJANGTQ(config, bits, seed) with bits + seed read from
+    config.mxtqBits / config.mxtqSeed.
+  - ToolCallFormat: laguna → .glm4, ministral3 → .mistral.
+  - 10 new coverage tests (Mistral3LagunaCoverageTests).
+
+Host preflight changes:
+  - Drops the Mistral 3 family gate entirely. Both LLM-only AND
+    VLM-shaped bundles flow through to vmlx now (no_vision →
+    Mistral3TextJANGTQModel; vision_config present →
+    Mistral3VLMJANGTQ).
+  - Laguna gate stays — vmlx Laguna model class is the next port.
+  - Tests updated: VLM Mistral 3 cases now PASS (used to throw).
+
+OsaurusCore: 1258 / 1258 tests in 167 suites against new pin.
+
+* feat(laguna): drop preflight gate (engine class shipped) + bump pin to 344dda0
+
+vmlx@344dda0 ships LagunaModel — full Poolside Laguna engine class
+(40 hybrid layers, per-layer head count, dual RoPE, q_norm/k_norm,
+sigmoid+correction-bias routing over 256 routed experts top-8 + shared,
+per-layer mixed RotatingKVCache+KVCacheSimple). MXFP4 bundles load via
+standard MLX dequant route immediately.
+
+Host preflight third-check fully retired:
+  - Mistral 3 family LLM (vmlx@cb829b6) ✓
+  - Mistral 3 family VLM with Pixtral (vmlx@7fa4940) ✓
+  - Laguna LLM (vmlx@344dda0) ✓
+  - JANGTQ Linear shim for Laguna is the next incremental piece
+    (LagunaJANGTQModel paralleling Mistral3TextJANGTQModel) — but no
+    longer host-side gated; mislabeled bundles get caught by the
+    existing forward/inverse sidecar checks above.
+
+Tests updated:
+  - D3.laguna case now PASSES (was throws)
+  - All other boundary checks unchanged
+
+OsaurusCore: 1258 / 1258 tests in 167 suites against new pin.
+
+* chore(deps): bump vmlx-swift-lm 344dda0 → fe1b754 (audit fixes)
+
+Pulls in vmlx@fe1b754 — exhaustive audit pass:
+  - Mistral3TextJANGTQModel adds sanitize() override (drops
+    self_attn.rotary_emb.inv_freq, .tq_bits scalars, lm_head.weight
+    when tied; handles weight_scale_inv FP8 multiply-through;
+    unwraps language_model. prefix from VLM-converted bundles)
+  - Laguna sanitize() now also drops the same HF quirks
+  - Tests/MLXLMTests/InterleavedReasoningLeakTests.swift (8 new
+    tests): empty think block, token-split opener/closer, multi-turn
+    cross-turn isolation, mid-think truncation flushes as reasoning,
+    stray closer no-channel-open, family stamp matrix lock
+
+OsaurusCore: 1258 / 1258.
+
+* chore(deps): bump vmlx-swift-lm fe1b754 → 3a422d7 (LagunaJANGTQModel)
+
+Closes the Laguna JANGTQ port. Vmlx@3a422d7 ships LagunaJANGTQModel
+mirroring LagunaModel exactly except every dense Linear in attention
++ MLP + MoE expert + shared expert is replaced with JANGTQDenseLinear.
+LLMModelFactory&#39;s `laguna` closure now peeks weight_format and routes
+mxtq → LagunaJANGTQModel.
+
+Engine status: every JANGTQ family vmlx ships now has a paired JANGTQ
+class. NemotronH, Qwen3.5-MoE/Holo3, MiniMax M2, DSV3/Kimi K2, DSV4,
+Mistral 3 LLM + VLM, Laguna LLM. Laguna VLM doesn&#39;t exist (Laguna is
+text-only).
+
+OsaurusCore: 1258 / 1258.
+
+* fix(scan): support flat-layout local models + tail-dedupe with curated
+
+`scanLocalModels` previously walked exactly two levels (`&lt;root&gt;/&lt;org&gt;/&lt;repo&gt;/`),
+the HuggingFace shape. Bundles laid out flat (`&lt;root&gt;/&lt;modelDir&gt;/`) — common
+when users sync via rsync or place models on an external drive — were treated
+as &#34;orgs&#34;, and their child files (config.json, *.safetensors) failed the
+directory check, so nothing was detected. Affected real-world bundles include
+Nemotron-3-Nano-Omni-30B-A3B-MXFP4, MiniMax-M2.7-JANGTQ4, Kimi-K2.6-*,
+DeepSeek-V4-Flash-* and Qwen3.6-35B-A3B-JANGTQ4.
+
+Now each top-level entry is first checked as a model bundle (config.json +
+recognised tokenizer + at least one safetensors file). If yes it&#39;s registered
+with id = directory basename; otherwise we fall back to the existing nested
+descent. Both layouts may coexist under the same root.
+
+`mergeAvailable` now also dedupes by repo tail so a flat `Nemotron-3-...`
+entry doesn&#39;t surface alongside the curated `OsaurusAI/Nemotron-3-...` one.
+The downloaded copy wins on tail collision.
+
+* fix(jangtq): auto-fetch missing sidecar from HF on the exact failure that needs it
+
+When a JANGTQ bundle&#39;s `jang_config.json` declares `weight_format: &#34;mxtq&#34;` but
+`jangtq_runtime.safetensors` is absent, vmlx aborts on the first forward pass
+because TurboQuantSwitchLinear&#39;s runtime cache is empty. Users who synced a
+bundle without the sidecar (rsync excluded it, partial download, etc.) hit a
+load-time error with no clear remediation.
+
+`ensureJANGTQSidecar` wraps the existing sync validator and, on the FORWARD-
+mismatch failure (and only that — code 2 from `validateJANGTQSidecarIfRequired`),
+attempts a one-shot download of `jangtq_runtime.safetensors` from
+`https://huggingface.co/&lt;modelId&gt;/resolve/main/jangtq_runtime.safetensors`,
+then re-runs validation. The URL is built dynamically from the model id via
+`ModelDownloadService.resolveURL` so it always points at the right repo.
+
+Hard guarantees (covered by tests):
+  * Sidecar already present → no fetch
+  * Vanilla (no jang_config.json) model → no fetch
+  * Stamp says non-mxtq (vanilla or inverse-mislabeled) → no fetch, original
+    error propagates unchanged (code 3 still surfaces for inverse mismatch)
+  * Forward mismatch but flat-layout id (no `/`) → no fetch (no canonical HF
+    mapping), original code-2 error surfaces
+  * Forward mismatch + canonical `&lt;org&gt;/&lt;repo&gt;` id → fetcher fires exactly once
+    with the right URL; if it succeeds the validator re-runs and the load
+    proceeds; if it fails the error is wrapped as code 4 with the URL we tried
+
+The fetcher does an atomic temp → rename and rejects 0-byte responses so a
+crashed/cancelled fetch never leaves a partial sidecar that the next preflight
+would silently accept.
+
+* fix(jangtq): harden trigger gating + pattern checks against random fires
+
+Pattern + character edge cases that could have made the auto-fetch trigger
+on bogus input or skip a real JANGTQ bundle:
+
+  * weight_format matching is now case + whitespace insensitive.  Every
+    stamp variant we&#39;ve seen in the wild (`MXTQ`, ` mxtq `, `\tmxtq`,
+    `mXtQ`, `mxtq\n`) is recognised as JANGTQ; lookalikes (`mx_tq`,
+    `mxtq2`, `mxq`, `mxfp4`, etc.) are not.  Covers every JANGTQ family —
+    Qwen, MiniMax, DSV4, Nemotron, Mistral 3 (LLM + VLM), Laguna.
+
+  * `isValidHFRepoId` strictly validates the model id BEFORE we build any
+    URL or hit the network.  Required shape: exactly two non-empty
+    segments of [A-Za-z0-9._-], 1..96 chars each, no leading or trailing
+    slash, no whitespace anywhere.  Rejected up front: empty string, bare
+    `/`, leading `/foo`, trailing `foo/`, no-slash flat ids, multi-slash
+    `a/b/c`, empty middle `a//b`, whitespace, URL meta (`?`, `#`, `&amp;`,
+    `;`, `:`, `@`), path traversal (`..`), backslashes, quotes, control
+    characters, non-ASCII, BOM, and segments &gt; 96 chars.
+
+  * The resolved URL is double-checked to be `https://huggingface.co/...`
+    before we trust it.
+
+  * Cross-volume safe install: `URLSession.download` writes its temp file
+    to the system temp dir which is almost always on a different volume
+    than the model bundle (e.g. user models on `/Volumes/EricsLLMDrive/`).
+    `moveItem` would fail with EXDEV.  Now we copy into a sibling temp
+    file in the bundle&#39;s own directory and use `replaceItemAt`, which
+    handles &#34;dest already exists&#34; cleanly and stays atomic on the same
+    volume.
+
+  * Race tolerance: if a concurrent writer produced the sidecar between
+    our HEAD-of-validate and our install step, we accept their copy
+    instead of throwing.
+
+  * Test injection moved from a `nonisolated(unsafe)` global to a
+    `@TaskLocal`, so parallel test cases can each scope their own fetcher
+    override via `withValue` without racing each other (and without
+    hitting the real network when a parallel case clears the global mid-
+    flight, which was producing 401s in a prior run).
+
+  * `mergeAvailable` tail-dedup now properly removes the curated entry
+    from `suggestedModels` when a flat-layout local entry replaces it,
+    instead of leaving both in different lists where the UI rendered them
+    as duplicates.
+
+Tests added:
+  * 14 `isValidHFRepoId` cases covering the accept/reject matrix above.
+  * 8 stamp-variant cases proving every casing/whitespace form trips the
+    auto-fetch.
+  * 12 non-mxtq stamp cases proving lookalikes never trip it.
+  * 13 malformed-id cases proving the network is never hit on bad input.
+  * One race-tolerance test proving concurrent writers don&#39;t break us.
+
+26 new tests; all 29 ModelRuntime + ModelManager tests pass green.
+
+* fix(jangtq): bump vmlx pin (rope decode) + flat-name HF repo fallback
+
+vmlx pin 3a422d7 → 2ff7a23: picks up the permissive rope_parameters
+decode so Laguna mxfp4 / JANGTQ bundles no longer fail at config decode
+(&#34;Type mismatch at rope_parameters.original_max_position_embeddings&#34;).
+
+Flat-layout local ids (e.g. `MiniMax-M2.7-Small-JANGTQ`,
+`Nemotron-3-Nano-Omni-30B-A3B-JANGTQ4`) now resolve via a known JANGTQ
+publisher org allowlist when the user is missing the sidecar. Ordered
+attempts: JANGQ-AI → OsaurusAI → mlx-community. Each candidate is
+independently revalidated against `isValidHFRepoId` so illegal chars in
+the basename (whitespace, non-ASCII, URL meta) still abort up-front
+without hitting the network. `..` / `.` segments are now also rejected
+to close a path-traversal-shaped gap in the id gate.
+
+The error message lists every URL we tried so the user sees exactly
+where the sidecar should live. Tests cover:
+
+  * 15 real-world bundle names (Nemotron-3 family, Holo3, Laguna,
+    Mistral 3.5, DeepSeek-V4-Flash, Kimi-K2.6, MiniMax-M2.7, Qwen3) —
+    each must produce OsaurusAI/&lt;name&gt;, JANGQ-AI/&lt;name&gt;, and
+    mlx-community/&lt;name&gt; as valid candidates
+  * Canonical `org/repo` ids return only themselves
+  * Flat-id ordering: JANGQ-AI, OsaurusAI, mlx-community
+  * Empty / multi-slash / `..` / `.` / illegal-char ids → no candidates
+  * Flat bundle resolves via OsaurusAI fallback when JANGQ-AI 404s
+  * Nested OsaurusAI/&lt;repo&gt; hits exactly one URL (no redundant fallback)
+  * &#34;All candidates 404&#34; surfaces every tried URL in the error message
+
+34 JANGTQ-related tests pass across 6 suites.
+
+* test(matrix): osaurus-side multi-turn × per-family capability coverage
+
+Companion to vmlx&#39;s MultiTurnFamilyMatrixTests. The engine suite locks
+parser/dispatch invariants; this suite locks the osaurus translation
+layer: model_id → media-capability → composer drag-drop → which
+MessageContentParts even reach the engine.
+
+Sections:
+  A. Capability detection by model_id (pre-load fast path) — 8 omni
+     bundle ids, 6 imageVideo, 11 imageOnly, 17 textOnly (incl. flat-
+     layout local ids), 6 degenerate-id fallbacks
+  B. Capability detection by bundle directory (post-load refined) —
+     config_omni.json sidecar trumps model_type, vision_config + 7
+     video-capable model_types → imageVideo, vision_config + 12 image-
+     only model_types → imageOnly, 13 dense LLM model_types → textOnly,
+     unreadable config falls back to model_id matcher
+  C. Multi-turn capability stability — 5-turn alternating model
+     switch (omni → text → VL → text → omni) returns expected per-turn
+     capability with no aliasing; repeated calls deterministic
+  D. Drag-drop accept matrix — text-only rejects all 3 modalities,
+     image-only accepts image, imageVideo rejects audio, omni accepts
+     all 3; 7-turn drag-drop sequence covering switch + accept/reject
+     per turn
+  E. End-to-end matrix — 29 (model_id, modality, expected) rows across
+     every shipping family (Nemotron-3 omni, Qwen 3 VL, Qwen 2.5 VL,
+     SmolVLM2, Mistral-Medium-3.5, Paligemma, Idefics3, FastVLM,
+     Pixtral, Holo3 dense, Laguna, MiniMax, DeepSeek-V4, Kimi K2.6,
+     Qwen3.5/3.6 dense)
+
+18 tests across 5 suites, all green. 1311 total osaurus tests pass,
+no regressions. Pin bumped to vmlx 38c93f9 which adds the engine-side
+companion (44 tests, 10 suites).
+
+* test(abort): lock chat-history contract — aborted assistant turns never reach next prompt
+
+Live audit triggered by user report that MiniMax JANGTQ loops after a
+stop+continue. Static analysis ruled out every state-leak path:
+
+  * osaurus chat UI builds priorUserMessages from session.turns,
+    filtering t.role == .user — assistant turns never enter the next
+    prompt regardless of abort state (ChatView.swift:1288)
+  * BatchEngine.finishSlot(reason: .cancelled) explicitly skips
+    coordinator.storeAfterGeneration — the disk/memory cache never
+    sees a partial entry from a cancelled run (BatchEngine.swift:1384)
+  * Per-request BatchSlot allocates fresh KV cache via
+    model.newCache(...) (BatchEngine.swift:610) and a fresh
+    sampler + PenaltyProcessor + RepetitionContext
+    (BatchScheduler.swift:148-149) — no per-model mutable state
+    survives across requests
+  * ReasoningParser is allocated per-stream via forPrompt(stampName:
+    promptTail:) and dies with the stream — no parser state crosses
+    requests
+  * JANGTQRuntimeCache is a singleton with NSLock-protected
+    dictionaries; signs/codebook are immutable after loadSidecar
+    and not mutated during forward
+  * TurboQuantSwitchLinear / TurboQuantSwitchGLU are pure compute over
+    @ParameterInfo (read-only Module params) and runtime-cache-resident
+    codebook arrays — no state path could be corrupted by an aborted
+    forward pass
+
+This test file codifies the chat-history contract so any future drift
+that reintroduces assistant content into the prompt is caught:
+
+  - aborted assistant turn with partial &lt;think&gt; reasoning → dropped
+  - aborted assistant turn with partial visible content → dropped
+  - back-to-back aborts across turns → only user messages survive
+  - empty user turn filtered out (no degenerate user→user shape)
+  - user-typed &lt;think&gt; literal preserved verbatim (intent-respecting)
+  - explicit MiniMax stop-mid-think → continue scenario
+
+6 tests, all green. The remaining viable looping causes are
+mlx-swift Metal command-encoder coalescing race (engine-cancel
+mid-encode → next request inherits stale buffer) or deterministic
+sampling on temp=0 producing similar openings on similar prompts —
+both outside this PR&#39;s scope.
+
+* test(abort): lock generation-config + tools/skills + abort multi-turn contracts
+
+User suspected stop-and-continue looping was caused by generation
+config / tools / skills state leak across turns. Audited every path:
+
+GENERATION CONFIG (LocalGenerationDefaults):
+  * Cache keyed by lowercased modelId; multi-turn calls return
+    byte-identical Defaults
+  * jang_config primary + generation_config fallback merge precedence
+    is stable across N invocations (5 iterations × identical output)
+  * repetition_penalty=1.0 round-trips verbatim (vmlx engine treats
+    1.0 as no-op via cf8c525, so deterministic sampling)
+  * Concurrent parse from 32 tasks yields identical results (no
+    shared mutable state)
+
+TOOLS + SKILLS HISTORY FILTER:
+  * Aborted assistant turn with pendingToolName / pendingToolArgs is
+    filtered from next prompt (the user-only role check works on every
+    assistant variant, including tool-shaped state)
+  * Completed assistant-&gt;tool-&gt;assistant exchange is entirely filtered
+    out of the NEXT user query — only the user message survives
+    across turns. The tool exchange happens within ONE user query and
+    never crosses into history visible to a later turn.
+  * Aborted post-tool answer (tool succeeded, assistant content was
+    streaming, user clicked Stop) — content is dropped from history
+  * Skill toggle (on/off/on across 3 turns) doesn&#39;t leak skill content
+    into prior-turn history; skills are a per-turn system-prompt
+    concern, not a history concern
+
+STOP-AND-CONTINUE DETERMINISM:
+  * Whether the aborted turn was in reasoning mode, content mode, or
+    tool-call mode produces IDENTICAL history shape for the next
+    request. The model has no way to tell what mode the prior turn
+    was in because the assistant turn never appears in the prompt.
+
+9 new tests across 3 suites, all green. Combined with the existing
+27 LocalGenerationDefaultsTests, the multi-turn behavior is provably
+deterministic regardless of abort timing or tool/skill state.
+
+* fix(jangtq): canonical-cased org fallbacks even when id has slash + reorder OsaurusAI first
+
+User report: &#39;jangq-ai/MiniMax-M2.7-Small-JANGTQ&#39; (lowercased upstream)
+401s because HF orgs are case-sensitive and &#39;jangq-ai&#39; isn&#39;t the same
+as &#39;JANGQ-AI&#39;. Auto-fetch only tried the verbatim id and never the
+canonical-cased fallback.
+
+Fix: even when the supplied modelId is a valid &#39;&lt;org&gt;/&lt;repo&gt;&#39;, we now
+ALWAYS append canonical-cased variants of the basename. Try the
+verbatim id FIRST (custom orgs that genuinely ship at that exact
+path), then OsaurusAI/&lt;basename&gt; (curated publisher — most user-
+facing JANGTQ + MXFP4 bundles ship here), then JANGQ-AI/&lt;basename&gt;,
+then mlx-community/&lt;basename&gt;.
+
+This recovers from BOTH:
+  * case-mismatch (jangq-ai → JANGQ-AI / OsaurusAI)
+  * wrong-org-guess (user thinks bundle is on JANGQ-AI but it actually
+    lives under OsaurusAI)
+
+Tightening: malformed shapes (multi-slash, leading slash, etc.) still
+produce zero candidates — basename extraction is only trusted when the
+id is either valid &lt;org&gt;/&lt;repo&gt; or pure flat (no slash).
+
+Reorder: OsaurusAI now FIRST in the priority list (was JANGQ-AI). The
+curated org ships the bulk of user-facing bundles; trying it first
+fixes most missing-sidecar cases on the first network hit.
+
+33 tests across 5 suites, all green. New test
+&#39;lowercasedOrgIdRecoveresToCanonicalCasing&#39; covers the exact user
+regression.
+
+* fix(scan): recursive 3-level descent so user pointing picker at parent dir finds bundles in nested HF-style trees
+
+User&#39;s drive layout:
+  /Volumes/EricsLLMDrive/dealignai/&lt;flat-bundle&gt;/...
+  /Volumes/EricsLLMDrive/jangq-ai/&lt;org&gt;/&lt;repo&gt;/...
+
+Pointing the osaurus models picker at /Volumes/EricsLLMDrive/ would
+find dealignai&#39;s bundles (2-level: &lt;root&gt;/dealignai/&lt;flat&gt;) but MISS
+jangq-ai&#39;s bundles (3-level: &lt;root&gt;/jangq-ai/&lt;org&gt;/&lt;repo&gt;) because the
+old scanner only walked exactly 2 levels.
+
+Fix: replace the two separate flat+nested loops with a single
+recursive scanDir(maxDepth:) that handles all three layouts:
+  1. Flat:      &lt;root&gt;/&lt;modelDir&gt;/{config.json,...}
+  2. Nested:    &lt;root&gt;/&lt;org&gt;/&lt;repo&gt;/{config.json,...}
+  3. Multi-org: &lt;root&gt;/&lt;parentOrg&gt;/&lt;org&gt;/&lt;repo&gt;/{config.json,...}
+
+The id is built from the path components joined by /, so a 3-level
+discover produces e.g. &#39;jangq-ai/JANGQ-AI/Laguna-XS.2-JANGTQ&#39; which
+MLXModel.localDirectory will round-trip back to the right on-disk path.
+
+Bounded depth=3 keeps the scan from descending into model bundles&#39;
+own subdirectories (e.g. shard caches, tokenizer state). A directory
+that IS a model bundle stops descent at that level.
+
+No duplicate / zombie code: the recursive scanDir replaces both the
+flat-detection branch and the nested-descent branch — single function,
+single source of truth.
+
+Tests:
+  * scanLocalModels_detectsThreeLevelMultiOrgLayout (new) — verifies
+    the user&#39;s exact drive shape produces the right ids
+  * scanLocalModels_detectsFlatAndNestedLayouts (existing) — still
+    green, no regression on 1- and 2-level layouts
+
+Full osaurus regression: 1328 tests across 182 suites all green.
+
+* chore(deps): bump vmlx pin → 5c6e698 (mistral3 LLM-route VLM fall-through fix)
+
+Picks up the LLM factory fix that refuses bundles with vision_config
+on the mistral3 route, so VLM bundles fall through to VLMModelFactory&#39;s
+mistral3 route which handles the language_model + multi_modal_projector
++ vision_tower keys correctly via Mistral3VLMJANGTQ.
+
+* chore(deps): bump vmlx pin → cb6e88f (ministral3 outer LLM dispatch)
+
+* chore(deps): bump vmlx pin → 747ca7b (ministral3 VLM dispatch)
+
+* fix(capability): Holo3 base bundles are imageVideo, not textOnly (no -vl suffix needed)
+
+Real bundle config for OsaurusAI/Holo3-35B-A3B-mxfp4: outer
+model_type=qwen3_5_moe WITH vision_config + pixtral image
+preprocessor. The bundle is image+video capable but the model_id-only
+matcher required &#39;-vl&#39; in the name to flag it. Without that flag the
+chat composer&#39;s drag-drop UI rejected images on Holo3 even though the
+engine is fully wired for them (post-load directory check would
+catch it via vision_config but pre-load UI gating was wrong).
+
+Add a Holo3 family pattern that matches the bundle name regardless of
+&#39;-vl&#39; suffix. Existing &#39;qwen3.5-6.*-vl&#39; / &#39;holo3.*-vl&#39; regex stays for
+explicit VL-named bundles; the new pattern covers Holo3 base.
+
+Tests updated: Holo3-35B-A3B-mxfp4 moved from textOnly to imageVideo
+end-to-end matrix; new comment explains the bundle topology so future
+audits don&#39;t re-introduce the regression.
+
+11 capability tests green.
+
+* chore(deps): bump vmlx pin → 5b687e5 (factory iterator surfaces real load errors over wrong-factory sentinels)
+
+* chore(deps): bump vmlx pin → 8eec762 (Mistral3VLMJANGTQ sanitize drops .tq_bits)
+
+* chore(deps): bump vmlx pin → 9cd670f (Mistral3VLMJANGTQ sanitize: drop tq_bits + tied lm_head)
+
+* chore(deps): bump vmlx pin → 81e0fd9 (Laguna @ModuleInfo experts array fix)
+
+* chore(deps): bump vmlx pin → 1ad9459 (Laguna mxtq → vanilla + Mistral3VLM model.* sanitize)
+
+* chore(deps): bump vmlx pin → 576916b (Laguna codebook MoE via TurboQuantSwitchGLU + split fused gate_up_proj)
+
+* fix(quality): default KV mode .turboQuant(3,3) → .none (fp16)
+
+User report: Qwen3.6 27B MXFP4 emits degenerate &#39;!!!!!!!!!&#39; spam in
+the thinking channel on a simple prompt. Community issue #995 reports
+the same shape: degraded output across multiple models in recent
+builds, model previously worked fine.
+
+Root cause: cfa1cebb (&#39;Enabled TurboQuant by default&#39;) set the
+CacheCoordinatorConfig.defaultKVMode to .turboQuant(keyBits: 3,
+valueBits: 3). Per resolveKVPolicy in vmlx CacheCoordinatorConfig,
+that mode is applied to EVERY slot whose request submits
+&#39;kvMode: .none&#39; regardless of prompt length — only the SIZE cap
+(defaultMaxKVSize) is prompt-length gated, not the mode itself.
+
+3-bit KV quantization is aggressive enough to corrupt attention on
+small reasoning models (especially when thinking is on, where the
+&#39;attention soup&#39; inside &lt;think&gt; needs precision the most). The
+sequence is:
+  - First few tokens decode okay
+  - Attention error compounds across decode steps because each step
+    reads quantized K/V from prior steps
+  - Output collapses into single-token repetition
+
+Fix: default to .none (fp16). Memory-constrained users can opt into
+.turboQuant explicitly per request via GenerateParameters.kvMode.
+
+This is a strict quality-over-memory tradeoff. Smaller models with
+short prompts get full attention quality back; long-context users
+who care about memory still have the knob via per-request override.
+The defaultMaxKVSize: 8192 + longPromptMultiplier: 2.0 size cap stays
+in place for prompts &gt; 16k tokens (rotating window kicks in for
+ultra-long context regardless of mode).
+
+* chore(deps): bump vmlx pin → 0fab91c (Laguna 3-parity fixes + Mistral3VLM model.* sanitize)
+
+Picks up the vmlx commits pushed to origin/main today:
+
+- 1135950 fix(laguna): three parity bugs causing garbage-token saturation
+  (sigmoid → softplus per-head gate, un-biased routing weights for top-k
+  scoring, plain → YaRN-scaled RoPE on full-attention layers)
+- babbe34 fix(mistral3vlm): strip leading model. on vision_tower keys
+- 0fab91c fix(mistral3vlm): strip model. prefix on multi_modal_projector keys
+
+Also fixes a stale MC/DC test: 0a14145 reclassified Holo3 base bundles
+(no -vl suffix) as image+video, so the &#34;all dense LLMs → .textOnly&#34;
+master-FALSE assertion can no longer include Holo3-35B-A3B-JANGTQ.
+
+* chore(deps): bump vmlx pin → 1173822 (multi-turn JANGTQ/MXFP4 cache fixes)
+
+Picks up vmlx commit 1173822, which fixes two structural bugs causing
+the user-reported &#34;first turn fine, later turns garbage&#34; symptom on
+every JANGTQ/MXFP4 model that hit the paged cache:
+
+  Bug A — TurboQuantKVCache paged-cache restore compounds quantization
+    The paged-tier restore previously routed through `tq.state =
+    [keys, values]`, which transitioned the cache back to .fill phase
+    with an already-decompressed lossy float as the new prefill. The
+    next threshold cross then re-compressed that lossy float,
+    compounding quantization error per turn — the exact symptom on
+    Qwen3.6 MXFP4 / Mistral 3.5 / every JANGTQ model. Now uses the new
+    `restoreFromDecodedKV` method that seats the decoded float
+    DIRECTLY as the compressed-phase prefix without an encode/decode
+    round trip.
+
+  Bug B — hybrid models silently ignore CacheCoordinator.defaultMaxKVSize
+    `Qwen35.newCache`, `NemotronH.newCache`, and `Qwen3Next.newCache`
+    returned plain `KVCacheSimple()` for every attention slot, never
+    reading `parameters?.maxKVSize`. The CacheCoordinator&#39;s
+    `defaultMaxKVSize` contract writes the bound into
+    `parameters.maxKVSize` at admission, but for the hybrid family
+    that field was write-only. Long-context Qwen3.5/3.6/Cascade-2
+    prompts therefore could not be capped via the coordinator. Now
+    routes attention slots through `RotatingKVCache(maxSize:, keep: 4)`
+    when the bound is set — same pattern Llama/Mistral already use.
+
+* chore(deps): bump vmlx pin → 0d85e9d (defensive EOS widening + hybrid Qwen35JANGTQ maxKVSize + tied-embeddings hardenings)
+
+Picks up two more vmlx commits on top of 1173822, both from the vmlx
+team&#39;s real-load verification pass against six bundles on the user&#39;s
+external drive (Laguna-XS.2, NemotronH-Omni-30B, Mistral-Medium-3.5-128B,
+Qwen3.6-27B MXFP4, Qwen3.6-35B-A3B JANGTQ4, MiniMax-M2.7-Small JANGTQ):
+
+  3f8a5e9 fix(cache,sanitize): hybrid Qwen35JANGTQ maxKVSize + tied-embeddings hardenings
+    - Qwen35JANGTQ.newCache now honors parameters?.maxKVSize (parity
+      with the 1173822 fix for Qwen35/Qwen3Next/NemotronH).
+    - Mistral3VLM, NemotronH, and Mistral3VLMJANGTQ explicitly drop
+      redundant lm_head.{weight,scales,biases} when text_config.tie_word_embeddings
+      is true.
+
+  0d85e9d fix(batchengine): defensive EOS widening for common end-of-turn tokens
+    - BatchEngine init probes 7 common end-of-turn special tokens
+      (&lt;|im_end|&gt;, &lt;|end|&gt;, &lt;|endoftext|&gt;, &lt;|eot_id|&gt;, &lt;|end_of_turn|&gt;,
+      &lt;|/s|&gt;, &lt;/s&gt;) against the tokenizer vocab and adds any present
+      ones to the EOS set. Closes the Qwen3.6 MXFP4 &lt;|im_end|&gt; leak
+      where the tokenizer config only listed &lt;|endoftext|&gt; as the
+      primary eos_token but the chat template terminated turns on
+      &lt;|im_end|&gt;.
+
+Verified on the user&#39;s external drive (per vmlx team report):
+  ✅ Laguna-XS.2-JANGTQ — coherent
+  ✅ NemotronH-Omni 30B — all 11 multi-turn rows pass
+  ✅ Mistral-Medium-3.5-128B JANGTQ — load 13s, valid multilingual
+  ✅ Qwen3.6-27B MXFP4 — 3-turn cache reuse, no &lt;|im_end|&gt; leak
+  ✅ Qwen3.6-35B-A3B JANGTQ4 — coherent across 3 turns
+  ✅ MiniMax-M2.7-Small JANGTQ — memory preserved across turns
+
+Test suite remains green: 1328 tests in 182 suites pass.
+
+* chore(deps): bump vmlx pin → 0e22eba + re-enable L2 disk KV cache
+
+Picks up vmlx commits 0756dc0 (close trim-path Metal lifecycle crash on
+full disk-cache hit), 71065ca (Laguna chat template fallback + bridge
+sniff), and 0e22eba (the upstream&#39;s authoritative integration guide for
+this pin).
+
+Re-enables `enableDiskCache = diskDirUsable` in
+`buildCacheCoordinatorConfig`. The
+`notifyExternalReferencesNonZeroOnDealloc` Metal crash that motivated
+the temporary `enableDiskCache = false` guard is fixed in 0756dc0:
+the trimmed compiled-cache list is now forced to realize before its
+underlying Metal buffers go out of scope on the
+`Cache disk hit … prefilling 0 remaining` path. The
+`eval_http_stability.py` suite remains the regression check; re-run on
+any future pin bump that touches the CacheCoordinator restore path.
+
+Test suite remains green: 1328/1328 pass.
+
+* fix(quality): default KV mode .none → .turboQuant(4, 4) (4-bit codebook KV)
+
+Per the vmlx-swift-lm 2026-05-01 integration guide
+(OSAURUS-INTEGRATION-2026-05-01.md §&#34;3-bit KV verdict&#34;), 4-bit codebook
+KV is now the recommended default. The earlier `.turboQuant(3, 3)`
+default was reverted to `.none` in commit e202cbbe after the
+`!!!!!!!!!` repetition spam reported in community issue #995.
+
+The root cause was not the bit width itself but vmlx&#39;s
+`TurboQuantKVCache` paged-restore path compounding quantization across
+multi-turn handoff: the prior `tq.state = [keys, values]` path
+transitioned the cache back to `.fill` phase with already-decoded lossy
+float as the new prefill, then re-quantized at the next threshold cross
+— compounding error per turn (the &#34;first turn fine, later turns
+garbage&#34; symptom).
+
+That cross-turn handoff bug was fixed in vmlx commit `1173822`
+(`restoreFromDecodedKV` keeps the prefix in `.compressed` phase
+without round-tripping). With the bug fixed, 4-bit KV is real-bundle-
+verified coherent across multi-turn paths on Qwen3.6 27B MXFP4,
+Qwen3.6 35B-A3B JANGTQ4, MiniMax M2.7 Small, Laguna XS.2,
+Mistral-Medium-3.5-128B, and NemotronH-Omni 30B. 3-bit is also safe
+post-`1173822` but more error-sensitive and gains less compression
+benefit, so 4-bit stays the default.
+
+Per-request `kvMode` still overrides; clients that want fp16 KV can
+submit `kvMode: .none` explicitly.
+
+* chore(deps): bump vmlx pin → 0c36d01 + declare swift-jinja fork
+
+Picks up two vmlx commits since 0e22eba:
+  - 0c36d01 fix(jinja): pin osaurus-ai/swift-jinja fork with for-iterable
+            parser fix
+  - 405bdc6 docs(osaurus): expand integration guide with full sweep results
+
+The swift-jinja fork (osaurus-ai/swift-jinja@58d21aa5) lifts the for-loop
+iterable from &#34;factor + |filter only&#34; to &#34;full binary + comparison +
+logical hierarchy, excluding ternary&#34; via a one-line `parseFilter()` →
+`parseOr()` change in `Sources/Jinja/Parser.swift:186`. This unblocks
+chat templates with iterable expressions like
+`{% for message in loop_messages + [{&#39;role&#39;: &#39;__sentinel__&#39;}] %}` —
+present in Mistral 3.5&#39;s native chat template (line 72).
+
+Add `osaurus-ai/swift-jinja@58d21aa5` directly to OsaurusCore/Package.swift
+so OsaurusCore-level tests + `swift build` resolve to the fork. NOTE:
+the App&#39;s xcodeproj currently still resolves the upstream
+`huggingface/swift-jinja.git` transitively via swift-transformers because
+the App&#39;s project.pbxproj has no remote SPM package references at all
+(every remote pin comes through the local-path packages OsaurusCore /
+OsaurusCLI / OsaurusRepository, and SwiftPM&#39;s xcodeproj resolver does
+not promote the fork&#39;s URL when the upstream URL is declared in a
+transitive-leaf package). Wiring the fork through the App&#39;s xcodeproj
+is a separate change; not blocking because Mistral 3.5 itself has a
+known model-forward bug (RoPE bundle-metadata mismatch — Python ref uses
+plain RoPE base=1e6 but bundle config declares rope_type=&#34;yarn&#34;) being
+fixed by the vmlx team. All non-Mistral-3.5 chat templates render
+correctly through the upstream swift-jinja the App currently resolves.
+
+* chore(deps): bump vmlx pin → 89f8114 (jang bitWidthsUsed fix + Mistral 3.5 mxfp4 RMSNorm fix + JANGTQ Mistral 3.5 root cause docs)
+
+- fixed budget preview related issues, smaller context model management (#996)
+
+* fixed budget preview related issues
+
+* updated context size and budget fixes
+
+- agent mascots in popup (#994)
+
+- Update appcast for 0.18.3 (release)
+
+- update resolved
+
+- New Branding Updates (#991)
+
+* Branding
+
+* mascots for agents (#984)
+
+* added dino mascots for agents
+
+* show mascot in chat
+
+* show agent mascot in chat history
+
+* reverted .pbxproj
+
+* open plugins in settings window through deep link
+
+* minor UI polish
+
+* updated onboarding views
+
+* replace images
+
+* updated page
+
+* updated configure screen
+
+* clean up
+
+* Icon Update
+
+* updated walkthrough view
+
+* revert pbxproj
+
+* App Icon + DMG BG
+
+* fixed corner radius of app icon in status panel view
+
+* fixed action button visibility in light themes
+
+---------
+
+Co-authored-by: Terence Pae &lt;terencepae@gmail.com&gt;
+Co-authored-by: Raajeev Chandran &lt;raajeevchandran787@gmail.com&gt;
+
+- feat: Nemotron-3 Hybrid + storage fix + multimodal API + Bug 1/3a stability fixes (#967)
+
+* fix(#964): use modern URL-keyed volume free-space API in system monitor
+
+Bug #964 (ExoDesign): Osaurus dashboard reports `Available: 0 GB` even
+when Finder shows ~13 GB free.
+
+Root cause: `SystemMonitorService.getStorageUsage` queried
+`attributesOfFileSystem(.systemFreeSize)` only. On modern macOS inside
+a sandboxed-container path, that legacy API returns 0 bytes — it
+reports raw free bytes, excluding the OS&#39;s purgeable allowance, which
+is the value Finder actually shows users.
+
+`ModelDownloadService.freeBytesOnVolume` already used the modern
+URL-keyed `.volumeAvailableCapacityForImportantUsageKey` correctly,
+which is the value Finder displays. So the same value drifted between
+two services in the same process: the downloader saw the right number
+and the dashboard saw zero.
+
+Fix: extract a single `OsaurusPaths.volumeFreeBytes(forPath:)` helper
+that uses the modern URL-keyed query first and falls back to the legacy
+API only when the modern query is unavailable. Both
+`SystemMonitorService` and `ModelDownloadService` now route through
+it — the two read-outs cannot drift again.
+
+Also adds `OsaurusPaths.volumeTotalBytes(forPath:)` for symmetric
+total-capacity queries (uses `.volumeTotalCapacityKey` first, legacy
+`.systemSize` fallback).
+
+Live verification: nothing to repro standalone (per-volume APFS
+behaviour), but the fix replaces the call that returns 0 in sandboxed
+contexts with the call that returns the value Finder shows. Sanity
+build green.
+
+* feat(nemotron): registry entries + thinking profile for Nemotron-3 Hybrid
+
+Adds osaurus-side support for NVIDIA Nemotron-3-Nano-Omni-30B-A3B
+Reasoning V3 — hybrid Mamba-2 SSM + Attention + MoE (52 layers: 23 M /
+23 E / 6 *), 262K native context, ReLU² activation. Per
+`jang/research/NEMOTRON-OMNI-RUNTIME-2026-04-28.md`.
+
+Three bundles registered (mirroring MiniMax M2.7&#39;s tier layout):
+  - Nemotron-3-Nano-Omni-30B-A3B-MXFP4   (~18 GB, 113 tok/s on M4 Max)
+  - Nemotron-3-Nano-Omni-30B-A3B-JANGTQ4 (~16 GB, 81.7 tok/s)
+  - Nemotron-3-Nano-Omni-30B-A3B-JANGTQ  (~9.1 GB, 84.7 tok/s)
+
+`NemotronThinkingProfile` matches `nemotron-3` (excluding any future
+`coder` variant) and defaults `disableThinking: true` for the same
+reason `QwenThinkingProfile` does — the SKU&#39;s training extends
+`&lt;think&gt;` blocks through arbitrary self-verification on validation
+prompts (the trapped-thinking pattern documented in PR #953&#39;s
+`unclosedReasoning` chip). Forcing thinking off for chat workloads
+matches the runtime doc&#39;s recommended operating point. Users who want
+CoT can toggle the chip per turn.
+
+What&#39;s NOT in this commit (delegated to vmlx, no osaurus wiring needed):
+  - Reasoning parser stamp: `nemotron_h` is already in vmlx&#39;s
+    `thinkXmlPrefixes` — auto-resolves to `think_xml`.
+  - Tool-call format: `ToolCallFormat.fromCapabilityName(&#34;nemotron&#34;)`
+    handled inside vmlx via JANG capabilities or model-type heuristic.
+  - Hybrid SSM cache: vmlx auto-flips `CacheCoordinator.isHybrid` on
+    first slot admission. Osaurus does NOT call `setHybrid` manually
+    (per OSAURUS-INTEGRATION.md).
+  - Sampling defaults: bundle ships `generation_config.json` with the
+    canonical T=0.6 top_p=0.95 recipe; `LocalGenerationDefaults`
+    reads it via the existing JANG → HF fallback chain.
+  - JANGTQ weight loading + Mamba SSM kernels: vmlx ships
+    `NemotronH.swift` (affine path verified on Cascade-2 30B JANG_4M);
+    JANGTQ wrapper landing separately upstream — picked up via pin
+    bump when ready.
+
+Tests:
+  - 2 new `ModelProfileRegistryTests` cases:
+      • `nemotron3_matchesNemotronProfile` — locks in matcher across
+        4 ID forms (full ORG/REPO + case-folded picker forms) and
+        asserts `disableThinking: true` default.
+      • `olderNemotron_doesNotMatch` — guards specificity (Cascade-2
+        and Super-120B should NOT match the nemotron-3 profile).
+  - 6 pre-existing profile-registry tests untouched and green.
+
+* feat(cache): eager setHybrid(true) for known hybrid Mamba families
+
+Per `vmlx-swift-lm/Libraries/MLXLMCommon/BatchEngine/OMNI-OSAURUS-HOOKUP.md`
+§5.1 (commit 08994b0): vmlx&#39;s BatchEngine still auto-flips
+`coordinator.isHybrid` on first slot admission, but the new omni doc
+explicitly recommends eager-set as harmless and complementary —
+&#39;avoids a one-frame stale-flag window if osaurus admits requests via
+Evaluate first.&#39; Eager-set also primes the SSM-state companion-cache
+lookup for Nemotron-3 / Holo3 / Qwen 3.5/3.6 MoE / MiniMax M2 hybrid
+bundles before the first turn lands.
+
+osaurus uses BatchEngine for every request today, so the auto-flip
+already handles us. Eager-set is defense-in-depth: if a future code
+path lands single-slot via Evaluate (e.g. for VL multimodal turns once
+`OMNI-OSAURUS-HOOKUP.md` §10.1&#39;s BatchEngine inputsEmbeds seam closes),
+the coordinator is already in the right mode.
+
+Wired via a new `isKnownHybridModel(name:)` substring matcher that
+covers the Mamba families: Nemotron-3 + Cascade-2, Qwen 3.5/3.6 MoE +
+Holo3, MiniMax M2/M2.7. Lock-in regression test (`ModelRuntimeIsHybridTests`,
+6 cases) guards the family list in both directions:
+  - Mamba families MUST flip (positive cases across full ORG/REPO + picker forms)
+  - Dense families (Gemma 4, GPT-OSS, Mistral, foundation) MUST NOT flip
+  - DSV4-Flash JANGTQ MUST NOT flip (uses DeepseekV4Cache, separate
+    DSV4_KV_MODE env-var control)
+
+Drift signal: when a new hybrid bundle ships, the family-list test
+fails until updated. Auto-flip remains the source of truth for any
+model_type the substring matcher misses (worst-case the eager-set is
+just skipped; vmlx flips on admission).
+
+* feat(error-handler): install global MLX error handler so C++ traps don&#39;t kill the server
+
+Without this, mlx-swift&#39;s default ErrorHandler.dispatch falls back to
+fatalError(message) for any C++-side MLX error — symbolicated against
+nemotron-cascade-2-30b-a3b-jang_4m during PR #967 triage where a
+weight-shape mismatch in MLXFast.rmsNorm took the entire process down,
+killing every unrelated in-flight request as collateral damage.
+
+MLXErrorRecovery.installGlobalHandler() registers a process-wide
+handler via MLX.setErrorHandler that logs + captures lastError instead
+of fatalError. AppDelegate.applicationDidFinishLaunching calls it
+before any model load can run.
+
+Pairs with the upstream vmlx fix in ae526a3 (rms_norm trap class fix
+for the bits=4 / 164-override JANG path) — that closes the one we hit;
+the handler protects against future ones.
+
+* chore(deps): bump vmlx-swift-lm pin a7db6e5 → 1c62d21
+
+Brings every runtime + docs fix accrued since a7db6e5 that the
+PR #967 picker entries depend on.
+
+Runtime fixes that matter for omni picker entries:
+  - ae526a3 closes the rms_norm trap on Cascade-2 JANG_4M /
+    Nemotron-Omni MXFP4 (the bug we triaged in this PR).
+  - 537e386 NemotronHJANGTQ closes &#34;Unhandled keys [experts]&#34;
+    for omni JANGTQ4 / JANGTQ2 bundles.
+  - d020e76 NemotronHOmni text-only prepare() returns .logits to
+    dodge BatchEngine&#39;s [.newAxis] cascading into Mamba conv state
+    merge.
+
+Documentation updates carried in:
+  - 1c62d21 corrects OMNI-OSAURUS-HOOKUP §10 — the previously-
+    reported &#34;BatchEngine omni B=1 empty stream&#34; was a bench
+    artifact (bench counted only .chunk events, missed .reasoning
+    events from reasoning-on-by-default omni). Osaurus&#39;s
+    GenerationEventMapper forwards .reasoning correctly via
+    delta.reasoning_content, so streaming clients see full output.
+  - OMNI-VOICE-INTEGRATION.md (new doc, voice/audio/video product-
+    engineering guide).
+
+Verification: build clean, 1160 tests pass when run in isolation
+across 3 suites that exhibit pre-existing test-suite-ordering
+flakes (ChatViewSandboxTests, ModelRuntimeMappingTests,
+FoundationMLXParityTests). Same flakes appear at ae526a3 — they
+are pre-existing, not introduced by this bump.
+
+* chore(deps): bump pins — vmlx-swift-lm 13abe40, mlx-swift e0b6111 (revision-pinned)
+
+Two coordinated pin bumps that anchor the Bug-1 + Bug-3a fixes:
+
+* vmlx-swift-lm: cf8c525 → 13abe40
+    - 13abe40 deps(mlx-swift): pin by revision e0b6111 (matches osaurus)
+    - 1f2292e docs(handoff): scrub names + add coverage matrix + API
+    - cf8c525 fix(repetition): treat penalty=1.0 as no-op (Bug 3a)
+
+* mlx-swift: branch:&#34;osaurus-0.31.3&#34; → revision e0b6111
+    - e0b6111 deps(mlx): submodule URL → osaurus-ai/mlx fork +
+                          pointer to f58e52da (Bug 1 fix +
+                          OSAURUS_MLX_CLEAR_LIBRARY_TRACE).
+
+Bug 1 (the deterministic Metal validation crash class
+`notifyExternalReferencesNonZeroOnDealloc` that fired inside
+BatchEngine.stepPrefill on warm-disk-cache 2nd-request flows on
+Apple M4 Pro Debug builds) is now fixed via the patched mlx
+submodule. The fix is semantically correct on macOS 14+ (Metal
+command buffer holds its own retain on encoded resources for the
+commit-to-completion lifecycle) and is hardware-agnostic across M1
+through M5. Reverter knob: `MLX_CLEAR_LIBRARY_RELEASE=1` at runtime.
+
+Bug 3a (RepetitionContext panic on Nemotron-3 first decode when
+generation_config.json declares `repetition_penalty: 1.0`) is fixed
+in vmlx via the no-op skip at Evaluate.swift, with 15-case
+SampleTests coverage.
+
+Both pins are revision-locked per the host-side pin policy from
+e2e13b4f — no remaining branch-based dep in OsaurusCore/Package.swift.
+
+End-to-end verification (M5 Max + macOS 26.4 + Xcode 26.4):
+  - vmlx focused tests 30/30 PASS at 13abe40
+  - osaurus full Release scheme builds clean against the new pins
+  - OmniBench 13/13 + StabilityBench 10/10 PASS on the
+    Nemotron-3-Nano-Omni-30B-A3B-MXFP4 weights, including the
+    &#34;restored N tokens from disk, prefilling 0 remaining&#34; disk-hit
+    path that triggered the original Bug-1 crash on M4 Pro
+
+* feat(api): OpenAI input_audio + video_url content parts → vmlx audios/videos
+
+Adds the osaurus-side HTTP plumbing that lets `POST /v1/chat/completions`
+clients send audio (`input_audio.{data, format}`) and video
+(`video_url.url`) content parts and have them reach Nemotron-3-Nano-Omni&#39;s
+Parakeet ASR + RADIO video pipeline end-to-end.
+
+API surface:
+  - MessageContentPart gains `.audioInput(data, format)` and `.videoUrl(url)`
+    cases. Codable round-trips preserve them.
+  - ChatMessage gains `audioInputs: [(data, format)]` and `videoUrls: [String]`
+    accessors. The encoder now serializes any non-text content parts as
+    arrays so requests round-trip.
+
+Mapping:
+  - mapOpenAIChatToMLX populates `Chat.Message.audios` and `.videos` for
+    every role branch — system, user, assistant, tool, default.
+  - extractVideoSources mirrors extractImageSources: data: URLs become
+    temp files, http(s): URLs pass through to vmlx as `.url(URL)`.
+  - extractAudioSources materializes base64 audio data to a temp file with
+    the format extension (wav/mp3/m4a/...) so vmlx&#39;s
+    `nemotronOmniLoadAudioFile` (AVAudioConverter → 16 kHz mono Float32)
+    drives the decode. Going through a file URL keeps the path uniform
+    across formats and avoids duplicating vmlx&#39;s resampling rig.
+  - common materializer normalizes mediatype variants
+    (audio/x-wav → wav, audio/mpeg → mp3, etc.).
+
+Pin bump: ae526a3 → a5c02a0. Brings the full omni audio + video stack
+plus end-to-end stress verification (39/39 rows across MXFP4 / JANGTQ4
+/ JANGTQ2 — text, image, video, audio, mixed-modality, reasoning toggle,
+hybrid SSM warm pass, MediaSalt isolation). `Chat.Message.audios` field
+arrives at 3b78db4 — that&#39;s what makes the mapping a one-line propagation
+through `Chat.Message.init(audios:)`.
+
+Cache + media-salt wiring is automatic: `BatchScheduler.swift:159` calls
+`computeMediaSalt(for: request.input)` on submission so audio waveforms
++ sample rate participate in the cache key alongside images/videos. No
+osaurus-side hashing needed — verified on row 10 of the bench (audio A
+vs audio B with identical prompt produce DIFFERENT decode output → no
+cache poisoning).
+
+Tests: MultimodalContentPartTests covers content-part decode for both
+shapes, ChatMessage accessors, mixed-parts Codable round-trip, mapping
+to Chat.Message for video + audio + every role, and that audio
+materializes to a temp file URL with the right extension for vmlx&#39;s
+extension-keyed AVAudioConverter dispatch.
+
+Full suite: 1168/1168 pass.
+
+* docs(deps): fix stale comment claims in OsaurusCore/Package.swift
+
+Three factual issues in the vmlx-swift-lm pin comment block were
+caught during a no-assumptions PR audit:
+
+1. Comment said `1c62d21 collects every relevant runtime + docs fix`
+   but the actual pin is now `13abe40` (which carries 1c62d21 +
+   four newer commits including the Bug 3a no-op repetition_penalty
+   fix and the revision-pinning of mlx-swift). Comment now reflects
+   the current pin tip.
+
+2. Comment cited `MLX.asyncEval(slot.cache)` for the disk-restore
+   eager-eval workaround at `BatchEngine.swift:748`. The actual code
+   uses `MLX.evaluate(slot.cache)` (the eager synchronous form), not
+   the async variant. Updated to match what the source actually does.
+
+3. Comment said the audio + video HTTP-API surface
+   `MessageContentPart.audioInput` / `.videoUrl` &#34;ships in a follow-up
+   osaurus PR on top of this one&#34;. The follow-up PR (#990) was
+   consolidated into this same PR. The `feat(api)` commit is now on
+   tip; comment updated to say so.
+
+While I was in there, also:
+  - Re-anchored the headline: this pin&#39;s primary contribution is
+    the Bug 3a fix (`cf8c525`) for the Nemotron-3 first-decode
+    Index-out-of-range panic.
+  - Added explicit notes that the Bug 1 (`notifyExternalReferences-
+    NonZeroOnDealloc`) fix lives in the mlx-swift submodule, not
+    in vmlx itself, and is anchored via the mlx-swift pin block
+    above (revision e0b6111 → mlx submodule f58e52da).
+  - Noted ae49c7c + 3b78db4 as the omni audio + video gap closures
+    that make the host-side `feat(api)` round-trip end-to-end.
+
+No functional change. Verified the comment&#39;s other cited facts
+against the source on this PR&#39;s tip:
+  - PluginHostAPI.swift:1139 emits `delta.reasoning_content` ✓
+  - ModelRuntime.installCacheCoordinator §5.1 reference still valid ✓
+  - isKnownHybridModel matches qwen3.6 / nemotron-3 / holo3 /
+    minimax-m2 substrings — locked down by ModelRuntimeIsHybridTests
+  - NemotronThinkingProfile excludes &#34;coder&#34; substring — locked
+    down by ModelProfileRegistryTests.qwen3_coder_excluded
+
+* feat(models): register Laguna-XS.2 + Mistral-Medium-3.5-128B (preview)
+
+Add picker entries + thinking-profile coverage for two model families
+the host-side `jang_tools` converters now produce, ahead of vmlx-swift-lm
+engine support landing.
+
+## Laguna-XS.2 (Poolside, model_type=laguna)
+
+  - 33B/3B-active agentic-coding MoE
+  - 40 layers, hidden 2048, 48/8 GQA, head_dim 128
+  - max_position 131,072
+  - 256 routed experts top-8 + 1 shared, sigmoid routing per-head
+  - sliding_window 512 with per-layer SWA + full attention mix
+  - dual RoPE (full=YaRN, swa=default), q_norm/k_norm in attention
+  - text-only (no vision/audio/video)
+  - chat template `laguna_glm_thinking_v5/chat_template.jinja` reads
+    an `enable_thinking` Jinja kwarg, defaulting to false
+
+Registry entries:
+  - `OsaurusAI/Laguna-XS.2-mxfp4`     (~17 GB)
+  - `OsaurusAI/Laguna-XS.2-JANGTQ2`   (~7 GB)
+
+`LagunaThinkingProfile` (new) matches `laguna` substring lower-cased,
+exposes a &#34;Disable Thinking&#34; toggle defaulting to true so the chat-input
+area&#39;s reasoning chip mirrors the in-template default. The profile is
+registered before `AutoThinkingProfile` so it takes precedence over the
+generic chat-template-driven fallback. 5-case match coverage in
+`ModelProfileRegistryTests.laguna_matchesLagunaProfile`, including the
+case-folded picker form and a forward-compat &#34;Laguna-S.3-JANGTQ4&#34; entry.
+
+The hybrid in Laguna is sliding-window + full attention (handled by
+`RotatingKVCache` + `KVCacheSimple` per-layer in vmlx), NOT the Mamba/
+Attn/MoE pattern that `setHybrid(true)` is for. `isKnownHybridModel`
+intentionally does NOT match Laguna — locked down by
+`ModelRuntimeIsHybridTests.laguna_isNotMambaHybrid` (5 negative cases).
+
+`jang_config.json` v2 schema captured by `convert_laguna_jangtq.py`:
+  { &#34;weight_format&#34;: &#34;mxtq&#34; | &#34;mxfp4&#34;,
+    &#34;source_model.architecture&#34;: &#34;laguna&#34;,
+    &#34;has_vision/audio/video&#34;: false,
+    &#34;mxtq_bits&#34;: { &#34;attention&#34;: 8, &#34;shared_expert&#34;: 8,
+                   &#34;routed_expert&#34;: 2 | 4, &#34;embed_lm_head&#34;: 8 } }
+The shared `validateJANGTQSidecarIfRequired` preflight guards
+mislabeled JANGTQ bundles (sidecar present + non-mxtq stamp); Laguna
+inherits that protection without changes.
+
+## Mistral-Medium-3.5-128B (Mistral AI, model_type=mistral3 wrapper)
+
+  - text inner: ministral3 — dense GQA 96/8, 88 layers, hidden 12288,
+    head_dim 128, 256K YaRN (theta=1M, factor=64, orig=4096)
+  - vision: pixtral — 48 layers, hidden 1664, head_dim 104,
+    image_size 1540, patch 14, spatial_merge 2
+  - source FP8 e4m3 with PER-TENSOR scales (`weight_block_size: null`)
+  - vision tower / multi_modal_projector / lm_head stay bf16/fp16
+
+Registry entries:
+  - `OsaurusAI/Mistral-Medium-3.5-128B-mxfp4`    (~70 GB)
+  - `OsaurusAI/Mistral-Medium-3.5-128B-JANGTQ2`  (~36 GB)
+
+vmlx-swift-lm&#39;s `mistral3` factory currently checks
+`text_config.model_type == &#34;mistral4&#34;` and falls through to
+`Mistral3VLM` for everything else. Loading a `ministral3` text inner
+through that fall-through path will mismatch `Mistral3VLM`&#39;s expected
+layer / hidden counts — the engine needs a new `ministral3` text inner
+class (mirrors how `mistral4` was added earlier). Tracked as a vmlx
+follow-up; the registry entry is in place so the picker carries it
+across the engine bump and the host-side hybrid matcher already gives
+the right answer (NOT a Mamba hybrid — Mistral 3.5 is dense GQA +
+Pixtral vision). Negative coverage in
+`ModelRuntimeIsHybridTests.mistralMedium35_isNotMambaHybrid` (4 cases).
+
+`jang_config.json` v2 schema captured by `convert_mistral3_jangtq.py`:
+  { &#34;weight_format&#34;: &#34;mxtq&#34; | &#34;mxfp4&#34;,
+    &#34;source_model.architecture&#34;: &#34;mistral3&#34;,
+    &#34;has_vision&#34;: true, &#34;vision_arch&#34;: &#34;pixtral&#34;,
+    &#34;mxtq_bits&#34;: { &#34;text_decoder&#34;: 2 | 4, &#34;embed_tokens&#34;: 8,
+                   &#34;vision_tower&#34;: &#34;passthrough_fp16&#34;,
+                   &#34;multi_modal_projector&#34;: &#34;passthrough_fp16&#34;,
+                   &#34;lm_head&#34;: &#34;passthrough_fp16&#34; } }
+
+Mistral 3.5 has no `&lt;think&gt;` block in its chat template today, so no
+new thinking-profile is registered for it; if it falls through to
+`AutoThinkingProfile` that path activates only when the local-reasoning
+detector says thinking is toggleable. Negative coverage in
+`ModelProfileRegistryTests.mistralMedium35_doesNotMatchThinkingFamilies`
+(must NOT shortcut into Nemotron or Laguna profiles).
+
+Verified: full `swift test` on OsaurusCore: 1194 / 1194 in 163 suites
+pass on this branch&#39;s tip.
+
+* fix(api): video data URL no longer downgraded to .m4a + Nemotron comment fix
+
+Two surgical audit fixes uncovered while reviewing PR #967 end-to-end.
+
+1. `materializeMediaDataUrl` shared helper applied the audio mediatype
+   canonicalization table (`mp4 → m4a`) unconditionally — meaning a
+   `data:video/mp4;base64,...` part got written to a temp file with `.m4a`.
+   AVAsset on macOS still extracts video tracks from the misnamed file
+   so the bug was invisible in the e2e https-URL mapping test, but it
+   misroutes against any downstream tool that keys on `pathExtension`.
+   Fix: gate the canonicalization on `header.hasPrefix(&#34;audio/&#34;)`.
+
+   New regression test in `MultimodalContentPartTests` exercises both
+   shapes — `data:video/mp4` keeps `.mp4`, `format=mp4` audio still
+   canonicalizes to `.m4a`.
+
+2. Nemotron-3 registry comment in `ModelManager.swift` claimed osaurus
+   does NOT call `setHybrid` manually. That was true before commit
+   `051931a5` (eager setHybrid for hybrid Mamba families); since then
+   it has been stale. Comment rewritten to match the current behavior.
+
+OsaurusCore: 1195 / 1195 (was 1194; +1 regression test).
+
+* docs(models): correct Mistral 3.5 vmlx engine-support claim
+
+Comment-only fix. The previous comment said the vmlx `mistral3` factory
+fall-through path would FAIL on Mistral 3.5 because Mistral3VLM didn&#39;t
+expect ministral3 shapes. That&#39;s wrong:
+
+  Libraries/MLXVLM/Models/Mistral3.swift:516
+  &gt; Language model that supports both ministral3 and mistral model types.
+  &gt; For ministral3: uses sliding attention with llama4 attention scaling
+  &gt; Use ministral3 model as the primary implementation
+  &gt; It handles both cases ...
+
+`Mistral3VLM.LanguageModel` already wires `Ministral3ModelInner`
+unconditionally and the vision tower shapes are config-parametric.
+Mistral 3.5 should load through the existing factory dispatch — no new
+model class needed.
+
+End-to-end smoke test on real 3.5 weights still pending, so &#34;preview&#34;
+flag stays. Wording now reads &#34;architecturally supported, load
+unverified&#34; rather than &#34;engine support pending&#34;.
+
+No code change. 1195/1195 still pass.
+
+* chore(deps): bump vmlx-swift-lm 13abe40 → 2a6c965 (laguna stamp + omni docs)
+
+Pulls in the just-landed vmlx commit `2a6c965`:
+
+  - `feat(reasoning)`: pre-registers `laguna` model_type in
+    `reasoningStampFromModelType`&#39;s `think_xml` prefix list. Without
+    this, the day vmlx ships a `laguna` model class CoT output would
+    silently leak into `.chunk` events instead of `.reasoning` deltas
+    (Poolside laguna_glm_thinking_v5/chat_template.jinja emits
+    &lt;think&gt;/&lt;/think&gt;). Test `lagunaResolvesToThinkXml` locks the
+    resolution; 4/4 assertions green.
+
+  - `docs(integration)`: new
+    Libraries/MLXLMCommon/BatchEngine/PARAKEET-RADIO-INTEGRATION.md —
+    host-team integration spec for Nemotron-3&#39;s audio (Parakeet ASR)
+    and vision (RADIO ViT) modalities. Covers API surface, file
+    format expectations, frame budgets, cache + memory profile,
+    streaming + cancellation, error surfaces.
+
+OsaurusCore: 1195 / 1195 against the new pin. No downstream API changes
+on the host side — this bump is pure observability + future-proofing.
+
+* test(mcdc): host-side MC/DC suites + bump vmlx pin to 5adb91b
+
+Adds MC/DC discipline to the osaurus host fixes that mirror the engine
+discipline established in vmlx-swift-lm@5adb91b.
+
+Ships:
+
+  - Tests/Service/IsKnownHybridModelMCDCTests.swift — 14 cases for the
+    `isKnownHybridModel` 3-OR-block matcher. Each substring (nemotron-3,
+    nemotron-cascade, nemotron_h, qwen3.5, qwen3.6, holo3, holo-3,
+    minimax-m2, minimax_m2) independently flips its block. Master-FALSE
+    row over 12 dense/non-hybrid families locks negative side. Boundary
+    rows for bare &#39;nemotron&#39; (must NOT match — older NeMo dense bundles)
+    and qwen3-coder (excluded by design).
+
+  - Tests/Model/MaterializeMediaDataUrlMCDCTests.swift — 11 cases
+    exercising the audit-fix decision tree through `mapOpenAIChatToMLX`.
+    D1 prefix guard, D2 comma-index guard, D3 base64 decode guard,
+    D6 audio-mime gate (the audit-fix regression row: data:video/mp4
+    must keep .mp4, not be downgraded to .m4a), each switch arm
+    (x-wav/mpeg/x-m4a/mp4) independently flipping ext.
+
+  - Bump vmlx-swift-lm pin 2a6c965 → 5adb91b. New pin carries:
+    * EvaluateRepetitionPenaltyMCDCTests.swift (Bug 3a, 11 cases)
+    * ReasoningStampMCDCTests.swift (17 cases, full disjunction)
+    * MCDC-COVERAGE-STRATEGY.md (test-design contract for engine fixes)
+    * scripts/coverage/run_mcdc.sh (llvm-cov branch coverage extraction)
+
+OsaurusCore: **1220 / 1220** tests in 165 suites against the new pin
+(was 1195/163; +25 MC/DC tests / +2 suites). vmlx focused: 30/30 + 28
+new MC/DC = 58 engine-side regression-protected. No existing test
+regressions.
+
+* chore(deps): bump vmlx-swift-lm 5adb91b → 03b4441 (full media-model + JANGTQ matrix doc)
+
+Pulls in the new MEDIA-MODEL-MATRIX.md spec sheet at vmlx@03b4441
+covering every modality-capable family in the engine — not just
+Nemotron-3&#39;s Parakeet/RADIO. Companion to PARAKEET-RADIO-INTEGRATION.md.
+
+Spec covers:
+  - Modality matrix: 17 VLM families × {image, video, audio} + 14 LLMs
+  - JANGTQ dispatch: NemotronH/Qwen35/MiniMax/DSV3/DSV4 routing classes
+  - Cache topology: hybrid SSM (Mamba) vs SWA hybrid (sliding+full)
+    vs dense, plus DSV4&#39;s dedicated DeepseekV4Cache
+  - Per-family video processing: Qwen 2/2.5/3 VL temporal patches,
+    Qwen 3 VL hardcoded targetFPS=2, Qwen 3.5/3.6 MoE hybrid eager
+    setHybrid, SmolVLM 2 adaptive 1fps≥10s sampling
+  - Audio support boundary: Nemotron-3-Nano-Omni only
+  - Memory profile baselines (M5 Max MXFP4)
+  - Host UI rejection contract per attachment type
+  - Boundary trap: Mistral3Text.newCache slidingWindow=nil silent
+    wrong-cache fallthrough flagged for engine refactor
+
+OsaurusCore: 1220/1220 against new pin.
+
+* feat(chat): drag/drop audio + video attachments gated by per-model capability
+
+Wires the in-app chat composer for audio + video attachments end-to-end,
+gated by per-model capability detection. Users dragging a wav onto a
+loaded Nemotron-3-Nano-Omni get audio routed; dragging the same wav
+onto a Qwen3.6 model gets a &#34;model is image+video only&#34; toast instead
+of silent ignore.
+
+Pieces:
+
+  - Attachment.Kind: new `.audio(Data, format, filename?)` and
+    `.video(Data, filename?)` cases plus their spillover refs
+    (`audioRef`, `videoRef`) for chat-history persistence parity with
+    image/document. Codable round-trip + factory methods + queries
+    (isAudio/isVideo) + audioFormat accessor + estimatedTokens
+    refined per-modality (audio ≈ 1 token / 640 bytes per Parakeet
+    rate; video bounded ~2K tokens regardless of file size).
+
+  - ModelMediaCapabilities (new): regex/substring matcher resolving
+    a model id or local bundle directory to {supportsImage,
+    supportsVideo, supportsAudio}. Covers Nemotron-3 omni regex,
+    Qwen 2/2.5/3 VL, Qwen 3.5/3.6 MoE VL, Holo3 VL, SmolVLM 2,
+    image-only VLMs (PaliGemma/Idefics3/Pixtral/etc), Mistral
+    3/3.5/4 VL. Bundle-directory path checks `config_omni.json`
+    sidecar for the omni gate. 27 MC/DC-shaped tests in
+    Tests/Model/ModelMediaCapabilitiesMCDCTests.swift covering each
+    branch independently flipping + boundary cases (bare nemotron-3
+    must NOT match omni; bare qwen3.5 without -vl must NOT match
+    imageVideo; etc).
+
+  - FloatingInputCard:
+    * `mediaCapabilities` computed from selectedModel
+    * `dropAcceptedTypes` + `pickerAllowedTypes` UTType lists gated
+      by capability — audio types only when supportsAudio, video
+      types only when supportsVideo
+    * `attachIfAllowed(url:)` central router with rejection toast
+      for unsupported attachment types
+    * `attachAudio` / `attachVideo` with size caps (50 MB / 100 MB
+      inline before the user is told to use streaming API)
+    * inline preview chip case for audio/video (DocumentChip with
+      icon override — `waveform` for audio, `film` for video)
+    * onDrop branches for UTType.audio / UTType.movie / UTType.video
+      load via fileURL → attachIfAllowed for uniform routing
+
+  - AttachmentBlobStore.spillIfNeeded: new switch arms for audio
+    (256 KB threshold — chat-history doesn&#39;t bloat with raw PCM)
+    and video (64 KB threshold — virtually always spills). Garbage
+    collection refs sweep updated to include audioRef/videoRef
+    hashes.
+
+  - OpenAIAPI ChatMessage: new init taking `audios: [(Data, format)]`
+    and `videos: [(Data, mimeSubtype)]`. Audio bytes encode as
+    `input_audio` with the format hint flowing into vmlx&#39;s
+    AVAudioConverter dispatch. Video bytes encode as `video_url`
+    with `data:video/&lt;container&gt;` URL preserving the .mp4/.mov/etc
+    extension (the audit fix&#39;s audio-mime gate ensures the
+    canonicalization table doesn&#39;t downgrade video/mp4 to .m4a).
+
+  - MEDIA-ATTACHMENT-USER-GUIDE.md: 10-section host-side guide
+    covering UX, capability matrix, format extensions, memory +
+    cache + JANGTQ runtime behavior, streaming + cancellation,
+    programmatic API, capability detection programmatic surface,
+    test coverage, and the checklist for adding new families.
+
+OsaurusCore: **1247 / 1247** tests in 166 suites (up from 1220, +27
+MC/DC capability tests). Build clean. No regressions in existing
+tpae regression / multimodal / hybrid-cache / Bug 3a suites.
+
+* fix(deps): bump vmlx-swift-lm 03b4441 → de521c7 (Bug 2 fix) + lock FluidAudio &lt; 0.14.2
+
+vmlx-swift-lm bump pulls in:
+  - de521c7 fix(omni): chunked prefill in NemotronHOmni text-only path
+    (Bug 2 root-cause fix). Reproduced on real Nemotron-3-Nano-Omni
+    weights via StabilityBench S5/S11 with the new mx::malloc tracer.
+
+  Bug 2 mechanism (confirmed via 99 tracer hits, including 298 GiB
+  ternary_op_gpu and 37 GiB allocations):
+    - Old code ran the entire prompt unchunked through the model.
+    - For prompts &gt; ~8k tokens, ssmAttn&#39;s segsum builds [B, h, L, L]
+      via `MLX.repeated(x[..., .newAxis], count: l, axis: -1)` then
+      `MLX.tril(...)` then `MLX.cumsum(...)` — 17 GB per Mamba layer
+      at L=16k bf16.
+    - With 23 sequential Mamba layers and lazy-eval intermediates,
+      peak Metal-buffer allocation hits 100s of GB.
+  Fix: chunked prefill mirroring LLMModel.prepare. Mamba layers carry
+  running state across chunks via MambaCache (designed for this);
+  attention layers update KV in place. Each chunk re-evals + clears
+  Metal cache before the next, bounding peak to O(chunk²) per layer.
+
+  Pre-fix S5 (16k tokens): peak 418 GB, 85.81s
+  Post-fix S5 (16k tokens): peak &lt; 512 MiB, 4.01s (21× faster)
+  Post-fix S11 (60k tokens): peak &lt; 512 MiB, 15.39s (was OOM)
+
+mlx-swift bump:
+  - 0a56f9 advances submodule to osaurus-ai/mlx@96aa27a5 carrying the
+    env-gated mx::malloc large-allocation tracer used to find Bug 2.
+    Zero overhead when env unset.
+
+FluidAudio: locked to &#34;0.14.0&#34;..&lt;&#34;0.14.2&#34; — 0.14.2+ added a breaking
+`language:` parameter to TTS calls that osaurus&#39;s TTSService doesn&#39;t
+pass yet. Bumping requires a paired TTSService update (separate PR).
+
+OsaurusCore: 1247/1247 tests pass. Bug 2 root-cause fix in upstream
+osaurus-ai/vmlx-swift-lm (not workaround). MC/DC + tpae regression
+suites all green.
+
+* chore(deps): bump vmlx-swift-lm de521c7 → a196800 (low-spec host guidance doc)
+
+Pulls in vmlx@a196800 — new
+Libraries/MLXLMCommon/BatchEngine/LOW-SPEC-HOST-GUIDANCE.md doc with
+per-host-class memory ceilings, wired allocation knobs, Bug 1 + Bug 2
+fix path-confirmation, reasoning parser edge case matrix, tool-call
+parser per-family verification, context injection (additionalContext)
+kwarg coverage, JANG config v2 schema preflight, async cancellation
+semantics, and recommended host config for tight-memory operating
+points.
+
+Companion live verification on real Nemotron-3-Nano-Omni-30B MXFP4:
+
+  - StabilityBench S1-S12: 12/12 PASS, 0 tracer hits at 512 MiB
+    threshold across all rows
+  - S12 (NEW): warm disk cache + mid-reasoning state — turn 1 capped
+    mid-&lt;think&gt; at 30 chunks, turn 2 disk-hit produced 22 valid chunks
+    without Metal-validation assertion. Highest-fidelity stress of
+    the originally-reported Bug 1 mechanism.
+  - OmniBench multimodal: 13/13 PASS at the previous pin (de521c7);
+    no engine code change at a196800, doc-only.
+
+OsaurusCore: 1247/1247.
+
+- fix flaky tests (#982)
+
+- added loopback to CORS and simplified controls (#981)
+
+- tts support (#962)
+
+* initial TTS setup
+
+* minor improvements
+
+* fixed incorrect download state of tts model
+
+* fixed cell reuse bug which was causing action buttons to hide
+
+* added voice picker
+
+* added TTS as a tool
+
+* improved visual updates for tts tool call
+
+* fixed a bug in speaker button in message cell
+
+* stop audio playback at appropriate places
+
+- [codex] Clean Azure Foundry provider support (#978)
+
+* fix: support Azure OpenAI Foundry providers
+
+* Clean Azure Foundry provider PR
+
+---------
+
+Co-authored-by: Jordan Kabyemela &lt;wyzig34@gmail.com&gt;
+Co-authored-by: Michael Meding &lt;mmeding@Michaels-Mac-Studio.local&gt;
+
+- Update appcast for 0.18.2 (release)
+
+- minor changes (#972)
+
+* minor changes
+
+* fixed inconsistent border radius in what&#39;s new modal
+
+- [codex] Gate local thinking controls and SQLCipher import (#954)
+
+* Gate auto thinking toggle by runtime markers
+
+* Hide SQLCipher extension API during Swift import
+
+* Align CI Xcode with release workflow
+
+* Define SQLCipher FTS5 import guard in umbrella
+
+---------
+
+Co-authored-by: tpae &lt;terencepae@gmail.com&gt;
+
+- added core model fallback if missing (#971)
+
+- prevent cold loading large core MLX models on launch for memory distillation (#970)
+
+skip launch time distill drain when core model would cold load
+
+- improved model manager (#961)
+
+* account downloading models for badge count in downloads tab
+
+* added performance filters
+
+* improved UI of models card
+
+* show recommended models as a section in all tab
+
+* removed unused animation
+
+* shared element transition for grid changes
+
+* added debounce for shared element animation during search
+
+* improved model search
+
+* import hf modal &amp; simplified model name in model card
+
+* updated UI of model card and model detail popup
+
+* added sorting
+
+* optimized animation for sorting
+
+* extracted diff animation as a modifier &amp; added it in AgentsView
+
+* added sort by downloads option
+
+* fetch model size from HF
+
+* show selected filter/sort option for better UX
+
+- Update appcast for 0.18.1 (release)
+
+- docs update
+
+- added additional responsiveness to watchers (#968)
+
+- Agent View Updates - added Share Agent feature (#966)
+
+* added agent view
+
+* updated agent view
+
+* updated agents view
+
+- feat(documents): foundations for document format adapters (#926)
+
+* feat(documents): add foundations for document format adapters
+
+Adds the read-side, write-side, and streaming protocols plus a
+process-wide routing registry, with a typed parse result that carries
+both a format-native representation and a plain-text fallback. No
+existing code is touched — the shim that delegates DocumentParser.parseAll
+to the registry, and the first real adapters, land in follow-up PRs so
+each slice stays independently reviewable.
+
+- Protocols split by responsibility so read-only formats (XLS, OFX 1.x)
+  don&#39;t carry stub writers and small formats (QIF, MT940) don&#39;t carry
+  stub streamers.
+- Registry uses an NSLock rather than @MainActor isolation so agent
+  tool calls (which will run off the main actor) can look up an adapter
+  without an await hop.
+- Per-format size ceilings collected in DocumentLimits; the adversarial-
+  input argument for these caps mirrors the file-size gate landed in
+  #925 for the legacy DocumentParser.
+
+* Stabilize sandbox routing tests
+
+* Serialize synthetic agent test state
+
+* Avoid Keychain prompts in plugin registration tests
+
+---------
+
+Co-authored-by: tpae &lt;terencepae@gmail.com&gt;
+
+- Update appcast for 0.18.0 (release)
+
+- markdown rendering improvements (#960)
+
+* hide raw markdown delimiters during streaming
+
+* smooth response streaming
+
+* handle incomplete list markdown element
+
+* animate streaming
+
+* fixed concurrency warnings
+
+---------
+
+Co-authored-by: tpae &lt;terencepae@gmail.com&gt;
+
+- fix(preflight): detect mislabeled JANGTQ bundles + vmlx fa77575 auto-correct (#953)
+
+* fix(preflight): detect mislabeled JANGTQ bundles (sidecar present + non-mxtq stamp)
+
+Bundles that ship jangtq_runtime.safetensors but stamp jang_config.json
+as weight_format: &#34;bf16&#34; (or omit the field entirely) cause vmlx to
+dispatch to the BASE DeepseekV4Model / MiniMaxModel / etc. class. The
+safetensors then carry tq_norms / tq_packed tensors the base parameter
+loader can&#39;t decode, surfacing as:
+
+  Error: Unhandled keys [&#34;tq_norms&#34;, &#34;tq_packed&#34;] in
+  model.layers.0.mlp.switch_mlp.up_proj in
+  DeepseekV4Model...DeepseekV4MoE.SwitchGLU.SwitchLinear
+
+Live-confirmed 2026-04-25 on an early DSV4-Flash JANGTQ bundle stamped
+&#34;bf16&#34; — the case the vmlx integration doc explicitly notes via the
+DSV4_FORCE_JANGTQ=1 env-var workaround.
+
+This commit extends validateJANGTQSidecarIfRequired with the inverse
+mismatch check: sidecar present + weight_format != &#34;mxtq&#34; → throw a
+clear remediation error instead of letting vmlx consume 60+ shards
+before failing on Unhandled keys.
+
+Genuine bf16 dense bundles (DSV4-Flash-JANG_2L, etc.) ship NO sidecar
+and continue to pass through. Three new tests cover both mislabel
+shapes (bf16+sidecar, absent+sidecar) plus a regression test confirming
+the bf16-no-sidecar happy path still works.
+
+* deps: pin vmlx-swift-lm by revision instead of branch (per tpae&#39;s new convention)
+
+Switch from `branch: &#34;main&#34;` to `revision: &#34;c992df9...&#34;` in
+Packages/OsaurusCore/Package.swift, and strip the now-redundant
+`branch: &#34;main&#34;` field from osaurus.xcworkspace&#39;s Package.resolved
+`state` block. SwiftPM keeps the revision-only state when the source
+declaration uses revision pinning; collaborators get the matching
+lock file by re-resolving the workspace (Xcode &#39;File ▸ Packages ▸
+Reset Package Caches&#39; or `xcodebuild -resolvePackageDependencies`).
+
+Why: prevents unwanted upgrades from the upstream main branch moving,
+and makes local development against vmlx hashes deterministic across
+contributors. Branch-based pinning silently picked up new commits
+on every package refresh.
+
+Build verified: `xcodebuild build` against the workspace succeeds at
+this pin.
+
+* feat(reasoning): surface vmlx unclosedReasoning to chat UI as a trapped-thinking warning
+
+Wires vmlx-swift-lm c992df9&#39;s GenerateCompletionInfo.unclosedReasoning
+flag through the osaurus runtime + chat UI. Reasoning-trained Qwen3.6-A3B
+and DSV4 fine-tunes can get trapped doing meta-cognitive self-validation
+loops on prompts like &#39;give me a 20-digit number&#39; — the model emits
+[Final Check] / Self-Correction tokens forever and never closes
+&lt;/think&gt;, so the visible content channel stays empty while the answer
+sits buried in the reasoning pane.
+
+vmlx now detects this case (insideReasoning at stream end) and surfaces
+it on Generation.info(GenerateCompletionInfo.unclosedReasoning). This
+commit threads that signal end-to-end:
+
+  vmlx GenerateCompletionInfo.unclosedReasoning
+    ↓
+  GenerationEventMapper passthrough (logs it on the [perf] mlxStats line)
+    ↓
+  ModelRuntimeEvent.completionInfo(..., unclosedReasoning: Bool)
+    ↓
+  ModelRuntime.streamWithTools encodes via StreamingStatsHint
+    (wire format: &#34;&lt;sentinel&gt;stats:&lt;count&gt;;&lt;tps&gt;[;unclosed]&#34; — third
+    field is comma-separated flags so future signals stay backward-compat)
+    ↓
+  ChatView decodes + persists onto ChatTurn.unclosedReasoning
+    ↓
+  ContentBlock.generationStats carries the flag to the cell renderer
+    ↓
+  NativeStatsView appends a one-line warning chip beside the tok/s
+    counter:  &#39;⚠ thinking didn&#39;t close — try Disable Thinking&#39;
+
+The HTTP API path intentionally drops the stats sentinel today (existing
+behavior — clients only see OpenAI/Ollama-shaped JSON), so this is a
+chat-UI-only surface for now.
+
+Live verified end-to-end on DSV4-Flash JANGTQ at HEAD with the exact
+repro prompt from the upstream c992df9 commit:
+  prompt=&#39;Give me a random 20-digit number. Only return the number itself.&#39;
+  → log line: &#39;genTokens=256 stop=length unclosedReasoning=true&#39;
+
+Tests:
+  - 7 new StreamingStatsHint cases (encode/decode roundtrip with the
+    new flag; legacy 2-field payload still decodes; unknown future
+    flags are ignored without breaking parse).
+  - 1 new GenerationEventMapper case (vmlx-set unclosedReasoning
+    propagates through the bridge).
+  - Full suite: 1027/1027 pass.
+
+Pin: bumped to vmlx-swift-lm c992df9 (the commit that adds the flag).
+
+Pairs with — but does NOT need — QwenThinkingProfile already defaulting
+disableThinking=true for Qwen3.x; this fallback exists for the case
+where the user explicitly opts INTO thinking and the model&#39;s training
+nonetheless traps.
+
+* fix(deps): bump vmlx-swift-lm pin to a7db6e5 (closes Metal-assertion crash on cache hit)
+
+Closes the deterministic `notifyExternalReferencesNonZeroOnDealloc`
+crash class that fired in `BatchEngine.stepPrefill` immediately after
+`Cache disk hit` on the second request to the same model. Two upstream
+commits land that fix together:
+
+  - 98289d9 forces eager MLX async-eval on `slot.cache` after disk
+    restore so lazy-restore graph ops don&#39;t extend into the next
+    request&#39;s command buffer.
+  - a7db6e5 sets `continuation.onTermination` on
+    `BatchEngine.generate`&#39;s outStream so orphan slots get reaped via
+    `engine.cancel(requestId)` whenever a consumer breaks early.
+
+Net effect: the `Task.isCancelled` break in MLXBatchAdapter line
+209-222 is safe, no `enableDiskCache: false` workaround is needed,
+and the cache disk-hit fast path is now usable on back-to-back requests.
+
+Live verification (this commit, exhaustive 5-phase matrix):
+
+  Phase 1 (exact bug report repro): qwen3.6-27b-mxfp4-crack, 2x
+    identical prompts, request B finished cleanly in 6s (vs 10s cold A).
+  Phase 2 (sustained loop): 5x back-to-back identical, app pid steady,
+    RSS stable.
+  Phase 3 (orphan-slot pattern): 3x cycles of cancel-mid-stream +
+    immediate retry, no crash on any cycle.
+  Phase 4 (hybrid SSM): holo3-35b-a3b-jangtq4, prompt-tps jumped
+    75→482 (6.3x) on cache hit, no crash.
+  Phase 5 (other model class): deepseekv4-flash-jangtq A+B identical,
+    both completed cleanly.
+
+Across 15+ generations spanning 3 model_type families
+(qwen3_5_moe / qwen3_5_moe+SSM / deepseek_v4) and ~3.5 minutes of app
+uptime: ZERO Metal assertions, zero process exits, zero
+`destroyed while still required` lines in stderr or syslog.
+
+Also includes c992df9&#39;s `GenerateCompletionInfo.unclosedReasoning` for
+the trapped-thinking chip — same pin lineage.
+
+* ci: revert release-drafter v7 -&gt; v6 (target_commitish API rejection)
+
+PR-event runs of release-drafter@v7 fail with:
+  Validation Failed: {&#34;resource&#34;:&#34;Release&#34;,&#34;code&#34;:&#34;invalid&#34;,
+                     &#34;field&#34;:&#34;target_commitish&#34;}
+
+Triggered by v7&#39;s `Updating existing release...` step which sends
+`target_commitish: refs/pull/&lt;N&gt;/merge` — a value GitHub&#39;s REST
+`/releases` API rejects (must be a real branch). v6 omits the field
+on PR runs and only updates the draft body, which is what we want for
+the PR-time preview.
+
+Empirical evidence:
+  PR #944 / #951 / #956 — passed on v6 (the prior pin).
+  PR #953 — failed on v7 (introduced by commit 56c4dc74 &#34;fix release
+            drafter&#34; on main 2026-04-27, which mistakenly upgraded the
+            action while attempting to fix something else).
+
+Revert to v6 restores green CI. The push-to-main run keeps working on
+either version because that path provides a real branch ref.
+
+- fix release drafter
+
+- fix flaky tests and updated headers for sqlite collision prevention (#956)
+
+* fixed flaky test
+
+* extended collision protection
+
+* added sandbox test lock to prevent races
+
+* fix race condition
+
+* refactor tests for predictability
+
+- improved security with full storage encryption and sandbox hardening (#951)
+
+* fixed security vulnerabilities and improved tests
+
+* added storage encryption
+
+* updated ci and fixed minor issues
+
+* updated sqlcipher headers for collision prevention
+
+* fix hanging on launch
+
+* fixed critical issue with provider migration
+
+* updated UI
+
+* fix bug with preflight
+
+* fix long running tests
+
+* fix consolidator
+
+* fix tests
+
+* fixed long running process blocking tests
+
+* attempted fix
+
+* updated runtime environment
+
+* update git
+
+* unblock storage lock
+
+* clean up code, fixed tests
+
+* minor clean up
+
+* fix failing test
+
+- feat: jang_config.json chat metadata + vmlx bump (DSV4 / Kimi K2.6 / LFM factory fix) (#944)
+
+* feat: jang_config.json chat.sampling_defaults overlay
+
+New JANG / JANGTQ bundles (DSV4-Flash-JANGTQ, Kimi K2.6 JANGTQ, newer
+Gemma-4 / Qwen-3.6 JANG snapshots) stamp training-recipe sampling
+defaults into `jang_config.json &gt; chat &gt; sampling_defaults` via the
+converter (`jang/jang-tools/dsv4_prune/convert_dsv4_jangtq.py`). These
+can differ from the upstream `generation_config.json`:
+
+  DSV4-Flash-JANGTQ:
+    upstream generation_config.json  →  temperature: 1.0
+    DSV4 chat.sampling_defaults      →  temperature: 0.6   ← recipe
+
+`LocalGenerationDefaults` now consults BOTH files and merges primary
+(JANG) → fallback (HF). A bundle that sets only `temperature` in JANG
+still gets `top_p` / `top_k` from the upstream HF file. Bundles with
+neither fall through to the caller&#39;s hardcoded defaults (unchanged
+from pre-PR behaviour).
+
+Schema recognized (subset osaurus honors):
+
+    {
+      &#34;model_family&#34;: &#34;deepseek_v4&#34; | &#34;kimi_k25&#34; | …,
+      &#34;chat&#34;: {
+        &#34;sampling_defaults&#34;: {
+          &#34;temperature&#34;: 0.6,
+          &#34;top_p&#34;: 0.95,
+          &#34;top_k&#34;: 20,
+          &#34;repetition_penalty&#34;: 1.05
+        }
+      }
+    }
+
+Everything outside `chat.sampling_defaults` (quantization, source_model,
+crack_surgery, architecture, `chat.reasoning.modes`,
+`chat.tool_calling.parser` (DSML), `chat.tool_calling.dsml_token`, …)
+belongs to vmlx&#39;s JangChat / tool-parser / reasoning-parser resolvers,
+not osaurus&#39;s sampling overlay — intentionally ignored here.
+
+vmlx pin (eda0c81) already on main via upstream merges — not touched
+by this PR. The factory-level LFM2 fix (937c87f) + Kimi K2.6
+registration (c74ef8b) + DSV4 arch-distinct guard (5833aac) + DSML
+parser (7df9ad8) + forPrompt content-start default (7ed9e1d) + zombie
+ParserResolution.reasoning() rewrite (eda0c81) are all picked up
+transparently.
+
+Cohesion audit (verified no overlap with #932, #934, #935, #945, #946,
+#947, or current main):
+
+| Area                                | State                         |
+| ----------------------------------- | ----------------------------- |
+| LocalReasoningCapability.analyze    | template-text based, unchanged|
+| ModelRuntime.streamWithTools        | #934 coercion still correct   |
+| GenerationEventMapper.map           | unchanged                     |
+| MLXBatchAdapter.prepareInput        | enable_thinking: true default |
+| LocalGenerationDefaults (new path)  | jang_config + HF merge        |
+| Caches (invalidateLocalModelsCache) | hooks BOTH caches             |
+| UI layer (StreamingDeltaProcessor)  | no self-driven &lt;think&gt; scan   |
+
+Test coverage (9 new, added to the existing 16 from #932):
+
+  jang_config parsing (5):
+    - DSV4 real fixture: temp=0.6 + ignored max_new_tokens
+    - All four sampling fields populate
+    - Older JANG bundles without chat subtree → empty
+    - chat present but no sampling_defaults → empty
+    - Malformed JSON → empty
+
+  merge overlay (3):
+    - Primary fills first, fallback fills gaps (DSV4 real case)
+    - Primary-only fields preserved
+    - Fallback-only fields preserved when primary empty
+
+  Filesystem integration (3):
+    - Bundle with BOTH files merges correctly
+    - jang_config alone suffices
+    - jang_config with no sampling_defaults falls through to HF
+
+* feat: jang_config.json chat.reasoning fallback for DSV4 thinking detection
+
+Ready-state change for DSV4-Flash — the Swift runtime port is in flight
+upstream in vmlx-swift-lm; this commit lands the osaurus-side detection
+prep so the app works correctly the moment vmlx ships DSV4 support.
+
+### The problem
+
+DSV4-Flash is the first JANG model that ships NO chat_template in
+`tokenizer_config.json` — the template lives in a Python module
+`encoding/encoding_dsv4.py` (per
+`jang/research/DSV-FAMILY-RUNTIME-GUIDE.md §6`). The JANG converter
+(`jang-tools/dsv4/convert_dsv4_jangtq.py`) stamps this explicitly:
+
+    {
+      &#34;chat&#34;: {
+        &#34;chat_template_source&#34;: &#34;builtin_encoding_module&#34;,
+        &#34;has_tokenizer_chat_template&#34;: false,
+        &#34;reasoning&#34;: {
+          &#34;supported&#34;: true,
+          &#34;modes&#34;: [&#34;chat&#34;, &#34;thinking&#34;],
+          &#34;default_mode&#34;: &#34;chat&#34;,
+          ...
+        },
+        ...
+      }
+    }
+
+Before this commit:
+
+    LocalReasoningCapability.detect(modelId:) {
+        guard let dir = ...,
+              let template = readChatTemplate(at: dir)  ← nil for DSV4
+        else { return .none }                            ← supportsThinking = false
+        return analyze(template: template)
+    }
+
+With `supportsThinking = false`, PR #934&#39;s defence-in-depth in
+`ModelRuntime.streamWithTools` routes `.reasoning` deltas → plain
+content:
+
+    case .reasoning(let s):
+        if modelSupportsThinking {
+            continuation.yield(StreamingReasoningHint.encode(s))
+        } else {
+            continuation.yield(s)           ← DSV4 thinking flattened
+        }
+
+End result: DSV4&#39;s `&lt;think&gt;…&lt;/think&gt;` reasoning envelope collapses into
+the visible response block. Thinking split destroyed.
+
+### The fix
+
+`detect()` now tries a second source of truth when the chat template is
+missing: `jang_config.json &gt; chat &gt; reasoning.supported`. If that flag
+is true we return a `Capability` with `supportsThinking = true`. The
+other Capability fields stay false on purpose:
+
+  - `hasEnableThinkingKwarg: false`  — DSV4&#39;s Python encoder takes
+    `thinking_mode` as a positional argument, not a Jinja kwarg. vmlx&#39;s
+    renderer plumbs `modelOptions[&#34;disableThinking&#34;]` through whatever
+    path the bundle uses (template kwarg OR encoder arg); osaurus sends
+    the kwarg regardless, it&#39;s a no-op for DSV4 but harmless.
+
+  - `templateInjectsThinkTag: false`  — the DSV4 Jinja template doesn&#39;t
+    exist on disk, so there&#39;s nothing for the regex to match. vmlx&#39;s
+    encoder handles the chat-vs-thinking prompt-tail state itself.
+
+### What this covers
+
+- **DSV4-Flash** (`deepseek_v4` model_type, no chat_template, ships
+  `jang_config.json &gt; chat &gt; reasoning.supported: true`): now correctly
+  flagged `supportsThinking = true`. The `.reasoning` stream survives
+  to the thinking pane.
+
+- **Kimi K2.6** (`kimi_k25` model_type): unchanged — its
+  `tokenizer_config.json` DOES carry a Jinja chat template with an
+  always-on `&lt;think&gt;` tag, so the existing template-text path already
+  flags `supportsThinking = true`. Per Kimi docs, user-level
+  `enable_thinking=False` override is plumbed via existing
+  `modelOptions[&#34;disableThinking&#34;]`; no osaurus code change needed.
+
+- **Other JANG bundles** (Qwen 3.x, Gemma-4, MiniMax, Nemotron, GLM
+  JANG snapshots): unchanged — these ship standard Jinja templates the
+  existing template-text path reads.
+
+- **Non-JANG bundles**: no behaviour change; `readJangConfigReasoning`
+  returns nil when `jang_config.json` is absent.
+
+### Schema accepted (forward-compatible)
+
+Parses a narrow subset and ignores every other key. Fields we honor:
+
+    {&#34;chat&#34;: {&#34;reasoning&#34;: {&#34;supported&#34;: true | false}}}
+
+Fields deliberately IGNORED for now (vmlx owns prompt-shape decisions,
+not osaurus):
+
+  - `chat.reasoning.modes`           — vmlx&#39;s encoder picks these
+  - `chat.reasoning.default_mode`    — user&#39;s `disableThinking` override
+                                        already drives behaviour; we
+                                        don&#39;t want to silently flip an
+                                        existing-user&#39;s default from
+                                        true→false based on a bundle
+                                        field
+  - `chat.reasoning.thinking_start` /
+    `.thinking_end`                  — reasoning parser lives in vmlx
+                                        (`ReasoningParser` with stamp
+                                        `think_xml` for deepseek*)
+  - `chat.reasoning.reasoning_effort_levels`
+                                     — UI plumbing for effort is
+                                        out-of-scope here
+
+These can be layered on later as separate commits without breaking
+this one.
+
+### Test coverage (7 new)
+
+  jang_config parsing (5):
+    - DSV4 real fixture: supported=true → supportsThinking=true
+    - reasoning.supported=false → nil (fall through to .none)
+    - Missing chat subtree (older JANG) → nil
+    - chat present, no reasoning sub-object → nil
+    - Malformed JSON → nil (does not throw)
+
+  Filesystem (2):
+    - DSV4-shaped bundle (no chat template, jang_config reasoning)
+    - Missing jang_config.json returns nil
+
+All 998 OsaurusCore tests pass (991 baseline + 7 new).
+
+* fix(deps): bump vmlx-swift-lm pin to 104b6a5
+
+Picks up the DSV4-Flash Swift port + MiniMax emoji-streaming fix +
+disk-tier cache trim fix (10 commits since eda0c81). All real-bundle
+verified upstream by the vmlx agent on M4 Max 128 GB:
+
+  Scenario                       MiniMax-M2.7-Small-JANGTQ   DSV4-Flash-JANGTQ
+  ─────────────────────────────  ──────────────────────────  ─────────────────
+  Multi-turn + reasoning + tool  PASS, 0 &lt;think&gt; leaks       PASS, 0 leaks
+  Cache-hit (paged tier)         PASS, 128/186 prefix match  PASS, 128/155
+  Disk-restore (L2)              PASS, 84 gen tokens         PASS, 256 gen tokens
+  BENCH_BATCH (TurboQuant + B=2) PASS, 37.3 tok/s baseline   PASS, 11.1 tok/s
+
+The 10 vmlx commits (oldest → newest):
+
+  a439a7f  feat(dsv4): Phase 1a — chat encoder + configuration + math helpers
+  d804909  test(dsv4): end-to-end instruct / reasoning / max-reasoning runtime
+  ae41ce2  feat(dsv4): Phase 1b — live forward + JANGTQ + factory dispatch
+  2b6d395  fix(dsv4): correct MLA numerics + wire Compressor/Indexer
+  2a7faf1  fix(dsv4): align default long-ctx path + wire L2 disk
+  581679f  fix(dsv4): real-bundle sanitize remap + JANGTQ env override
+  31f663e  fix(dsv4): real-bundle JANGTQ decode end-to-end on 74 GB bundle
+  15425c0  fix(dsv4): partial RoPE = traditional/interleaved (matches Python)
+  42b6ea1  fix(detokenizer): defer mid-grapheme emoji emits — closes the
+           ❓国旗 user-visible bug confirmed 2026-04-24 with MiniMax-M2.7-Small
+           JANGTQ. The deferred-emit guard inspects the LAST grapheme cluster
+           of `new` (not the last scalar) so completed flags / ZWJ sequences /
+           variation selectors flush atomically. Empty `.chunk` events are
+           emitted between an emoji&#39;s bytes — osaurus&#39;s
+           GenerationEventMapper.swift:54 already filters them.
+  104b6a5  fix(cache): trim cache to prompt-1 on full disk hit before re-feeding
+           last token. Without this, RoPE rotated by promptLen +
+           previousDecodeLen instead of promptLen - 1, logits argmaxed to EOS,
+           session 2 emitted zero tokens. Fix at BatchEngine.swift:733-768.
+
+osaurus-side audit confirmed clean against the new vmlx state:
+
+  - reasoningStampFromModelType allowlist (937c87f, present in 104b6a5)
+    correctly stamps `deepseek_v4` → `think_xml`, LFM2/LLaMA/Phi → `none`
+  - JangChatConfig schema (JangLoader.swift:469) parses chat.reasoning +
+    chat.toolCalling + chat.samplingDefaults — three sub-objects vmlx
+    consumes for its own resolvers
+  - osaurus consumes only `chat.sampling_defaults` (LocalGenerationDefaults
+    overlay, commit 1) and `chat.reasoning.supported` (LocalReasoningCapability
+    fallback, commit 2) — non-overlapping with vmlx&#39;s domain
+  - DeepseekV4 model registration: LLMModelFactory.swift:184 dispatches
+    via dispatchDeepseekV4 → DeepseekV4JANGTQModel (or affine
+    DeepseekV4Model fallback)
+  - TurboQuant kernels present (TQCodebook, TQEncoder, TQHadamard,
+    TQQJL, TurboQuantKVCache) — JANGTQ codebook decode path live
+  - GenerationEventMapper.swift:54 empty-chunk filter handles the new
+    deferred-emit pattern (vmlx may yield empty .chunk events between
+    an emoji&#39;s bytes; osaurus skips before forwarding)
+  - PR #934 supportsThinking coercion + PR #944 jang_config fallback
+    cohere: DSV4 (no chat template) → supportsThinking=true via fallback
+    → .reasoning preserved; LFM2 → supportsThinking=false → .reasoning
+    coerced to content
+  - osaurus unload() (ModelRuntime.swift:123-148) doesn&#39;t touch disk
+    cache — vmlx&#39;s CacheCoordinator owns L2 persistence
+
+* fix: bump vmlx-swift-lm pin to dade305 + DSV4 full-attention default
+
+vmlx 104b6a5 → dade305 picks up the production-ready DSV4-Flash long-context
+fixes + JANGTQ/JANG runtime config-patching for any-bundle-shape robustness.
+Plus a single osaurus-side env-var so DSV4 chat works correctly out of the
+box on first load.
+
+### vmlx commits absorbed (oldest → newest)
+
+  abc92bb  feat(dsv4): mask helpers for PR #1195 Compressor + Indexer port
+  014e1ba  fix(loader): shape-authoritative bit/group-size inference for any
+           quantized bundle (Path A/B/C/D shape walker — auto-corrects
+           bundles whose `config.json` got re-stamped with mismatched
+           per-layer overrides; idempotent on clean configs)
+  840c1e7  docs(osaurus): document DSV4 row + runtime knobs
+  0e9c4cd  docs(osaurus): DSV4 prompt-mode guidance — chat coherent, FIM
+           unreliable
+  5f64495  fix(dsv4): explicit fp32 cast on hcSplitSinkhorn collapse()
+           rms_norm — required for M3 Ultra correctness; M4 happens to keep
+           fp32 in SIMD lanes by accident but the cast is mandatory parity
+           guard
+  ea23ab2  docs(osaurus): multi-turn reasoning gotcha + cross-runtime fp32
+           mHC parity lock
+  53e8fc7  fix(loader): defense-in-depth shape validation on
+           perLayerQuantization path + diagnostics
+  dade305  docs: JANGTQ/JANG runtime config-patching guide for osaurus
+           integrators
+
+### DSV4_KV_MODE=full set at process start
+
+DSV4-Flash&#39;s stock cache mode is `RotatingKVCache(maxSize: 128)` per layer
+— fine for FIM / short Q&amp;A but loses prompt visibility past 128 decode
+tokens. Live-confirmed 2026-04-25 on DSV4-Flash JANGTQ: thinking traces
+exceeded the rotating window, original prompt scrolled out of attention,
+and the model emitted random SQL queries (&#34;DustBuster&#34;-class drift) in
+HumanEval/1.
+
+Per vmlx
+`Libraries/MLXLMCommon/BatchEngine/OSAURUS-INTEGRATION.md`
+§&#34;DeepSeek-V4 — runtime knobs&#34;:
+
+  | DSV4_KV_MODE     | Cache class       | Memory @ 8K | Use when           |
+  | (unset, default) | RotatingKVCache   | ~6 MB       | FIM / short Q&amp;A    |
+  | full             | KVCacheSimple     | ~360 MB     | Chat / reasoning   |
+  | tq               | KVCacheSimple →                                     |
+  |                  | TurboQuantKVCache | ~14 MB      | Long agent loops   |
+
+osaurus is a chat / reasoning host — not a FIM completion engine — so
+`full` is the correct operating point. The 360 MB extra is a non-issue on
+any machine that can load the 79.5 GB+ DSV4 bundle.
+
+Wired in `AppDelegate.applicationDidFinishLaunching` via
+`setenv(&#34;DSV4_KV_MODE&#34;, &#34;full&#34;, 1)` ONLY when the env var is unset, so a
+power user exporting `DSV4_KV_MODE=tq` before launch keeps their override.
+
+Zero effect on non-DSV4 models — vmlx ignores the env var unless the
+factory dispatch hits the `deepseek_v4` model_type at load.
+
+### What this PR does NOT change
+
+- Cache config for non-DSV4 models — `defaultKVMode: .turboQuant(3,3)` +
+  `defaultMaxKVSize: 8192` stay as the global default (covers Qwen 3.x,
+  Gemma-4, MiniMax, Kimi K2.6, GLM, Nemotron, etc.)
+- `LocalReasoningCapability` jang_config fallback (commits already in
+  this PR) — handles DSV4 bundles with no chat_template
+- `LocalGenerationDefaults` jang_config sampling overlay (commits already
+  in this PR) — handles DSV4&#39;s `temperature: 0.6` recipe
+- vmlx loader&#39;s Path A/B/C/D shape walker — fully owned by vmlx; osaurus
+  passes paths through unchanged
+
+### Coverage matrix (verified against vmlx dade305 docs)
+
+| Surface           | Model class       | Status                              |
+|-------------------|-------------------|-------------------------------------|
+| **DSV4-Flash**    | DeepseekV4Model   | ✅ KV=full default, JANGTQ ready    |
+| **DSV4 JANGTQ**   | DeepseekV4JANGTQ  | ✅ shape walker handles bit override|
+| **Kimi K2.6**     | DeepseekV3Model   | ✅ kimi_k25 dispatch, KimiK2 parser |
+| **MiniMax M2.7**  | MiniMaxModel      | ✅ deferred-emit emoji fix in 104b6a5+ |
+| **Reasoning ON** | think_xml stamp   | ✅ enable_thinking=true via additionalContext |
+| **Reasoning OFF** | think_xml stamp   | ✅ via modelOptions[&#34;disableThinking&#34;] |
+| **JANGTQ codebook** | TurboQuant kernels | ✅ TQ Cache + perLayerQuantization shape walker |
+
+Local verification:
+- swift package resolve: vmlx@dade305 clean
+- swift test --parallel: 998 / 998 pass across 134 suites
+- swift build: clean
+
+* fix(prompt): scrub tool names from defaultIdentity to stop low-bit MoE recitation loops
+
+### The bug
+
+MiniMax M2.7 Small JANGTQ (and any other 2-bit MoE that ships at the
+ragged edge of dequant precision) fell into a recitation loop on chats
+where the user asked something simple — the model emitted hundreds of
+lines of fake tool-spec text:
+
+    I can:
+    - todo — write a task.
+    - complete — done the end.
+    - share_artifact — surface artifact in the chat
+    - capabilities_search and capabilities_load to extend
+    - render_chart, search_memory ...
+
+…repeating the same fragments over and over, never producing real
+content.
+
+### Root cause
+
+`SystemPromptTemplates.defaultIdentity` (the unconditional system-prompt
+fallback when the user hasn&#39;t customised a base prompt) named TWO
+chat-layer-intercepted tools by name:
+
+    &#34;When the task involves more than two obvious steps, write a `todo`
+     checklist; when you finish, call `complete` with a one-paragraph
+     summary of what you did and how you verified it.&#34;
+
+Those names appeared in the system prompt UNCONDITIONALLY — even when
+`todo` and `complete` weren&#39;t actually in the request&#39;s `tools[]`
+schema. The model:
+
+  1. Sees the names in the system prompt,
+  2. Expects the schema to back them with real entries,
+  3. Finds a mismatch (or finds the four chat-layer tools but no
+     other expected names like `share_artifact`, `capabilities_search`,
+     `render_chart`, `search_memory` that low-bit MoE checkpoints
+     remember from training),
+  4. Falls back to emitting tool-spec text from its training
+     distribution — looks like reciting Anthropic-style or Claude-style
+     agent-harness tool registries — and loops because that text
+     pattern has no natural EOS in MiniMax&#39;s vocab at low quant.
+
+vmlx-side investigation by tpae&#39;s vmlx-swift-lm agent ruled out the
+loader: dade305&#39;s shape walker (`014e1ba`) actually CORRECTS MiniMax&#39;s
+8-bit-gs64 attention layers (was being miscoded as (4, 128) on
+104b6a5; now correctly inferred as (8, 64) — verified live with
+&#34;250 per-layer quant override(s) over default (bits=2, gs=32)&#34; log
+line on real bundle). MiniMax does NOT loop in vmlx&#39;s bench harness
+on the same dade305 + same bundle — confirming the cause is upstream
+of vmlx.
+
+### Fix
+
+Strip tool-name mentions from `defaultIdentity`. The replacement text
+keeps the spirit (tool-driven agent that doesn&#39;t reflexively refuse)
+without naming any tool the schema may not back:
+
+    &#34;Use the tools available in this conversation when they raise
+     correctness or ground a claim in real data; do not narrate
+     intent before acting. If no tools are listed, answer directly
+     from your own knowledge.&#34;
+
+The how-to detail for `todo` / `complete` / `clarify` / `share_artifact`
+already lives in the SEPARATE `agentLoopGuidance` block, which IS
+correctly gated at `SystemPromptComposer.swift:265-277` — only fires
+when at least one of those four names appears in the resolved tool
+schema. Same pattern for `capabilityDiscoveryNudge` (gated on
+`capabilities_search` presence) and the sandbox / folder tool
+hint blocks (gated by their composer call-sites).
+
+### Regression test (6 cases)
+
+New `SystemPromptDefaultIdentityTests.swift` enforces:
+
+  - `defaultIdentity` mentions NONE of: `todo`, `complete`, `clarify`,
+    `share_artifact`, `capabilities_search`, `capabilities_load`,
+    `sandbox_*` (10 names), `file_*` / `dir_create` (8 names),
+    `render_chart`, `search_memory`
+  - `effectiveBasePrompt(&#34;&#34;)` falls back to defaultIdentity and stays
+    clean
+  - `effectiveBasePrompt(whitespace)` same
+  - User-supplied base prompts are passed through verbatim (we don&#39;t
+    scrub their content)
+  - Sanity guard: `agentLoopGuidance` STILL contains the four names
+    (so a future &#34;clean everything&#34; refactor doesn&#39;t break the
+    actually-gated block where the names are correct)
+  - Same sanity guard for `capabilityDiscoveryNudge`
+
+### Scope
+
+Pure system-prompt edit + test. No code path changes, no other
+templates touched, no UI changes, no model registration changes,
+no vmlx interaction changes. The fix is layered under PR #944&#39;s
+existing scope (DSV4 / Kimi / MiniMax small readiness) since it
+materially affects MiniMax M2.7 Small JANGTQ usability — the user
+hit it on the live build of this PR.
+
+All 1004 OsaurusCore tests pass (998 baseline + 6 new).
+
+* fix(stream): scrub orphan &lt;think&gt; / &lt;/think&gt; tags leaking into visible content
+
+### The bug
+
+After PR #944&#39;s `defaultIdentity` fix stopped MiniMax M2.7 Small JANGTQ
+from looping, a residual symptom remained: literal `&lt;/think&gt;` markers
+appearing in the visible response text — visible to the user, breaks
+markdown rendering, looks broken.
+
+Live-reproduced 2026-04-25 against the same MiniMax bundle:
+
+    Here&#39;s what I can do right now:
+    • Read files &amp; memory — I can search past chat...&lt;/think&gt;
+    • Output artifacts — Write files, charts, reports...&lt;/think&gt;
+    ...
+
+### Why vmlx&#39;s parser leaks them
+
+vmlx&#39;s `ReasoningParser` is a state machine that toggles ONLY on a
+seen opener:
+
+  - In `content` mode: scans for `&lt;think&gt;`, switches to reasoning.
+  - In `reasoning` mode: scans for `&lt;/think&gt;`, switches to content.
+
+When a low-bit MoE checkpoint emits an ORPHAN `&lt;/think&gt;` while the
+parser is in `content` mode (e.g. interleaved-thinking pattern where
+the model closes a block it never opened, or quant-drift produces
+the close-tag tokens at random intervals), the parser is looking
+for `&lt;think&gt;` — finds nothing — leaves the literal `&lt;/think&gt;` in
+the buffer — surfaces it as part of `.content(text)` →
+`Generation.chunk(&#34;…&lt;/think&gt;…&#34;)` → tag leaks to the UI.
+
+Symmetric for orphan `&lt;think&gt;` while in `reasoning` mode.
+
+This is correct behaviour from vmlx&#39;s perspective: the parser can&#39;t
+toggle into `reasoning` from `content` without an opener (otherwise
+malformed model output could swallow the visible answer). The fix
+belongs at the consumer.
+
+### Defensive layer
+
+New `ThinkTagScrubber` — small stateful filter wired into
+`ModelRuntime.streamWithTools` for the `.tokens(s)` branch when
+`modelSupportsThinking == true`. Drops orphan `&lt;think&gt;` and
+`&lt;/think&gt;` substrings from the visible-content stream, including
+the split-token case where a tag arrives across chunk boundaries
+(MiniMax M2.7 Small JANGTQ at 2-bit can emit `&lt;` then `think&gt;` as
+separate tokens).
+
+Mirror of vmlx&#39;s partial-tag handling: holds up to
+`max(&#34;&lt;think&gt;&#34;.count, &#34;&lt;/think&gt;&#34;.count) - 1 == 7` chars at the tail
+to catch a partial-tag prefix that might complete in the next chunk.
+
+### Behaviour matrix
+
+  | Input chunk(s)                    | Output (after scrub)         |
+  | --------------------------------- | ---------------------------- |
+  | &#34;answer.&lt;/think&gt;&#34;                 | &#34;answer.&#34;                    |
+  | &#34;&lt;think&gt;visible&#34;                  | &#34;visible&#34;                    |
+  | [&#34;pref &lt;&#34;, &#34;think&gt;vis&#34;]           | &#34;pref vis&#34;                   |
+  | [&#34;a&lt;&#34;, &#34;/think&gt;b&#34;]                | &#34;ab&#34;                         |
+  | &#34;a &lt; b means less than: &lt;&#34;        | &#34;a &lt; b means less than: &#34;    |
+  |                                   | (with &#34;&lt;&#34; held; flushed at   |
+  |                                   |  end-of-stream as real text) |
+  | &#34;&lt;thinkX nope&#34;                    | &#34;&lt;thinkX nope&#34; (no match)    |
+  | code with literal `&lt;think&gt;` text  | stripped (acceptable trade-  |
+  |                                   |  off for thinking models)    |
+
+### Why gated on `modelSupportsThinking`
+
+Non-thinking models (LFM2, Llama instruct, Phi, etc.) never go
+through the reasoning parser, so `&lt;think&gt;` text in their output is
+either real content or hallucination — either way, scrubbing would
+be wrong. PR #934&#39;s existing `supportsThinking` check from
+`LocalReasoningCapability.capability(forModelId:)` is the source of
+truth, so reuse the same flag.
+
+### Flush semantics
+
+When the upstream stream finishes, any held tail (`&lt;`, `&lt;t`, `&lt;th`,
+`&lt;thi`, `&lt;thin`, `&lt;think`, `&lt;/`, `&lt;/t`, `&lt;/th`, `&lt;/thi`, `&lt;/thin`,
+`&lt;/think`) was being held as a partial-tag candidate. If no further
+chunk arrives to complete it, those bytes are real content — the
+model just happened to end on `&lt;` (math expression) or similar.
+Drained via `scrubber.flush()` and yielded as the final chunk.
+
+### Test coverage (13 new)
+
+  - Whole-tag occurrences: orphan close, orphan open, multiple in
+    one chunk, no-tag passthrough
+  - Split-token tags: 2-way split for both open and close, 3-way
+    split with mid-token boundary
+  - Trailing partial: `&lt;` and `&lt;th` flushed as real content when no
+    continuation arrives
+  - Non-matching prefix: `&lt;thinkX` not held back, surfaces immediately
+  - Real-world MiniMax pattern: exact failure case from 2026-04-25
+  - Idempotent flush (calling twice returns empty the second time)
+  - Empty flush when no buffer pending
+
+All 1017 OsaurusCore tests pass (1004 baseline + 13 new).
+
+### Scope
+
+Pure consumer-side defense. Does not modify vmlx behavior. Does not
+change reasoning-channel routing (`.reasoning(s)` events still flow
+through `StreamingReasoningHint.encode` unchanged when
+`supportsThinking == true`). Does not change non-thinking models&#39;
+output (untouched passthrough on the `else` branch). Layered under
+PR #944&#39;s existing scope alongside today&#39;s `defaultIdentity` scrub
+since both fixes target the same MiniMax 2-bit JANGTQ usability
+issue.
+
+* fix(deps): bump vmlx-swift-lm pin to c98ae5c
+
+Picks up the upstream ReasoningParser fix for interleaved-thinking
+pathology — model emits &lt;/think&gt; while parser is in content mode (or
+&lt;think&gt; while in reasoning). Old parser only scanned for the tag matching
+the current state; stray markers passed through verbatim into displayed
+text.
+
+Upstream drain loop now scans for whichever tag appears earliest in the
+buffer and sets state explicitly per tag. Family-aware: stripStrayTags
+defaults true for &lt;think&gt;/&lt;/think&gt; family models (Qwen3.x, DeepSeek-V4,
+MiniMax, GLM, Nemotron, Kimi); Harmony / Gemma-4 channel parser opts out.
+
+Local ThinkTagScrubber retained as defense-in-depth for any future
+parser regression.
+
+* fix(deps): bump vmlx-swift-lm pin to cdfe40b
+
+Picks up two upstream backports from the parallel jang/vmlx-swift dev
+branch — both internal to vmlx, no osaurus-side wiring required.
+
+§419 Qwen35GatedDeltaNet fused scaled rms_norm: replaces 2 Metal
+dispatches with 1 by baking the per-head-dim scale into the rmsNorm
+weight vector. ~+7% cold-start on Qwen 3.5-35B (M4 Max).
+
+§418 Qwen35JANGTQ mxtq_bits fallback chain: covers bundles that ship
+top-level quantization.bits only (e.g. Qwen3.6-35B-A3B-JANGTQ4 with
+quantization.bits=4) where the routed-expert TurboQuant codebook used
+to default to 2-bit and produce empty output.
+
+Live verified by upstream on three production bundles: MiniMax-M2.7
+Small JANGTQ (cache-hit ratio 0.47, 0 leaks), DSV4-Flash JANGTQ
+(disk-restore ratio 0.02), Holo3-35B-A3B JANGTQ (hybrid SSM
+scheduler partial-hit rollback fires).
+
+* fix(deps): bump vmlx-swift-lm pin to b9779d1
+
+Picks up the JANGTQ Metal kernel loop-bound fix — was hardcoded for
+bits=2 only, producing garbage output on bits=4 bundles
+(Holo3-35B-A3B-JANGTQ4, Qwen3.6-35B-A3B-JANGTQ4, etc.).
+
+Live verified by upstream: Holo3-JANGTQ4 chat now coherent (was
+gibberish), MiniMax-M2.7-Small JANGTQ2 + DSV4-Flash JANGTQ2 confirmed
+no regression.
+
+* fix(deps): bump vmlx-swift-lm pin to 070dc5b
+
+Refactors the JANGTQ routed-MoE bits-resolution chain from a module-
+global side-channel (JANGTQRuntimeCache.shared.routedBitsHint, racy
+under concurrent loads) to pure field-level plumbing: the loader&#39;s
+config-merge step writes the resolved bits into both mxtq_bits and
+routed_expert_bits before any decoder runs, so each decoder reads its
+conventional field with no timing dependency.
+
+Final resolution priority (vmlx-internal):
+  1. config.json mxtq_bits Int
+  2. jang_config.mxtq_bits dict&#39;s routed_expert key
+  3. jang_config.routed_expert_bits Int
+  4. jangtq_runtime.safetensors codebook sniff (most-frequent bits)
+  5. profile name parse (JANGTQ4 → 4, JANGTQ/JANGTQ2/MXTQ → 2)
+  6. per-config decoder default
+
+Pure data-flow, no mutable globals, no race window.
+
+osaurus side: no wiring change required. Our preflight reads ONLY
+weight_format from jang_config.json — the bits chain is entirely
+vmlx-internal, so HF-side mxtq_bits stamping (or absence) is
+orthogonal to osaurus dispatch.</div>
+</div>
+
+<a href="../project/osaurus-ai_osaurus.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

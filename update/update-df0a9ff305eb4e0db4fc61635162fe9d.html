@@ -1,0 +1,1962 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (20 commits) - FluidInference/FluidAudio - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (20 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a> /
+    Updates in main (20 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-02 03:25 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/FluidInference/FluidAudio/commits/main" target="_blank">https://github.com/FluidInference/FluidAudio/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>FluidAudio значительно расширил свои возможности TTS, интегрировав новые модели, такие как StyleTTS2, Magpie и CosyVoice3 (последние две в бета-статусе), а также представил ANE-оптимизированный вариант Kokoro и многоязычную поддержку для PocketTTS. ASR получил улучшения с длинноформовой транскрипцией Cohere, а Parakeet TDT v3 теперь по умолчанию использует меньший и более быстрый кодировщик int4. Также был добавлен новый унифицированный инструмент командной строки `tts-benchmark` для комплексной оценки производительности TTS по всем бэкендам. Кроме того, было реализовано несколько исправлений ошибок, включая фильтр коротких сегментов DiarizerTimeline и устранение вводящих в заблуждение предупреждений ASR, наряду с обновлениями основной документации и элементов API.
+
+**Russian Summary:**
+
+FluidAudio значительно расширил свои возможности TTS, интегрировав новые модели, такие как StyleTTS2, Magpie и CosyVoice3 (последние две в бета-статусе), а также представил ANE-оптимизированный вариант Kokoro и многоязычную поддержку для PocketTTS. ASR получил улучшения с длинноформовой транскрипцией Cohere, а Parakeet TDT v3 теперь по умолчанию использует меньший и более быстрый кодировщик int4. Также был добавлен новый унифицированный инструмент командной строки `tts-benchmark` для комплексной оценки производительности TTS по всем бэкендам. Кроме того, было реализовано несколько исправлений ошибок, включая фильтр коротких сегментов DiarizerTimeline и устранение вводящих в заблуждение предупреждений ASR, наряду с обновлениями основной документации и элементов API.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Fix DiarizerTimeline Short Segment Filter (#565)
+
+The `DiarizerTimeline` was incorrectly closing short gaps as soon as
+another speech frame appeared, instead of waiting for a sufficiently
+long speech segment to merge the old one with.
+
+This bug fix ensures that gaps are only closed between two segments of
+sufficient length (at least `config.minFramesOn` frames long).
+
+Also removed an unnecessary `throws` from a non-throwing `LSENDDiarizer`
+constructor.
+
+---------
+
+Co-authored-by: devin-ai-integration[bot] &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+
+- feat(asr/cohere): long-form transcribeLong + cold/warm docs (#564)
+
+## Summary
+
+Two related changes that grew out of the cohere isolated-bench
+investigation:
+
+### 1. Long-form Cohere ASR — `CoherePipeline.transcribeLong`
+
+The encoder is fixed at a 35 s window, so the prior `transcribe()`
+silently truncated longer audio via `padOrTruncate(... fixedFrames:
+3_500)` in `Sources/FluidAudio/ASR/Cohere/CoherePipeline.swift:250`.
+
+`transcribeLong` slices audio into 35 s chunks with **5 s overlap**
+(matches upstream `cohere-pytorch/config.json` `overlap_chunk_second:
+5`) and stitches adjacent chunks via **token-level
+longest-common-substring merge**. No model changes — encoder shape stays
+`[1, 128, 3500]`, decoder cache shape unchanged.
+
+- Audio ≤ 35 s short-circuits to the existing single-chunk
+`transcribe()` path → byte-identical short-form behavior, zero perf
+delta on FLEURS / LibriSpeech (which are all ≤ 35 s)
+- Audio &gt; 35 s: hop = 30 s, decode each chunk independently, merge token
+streams (drop the suffix&#39;s matched head, keep prefix as-is)
+- LCS window bounded to 32 tokens per seam → O(K²) merge is negligible
+vs. decode
+- Per-chunk encoder/decoder/total seconds are summed into one
+`TranscriptionResult`
+
+CLI rewiring:
+- `cohere-transcribe`, `cohere-benchmark`, `tts-benchmark` now route
+through `transcribeLong`
+- `cohere-benchmark` no longer skips files exceeding 35 s
+
+Smoke-tested on a Mandarin 81 s WAV: full 80 s now transcribes
+(previously cut at 35 s). 10 unit tests cover `mergeTokenStreams`
+correctness (empty-input, no-overlap, threshold fallback, boundary
+overlap, offset overlap, longest-run preference, window bounds) and
+chunk-config constants.
+
+### 2. Cold-start vs warm inference docs
+
+Adds a section to `Documentation/ASR/Cohere.md` capturing the isolated
+single-process bench (cold ANE compile ~186 s on M2 Tahoe; warm calls
+3.4–4.6 s, RTFx 1.96×–8.73×). Clarifies process reuse is what unlocks
+the headline FLEURS/LibriSpeech RTFx.
+
+## Test plan
+
+- [x] `swift test --filter CohereLongFormTests` (10 / 10 pass)
+- [x] `swift test --filter CohereAsrConfigTests` and
+`CoherePipelineMaskTests` (no regressions)
+- [x] `swift build` (debug) clean; `swift build -c release` clean
+- [x] Smoke: `cohere-transcribe /tmp/cohere_test_80s.wav --language zh`
+transcribes full 80 s of audio (3 chunks merged, no duplicated overlap
+content)
+- [x] `swift format lint` — no new warnings in changed files
+
+- feat(tts/benchmark): tts-benchmark CLI covering all TTS backends (#557)
+
+## Summary
+
+Adds `fluidaudio tts-benchmark`, a unified harness for measuring
+**latency × efficiency × quality** across every shipping TTS backend in
+FluidAudio, plus the model + runtime fixes needed to actually clear all
+six backends end-to-end on the [MiniMax Multilingual TTS Test
+Set](https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set).
+Also tags Magpie / StyleTTS2 / CosyVoice3 as **beta** at the API + docs
+level so users get a runtime warning on `initialize()` reflecting their
+actual perf / quality posture.
+
+### Backends — all green on M2 / macOS 26
+
+| Backend | Corpus | Status | Audio out (min / p50 / max) | RTFx | WER |
+Notes |
+|---|---|---|---|---|---|---|
+| Kokoro ANE | minimax-en (100/100) | ✅ | 3.5 s / 8.0 s / 11.4 s | 5.19×
+| 10.8% | one-shot @ 24 kHz, 7-graph pipeline; per-stage CU sweep |
+| Kokoro | minimax-en (100/100) | ✅ | 3.5 s / 6.8 s / 9.3 s | 2.02× |
+1.3% | one-shot @ 24 kHz; multi-chunk w/ 8 ms crossfade; cleanest
+English ASR roundtrip |
+| PocketTTS | minimax-en (100/100) | ✅ | 2.8 s / 6.3 s / 9.4 s | 0.61× |
+1.4% | **streaming** @ 24 kHz, 80 ms frames; TTFT 1244 ms — RTFx looks
+slow but is honest per-frame cost (see &#34;RTFx caveat&#34; below) |
+| Magpie | minimax-en (100/100) | ⚠️ **BETA** | 4.7 s / 10.0 s / 20.6 s
+| 0.64× | 5.6% | **streaming TTFT** @ 22.05 kHz: first chunk at **9.6 s
+p50** vs full synth 15.1 s; split-K/V decoder + `outputBackings` fast
+path; below real-time, runtime warning on init |
+| StyleTTS2 | minimax-en (100/100) | ⚠️ **BETA** | 9.6 s / 22.6 s / 32.6
+s | 2.72× | 44.0% | one-shot @ 24 kHz; flex-shape fix + misaki→espeak
+post-pass remap (WER 58.1% → 44.0%); WER ~30× Kokoro&#39;s, runtime warning
+on init |
+| CosyVoice3 | minimax-zh (100/100) | ⚠️ **BETA** | 2.2 s / 6.5 s /
+**16.0 s** | 0.357×† | n/a‡ | post auto-chunker @ 24 kHz; long phrases
+now split + crossfaded (8 ms cosine) — longest output 16.0 s (was capped
+at ~6.5 s); HiFT `.cpuAndGPU` + LLM-Decode `outputBackings` (+33% RTFx);
+**whisper-large-v3 CER 1.68% (macro) / 1.84% (micro)** across 100/100
+phrases‡; RTFx &lt; 1, runtime warning on init |
+| CosyVoice3 | minimax-yue (100/100) | ⚠️ **BETA** | 3.3 s / 8.0 s /
+**16.1 s** | 0.249× | n/a | post auto-chunker; **truncation 80/100 →
+5/100 phrases** (`finished_on_eos=false` field), longest output 6.5 s →
+16.1 s. TTFT-p50 climbs (24 s → 36 s) as the cost of multi-chunk synth |
+
+⚠️ **BETA** = `${Backend}TtsManager.initialize()` emits a
+`logger.warning` flagging the perf / quality posture; safe to ship in
+non-latency-sensitive paths but read the per-backend doc first.
+
+‡ CosyVoice3 zh WER stays `n/a` because `WERCalculator`
+whitespace-tokenizes and Mandarin has no word boundaries (word-level WER
+reads ~100% and is meaningless). CER is `whisper-large-v3` against the
+rendered WAVs from the full 100-phrase `minimax-chinese` run via
+`Scripts/whisper_zh_cer.py`. Cohere Transcribe q8 is also wired in this
+PR via `--asr-backend cohere` (see [Cohere ASR backend in the
+harness](#cohere-asr-backend-in-the-harness) below) and agrees with
+whisper at the 3–5% CER range on a 10-phrase sub-sample, but hits a
+`MILCompilerForANE` cache failure on this M2 host that drops it to RTFx
+~0.13×, so whisper is the practical source-of-truth for the full
+100-phrase run.
+
+Full numbers (cold start, p50/p95 synth, peak RSS, WER/CER per category)
+live in `Documentation/TTS/Benchmarks.md`. Corpus attribution +
+reproduction notes live in `Documentation/TTS/MinimaxCorpus.md`.
+
+### RTFx caveat — phrase length and streaming granularity both matter
+
+Aggregate RTFx (audio_duration / wall_clock) is **only directly
+comparable between backends when both produce similar phrase lengths and
+yield audio at the same granularity**. Two things skew the headline
+number on this corpus:
+
+**1. Phrase-length spread.** StyleTTS2 emits ~22 s p50 of audio per
+`minimax-english` phrase while Kokoro emits ~7 s — same input text, ~3×
+more audio out. That&#39;s mostly long inter-word pauses + slow speaking
+rate baked into the LibriTTS multi-speaker checkpoint, not a measurement
+artifact. A 2.72× RTFx on 22 s audio = ~8 s wall — which matches the
+TTFT p50 column. Kokoro&#39;s 2.02× on 7 s audio = ~3.5 s wall. Same-corpus
+RTFx ratios alone hide this.
+
+**2. Streaming granularity.** PocketTTS posts 0.61× agg-RTFx vs.
+Kokoro&#39;s 2.02× but it&#39;s **not slower from a user perspective**:
+PocketTTS yields its first 80 ms audio frame at TTFT **1244 ms**,
+Kokoro&#39;s first frame at TTFT **3113 ms** (full one-shot chunk). The
+0.61× is the per-frame cost averaged across the streaming run; what
+users feel is TTFT.
+
+| Backend | TTFT p50 | First yield | Implication |
+
+|-------------|----------|------------------|--------------------------------------------|
+| PocketTTS | 1244 ms | 80 ms frame | true streaming;
+conversational-ready |
+| Kokoro ANE | 1586 ms | full ~8 s chunk | ~1.6 s to any audio;
+ANE-tuned |
+| Kokoro | 3113 ms | full ~7 s chunk | clean quality, slower first-byte
+|
+| StyleTTS2 | 6671 ms | full ~22 s chunk | one-shot only; long phrase
+output amortizes the wall |
+| Magpie | **9580 ms** | first chunk @ 22.05 kHz | streaming via
+`synthesizeStream`; TTFT-p50 9.6 s vs full synth 15.1 s — 36% earlier
+playback start |
+| CosyVoice3 | 14091 / 35681 ms (zh / yue) | full chunk @ 24 kHz |
+one-shot per chunk; multi-chunk phrases pay TTFT for the first chunk
+only |
+
+For conversational use cases, **TTFT &gt; RTFx**. PocketTTS (true
+streaming), Magpie (streaming via `synthesizeStream`), and Kokoro ANE
+(small one-shot chunks) are the three backends that meaningfully clear
+the &#34;user feels it&#39;s responsive&#34; bar today.
+
+### Beta callouts (StyleTTS2, Magpie, CosyVoice3)
+
+Three of the six shipping backends post numbers that callers should
+weigh against an explicit caveat:
+
+- **StyleTTS2** — WER 44% on `minimax-english` is ~30× Kokoro&#39;s 1.3%.
+The misaki→espeak post-pass remap closed half the gap; the remainder is
+BART G2P misses + diffusion-sampler formant breaks on long phrases.
+- **Magpie** — agg-RTFx 0.64× on M2 — below real-time but streaming via
+`synthesizeStream` so TTFT (9.6 s p50) is significantly better than
+full-synth wall (15.1 s p50). Long-tail phrases still pull p95 wall to
+~30 s.
+- **CosyVoice3** — agg-RTFx 0.357× on `minimax-chinese` (0.249× on the
+longer-phrase `minimax-cantonese` after the auto-chunker). The 250-token
+Flow input cap is now worked around at the call site by the auto-chunker
+(long phrases split + crossfaded), dropping cantonese truncation from
+80/100 → 5/100 and lifting longest output from 6.5 s → 16.1 s. The 5/100
+residual is the long-tail token-rate worst case; the structural fix is
+re-exporting Flow with a larger fixed input shape (tracked in
+`mobius-cosyvoice3`). `CosyVoice3SynthesisResult.finishedOnEos: Bool` +
+a `.warning`-level `LLM-Decode budget exhausted` log still surface any
+truncation, and the harness writes `finished_on_eos` into each phrase in
+the JSON report.
+
+Each manager now logs a `.warning`-level beta notice on `initialize()`
+(mirroring the existing CosyVoice3 pattern) so anyone wiring these into
+a product gets a console signal, not a silent surprise. Docs
+(`Documentation/TTS/Magpie.md`, `Documentation/TTS/Benchmarks.md`
+StyleTTS2 footnote, existing `CosyVoice3.md` callout) carry the same
+caveat at the top.
+
+### Model + runtime fixes landed in this PR
+
+#### CosyVoice3 stateless port (`71130c9fb`)
+Switches LLM-Decode from the macOS 15+ stateful `MLState` path to the
+non-stateful `LLM-Decode-M768-fp16` graph that&#39;s actually shipped on
+HuggingFace. Drops ~95 LOC of state plumbing for ~30 LOC of plain
+`MLDictionaryFeatureProvider` prediction with explicit kv carry-forward;
+lowers the availability gate from macOS 15 / iOS 18 back to the package
+baseline (macOS 14 / iOS 17). `CosyVoice3ModelNameTests` guard the
+rename.
+
+#### CosyVoice3 HiFT timeout fix (`267766b62`)
+`minimax-chinese` runs were aborting mid-corpus with `E5RT: Submit Async
+failed for [3:29] ... HiFT-T500-fp16_main__Op104_BnnsCpuInference has
+timed out`. Root cause: HiFT was loaded with `.cpuAndNeuralEngine`,
+which let the planner place most of the graph on ANE but kept at least
+one op on the BNNS CPU async-dispatch path; long phrases tripped the
+BNNS async watchdog. Fix pins HiFT to `.cpuAndGPU` regardless of
+user-supplied compute-units, removing the BNNS path entirely. Verified
+on 100/100 zh + 100/100 yue.
+
+#### CosyVoice3 LLM-Decode `outputBackings` double-buffer (`248c638c6`)
+The autoregressive decode loop runs ~163 steps per phrase to fill the
+250-token cap. Each step takes the previous step&#39;s KV cache as `kv_k` /
+`kv_v` (fp32 `[24, 1, 2, 768, 64]` = 9 MB each) and produces fresh
+`kv_k_out` / `kv_v_out` plus logits — i.e. ~36 MB of host-side
+`MLMultiArray` allocation **per step**. Fix pre-allocates 4 KV
+back-buffers + a logits backing, rotates front/back/spare across steps
+via `MLPredictionOptions.outputBackings`, and falls back to fresh-alloc
+on first rejection (one-shot `logger.warning`). Mirrors the Magpie
+pattern. Result on full `minimax-chinese`: agg-RTFx **0.269 → 0.357
+(+33%)**, TTFT-p50 14091 ms → 9619 ms (-31%), peak RSS 3302 MB → 2470
+MB.
+
+#### CosyVoice3 auto-chunker (`f80e0b92e` + `fd22624b5` + `f60cccd0d`)
+The 250-token Flow input cap means a single synth pass produces at most
+~6.5 s of audio regardless of input length. Re-exporting Flow with a
+larger fixed input shape is gated on upstream conversion work, so this
+PR works around it at the call site: long inputs are split at
+sentence/clause boundaries by `CosyVoice3TextChunker`, synthesized
+independently, and merged with an 8 ms equal-power cosine crossfade.
+
+**Splitter policy**: hard enders (`. ! ? 。 ！ ？ \n`) commit always; soft
+enders (`， 、 ； ： ; ,` + ASCII space) commit only at-or-past budget;
+force-split at +30 token overshoot if no natural boundary exists.
+`defaultMaxSpeechTokens` = 110 (leaves margin under the 250-token cap
+minus a typical 60–90-token speech-prompt context). Token-rate heuristic
+is calibrated against minimax-zh + minimax-yue runs:
+
+| Char class | Tokens / char | Rationale |
+
+|------------|---------------|--------------------------------------------------------------|
+| CJK | 7.5 | worst-case observed in real generation; varies 5.5–9 per
+char |
+| ASCII | 1.5 | matches BPE rate on English text |
+| Other | 2.5 | conservative for accented Latin / non-CJK Unicode |
+
+**Validation** on full `minimax-cantonese` (100 phrases, M2):
+
+| Metric | Pre-chunker | Post-chunker | Δ |
+
+|-------------------------------------------|-------------|--------------|------------|
+| `finished_on_eos=false` (truncated) | 80 / 100 | **5 / 100** | −94% |
+| Longest audio output | 6.5 s | **16.1 s** | +148% |
+| agg-RTFx | 0.245× | 0.249× | +1.6% |
+| TTFT p50 | 23.9 s | 35.7 s | +49% |
+
+The TTFT regression is the cost of running multiple synth passes per
+long phrase — splitting unblocks long-form output at the price of
+wall-clock latency. The 5/100 residual truncation is the long-tail
+token-rate worst case (some chars hit ~9 tokens/char); raising the
+per-CJK heuristic further would over-fragment short phrases. Cleaner fix
+is the Flow re-export.
+
+16-test suite covers tokenization estimates, hard/soft/force-split
+policy, and the crossfade arithmetic. Lives in
+`Sources/FluidAudio/TTS/CosyVoice3/Pipeline/Preprocess/CosyVoice3TextChunker.swift`
++ `CosyVoice3TtsManager.concatWithCrossfade`.
+
+#### Magpie streaming TTFT wire-up (`ace0bf485`)
+`TtsBenchmarkCommand.swift` now drives Magpie through
+`MagpieTtsManager.synthesizeStream`, recording `ttft_ms` at first
+`MagpieAudioChunk` emit instead of conflating it with full-synth wall
+time. Result on full `minimax-english` (100 phrases, M2): TTFT-p50 **9.6
+s** vs full synth-p50 **15.1 s** — agents start playback ~36% earlier
+than waiting for full synth. agg-RTFx 0.41× → 0.64× (warm-cache re-run
+benefit; fundamentals unchanged).
+
+#### StyleTTS2 `FlexibleShapeInfo` fix (`c24900731` + `8f9e42fd9`)
+`text_predictor.mlmodelc` aborted on long MiniMax phrases with `E5RT:
+tensor_buffer has known strides while the model has FlexibleShapeInfo`.
+The CoreML runtime rejects two access patterns on outputs from a
+flex-shape model: `arr.strides` reads, and `arr[idx].floatValue` element
+subscripts — and the original `sliceFirstAxis2D` helper used both. Fix
+rewrites it to read via `arr.dataPointer.bindMemory(...)` (handling
+`.float32`, `.float16`, `.double`) and computes the flat index from the
+known `(1, leading, trailing)` row-major layout. Verified on full
+100/100 minimax-en with a `ref_s.bin` dumped from the upstream LibriTTS
+demo voice.
+
+#### StyleTTS2 misaki → espeak post-pass remap (`ded0b9467`)
+After `sliceFirstAxis2D` unblocked the full corpus, StyleTTS2 still
+landed at **WER 0.581 / CER 0.476** — an order of magnitude worse than
+Kokoro (0.013). Instrumented the encoder via a new `--tokenize-only
+--corpus` mode and disproved the silent-vocab-drop hypothesis: only
+**0.09% of scalars** dropped on the full 100-phrase corpus (11 ASCII
+hyphens / 12247 scalars).
+
+Real root cause: G2P convention mismatch. Both Kokoro and StyleTTS2
+share the in-tree misaki BART G2P (`G2PModel`), but the StyleTTS2
+LibriTTS checkpoint was trained by yl4579 on **espeak-ng-phonemized**
+LibriTTS — predating misaki by years. The 178-vocab accepts both forms
+(e.g. both `ʧ` U+02A7 and `tʃ` decomposed encode), but acoustic
+embeddings for the misaki ligature glyphs are essentially untrained
+noise.
+
+Side-by-side comparison against locally-installed `espeak-ng -v en-us
+--ipa -q` flagged four systematic divergences:
+
+| misaki | espeak-ng | example                  |
+|--------|-----------|--------------------------|
+| `ʧ`    | `tʃ`      | choice → `tʃˈɔɪs`        |
+| `ʤ`    | `dʒ`      | jump   → `dʒˈʌmps`       |
+| `ɜɹ`   | `ɝ`       | girl   → `ɡˈɝl`          |
+| `əɹ`   | `ɚ`       | over   → `ˈoʊvɚ`         |
+
+Fix: a 4-rule post-pass remap in `StyleTTS2Phonemizer.phonemize`, gated
+on `.americanEnglish` and applied to the assembled phoneme string after
+every word has been emitted by the BART G2P. Lives alongside the
+existing per-piece misaki diphthong remap. Result on the same 100-phrase
+MiniMax-English run with the same `libritts_696` voice and same Parakeet
+TDT roundtrip:
+
+| Metric          | Pre   | Post  | Δ      |
+|-----------------|-------|-------|--------|
+| Macro WER       | 0.581 | 0.440 | −24.2% |
+| Macro CER       | 0.476 | 0.241 | −49.5% |
+| TTFT p50 (ms)   | 8937  | 6671  | −25.4% |
+| Agg RTFx        | 2.36× | 2.72× | +15.3% |
+| Peak RSS (MB)   | 1428  | 963   | −32.6% |
+
+Phrase 1 (`&#34;…simple choice. Get busy living…&#34;`) went from `simple voice.
+Busy dying.` (0.40 WER) to a perfect roundtrip. Remaining errors cluster
+on word-level G2P misses from the BART itself (`practical →
+practicckles`, `separation → expiration`) and diffusion-sampler formant
+breaks; closing the rest of the gap to Kokoro likely needs richer espeak
+coverage or libespeak-ng vendor — tracked separately.
+
+#### Beta callouts on StyleTTS2 + Magpie managers (`25e2b492a`)
+`StyleTTS2Manager.initialize` and `MagpieTtsManager.initialize` now emit
+`logger.warning` beta notices mirroring the existing
+`CosyVoice3TtsManager.initialize` pattern. Backends docs (`Magpie.md`
+Status section, `Benchmarks.md` StyleTTS2 footnote) gain matching `⚠️
+Beta / experimental` callouts so the perf / quality posture is visible
+at every entry point — runtime, manager docstring, doc top, PR body.
+
+#### Magpie `outputBackings` rejection fallback (`72dae8400` +
+`9767e1ef9`)
+The shipped `decoder_step.mlmodelc` reaches the user before the rebuild
+lands, so CoreML can reject our `outputBackings` dictionary on a
+name-mismatch. Latched fallback path falls back to a fresh-alloc decode
+so the model still runs; first rejection latches the flag for the rest
+of the run.
+
+### Cohere ASR backend in the harness (`8e741e659`)
+
+Lets non-English TTS runs (CosyVoice3, Magpie zh, etc.) score WER / CER
+through the harness against [Cohere
+Transcribe](Sources/FluidAudio/ASR/Cohere/) instead of being forced into
+`--skip-asr`. Four new flags on `tts-benchmark`:
+
+- `--asr-backend parakeet|cohere|none` — selects the ASR roundtrip
+engine. Default is `parakeet` for English-only runs and skipped for
+CosyVoice3.
+- `--cohere-model-dir &lt;path&gt;` — path to a directory containing
+`cohere_encoder.mlmodelc`, `cohere_decoder_cache_external_v2.mlmodelc`,
+and `vocab.json`.
+- `--asr-language &lt;code&gt;` — overrides the inferred language code (covers
+all 14 Cohere languages: en, fr, de, es, it, pt, nl, pl, el, ar, ja, zh,
+ko, vi).
+- `--cohere-compute-units all|cpu-and-gpu|cpu-only|all-ane` — pins
+`MLComputeUnits` at `CoherePipeline.loadModels` time. Use `cpu-and-gpu`
+when the q8 encoder fails ANE compilation (`MILCompilerForANE error:
+failed to compile ANE model using ANEF`) to skip the multi-minute
+fallback compile on the first call. The harness logs a WER caveat for
+zh/ja runs flagging that whitespace-tokenized WER is meaningless and the
+CER column is the real signal.
+
+Example end-to-end:
+```bash
+fluidaudio tts-benchmark \
+    --backend cosyvoice3 \
+    --corpus minimax-chinese \
+    --asr-backend cohere \
+    --cohere-model-dir /path/to/cohere/q8 \
+    --asr-language zh \
+    --output-json benchmark_results/cv3-zh-cohere.json \
+    --audio-dir benchmark_results/cv3-zh-cohere/audio
+```
+
+On this M2 host the q8 encoder hits a CoreML ANE-cache failure
+(`MILCompilerForANE error: ANECCompile() FAILED`) and CoreML silently
+falls back to CPU+GPU, dropping Cohere from its documented RTFx ~2× (per
+`Documentation/ASR/Cohere.md`) to RTFx ~0.13× — correctness is
+unaffected (same graph, same output), only latency. The full 100-phrase
+CosyVoice3 zh CER number reported above (1.68% macro / 1.84% micro) was
+therefore produced via `whisper-large-v3` (Python CPU FP32,
+`Scripts/whisper_zh_cer.py`) rather than by running Cohere over all 100
+phrases. A 10-phrase Cohere sub-sample agrees with whisper at the 3–5%
+CER range.
+
+### Corpus migration (`4cc7d3111`) + on-demand fetch CLI (`8022e8384`)
+
+Replaces the original `prose-en` / `numbers-en` / `names-en` /
+`prose-zh` shipped with the first cut of this PR with the [MiniMax
+Multilingual TTS Test
+Set](https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set)
+(CC-BY-SA-4.0; 100 phrases × 25 languages). Same public corpus used by
+[MiniMax-Speech](https://arxiv.org/abs/2505.07916), seed-tts-eval, and
+Gradium — numbers in this PR are paper-comparable.
+
+The 24 per-language `.txt` files used to be vendored in
+`Benchmarks/tts/corpus/minimax/`. **Removed in this PR** in favor of an
+on-demand `fluidaudio minimax-corpus` CLI subcommand that fetches them
+from the upstream HF dataset at the pinned revision and writes them to
+the same path. Reuses `DownloadUtils.fetchHuggingFaceFile` for HF auth
+(HF_TOKEN env) + retry/backoff — no `swift-transformers` dep added, no
+hardcoded asset URLs. The `.txt` files now live in `.gitignore` since
+they&#39;re CC-BY-SA-4.0 derivative content; only
+`Documentation/TTS/MinimaxCorpus.md` (attribution + revision pin + WER
+caveats — moved from `Benchmarks/tts/corpus/minimax/README.md` in
+`ac21d60bf`) and the CLI subcommand are tracked. Replaces the prior
+`python Scripts/fetch_minimax_tts_corpus.py` (also deleted). Per-backend
+language scope:
+
+| Backend | Languages benchmarked |
+|---|---|
+| Kokoro / Kokoro ANE | en (af_heart) |
+| PocketTTS | en + de + it + pt + es + fr |
+| Magpie | en + es + de + fr + it + vi + zh + hi |
+| StyleTTS2 | en (LibriTTS multi-spk) |
+| CosyVoice3 | zh + yue |
+
+### PocketTTS streaming TTFT (`c26f1e163`)
+PocketTTS now drives the harness through its `synthesizeStreaming` API
+so TTFT measures time-to-first-80ms-frame instead of full one-shot
+synth. TTFT 1244 ms vs. full synth 8757 ms — a 7× streaming advantage
+that one-shot benchmarking previously hid.
+
+### Reference voice dumper helper (mobius-styletts2)
+`mobius-styletts2/scripts/06_dump_ref_s.py` (added in the sibling repo)
+wraps `style_encoder` + `predictor_encoder` from `99_parity_check.py` to
+dump a 256-fp32 LE `ref_s.bin` that `StyleTTS2Manager.synthesize`
+consumes via `--voice`. Required because the shipped CoreML bundle
+doesn&#39;t include those upstream-only PyTorch encoders.
+
+## Test plan
+
+- [x] `swift build -c release` clean
+- [x] `swift format lint` clean for new files
+- [x] `fluidaudio tts-benchmark --help` lists all 6 backends
+- [x] `fluidaudio minimax-corpus --languages english --out-dir /tmp/x`
+produces byte-identical output to the deleted Python script
+- [x] Kokoro / Kokoro ANE / PocketTTS / Magpie — full 100/100 minimax-en
+- [x] StyleTTS2 — full 100/100 minimax-en (verified after
+`sliceFirstAxis2D` fix + post-pass remap)
+- [x] CosyVoice3 — full 100/100 minimax-zh + 100/100 minimax-yue
+(verified after HiFT + LLM-Decode `outputBackings` fixes)
+- [x] `CosyVoice3ModelNameTests` + `TtsComputeUnitPresetTests` green
+- [x] No `@unchecked Sendable`; per-backend error enums use `Error,
+LocalizedError`
+- [x] StyleTTS2 + Magpie + CosyVoice3 emit beta `logger.warning` on
+`initialize()`
+- [x] Corpus README moved to `Documentation/TTS/MinimaxCorpus.md`;
+cross-refs in `Benchmarks.md`, `MinimaxCorpusCommand.swift`,
+`TtsBenchmarkCommand.swift` updated
+- [x] CosyVoice3 6.5 s output cap investigated — confirmed structural
+(250-token Flow input shape, 40 ms / token); surfaced via
+`finishedOnEos` + warning log + JSON `finished_on_eos` field. See
+[Decode budget
+cap](Documentation/TTS/Benchmarks.md#cosyvoice3-decode-budget-cap)
+- [x] **CosyVoice3 auto-chunker** lands in this PR as a call-site
+workaround. Validated on full minimax-cantonese: truncation **80/100 →
+5/100**, longest output **6.5 s → 16.1 s**, agg-RTFx 0.245× → 0.249×.
+16-test suite (`CosyVoice3TextChunkerTests`) green. See [CosyVoice3
+auto-chunker](Documentation/TTS/Benchmarks.md#cosyvoice3-auto-chunker)
+- [x] **Magpie streaming TTFT** wired through `synthesizeStream` in
+`TtsBenchmarkCommand.swift`. Validated on full minimax-english: TTFT-p50
+**9.6 s** (first chunk) vs full-synth-p50 **15.1 s** — 36% earlier
+playback start. agg-RTFx 0.41× → 0.64× (warm-cache re-run)
+- [x] **Cohere ASR harness wiring** (`--asr-backend cohere` +
+`--cohere-model-dir` + `--asr-language` + `--cohere-compute-units`).
+Smoke-tested on a 10-phrase `minimax-chinese` sub-sample (Cohere q8
+macro CER 4.88%, hit `MILCompilerForANE` fallback, RTFx ~0.13× on this
+M2 host). Whisper-large-v3 cross-check on the same WAVs: macro CER 3.04%
+— both backends agree
+- [x] **CosyVoice3 zh CER on full corpus** measured via
+`whisper-large-v3` (Python CPU FP32, `Scripts/whisper_zh_cer.py`) over
+all 100 minimax-chinese WAVs: macro CER **1.68%**, micro CER **1.84%**.
+Recorded in `Documentation/TTS/Benchmarks.md` (CosyVoice3 row + footnote
+‡)
+
+- feat(asr/parakeet-v3): default to int4-per-channel encoder (#560)
+
+## Summary
+
+Switch the Parakeet TDT v3 default encoder from the 6-bit palettized
+`Encoder.mlmodelc` to a new int4-per-channel `EncoderInt4.mlmodelc`. v2
+and TDTJa keep the legacy 6-bit encoder; v3 is the only path that
+changes.
+
+## WER / size / speed (LibriSpeech test-clean, 100 files, M2)
+
+| variant | WER | disk | RTFx | ANE residency |
+|---|---|---|---|---|
+| baseline (6-bit palettized, current default) | 2.64% | 426 MB | 36.8x
+| 99.4% |
+| **int4-per-channel (new default)** | **5.24%** | **285 MB** |
+**49.2x** | 82.0% |
+| enc-prune+int8 | 2.57% | 568 MB | 19.8x | 82.0% |
+| enc-int4-linear-per-block-32 | 3.95% | 319 MB | 15.6x | 33.3% |
+| enc-prune+int4-block | 3.95% | 319 MB | 15.9x | 33.3% |
+
+The chosen variant trades roughly 2× LibriSpeech WER (still in the same
+single-digit-percent regime) for **33% less disk** and the **fastest
+RTFx** of any variant tested. Per-block quants drop off ANE entirely
+(33%) while per-channel stays compatible (82%).
+
+## Implementation
+
+- `ModelNames.ASR`
+- Add `encoderInt4 = \&#34;EncoderInt4\&#34;` and `encoderInt4File =
+\&#34;EncoderInt4.mlmodelc\&#34;`.
+- Swap `encoderFile` for `encoderInt4File` in `requiredModelsV3`.
+`encoderFile` stays defined and is still used by v2 / TDTJa / 110m.
+- `AsrModels.swift`
+- Extend `getModelFileNames(version:)` return tuple from `(decoder,
+joint, vocabulary)` to `(encoder, decoder, joint, vocabulary)`.
+- Thread `fileNames.encoder` through `createModelSpecs`, the v3 `load`
+flow, the `download` spec list, and `isModelValid`. v3 returns
+`Names.encoderInt4File`; v2/tdtJa return their existing
+`Encoder.mlmodelc`; fused (110m) is unaffected.
+- Tests: add `testV3UsesInt4EncoderAsDefault` and
+`testV2KeepsLegacyEncoder` in `ModelNamesTests`.
+
+## Distribution
+
+The new `EncoderInt4.mlpackage` / `EncoderInt4.mlmodelc` will be
+uploaded to the existing `FluidInference/parakeet-tdt-0.6b-v3-coreml` HF
+repo alongside the current `Encoder.mlmodelc`. Older library versions
+that still ask for `Encoder.mlmodelc` continue to work unchanged.
+
+## Test plan
+
+- [x] `swift build` clean
+- [x] `swift test --filter ModelNamesTests` — 20/20 (2 new)
+- [x] `swift test --filter AsrModelsTests` — 30/30
+- [x] End-to-end transcription smoke test on LibriSpeech
+61-70970-0001.flac via `EncoderInt4.mlmodelc`: correct text, RTFx
+29.12x. ANE cold compile 21.3s (one-time).
+- [x] swift-format lint clean on the modified files (only pre-existing
+Sortformer warnings remain in `ModelNames.swift`).
+- [ ] CI: tests + asr-benchmark
+- [ ] Verify HF download path on a clean cache once
+`EncoderInt4.mlmodelc` is uploaded to the v3 repo.
+
+## Companion
+
+The mobius PR adds the conversion scripts that produced these variants
+(`extra_encoder_variants.py`, `analyze_fallback.py`,
+`compute_unit_sweep.py`).
+&lt;!-- devin-review-badge-begin --&gt;
+
+---
+
+&lt;a href=&#34;https://app.devin.ai/review/fluidinference/fluidaudio/pull/560&#34;
+target=&#34;_blank&#34;&gt;
+  &lt;picture&gt;
+&lt;source media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-dark.svg?v=1&#34;&gt;
+&lt;img
+src=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-light.svg?v=1&#34;
+alt=&#34;Open in Devin Review&#34;&gt;
+  &lt;/picture&gt;
+&lt;/a&gt;
+&lt;!-- devin-review-badge-end --&gt;
+
+- Added Back the Old LS-EEND Constructors (#563)
+
+I accidentally deleted the old constructor in my last PR.
+
+---------
+
+Co-authored-by: devin-ai-integration[bot] &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+
+- Optimized LS-EEND API (#526)
+
+- Add Dictato to showcase (#561)
+
+Adds Dictato to the showcase section, appended at the end to keep
+chronological order.
+
+Dictato turns your voice into text, anywhere on your Mac. It runs fully
+on-device, so your words never leave your machine — fast, private, and
+works offline. Boost recognition for your own vocabulary (names, brands,
+acronyms) and dictate in multiple languages.
+
+Website: https://dicta.to
+&lt;!-- devin-review-badge-begin --&gt;
+
+---
+
+&lt;a href=&#34;https://app.devin.ai/review/fluidinference/fluidaudio/pull/561&#34;
+target=&#34;_blank&#34;&gt;
+  &lt;picture&gt;
+&lt;source media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-dark.svg?v=1&#34;&gt;
+&lt;img
+src=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-light.svg?v=1&#34;
+alt=&#34;Open in Devin Review&#34;&gt;
+  &lt;/picture&gt;
+&lt;/a&gt;
+&lt;!-- devin-review-badge-end --&gt;
+
+- docs: add top-level architecture overview (#559)
+
+## Summary
+
+Adds `Documentation/Architecture.md` — a conceptual companion to the
+existing per-module docs (`Documentation/{ASR,TTS,VAD,Diarization}/`)
+that explains **why** the code is structured the way it is, not just
+what each module does.
+
+Covers all four runtime modules:
+
+- **Cross-cutting patterns**: actor-based model stores (and the
+libmalloc heap-corruption bug that motivated them), lazy HuggingFace
+downloads, per-module error enums, AsyncStream vs state-in/state-out
+choices, per-model compute-unit selection driven by measured precision,
+pure-Swift vs CoreML divide.
+- **ASR**: three families (Parakeet TDT, Qwen3, Cohere), why sliding
+window instead of stateful streaming, why TDT exists, why Qwen3 strips
+the embedding graph.
+- **TTS**: why no unified `TtsBackend` protocol, PocketTTS as the
+canonical multi-stage pipeline, Kokoro vs KokoroAne ANE-split tradeoffs,
+G2P/SSML pure-Swift rationale.
+- **VAD**: single-model stateful LSTM, why VAD deliberately doesn&#39;t
+expose AsyncStream (state-in/state-out composes better with the caller&#39;s
+existing loop), hysteresis state machine.
+- **Diarization**: why two managers (online cosine-threshold vs offline
+VBx + AHC), why C++17 for linkage, why no built-in VAD-gating.
+
+Every claim has `file_path:line` references so future contributors can
+jump to the canonical implementation. Closes the gap where the design
+rationale lived in PR descriptions and tribal knowledge instead of in
+the repo.
+
+## Test plan
+
+- [ ] Doc renders cleanly on GitHub
+- [ ] All `file_path:line` references resolve
+- [ ] No broken internal links
+&lt;!-- devin-review-badge-begin --&gt;
+
+---
+
+&lt;a href=&#34;https://app.devin.ai/review/fluidinference/fluidaudio/pull/559&#34;
+target=&#34;_blank&#34;&gt;
+  &lt;picture&gt;
+&lt;source media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-dark.svg?v=1&#34;&gt;
+&lt;img
+src=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-light.svg?v=1&#34;
+alt=&#34;Open in Devin Review&#34;&gt;
+  &lt;/picture&gt;
+&lt;/a&gt;
+&lt;!-- devin-review-badge-end --&gt;
+
+- Feat/pocket tts int8 precision swap (#558)
+
+### Why is this change needed?
+&lt;!-- Explain the motivation for this change. What problem does it solve?
+--&gt;
+
+Wires up the published `flowlm_stepv2.mlmodelc` int8 variant via a
+`PocketTtsPrecision { .fp16, .int8 }` parameter on `PocketTtsManager`,
+threaded through to `PocketTtsModelStore` and
+`PocketTtsResourceDownloader`.
+
+Closes the loop on the `flowlm_stepv2.mlmodelc` artifact that&#39;s been
+published under `v2/&lt;lang&gt;/` for a while but didn&#39;t have a Swift loader
+hook. Default stays `.fp16`, no behavior change for existing callers.
+
+## What&#39;s in this PR
+
+**Code (5 files, +171/-12):**
+- `PocketTtsPrecision.swift` — new enum `{ .fp16, .int8 }`, with
+  docstring documenting the kyutai-labs/pocket-tts#147 recipe and
+  preserving the per-submodel A/B data from `experiment/pocket-tts-int8`
+  (cond_step / flowlm_step / flow_decoder / mimi_decoder safety summary)
+- `ModelNames.swift` — `flowlmStepV2` constant +
+  `flowlmStepFile(precision:)` and `requiredModels(precision:)` helpers
+- `PocketTtsResourceDownloader.swift` — `precision:` param,
+  precision-aware cache check, and `removeUnusedFlowlmVariant()` post-
+  download cleanup so callers&#39; disk usage matches the loaded models
+- `PocketTtsModelStore.swift` — `precision:` init param plumbed to the
+  precision-aware filename helper
+- `PocketTtsManager.swift` — `precision:` init param threaded to the
+  store
+
+**Docs (1 file, +47):**
+- `Documentation/TTS/PocketTTS.md` — new &#34;Model Files &amp; Precision&#34;
+  section: per-submodel precision/size/HF-path table, fp16-vs-int8
+  totals, rationale for why only `flowlm_step` is quantized
+
+## Why default is `.fp16`
+
+I asked about the on-disk weight format before committing the rename
+and verified by inspecting `model.mlmodel` for both flowlm variants:
+the int8 variant has explicit `cast_fp16_to_fp32` op scaffolding
+throughout, while the default has none — indicating uniform fp16
+weights. Combined with the 304→77 MB size ratio (~4×, consistent with
+fp16→int8 plus quantization scale tensors) the default file&#39;s weights
+are fp16 on disk. The existing `PocketTtsModelStore.swift:65-67`
+comment about &#34;CPU/GPU compute in float32 matches the Python reference&#34;
+is correct about runtime compute precision (CoreML upcasts fp16
+weights to fp32 on `.cpuAndGPU`); it just doesn&#39;t describe disk format
+and reads as accurate as-is.
+
+## Why per-submodel quantization isn&#39;t exposed
+
+The `experiment/pocket-tts-int8` branch&#39;s `PocketTtsQuantization`
+struct (per-submodel `PocketTtsModelPrecision`) is a richer API, but
+the per-submodel int8 artifacts (`cond_step_int8.mlmodelc`, etc.)
+aren&#39;t published on HuggingFace today. Adding the API would let
+callers request configurations that 404 at download time. Only
+`flowlm_stepv2.mlmodelc` is published, and that&#39;s what this PR wires
+up. The `PocketTtsPrecision` enum can grow into the experiment
+branch&#39;s `PocketTtsQuantization` shape mechanically if/when the
+per-submodel artifacts ship.
+
+## Disk footprint (English language pack)
+
+| | fp16 (default) | int8 |
+|---|---|---|
+| Total active files on disk | 766.3 MB | 549.3 MB |
+| **int8 savings vs fp16** | — | **−217 MB (28%)** |
+
+The `v2/&lt;lang&gt;/` HF directory ships both flowlm variants, so first
+download briefly holds ~857 MB before the cleanup pass deletes the
+unused `.mlmodelc` and `.mlpackage`.
+
+## Backward compatibility
+
+- `PocketTtsManager()` / `PocketTtsModelStore()` / `ensureModels()`
+  defaults all stay `.fp16`, which loads `flowlm_step.mlmodelc` exactly
+  as before
+- Existing `requiredModels` constant retained alongside new
+  `requiredModels(precision:)` so non-precision-aware callers keep
+  compiling
+
+## Verification done
+
+- All 11 published language packs have both `flowlm_step.mlmodelc`
+  and `flowlm_stepv2.mlmodelc` under `v2/&lt;lang&gt;/` — verified via HF
+  tree API
+- Branch is exactly +2 commits on top of `main`
+  (`00ea906 fix: remove module_map from MachTaskSelfWrapper subspec`)
+- Diff content is identical to `Gaozhongpai/FluidAudio:main`, just
+  squashed from 5 iterative commits into 2 clean ones (one feat, one
+  docs)
+
+I haven&#39;t run `swift test` locally — Bash on Windows here, no Swift
+toolchain. Happy to fix anything CI flags.
+
+&lt;!-- devin-review-badge-begin --&gt;
+
+---
+
+&lt;a href=&#34;https://app.devin.ai/review/fluidinference/fluidaudio/pull/558&#34;
+target=&#34;_blank&#34;&gt;
+  &lt;picture&gt;
+&lt;source media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-dark.svg?v=1&#34;&gt;
+&lt;img
+src=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-light.svg?v=1&#34;
+alt=&#34;Open in Devin Review&#34;&gt;
+  &lt;/picture&gt;
+&lt;/a&gt;
+&lt;!-- devin-review-badge-end --&gt;
+
+- fix: remove module_map from MachTaskSelfWrapper subspec (#546)
+
+## Summary
+
+- Remove `mach.module_map` from the `MachTaskSelfWrapper` subspec —
+CocoaPods does not allow `module_map` on subspecs
+- Guard `import MachTaskSelfWrapper` with `#if
+canImport(MachTaskSelfWrapper)`, matching the existing
+`FastClusterWrapper` pattern
+- In CocoaPods builds, the C headers are already exposed via the
+umbrella header, so the explicit module import is only needed under
+SwiftPM
+
+## Verification
+
+- `pod lib lint FluidAudio.podspec --allow-warnings` — **passed**
+- `swift build` — **passed**
+
+Fixes #545
+&lt;!-- devin-review-badge-begin --&gt;
+
+---
+
+&lt;a href=&#34;https://app.devin.ai/review/fluidinference/fluidaudio/pull/546&#34;
+target=&#34;_blank&#34;&gt;
+  &lt;picture&gt;
+&lt;source media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-dark.svg?v=1&#34;&gt;
+&lt;img
+src=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-light.svg?v=1&#34;
+alt=&#34;Open in Devin Review&#34;&gt;
+  &lt;/picture&gt;
+&lt;/a&gt;
+&lt;!-- devin-review-badge-end --&gt;
+
+Co-authored-by: dianshu &lt;dianshu@123.com&gt;
+
+- feat(tts/styletts2): scaffold StyleTTS2 4-stage pipeline integration (#554)
+
+## Summary
+
+Adds the FluidAudio host surface for the StyleTTS2 LibriTTS
+multi-speaker checkpoint published at
+`FluidInference/StyleTTS-2-coreml`, end-to-end. Covers asset download,
+lazy bucketed model loading, text frontend (G2P + 178-token vocab),
+bundle config validation, the ADPM2/Karras sampler, hard-alignment,
+decoder driver, and a CLI driver.
+
+`fluidaudio styletts2 &#34;Hello world.&#34; --voice ref_s.bin --output out.wav`
+produces an audible 24 kHz mono WAV.
+
+## Pipeline
+
+Per utterance (~5 ADPM2 steps default):
+
+| Stage | Bucket axis | Buckets | Precision | Compute |
+|---|---|---|---|---|
+| `text_predictor` | input tokens | 32, 64, 128, 256, 512 | fp16 | ANE |
+| `diffusion_step` | bert_dur frames | 512 only (5× per utt) | fp16 |
+CPU+GPU |
+| `f0n_energy` | dynamic (en frames) | enumerated 256/512/1024/2048/4096
+| fp16 | CPU |
+| `decoder` | mel frames | 256, 512, 1024, 2048, 4096 | fp32 | CPU+GPU |
+
+The decoder is fp32 because SineGen phase saturation in fp16 produces
+robotic audio. The HF repo ships precompiled `compiled/*.mlmodelc`
+bundles (skipping the cold-start `anecompilerservice` hit) plus
+`.mlpackage` doubles for portability — only the `.mlmodelc` bundles are
+fetched.
+
+`f0n_energy` is pinned to CPU and always called at the largest
+enumerated shape (1, 640, 4096) with zero-padding — the E5RT runtime
+emits a stderr &#34;tensor_buffer has known strides while the model has
+FlexibleShapeInfo&#34; warning when it sees enumerated shapes on GPU/ANE,
+which is non-fatal but the CPU/largest-shape path sidesteps it cleanly.
+
+## What&#39;s in this PR
+
+**Sources:**
+- `StyleTTS2Constants` — audio/tokenizer/model dims + sampler defaults
+(Karras `rho=9` to match upstream)
+- `StyleTTS2Error` — module-local `LocalizedError` enum
+- `Assets/StyleTTS2ResourceDownloader` — `DownloadUtils.downloadRepo`
+wrapper
+- `Assets/StyleTTS2Vocab` — 178-token espeak-ng IPA vocab loader;
+iterates Unicode scalars (not graphemes) so combining marks like U+0329
+syllabic / U+0361 tie-bar look up against their own vocab entries
+- `Assets/StyleTTS2BundleConfig` — `config.json` Codable + `validate()`
+against `StyleTTS2Constants`
+- `Assets/StyleTTS2VoiceStyle` — parser for precomputed `ref_s.bin` (256
+fp32 LE) speaker-prosody blobs (dump script lives in
+`mobius-styletts2/scripts/06_dump_ref_s.py`)
+- `Pipeline/StyleTTS2ModelStore` — actor with lazy per-bucket `MLModel`
+cache + lazy vocab/config caches; `f0nEnergy()` pinned `.cpuOnly`
+- `Pipeline/StyleTTS2Phonemizer` — `TtsTextPreprocessor` → in-tree
+`G2PModel` (BART, misaki IPA) for English with a small misaki→espeak-ng
+remap (`A→eɪ`, `I→aɪ`, `O→oʊ`, `W→aʊ`, `Y→ɔɪ`, schwa-offglide → `ə`);
+other languages fall back to `MultilingualG2PModel`
+- `Pipeline/StyleTTS2Sampler` — ADPM2 / Karras-rho noise schedule +
+CFG-aware sampling closure; deterministic via SplitMix64 + Box-Muller
+- `Pipeline/StyleTTS2Synthesizer` — full 4-stage driver. Float16-aware
+`MLMultiArray` reads (`denoised`, `F0`, `N` all ship as fp16 per
+schema), cumsum-of-durations → one-hot → matmul hard-alignment, decoder
+fan-out
+- `StyleTTS2Manager` — public actor; `initialize()` validates bundle
+config; `tokenize()` exposes the text frontend;
+`synthesize(text:voiceStyleURL:steps:alpha:beta:randomSeed:)` returns 24
+kHz mono WAV `Data`
+- `Sources/FluidAudioCLI/Commands/StyleTTS2Command` — `fluidaudio
+styletts2 &#34;&lt;text&gt;&#34; --voice &lt;ref_s.bin&gt; [--output --steps --alpha --beta
+--seed]`
+- `ModelNames.StyleTTS2` + `Repo.styleTts2` wired into the central
+registries
+- `TtsBackend.styleTts2` case
+
+**Tests** (37/37 pass, no network or CoreML deps):
+- `StyleTTS2VocabTests` — load happy path, combining-grapheme handling,
+missing/malformed JSON, encode known/unknown/empty
+- `StyleTTS2BundleConfigTests` — load + validate against every constant
+mismatch
+- `StyleTTS2VoiceStyleTests` — `ref_s.bin` parsing (size, fp32
+round-trip, wrong-size rejection)
+- `StyleTTS2SamplerTests` — Karras schedule, RNG determinism
+
+## Verification
+
+- `fluidaudio styletts2 &#34;Hello world. The quick brown fox jumps over the
+lazy dog.&#34; --voice /tmp/styletts2-ref_s.bin --output /tmp/out.wav --seed
+42` → 4.80s @ 24 kHz, RMS 7158, 0.0009% clipping
+- `fluidaudio transcribe /tmp/out.wav` → `Hello world quick brown fax
+nomps over lazy` (most words recovered; residual gaps are BART G2P
+emitting reduced `ð` for &#34;the&#34; with no schwa, and lacking length marks
+`ː` on stressed long vowels)
+
+## Test plan
+
+- [x] `swift build -c release` clean
+- [x] `swift test --filter StyleTTS2` → 37/37 pass
+- [x] `swift format lint` clean on new files
+- [x] End-to-end CLI synth produces audible WAV
+- [x] ASR roundtrip recovers most content words
+
+## Known follow-up
+
+- Tune misaki→espeak remap for length marks `ː` and reduced
+function-words (would push ASR WER lower)
+- Voice-bank packaging story (currently the user must precompute
+`ref_s.bin` via `mobius-styletts2/scripts/06_dump_ref_s.py`)
+- StyleTTS2 benchmark suite
+
+&lt;!-- devin-review-badge-begin --&gt;
+
+---
+
+&lt;a href=&#34;https://app.devin.ai/review/fluidinference/fluidaudio/pull/554&#34;
+target=&#34;_blank&#34;&gt;
+  &lt;picture&gt;
+&lt;source media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-dark.svg?v=1&#34;&gt;
+&lt;img
+src=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-light.svg?v=1&#34;
+alt=&#34;Open in Devin Review&#34;&gt;
+  &lt;/picture&gt;
+&lt;/a&gt;
+&lt;!-- devin-review-badge-end --&gt;
+
+- docs(models): fix Cohere Transcribe Model Sources link target (#553)
+
+## Summary
+
+Follow-up fix for [Devin Review on
+#551](https://github.com/FluidInference/FluidAudio/pull/551#pullrequestreview-4192652442):
+
+The Cohere Transcribe Model Sources row had a Markdown link whose text
+included `/q8` but whose URL pointed at the repo root, so clicking
+landed at the root instead of the `q8` subdirectory. Move the subdir
+into a parenthetical `(variant: \`/q8\`)` suffix to match the existing
+**Qwen3-ASR** and **Parakeet EOU** rows in the same table, and drop the
+mismatched suffix from the link text.
+
+```diff
+-| Cohere Transcribe (INT8 hybrid, default) | [FluidInference/cohere-transcribe-03-2026-coreml/q8](https://huggingface.co/FluidInference/cohere-transcribe-03-2026-coreml) |
++| Cohere Transcribe (INT8 hybrid, default) | [FluidInference/cohere-transcribe-03-2026-coreml](https://huggingface.co/FluidInference/cohere-transcribe-03-2026-coreml) (variant: \`/q8\`) |
+```
+
+## Test plan
+
+- [x] Docs-only change.
+- [x] Verified the link target now matches the displayed link text and
+the surrounding row pattern (Qwen3-ASR / Parakeet EOU).
+- [x] No code paths touched.
+
+- docs(models): add Cohere Transcribe + Qwen3-ASR rows (#551)
+
+## Summary
+
+`Documentation/Models.md` was missing two ASR backends that already ship
+via the public `Repo` enum (`cohereTranscribeCoreml`, `qwen3Asr` /
+`qwen3AsrInt8`) and have full integration docs under
+`Documentation/ASR/`. Add them to the **Batch Transcription** table +
+the **Model Sources** table at the bottom.
+
+- **Cohere Transcribe**
+([#487](https://github.com/FluidInference/FluidAudio/pull/487),
+[#537](https://github.com/FluidInference/FluidAudio/pull/537)) —
+14-language encoder-decoder, 48L Conformer + 8L decoder, INT8 encoder +
+FP32 ANE-resident static-shape decoder (v2). Hard 35 s per-call audio
+cap from upstream config; language must be passed explicitly.
+- **Qwen3-ASR**
+([#281](https://github.com/FluidInference/FluidAudio/pull/281),
+[#312](https://github.com/FluidInference/FluidAudio/pull/312),
+[#410](https://github.com/FluidInference/FluidAudio/pull/410)) —
+30-language with auto-detect, 2-model pipeline (ANE-optimized encoder +
+stateful 28L decoder), FP32 / INT8 variants, macOS 15 / iOS 18+, beta
+(accuracy may trail PyTorch reference).
+
+Also clarify the Parakeet EOU `Model Sources` row to surface the
+per-chunk-size subdirs (`/160ms`, `/320ms`, `/1280ms`) that
+`Repo.parakeetEou*` actually points at — saved future contributors a
+`grep ModelNames.swift`.
+
+## Out of scope (flagged for follow-up)
+
+Other Models.md staleness I noticed but did not touch in this PR:
+
+- Sortformer row doesn&#39;t enumerate the 6 model variants
+(`fastV2`/`v2_1`, `balancedV2`/`v2_1`, `highContextV2`/`v2_1`).
+- LS-EEND row doesn&#39;t enumerate the 4 dataset variants (AMI / CALLHOME /
+DIHARD II / DIHARD III).
+- \&#34;Pyannote CoreML Pipeline\&#34; row covers both online and offline
+diarization but doesn&#39;t mention that `OfflineDiarizerManager` uses an
+entirely different model set (Segmentation + FBank + Embedding + PldaRho
++ plda-parameters.json).
+- Nemotron Streaming row mentions chunk sizes inline but doesn&#39;t note
+each is a distinct HF subdir (`/80ms`, `/160ms`, `/560ms`, `/1120ms`).
+
+Happy to do those in a separate PR if useful.
+
+## Test plan
+
+- [x] Docs-only change; verified rendered tables in
+`Documentation/Models.md`.
+- [x] Cross-referenced PR / HF / variant info against
+`Sources/FluidAudio/ModelNames.swift`, `Documentation/ASR/Cohere.md`,
+and `Documentation/ASR/Qwen3-ASR.md`.
+- [x] No code paths touched; CI build/test/format remain unaffected.
+&lt;!-- devin-review-badge-begin --&gt;
+
+---
+
+&lt;a href=&#34;https://app.devin.ai/review/fluidinference/fluidaudio/pull/551&#34;
+target=&#34;_blank&#34;&gt;
+  &lt;picture&gt;
+&lt;source media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-dark.svg?v=1&#34;&gt;
+&lt;img
+src=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-light.svg?v=1&#34;
+alt=&#34;Open in Devin Review&#34;&gt;
+  &lt;/picture&gt;
+&lt;/a&gt;
+&lt;!-- devin-review-badge-end --&gt;
+
+- docs(models): drop Parakeet CTC Japanese + ASR/TTS row cleanups (#552)
+
+## Summary
+
+`Documentation/Models.md` cleanup pass:
+
+- **Drop Parakeet CTC Japanese.** CTC-only inference for Japanese was
+deleted in 846924a1d; only the INT8 CTC-trained preprocessor + encoder
+from the parakeet-0.6b-ja-coreml repo are reused as the acoustic
+frontend, paired with a TDT decoder + joint (see `ModelNames.TDTJa` and
+the comment on `Repo.parakeetJa` in
+`Sources/FluidAudio/ModelNames.swift:11-14`). Fold the relevant detail
+into the surviving **Parakeet TDT Japanese** row.
+- **Fix Japanese HF path.** Was the stale `parakeet-ctc-0.6b-ja-coreml`,
+now correctly points at
+[`parakeet-0.6b-ja-coreml`](https://huggingface.co/FluidInference/parakeet-0.6b-ja-coreml)
+— matches `Repo.parakeetJa`.
+- **Rename ASR section** `Batch Transcription (Near Real-Time)` →
+`Sliding-Window Transcription (Near Real-Time)` to match the actual
+implementation (`SlidingWindowAsrManager` wrapping TDT/CTC chunks). Add
+a short blurb contrasting it with the Streaming section so the
+distinction is explicit instead of implied.
+- **Parakeet EOU row:** add the missing **1280ms** chunk-size variant
+(`Repo.parakeetEou1280`; `StreamingEouAsrManager.swift:7` explicitly
+documents 160ms / 320ms / 1280ms support). Rephrase to highlight the
+latency/accuracy spectrum.
+- **Kokoro ANE row:** clarify that the variant was derived from
+`laishere/kokoro-coreml` **with permission** (not just lifted).
+
+## Test plan
+
+- [x] Docs-only change; verified rendered tables in
+`Documentation/Models.md`.
+- [x] All HF paths and chunk-size variants cross-checked against
+`Sources/FluidAudio/ModelNames.swift` and
+`Sources/FluidAudio/ASR/Parakeet/Streaming/EOU/StreamingEouAsrManager.swift`.
+- [x] No code paths touched; CI build/test/format remain unaffected.
+
+- docs(models): list CosyVoice3 under Not Production Ready (#550)
+
+## Summary
+- Add CosyVoice3 (Mandarin zero-shot voice cloning, #536) to the **Not
+Production Ready** table in `Documentation/Models.md` alongside Magpie
+TTS Multilingual.
+- Mirrors the existing Magpie row format (PR / mobius / HF links +
+status blurb) so contributors browsing the model index see which TTS
+backends ship today but still need community perf work.
+- Also adds the corresponding entry to the Model Sources table at the
+bottom of the file (parallel to Magpie).
+
+## Why now
+CosyVoice3 landed via #536 with the `[BETA — slow, RTFx &lt; 1.0]` flag in
+the CLI and a beta warning in `Documentation/TTS/CosyVoice3.md`, but the
+top-level `Models.md` still implied it was a fully supported TTS
+backend. The dominant perf bottlenecks (Flow CFM forced fp32 /
+`cpuAndGPU` because fp16+ANE NaNs through fused `layer_norm`; HiFT
+sinegen / windowing falling back to CPU) are documented inline so future
+PR / issue authors have shared context.
+
+## Test plan
+- [x] Docs-only change; verified rendered table in
+`Documentation/Models.md` (Not Production Ready section + Model
+Sources).
+- [x] No code paths touched; CI build/test/format remain unaffected.
+&lt;!-- devin-review-badge-begin --&gt;
+
+---
+
+&lt;a href=&#34;https://app.devin.ai/review/fluidinference/fluidaudio/pull/550&#34;
+target=&#34;_blank&#34;&gt;
+  &lt;picture&gt;
+&lt;source media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-dark.svg?v=1&#34;&gt;
+&lt;img
+src=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-light.svg?v=1&#34;
+alt=&#34;Open in Devin Review&#34;&gt;
+  &lt;/picture&gt;
+&lt;/a&gt;
+&lt;!-- devin-review-badge-end --&gt;
+
+- feat(tts/magpie): add NVIDIA Magpie TTS Multilingual 357M Swift port (#541)
+
+## Summary
+
+Ports the NVIDIA Magpie TTS Multilingual 357M autoregressive TTS from
+Python (mobius [#24](https://github.com/FluidInference/mobius/pull/24))
+to Swift. Closes FluidInference/FluidAudio#49.
+
+&gt; **⚠️ Experimental — quite slow on Apple Silicon, needs significant
+perf work.** First synth on a fresh process is dominated by CoreML model
+load + first-call ANE compile (~30 s). Warm synths run at **~96 s wall
+for an 8-word English sentence** on M-series — RTFx ≈ **0.04** (~25×
+slower than realtime). Whether the throughput ceiling is a model
+characteristic, a CoreML conversion limitation, or both is still being
+investigated and is expected to improve in subsequent iterations. **Do
+not use in latency-sensitive paths.** For real-time use prefer Kokoro
+(~20× RTFx, parallel) or PocketTTS (~1.5–2× RTFx, streaming Mimi).
+Magpie&#39;s value prop is multilingual coverage + 5 built-in speaker
+contexts, not throughput.
+
+## Status
+
+Functional. Audio quality is perceptually clean across all 5 speakers;
+first synth on a fresh process is dominated by CoreML model load +
+first-call ANE compile (~30 s), warm synths run at ~96 s wall for an
+8-word English sentence on M-series (RTFx ≈ 0.04). Quality is ASR-clean
+on 4/5 speakers; speaker 0 has a single trailing-word artifact (&#34;…and&#34;)
+attributable to fp16 sampler-trajectory drift, **not a structural bug**.
+
+Not yet covered: Japanese (deferred — needs OpenJTalk XCFramework +
+MeCab dict), CFG performance optimization, MLX-backed LocalTransformer.
+
+- **Languages (8/9):** English, Spanish, German, French, Italian,
+Vietnamese, Mandarin, Hindi. Japanese deferred pending OpenJTalk
+XCFramework integration.
+- **5 built-in speakers** (`.john`, `.sofia`, `.aria`, `.jason`, `.leo`)
+with 110-token (768d fp16) context embeddings.
+- **Inline IPA override** (`&#34;Hello | ˈ n ɛ m o ʊ | world&#34;`) routes `|…|`
+segments directly to the tokenizer for pronunciation control —
+first-class feature.
+- **Streaming**: `synthesizeStream(...)` yields `MagpieAudioChunk` per
+chunk as soon as its NanoCodec decode finishes (first chunk is a small
+clause-sized head ≈ 50 frames / 2.3 s for low TTFA). Each non-final
+chunk includes punctuation-aware trailing silence for gapless playback.
+- **ANE warmup at init**: `MagpieTtsManager.initialize()` runs an
+unmeasured 16-step synthesis to force `MILCompilerForANE` to compile the
+decoder graphs once. Without this the first user-facing `synthesize()`
+can fall back to GPU/CPU and run multiple× slower.
+- **Output:** 22.05 kHz mono WAV via 8-codebook NanoCodec decoder, max
+11.89 s per synthesis (256 nanocodec frames).
+
+## HF assets — live
+
+
+[`FluidInference/magpie-tts-multilingual-357m-coreml`](https://huggingface.co/FluidInference/magpie-tts-multilingual-357m-coreml)
+is **uploaded and ready** (1.4 GB). Ships:
+
+- `text_encoder.{mlmodelc,mlpackage}` — both compiled and portable
+- `decoder_step.{mlmodelc,mlpackage}` — rank-4 split-K/V cache, 97.3%
+ANE residency
+- `decoder_prefill.{mlmodelc,mlpackage}` — fast prefill path (110-token
+batched)
+- `nanocodec_decoder.{mlmodelc,mlpackage}` — 8-codebook → 22 kHz PCM
+(CPU-only by export)
+- `constants/` — `constants.json`, `speaker_info.json`, 8 audio-codebook
+embeddings, 5 speaker contexts, local-transformer weights
+- `tokenizer/` — per-language phoneme/jieba/pypinyin lookups
+(lazy-downloaded)
+- **`manifest.json`** — machine-readable index (sha256, file sizes, npy
+shapes, model IO specs) consumed by `MagpieResourceDownloader`
+
+## Architecture
+
+| Stage | Implementation |
+|---|---|
+| Text encoder | `text_encoder.mlmodelc` (CoreML, cpuAndNeuralEngine) |
+| Prefill | `decoder_prefill.mlmodelc` fast path (single batched call,
+110 tokens), or fallback loop |
+| AR loop | `decoder_step.mlmodelc` with **rank-4 split-K/V cache**
+(`cache_k{i}` / `cache_v{i}`, shape `[1, 512, 12, 64]` × 12 layers;
+logits `var_2129`); `outputBackings` + double-buffered KV cache to keep
+allocations off the hot path |
+| Local transformer | Pure Swift, 1-layer (256d), Accelerate
+(`cblas_sgemm`) + BNNS (GELU); fp32 only (fp64 path removed); vDSP-fused
+embed; min-heap top-K |
+| Sampling | top-k (80) + temperature (0.6), audio-EOS mask during
+`minFrames`, forbidden-token mask `[2016, 2018-2023]`;
+`torch.topk`-faithful tie semantics (counts above-threshold +
+earliest-index ties up to K) |
+| Vocoder | `nanocodec_decoder.mlmodelc` pinned to `cpuOnly` (ANE
+rejects the graph) — 8×N codes → float PCM → peak-normalize |
+
+CFG is **off by default** (`cfgScale = 1.0`); enabling it doubles
+per-step decoder cost. Assets fetched lazily via `DownloadUtils`; only
+the languages requested in `downloadAndCreate(languages:)` are
+materialized.
+
+## Public API
+
+```swift
+let manager = try await MagpieTtsManager.downloadAndCreate(
+    languages: [.english, .spanish]
+)
+
+// One-shot
+let result = try await manager.synthesize(
+    text: &#34;Hello | ˈ n ɛ m o ʊ | from FluidAudio.&#34;,
+    speaker: .john,
+    language: .english
+)
+let wav = AudioWAV.data(from: result.samples, sampleRate: result.sampleRate)
+
+// Streaming (chunk-level, per-chunk NanoCodec decode)
+for try await chunk in try await manager.synthesizeStream(text: longText) {
+    audioPlayer.append(chunk.samples)
+}
+```
+
+## CLI
+
+```
+fluidaudiocli magpie download --languages en,es
+fluidaudiocli magpie text --text &#34;Bonjour.&#34; --speaker 0 --language fr --output out.wav
+fluidaudiocli magpie text --text &#34;Long passage...&#34; --stream --output stream.wav
+fluidaudiocli magpie bench --runs 5 --warmup 1   # in-process median RTFx
+```
+
+(Parity tooling moved to mobius — see
+[FluidInference/mobius#44](https://github.com/FluidInference/mobius/pull/44)
+for the fixture emitter / Python ground-truth path.)
+
+## Inline IPA — verified working
+
+The `|…|` passthrough is **native NeMo `IpaG2p` behavior** (not added by
+us): segments inside pipes are looked up directly in `token2id.json` as
+whitespace-separated phonemes, bypassing G2P.
+
+```
+input:  &#34;Hello | n ɛ m o ʊ | from FluidAudio.&#34;
+G2P:    həˈloʊ nɛmoʊ frʌm fluɪdaːdɪoʊ.   ← injected IPA visible mid-stream
+```
+
+Validated end-to-end with the live HF assets (Python reference): 30
+tokens → 43 frames → 2.00 s @ 3.97x RTF.
+
+## Guardrails followed
+
+- No `@unchecked Sendable`; `MagpieTtsManager`, `MagpieModelStore`,
+`MagpieTokenizer`, `MagpieSynthesizer` are all `actor`s.
+- No dummy models / synthetic data.
+- `AppLogger(category: &#34;Magpie*&#34;)` throughout, no `print()` (including
+`MagpieCommand.printUsage`).
+- `MagpieError: Error, LocalizedError` for all error paths.
+
+## Test plan
+
+- [x] `swift build` — clean on macOS 14 / Swift 6 (only pre-existing
+`cblas_sgemm` deprecation warnings from Accelerate); iOS build also
+clean (Swift 6 isolation-checker workaround landed).
+- [x] `swift test --filter &#34;Magpie|NpyReader&#34;` — 17 / 17 pass:
+- `MagpieConstantsTests` (4) — forbidden-token mask, shape relations,
+NeMo tokenizer-name parity, per-language file coverage
+  - `MagpieIpaOverrideTests` (7) — `|…|` segmentation edge cases
+- `MagpieKvCacheTests` (3) — cache shape, `addInputs` key count, static
+output keys
+- `NpyReaderTests` (3) — fp32 parse, fp16→fp32 upcast, bad-magic
+rejection
+- [x] HF assets uploaded; Python inference parity confirmed (4.60 s
+plain English, 2.00 s + 11.05 s with inline IPA).
+- [x] End-to-end Swift validation: `magpie download` → `magpie text`
+produces audible 22 kHz WAV; `magpie bench` reports stable RTFx medians
+on M-series.
+- [x] Audio quality validated: ASR-clean on 4/5 speakers; speaker 0
+trailing-word artifact diagnosed as fp16 sampler-trajectory drift, not
+structural.
+- [x] Streaming validated: chunk-level decode yields correct gapless
+playback when concatenated; first chunk arrives in ~half the wall-time
+of the full synthesis.
+- [x] Devin review feedback addressed: `--text` flag handler,
+`torch.topk`-faithful tie semantics, `AppLogger.info()` in
+`printUsage()`, stale `MagpieComputePlanCommand` removed.
+
+## Companion PR
+
+Conversion pipeline + parity-fixture emitter + manifest generator:
+[FluidInference/mobius#44](https://github.com/FluidInference/mobius/pull/44).
+
+## Out of scope (follow-ups — perf is the headline item)
+
+- **Throughput investigation** — current ~0.04 RTFx is the dominant gap.
+Suspect surfaces: rank-4 split-K/V scatter ANE residency vs. apparent
+GPU fallback, NanoCodec CPU-only export, LocalTransformer per-step
+Accelerate path.
+- **MLX-backed LocalTransformer** — drop-in replacement for the
+Accelerate/BNNS forward pass to put the per-step hot loop on the GPU.
+- **CFG perf optimization** — currently doubles per-step decoder cost.
+- **Speaker 0 fp16 sampler drift** — investigate whether
+higher-precision logits or a small temperature schedule eliminates the
+trailing-word artifact.
+- Japanese support (OpenJTalk + MeCab dict).
+- Streaming NanoCodec via MLState conv-cache (current export is
+fixed-window batch; chunked-overlap fallback yields &lt;15 dB SNR —
+unviable without proper state caching).
+- CI workflow `magpie-benchmark.yml`.
+
+- feat(tts): CosyVoice3 Mandarin zero-shot TTS port (#536)
+
+## Summary
+
+Swift port of **CosyVoice3** (Mandarin zero-shot TTS) wired through the
+four validated CoreML mlpackages hosted at
+
+[`FluidInference/CosyVoice3-0.5B-coreml`](https://huggingface.co/FluidInference/CosyVoice3-0.5B-coreml).
+Delivered in two layered phases matching the existing Kokoro manager
+shape:
+
+- **Phase 1 (parity harness):** full Swift pipeline that ingests a
+Python
+frontend fixture (`.safetensors`) and produces WAV within parity of the
+  Python reference — validates all four CoreML bindings, 24-layer Qwen2
+  KV-cache slicing, RAS sampler, and Flow / HiFT wiring.
+- **Phase 2 (native frontend):** pure-Swift Qwen2 BPE tokenizer + Qwen2
+  text embeddings + minimal Mandarin text normalizer + 24 kHz log-mel
+  DSP so callers can synthesize directly from `String` input without a
+  Python dependency.
+
+Conversion pipeline that produced the mlpackages lives at
+
+[FluidInference/mobius#42](https://github.com/FluidInference/mobius/pull/42).
+Backend documentation:
+[`Documentation/TTS/CosyVoice3.md`](./Documentation/TTS/CosyVoice3.md).
+
+&gt; ⚠️ **Backend ships as beta / experimental.** End-to-end synthesis is
+&gt; currently slow on Apple Silicon — RTFx &lt; 1.0 typical, several seconds
+&gt; of latency for short Mandarin utterances. Cause is partly the Flow CFM
+&gt; stage (fp32 / CPU-or-GPU only because fp16 + ANE produces NaNs through
+&gt; the fused `layer_norm`) and partly HiFT sinegen / windowing ops that
+&gt; fall back to CPU. Treat as preliminary; may be a model issue, may be
+&gt; recoverable via better conversion. Warnings surfaced via doc comments,
+&gt; runtime `logger.warning` in `initialize()`, and CLI help text.
+
+## What&#39;s shipped
+
+### Public API (`Sources/FluidAudio/TTS/CosyVoice3/`)
+
+```swift
+public actor CosyVoice3TtsManager {
+    public init(directory: URL? = nil, computeUnits: MLComputeUnits = .cpuAndNeuralEngine)
+    public static func downloadAndCreate(from repo: Repo = .cosyvoice3,
+                                         computeUnits: MLComputeUnits = .cpuAndNeuralEngine)
+                                         async throws -&gt; CosyVoice3TtsManager
+    public func initialize() async throws
+    public func synthesize(text: String,
+                           promptAssets: CosyVoice3PromptAssets,
+                           options: CosyVoice3SynthesisOptions = .init(),
+                           prenormalized: Bool = false) async throws -&gt; CosyVoice3SynthesisResult
+}
+```
+
+`TtsBackend` gains `case cosyvoice3`; `ModelNames` gets the
+`CosyVoice3` enum plus `Repo.cosyvoice3` pointing at the HF repo.
+
+### Pipeline components
+
+| Layer | File | Notes |
+|---|---|---|
+| Model loader | `Assets/CosyVoice3ModelStore.swift` | Flat + nested
+layout probing, `.mlmodelc` compile cache |
+| Downloader | `Assets/CosyVoice3ResourceDownloader.swift` |
+`DownloadUtils` wrapper for the 4 mlpackages + embeddings |
+| Safetensors | `Shared/SafetensorsReader.swift` | ~170 LoC pure-Swift
+mmap + fp16/fp32/i32 accessors |
+| Prefill/decode | `Pipeline/Synthesize/CosyVoice3Synthesizer.swift` |
+Actor; in-place `[24,1,2,768,64]` fp16 KV-cache passthrough |
+| Sampler | `Pipeline/Synthesize/CosyVoice3RasSampler.swift` | top-p /
+top-k / repetition mask, seed-tokens bypass |
+| Speech embed | `Pipeline/Synthesize/CosyVoice3SpeechEmbeddings.swift`
+| Lazy mmap of 6761×896 fp16 table (12 MB) |
+| Frontend | `Pipeline/Preprocess/CosyVoice3TextFrontend.swift` |
+Special-token splitting + lm_input assembly |
+| Tokenizer | `Pipeline/Preprocess/Qwen2BpeTokenizer.swift` |
+tiktoken-compatible byte-level BPE, 151 936 vocab |
+| Text embed | `Pipeline/Preprocess/CosyVoice3TextEmbeddings.swift` |
+151 936×896 fp16 mmap → row copy |
+| TN | `Pipeline/Preprocess/CosyVoice3ChineseNormalizer.swift` | Minimal
+regex-free port of `frontend_utils.py` |
+| Prompt mel | `Pipeline/Preprocess/CosyVoice3PromptMel.swift` | 24 kHz
+log-mel matching `matcha audio.py` |
+
+### CLI (`Sources/FluidAudioCLI/Commands/`)
+
+```
+fluidaudio tts --backend cosyvoice3-parity --fixture … --models-dir … --output …
+fluidaudio tts --backend cosyvoice3 --text &#34;希望你以后能够做的比我还好用&#34; \
+               --prompt-assets … --models-dir … --output …
+fluidaudio tts --backend cosyvoice3-tokenizer --fixture …     # BPE parity
+fluidaudio tts --backend cosyvoice3-frontend --text …         # lm_input dump
+```
+
+`--backend` help text marks `cosyvoice3` as `[BETA — slow, RTFx &lt; 1.0]`
+and the dispatcher emits a runtime `logger.warning` so users see the
+status without reading docs.
+
+### Tests
+
+- `CosyVoice3ChineseNormalizerTests` — 8 cases covering
+`contains_chinese`,
+  `replace_blank`, corner marks, brackets, digit spellout, trailing
+  comma collapse, end-to-end, `is_only_punctuation`.
+- `CosyVoice3PromptMelTests` — 8 cases covering the matcha frame-count
+  formula, zero-audio log floor clamp, 200 Hz sine peak in low mel bins,
+exact reflect-pad semantics, periodic Hann endpoints, mel-basis shape /
+  non-zero integrals, token-ratio trimming (and the throws-if-too-short
+  path).
+
+### Integration
+
+- `ModelNames.swift` — `CosyVoice3` enum + `Repo.cosyvoice3`
+- `TtsBackend.swift` — `case cosyvoice3`
+- `TTSCommand.swift` — subcommand wiring
+- `Documentation/TTS/CosyVoice3.md` — file roster, call flow, public
+API,
+  CoreML caveats, indexed from `Documentation/README.md`
+
+## Test plan
+
+- [x] `swift build` (release)
+- [x] Full `swift test` on this branch: **1 435 tests, 24 skipped, 0
+failures** (~13 min)
+- [x] `--filter CosyVoice3ChineseNormalizer` — 8/8 pass
+- [x] `--filter CosyVoice3PromptMel` — 8/8 pass
+- [x] Phase 1 end-to-end parity vs `build/wavs/e2e_shipping.wav` (max|Δ|
+&lt; 1e-3, SNR &gt; 40 dB, CPU-only fp32 Flow)
+- [x] Phase 2 end-to-end round-trip: Swift output → whisper.base →
+expected transcript
+
+## Non-goals / follow-ups
+
+- SpeechTokenizer and CAMPPlus remain Python-side for prompt asset
+  preparation; both have CoreML mlpackages but the required DSPs aren&#39;t
+  yet ported. Users pass pre-computed `promptSpeechIds` / `spkEmbedding`
+  in `CosyVoice3PromptAssets` for now.
+- Full `wetext.ZhNormalizer` (year / currency / decimals / units) is not
+  ported. Callers that need production-grade TN run wetext server-side
+  and pass `prenormalized: true`.
+- Flow stays fp32 (1.2 GB) until CoreMLTools pins `layer_norm` fused
+fp16.
+
+## Updates — Devin review + main merge
+
+Picked up `origin/main` (resolved trivial enum-case merge in
+`ModelNames.swift` / `TtsBackend.swift` / `TTSCommand.swift`; both
+branches added new cases) and addressed the 12 Devin inline findings:
+
+- **Sendable hygiene** — dropped `@unchecked Sendable` from 9 types.
+  `CosyVoice3Synthesizer` is now a proper `actor` (it crosses actor
+  boundaries from the manager); `CosyVoice3Models` is plain `: Sendable`
+  via `@preconcurrency import CoreML` (matches the existing `TtsModels`
+  pattern; the initial drop-to-no-Sendable broke the benchmark CI build
+  with `non-sendable result type CosyVoice3Models cannot be sent from
+  actor-isolated context`, since it&#39;s returned by `store.models()`).
+  The remaining types had Sendable conformance dropped entirely since
+  they don&#39;t escape the owning actor.
+- **Prefill stop-token bug** — if the LLM emits an EOS token at step 0
+  the synthesizer now throws `predictionFailed` instead of falling
+  through into the decode loop and accumulating semantically meaningless
+  tokens.
+- **HiFT mel slice OOB** — added bounds check on `newMelStart` against
+  the actual mel length and clamped `validFrames` to the available
+window; previously a `newMelStart &gt; totalMelFrames` would `MLMultiArray`
+  out of range during the chunk-packed call path.
+- **Production logging** — replaced `print()` stage timings with
+  `AppLogger.info`; added `logger.warning` calls in `initialize()` and
+  the CLI dispatcher for the beta-status banner.
+- **Beta marker** — doc comments on `CosyVoice3TtsManager` and
+  `TtsBackend.cosyvoice3` flag the backend as experimental; CLI help
+  text annotates the backend label.
+- **Documentation** — added `Documentation/TTS/CosyVoice3.md` mirroring
+  the Kokoro / PocketTTS doc layout (files, call flow, public API, CLI,
+  CoreML caveats, known limits) and indexed it from
+  `Documentation/README.md`.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+&lt;!-- devin-review-badge-begin --&gt;
+
+---
+
+&lt;a href=&#34;https://app.devin.ai/review/fluidinference/fluidaudio/pull/536&#34;
+target=&#34;_blank&#34;&gt;
+  &lt;picture&gt;
+&lt;source media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-dark.svg?v=1&#34;&gt;
+&lt;img
+src=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-light.svg?v=1&#34;
+alt=&#34;Open in Devin Review&#34;&gt;
+  &lt;/picture&gt;
+&lt;/a&gt;
+&lt;!-- devin-review-badge-end --&gt;
+
+---------
+
+- feat(tts/pocket): multi-language support (EN + 9 new packs) (#549)
+
+## Summary
+
+Adds first-class support for PocketTTS language packs upstream
+`kyutai/pocket-tts` just published, tracking issue #49. Users pick a
+language at manager construction; all packs (including English) are
+downloaded from `v2/&lt;lang&gt;/` on `FluidInference/pocket-tts-coreml`.
+
+This PR replaces #540 (rebased onto current `main` from a fresh branch).
+
+### Supported languages
+
+| ID              | Layers | HF subtree           |
+|-----------------|--------|----------------------|
+| `english`       | 6      | `v2/english`         |
+| `french_24l`    | 24     | `v2/french_24l`      |
+| `german`        | 6      | `v2/german`          |
+| `german_24l`    | 24     | `v2/german_24l`      |
+| `italian`       | 6      | `v2/italian`         |
+| `italian_24l`   | 24     | `v2/italian_24l`     |
+| `portuguese`    | 6      | `v2/portuguese`      |
+| `portuguese_24l`| 24     | `v2/portuguese_24l`  |
+| `spanish`       | 6      | `v2/spanish`         |
+| `spanish_24l`   | 24     | `v2/spanish_24l`     |
+
+French ships 24-layer only upstream; no 6-layer French pack exists.
+
+### Per-language artifacts shipped on HF
+
+Each `v2/&lt;lang&gt;/` subtree contains 5 `.mlmodelc` directories +
+`constants_bin/`:
+
+| Artifact                  | Precision           | Notes |
+|---------------------------|---------------------|-------|
+| `cond_step.mlmodelc` | fp16 | conditioning prefill (voice/text → KV
+cache) |
+| `flow_decoder.mlmodelc` | fp16 | flow-matching audio decoder |
+| `flowlm_step.mlmodelc` | fp16 | per-token transformer step (default) |
+| `flowlm_stepv2.mlmodelc` | **selective int8** | weight-only PTQ on
+attn + FFN body linears (per kyutai-labs/pocket-tts#147 recipe); EOS
+head + input embedding stay fp32. Optional smaller variant; **not
+currently loaded by Swift** but available for client-side swap-in. |
+| `mimi_decoder.mlmodelc` | fp16 | Mimi neural codec decoder |
+
+`mimi_encoder.mlmodelc` (voice cloning, language-agnostic) is fetched
+lazily, separately from any language pack.
+
+The selective int8 in `flowlm_stepv2` quantizes 4 linears per
+transformer layer (`attn_in_proj`, `attn_out_proj`, FFN expand, FFN
+contract) via
+`coremltools.optimize.torch.quantization.PostTrainingQuantizer`
+(per-channel, symmetric, weight-only). Sizes: 6L 145 MB → 74 MB; 24L 1.1
+GB → 291 MB.
+
+## Changes
+
+- **`PocketTtsLanguage`**: new enum (10 cases) with `repoSubdirectory`
+(always `&#34;v2/&lt;rawValue&gt;&#34;`) and `transformerLayers` (6 or 24).
+- **`ModelNames.PocketTTS`**: single `mimiDecoderFile =
+&#34;mimi_decoder.mlmodelc&#34;` and single `requiredModels` set covering all
+language packs uniformly.
+- **`PocketTtsLayerKeys`**: discovers KV-cache I/O names at runtime so
+6L and 24L packs share the same inference path. `discover(...)` requires
+`expectedLayers: Int` (6 or 24) for early sanity-check.
+- **`PocketTtsMimiKeys`**: discovers the Mimi decoder&#39;s audio output +
+per-state input→output pairing dynamically (pass-through inputs first,
+then shape-bucket pairing in canonical order).
+- **Voice safetensors prebakes**: every language pack ships
+`&lt;voice&gt;.safetensors` containing pre-computed LM transformer KV cache
+snapshots (per-layer `[2, 1, seqLen, 16, 64]` F32 + I64 offset).
+`PocketTtsConstantsLoader.loadVoiceSnapshot` parses the safetensors
+header (8-byte LE u64 + JSON) and extracts per-layer cache + offset
+tensors. `PocketTtsSynthesizer.kvCacheStateFromSnapshot` copies K/V
+blocks into the runtime `[2, 1, kvCacheMaxLen, 16, 64]` state
+independently. Skips the per-token `cond_step` voice prefill.
+- **`PocketTtsResourceDownloader`**: `ensureModels(language:)` always
+fetches the requested `v2/&lt;lang&gt;/` subtree via
+`DownloadUtils.downloadSubdirectory`. `ensureVoice` downloads
+`&lt;voice&gt;.safetensors`. `ensureMimiEncoder()` lazily fetches the
+language-agnostic encoder for voice cloning without pulling a full
+language pack.
+- **`PocketTtsModelStore` / `PocketTtsManager` / `PocketTtsSession` /
+`PocketTtsSynthesizer`**: language threaded through load + constants +
+KV-cache sizing. Voice data is cached per `(language, voice)`. Mimi keys
+discovered + cached per language.
+- **Voice cloning across languages**: Mimi encoder is shared; cloned
+`PocketTtsVoiceData` from one language&#39;s manager can be fed to another.
+- **CLI**: `fluidaudiocli tts --backend pocket --language &lt;id&gt;` (default
+`english`). Unknown values log the supported list and fall back to
+English.
+- **Docs**: `Documentation/TTS/PocketTTS.md` gains a Languages section +
+cross-language cloning example.
+
+## Tests
+
+- `PocketTtsLanguageTests` — pure-logic cases covering
+`repoSubdirectory`, `transformerLayers`, and `requiredModels`. No model
+download / no network.
+- Full PocketTTS test suite: 16/16 passing (`swift test --filter
+PocketTts`).
+
+## Test plan
+
+- [x] `swift build` — clean Release build (rebased onto current `main`)
+- [x] `swift format lint --recursive --configuration .swift-format` —
+clean
+- [x] `swift test --filter PocketTts` — 16/16 pass
+- [x] Manual end-to-end via FluidAudio Swift CLI for **all 10 language
+packs** (fresh HF download → fp16 baseline → swap
+`flowlm_stepv2.mlmodelc` → re-synthesize → Parakeet TDT v3 ASR check on
+both outputs):
+
+| Language        | fp16 ASR | flowlm_stepv2 (int8) ASR |
+|-----------------|---|---|
+| english         | ✓ | ✓ |
+| spanish         | ✓ | ✓ |
+| spanish_24l     | ✓ | ✓ |
+| french_24l      | ✓ | ✓ |
+| german          | ✓ | ✓ |
+| german_24l      | ✓ | ✓ |
+| italian         | ✓ | ✓ |
+| italian_24l     | ✓ | ✓ |
+| portuguese      | ✓ | ✓ |
+| portuguese_24l  | ✓ | ✓ |
+
+Selective int8 vs fp16 for `flowlm_step`: 6L 145 MB → 74 MB; 24L 1.1 GB
+→ 291 MB.
+
+## Non-goals
+
+- Runtime language switching on a live `PocketTtsManager` (create a new
+manager instead).
+- Auto-inferring language from text.
+- French 6-layer (upstream did not ship it).
+- Auto-loading `flowlm_stepv2` (Swift continues to load
+`flowlm_step.mlmodelc`/fp16 by default; the int8 variant ships in the
+pack so clients can opt in via cache swap, and a future PR can add a
+`precision: .fp16 | .int8` selector).
+
+Closes #49
+
+- fix: avoid misleading confidence warning in SlidingWindowAsrManager.finish() (#548)
+
+### Why is this change needed?
+`SlidingWindowAsrManager.finish()` reconstructs final text by calling
+`processTranscriptionResult(...)` with empty `timestamps` and
+`confidences`.
+
+That path only needs token-to-text reconstruction, but it also runs
+confidence calculation, which logs:
+
+`Expected token confidences but got none - this should not happen`
+
+In practice this shows up during normal finalization even though nothing
+is actually wrong.
+
+### What changed?
+Use `convertTokensToText(accumulatedTokens)` directly in `finish()` when
+only the merged final text is needed.
+
+This keeps behavior the same for the returned transcription while
+avoiding a misleading warning during normal shutdown.
+
+### Validation
+- `swift test --filter SlidingWindowAsrManagerTests`
+- Reproduced locally from an app integration path before the patch;
+warning no longer appears after the change.
+
+&lt;!-- devin-review-badge-begin --&gt;
+
+---
+
+&lt;a href=&#34;https://app.devin.ai/review/fluidinference/fluidaudio/pull/548&#34;
+target=&#34;_blank&#34;&gt;
+  &lt;picture&gt;
+&lt;source media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-dark.svg?v=1&#34;&gt;
+&lt;img
+src=&#34;https://static.devin.ai/assets/gh-open-in-devin-review-light.svg?v=1&#34;
+alt=&#34;Open in Devin Review&#34;&gt;
+  &lt;/picture&gt;
+&lt;/a&gt;
+&lt;!-- devin-review-badge-end --&gt;
+
+- feat(tts/kokoro-ane): add laishere 7-stage CoreML chain (ANE-optimized) (#547)
+
+## Summary
+
+Adds a second Kokoro TTS backend (`KokoroAne`) wrapping the
+[laishere/kokoro-coreml](https://github.com/laishere/kokoro-coreml)
+7-stage chain (Albert → PostAlbert → Alignment → Prosody → Noise →
+Vocoder → Tail) behind an actor-based facade, used with the upstream
+author&#39;s permission. Per-stage `MLComputeUnits` assignment routes
+Albert/PostAlbert/Alignment/Vocoder to **ANE**; Prosody/Noise/Tail stay
+on CPU+GPU for fp32/iSTFT-heavy ops.
+
+The companion mobius PR for the conversion side:
+https://github.com/FluidInference/mobius/pull/45
+
+Existing `KokoroTtsManager` (single fp32 model) is untouched. Both
+backends ship from the same `FluidInference/kokoro-82m-coreml` HF repo —
+KokoroAne lives under the `ANE/` subdirectory.
+
+## What&#39;s added
+
+**Module: `Sources/FluidAudio/TTS/KokoroAne/`**
+- `KokoroAneManager` — actor facade: `initialize`,
+`synthesize(text|phonemes)`, `synthesizeDetailed`
+- `KokoroAneSynthesizer` — 7-stage orchestration with fp16↔fp32 vImage
+boundaries (Prosody→Noise→Vocoder→Tail). Uses `rebuild16`/`rebuild32`
+helpers so each output is fetched once.
+- `KokoroAneModelStore` — per-stage MLModel handles + vocab + voice pack
+cache. Atomic-commit load (matches `PocketTtsModelStore` pattern) so
+partial-load failures stay retryable.
+- `KokoroAneVoicePack` — `[510, 256]` flat fp32 row indexing (timbre
+cols `[0:128]`, style_s cols `[128:256]`)
+- `KokoroAneVocab` — IPA → token IDs with BOS/EOS wrap, max 512
+- `KokoroAneResourceDownloader` — HF cache management via existing
+`DownloadUtils`; also downloads the shared kokoro G2P assets on first
+init (see fix below)
+- G2P reuses existing `G2PModel.shared`
+
+**CLI:**
+```bash
+fluidaudiocli tts &#34;Hello world&#34; --backend kokoro-ane [--metrics m.json]
+fluidaudiocli tts-asr-verify --texts-file phrases.txt --output-json results.json
+```
+The `tts-asr-verify` batch command synthesizes each phrase, transcribes
+with Parakeet, and emits per-phrase + macro/micro WER with stage
+timings.
+
+**Tests** (`Tests/FluidAudioTests/TTS/KokoroAne/`):
+- 13 unit tests (vocab, voice pack) — no model deps, run on CI
+- 5 E2E tests (synth + ASR roundtrip) — gated by
+`FLUIDAUDIO_RUN_KOKOROANE_E2E=1`
+
+**Docs:**
+- New `Documentation/TTS/KokoroAne.md` — when-to-pick decision table,
+CLI/Swift quick start, per-stage compute targets, voice pack layout,
+limits, perf numbers, source links.
+- Top-of-file callout on `Documentation/TTS/Kokoro.md` linking to the
+ANE-resident variant.
+- Updated `Documentation/README.md` index, `Documentation/Models.md` TTS
+table, `Documentation/API.md` reference, `Documentation/CLI.md` example.
+
+## Verified end-to-end on M2
+
+Cold model load: 20.6s (`anecompilerservice` first-run ANE compilation).
+Warm load: ~300ms.
+
+| Phrase | Synth | Audio | RTFx | ASR roundtrip |
+|---|---|---|---|---|
+| Hello world | 0.47s | 1.65s | 3.5× | &#34;Hello world.&#34; (WER 0%) |
+| The quick brown fox… | 0.32s | 3.18s | 9.9× | dropped &#34;The&#34; (WER 11%)
+|
+| She had been waiting… | 0.25s | 2.80s | 11.4× | &#34;Shay&#34; misheard (WER
+12.5%) |
+
+Aggregate macro WER 7.9%, micro WER 10.5% — error is ASR-side; TTS audio
+is intelligible.
+
+Steady-state per-stage timings confirm ANE residency (Albert/PostAlbert
+~7-10ms each).
+
+## Devin Review fixes addressed in this PR
+
+- 🔴 **Partial model load wedged the store**
+(`KokoroAneModelStore.loadIfNeeded`) — fixed via local `pendingModels`
+accumulator + atomic commit, matching `PocketTtsModelStore`.
+- 🐛 **G2P models not downloaded standalone** — `G2PModel.loadIfNeeded`
+only reads from `~/.cache/fluidaudio/Models/kokoro/` and never
+downloads. The kokoroAne download set didn&#39;t include G2P, so first-time
+`--backend kokoro-ane` users (no prior `kokoro` use) hit a cryptic
+`vocabLoadFailed`. Fixed by adding a `g2p-only` sentinel variant to
+`getRequiredModelNames(.kokoro, …)` and a new
+`KokoroAneResourceDownloader.ensureG2PAssets(directory:)` that runs
+before `G2PModel.shared.ensureModelsAvailable()` in
+`KokoroAneManager.initialize()`.
+- 🟡 **Voice pack off-by-one (false positive)** — verified upstream
+`convert-coreml.py:552` uses `voice_pack[len(phonemes) - 1]`, exactly
+matching the existing Swift `phonemeCount - 1`. No change.
+
+## Refactor pass
+
+Internal cleanup applied across the module after the initial
+implementation landed:
+- `KokoroAneSynthesizer`: `rebuild16`/`rebuild32` helpers replace 11
+inline `outputShape + outputArray + float16Array` patterns; F0/N shapes
+cached once (was fetched 4×). Fixed a mislabeled `stage:` argument in
+`outputArray` error reporting.
+- `KokoroAneSynthesizer+Conversion`: extracted
+`convertF32toF16`/`convertF16toF32`/`genericCopy` private helpers
+(eliminates 4× duplicated vImage buffer setup).
+- `KokoroAneModelStore`: folded `voicePack(_)` +
+`loadVoicePackIfNeeded(_)` into one method; dropped unreachable
+post-load guard and dead synthesized-URL throw.
+- `KokoroAneVocab` / `KokoroAneError`: added `vocabParseFailed(URL,
+String)` so a malformed top-level JSON object reports parse-failure
+instead of file-not-found; removed dead NSNumber bridging fallback.
+- `KokoroAneConstants`: dropped unused `defaultLanguage`,
+`voicePackTimbreSlice`, `voicePackStyleSSlice`. Changed `defaultSpeed`
+from `Float16` to `Float` (drops 4 `Float(...)` wraps at default-arg
+sites).
+- `KokoroAneError`: dropped unused `unsupportedPhoneme(Character)` —
+`KokoroAneVocab.encode` silently drops unknown chars per the upstream
+Python convention.
+
+## Test plan
+
+- [x] `swift build` clean
+- [x] `swift test --filter KokoroAne` — 13 unit tests pass, 5 E2E gated
+- [x] With models staged at
+`~/.cache/fluidaudio/Models/kokoro-82m-coreml/ANE/`:
+- [x] `FLUIDAUDIO_RUN_KOKOROANE_E2E=1 swift test --filter KokoroAne` —
+all 18 pass
+- [x] `swift run fluidaudiocli tts &#34;Hello world&#34; --backend kokoro-ane
+--output /tmp/ane.wav --metrics /tmp/m.json` — produces non-silent audio
++ metrics with WER
+- [x] `swift run fluidaudiocli tts-asr-verify --texts-file phrases.txt
+--output-json /tmp/r.json` — aggregate WER ≤ 0.20
+
+## Models
+
+`FluidInference/kokoro-82m-coreml` on HuggingFace, under the `ANE/`
+subdirectory:
+```
+ANE/KokoroAlbert.mlmodelc       fp16 + int8pal  (CPU+ANE)
+ANE/KokoroPostAlbert.mlmodelc   fp16 + int8pal  (CPU+ANE)
+ANE/KokoroAlignment.mlmodelc    fp16 + int8pal  (CPU+ANE)
+ANE/KokoroProsody.mlmodelc      fp32             (CPU+GPU)
+ANE/KokoroNoise.mlmodelc        fp32             (CPU+GPU)
+ANE/KokoroVocoder.mlmodelc      fp16 + int8pal   (CPU+ANE)
+ANE/KokoroTail.mlmodelc         fp32 + iSTFT     (CPU+GPU)
+ANE/vocab.json                  114 IPA tokens
+ANE/af_heart.bin                [510, 256] fp32 voice pack
+```
+
+G2P assets (`G2PEncoder.mlmodelc`, `G2PDecoder.mlmodelc`,
+`g2p_vocab.json`) are pulled from the same repo&#39;s root and cached at
+`~/.cache/fluidaudio/Models/kokoro/`, shared with the regular
+`KokoroTtsManager` backend.
+
+## License
+
+Upstream (laishere) is MIT — carried forward in the mobius PR&#39;s LICENSE
+file. Used with the upstream author&#39;s permission.</div>
+</div>
+
+<a href="../project/FluidInference_FluidAudio.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

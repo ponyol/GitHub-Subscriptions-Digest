@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (14 commits) - tensorlakeai/tensorlake - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (14 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/tensorlakeai_tensorlake.html">tensorlakeai/tensorlake</a> /
+    Updates in main (14 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/tensorlakeai_tensorlake.html">tensorlakeai/tensorlake</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-02 04:13 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/tensorlakeai/tensorlake/commits/main" target="_blank">https://github.com/tensorlakeai/tensorlake/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This release significantly enhances the SDK and CLI with improvements across several areas. It introduces a VNC port-readiness probe to prevent connection errors and implements better trace propagation for sandbox-proxy requests, improving observability. New CLI commands (`tl ssh-keys`) now manage SSH public keys for sandbox access, while disk sizing flags and snapshot types have been standardized. The update also adds SDK methods for programmatic control over sandbox names, status, and configurations, alongside refactored CI/CD for more reliable Rust package publishing.
+
+---
+
+**Russian translation:**
+
+Этот релиз значительно улучшает SDK и CLI в нескольких областях. Он вводит зонд готовности VNC-порта для предотвращения ошибок подключения и реализует улучшенное распространение трассировки для запросов к sandbox-proxy, повышая наблюдаемость. Новые команды CLI (`tl ssh-keys`) теперь управляют публичными SSH-ключами для доступа к песочницам, при этом флаги для размера диска и типы снимков были стандартизированы. Обновление также добавляет методы SDK для программного контроля над именами, статусом и конфигурациями песочниц, а также переработанный CI/CD для более надежной публикации Rust-пакетов.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix(sdk): wait for VNC port readiness in connectDesktop (Rust + TS) (#669)
+
+## Summary
+
+`Sandbox.create()` returns when the in-VM container daemon is up (~1 s
+after VM resume from snapshot), but image-specific systemd units like
+`vncserver-tl-user.service` start a few seconds later. The current
+`connectDesktop` immediately opens a WebSocket to
+`/api/v1/tunnels/tcp?port=5901`. The dataplane sees `Connection refused
+(os error 111)` on `127.0.0.1:5901` and the proxy returns **502 Bad
+Gateway** — surfacing to the user as `desktop tunnel websocket handshake
+failed with HTTP 502`.
+
+This adds a port-readiness probe in both the Rust core (used by Python
+via the PyO3 wrapper) and the standalone TypeScript implementation. The
+probe runs `bash -c &#39;exec 3&lt;&gt;/dev/tcp/127.0.0.1/&lt;port&gt;&#39;` via the
+existing `POST /api/v1/processes/run` daemon endpoint, retrying every
+250 ms until the TCP connect succeeds. The whole probe is bounded by the
+caller&#39;s `connect_timeout` along with the WS handshake and VNC
+negotiation that follow — total wall-clock matches what the caller asked
+for. `bash`&#39;s `/dev/tcp` builtin is present on every sandbox image we
+ship, so no extra image dependency.
+
+## Verified end-to-end
+
+```python
+sandbox = Sandbox.create(image=&#34;ubuntu-vnc&#34;)
+with sandbox.connect_desktop(password=&#34;tensorlake&#34;) as desktop:
+    print(desktop.width, desktop.height)
+# Connected. 1280x800
+# elapsed=2s
+```
+
+Same flow before this patch returned `502 Bad Gateway` in ~50 ms.
+
+## Why not fix the snapshot baker instead
+
+The longer-term fix is per-image readiness in
+`indexify/crates/dataplane/src/service.rs:2336` — today the global
+presnap waits only on container-daemon connect, so the snapshot captures
+the VM mid-boot. The right fix is a per-image readiness probe (e.g.
+`tcp_listen 5901` for `ubuntu-vnc`) before snapshot capture. That&#39;s a
+separate change in the dataplane repo. This SDK probe keeps users
+unblocked today and stays useful afterward as a defensive bound on any
+cold-start jitter that survives a smarter baker.
+
+## Architecture note
+
+The Python SDK uses the Rust core via PyO3 (`crates/cloud-sdk` →
+`crates/rust-cloud-sdk-py`). The TypeScript SDK has its own
+implementation. So the same logical fix is implemented twice in this PR.
+We discussed (separately) whether to consolidate TS onto the Rust core
+via napi-rs — staying split for now; this divergence is the cost.
+
+## Test plan
+
+- [x] `cargo build -p tensorlake --tests` with `RUSTFLAGS=&#34;-D
+warnings&#34;`: clean
+- [x] `npm run typecheck`: clean
+- [x] `npm test`: 132/132 pass (added a `vi.spyOn(Sandbox.prototype,
+&#34;run&#34;)` short-circuit in the desktop tests so the probe doesn&#39;t try to
+hit `sandbox.tensorlake.ai` for a fake sandbox id)
+- [x] Live: rebuilt the PyO3 wheel locally, ran
+`Sandbox.create(&#34;ubuntu-vnc&#34;)` + `connect_desktop()` against prod — 2 s
+total, no 502, returns desktop dimensions cleanly.
+
+Note: `package-lock.json` had drifted (`0.5.3` vs. `package.json`&#39;s
+`0.5.5`); `npm install` synced it in the same change.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(cli): inject traceparent on sandbox-proxy requests in sbx commands (#665)
+
+## Summary
+
+- `sbx exec`, `sbx ssh`, and `sbx cp` each built their own `reqwest`
+client for sandbox-proxy requests but never added a `traceparent` header
+— sandbox-proxy received no parent context and started a fresh unrelated
+trace for every call
+- The trace ID printed by `--show-trace-id` came from a Platform API
+call and was never visible in sandbox-proxy or dataplane logs
+- Added `CliContext::traceparent_value()` (same `trace_id` + fresh
+`span_id` pattern already used in `ctx.client()`) and call it alongside
+the existing auth headers in all three commands
+
+## Test plan
+
+- [ ] `tl --show-trace-id sbx exec &lt;id&gt; -- echo hi` — the printed
+Trace-ID now appears in sandbox-proxy logs for the
+`/api/v1/processes/run` request
+- [ ] `tl sbx cp` and `tl sbx ssh` similarly propagate the same trace ID
+- [ ] `cargo check -p tensorlake-cli` passes
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- Add snapshot/checkpoint type flag (#664)
+
+## Summary
+- rename snapshot API/SDK surface to `snapshot_type` with values
+`filesystem | memory`
+- update Rust CLI checkpoint flag to `--snapshot-type
+&lt;filesystem|memory&gt;`
+- thread `snapshot_type` through CLI -&gt; SDK -&gt; HTTP request payload
+- update snapshot response handling and models to expose `snapshot_type`
+- align SDKs and tests (Rust/Python/TypeScript) to the new field/value
+names
+- add targeted CI coverage for snapshot-related SDK tests:
+- Python: `tests.sandbox.test_client_rust_backend`,
+`tests.sandbox.test_sandbox_rust_backend`,
+`tests.image.test_sandbox_builder`
+  - TypeScript: `tests/client.test.ts`, `tests/sandbox-image.test.ts`
+
+## Validation
+- `cargo test -p tensorlake-cli snapshot_type -- --nocapture`
+- `cargo test -p tensorlake snapshot_type -- --nocapture`
+- `PYTHONPATH=src poetry run python -m unittest
+tests.sandbox.test_client_rust_backend
+tests.sandbox.test_sandbox_rust_backend
+tests.image.test_sandbox_builder`
+- `npm test -- tests/client.test.ts tests/sandbox-image.test.ts`
+- `npm run typecheck`
+- live smoke-tested create -&gt; exec -&gt; snapshot -&gt; restore flows and
+verified logs for `filesystem` vs `memory` behavior
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- feat(cli): tl ssh-keys (ls/add/rm) for sandbox SSH access (#656)
+
+## Summary
+
+Adds `tl ssh-keys {ls,add,rm}` to manage the OpenSSH public keys that
+the sandbox SSH gateway will accept on behalf of the logged-in user.
+Backed by the new platform-api endpoints landed in
+[tensorlakeai/platform-api#477](https://github.com/tensorlakeai/platform-api/pull/477).
+
+```
+tl ssh-keys ls
+tl ssh-keys add --name laptop ~/.ssh/id_ed25519.pub
+tl ssh-keys add --name ci-runner &#34;ssh-ed25519 AAAA...&#34;
+tl ssh-keys rm laptop                 # by unique name
+tl ssh-keys rm ssh_key_abc123         # by id
+tl ssh-keys rm laptop ci-runner       # bulk
+```
+
+The `add` arg is path-or-literal — a readable file path is loaded,
+otherwise the argument is treated as the OpenSSH key body. Server-side
+parsing/fingerprinting is authoritative.
+
+## What changed
+
+- New `commands/ssh_keys.rs` — list/add/rm against
+`/platform/v1/users/me/ssh-keys` via
+`tensorlake_cloud_sdk::Client::{build_get_json_request,
+build_post_json_request, request, execute_json}`. Reuses the same
+scope-headers logic as `tl secrets` (PAT → `X-Forwarded-Organization-Id`
+/ `X-Forwarded-Project-Id`; API key → none).
+- New `ensure_auth` helper in `auth/guard.rs` that skips the org/project
+enforcement of `ensure_auth_and_project`. SSH keys are user-scoped.
+- Wired `SshKeysCommands` enum + dispatch in `main.rs`. Aliased as
+`ssh-key` for the singular form.
+- Special-cases the platform&#39;s 409 on duplicate fingerprint into `\&#34;this
+ssh key is already registered\&#34;` instead of a generic HTTP error.
+
+## Test plan
+
+- [x] `cargo test -p tensorlake-cli ssh_keys` — 6 unit tests passing
+(resolve_key_id: exact-id / unique-name / ambiguous-name / unknown;
+read_public_key: path vs. literal)
+- [x] `RUSTFLAGS=\&#34;-D warnings\&#34; cargo build -p tensorlake-cli --bins
+--tests` clean
+- [x] `tl ssh-keys --help` renders correctly
+- [ ] End-to-end against staging: `tl ssh-keys add --name e2e
+~/.ssh/id_ed25519.pub` then `tl ssh-keys ls` then `tl ssh-keys rm e2e`
+- [ ] 409 path: register a key, register the same key again, see the
+friendly error
+
+## Notes
+
+- Cargo.lock has tensorlake workspace version bumps (0.5.0 → 0.5.1) that
+came in via local `cargo check`; these are unrelated to the SSH-keys
+work but are part of the same commit since the lockfile must stay in
+sync.
+- The user-facing endpoints are gated on session/PAT, not API keys. If
+the caller has only an API key set, `tl ssh-keys add` will surface the
+4xx as a usage error.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Rename CLI disk flags to disk_mb (#663)
+
+## Summary
+- rename Rust CLI sandbox create flag from `--disk` to `--disk_mb` as
+the primary public flag
+- add hidden Rust CLI legacy alias `--disk` (GB) for backward
+compatibility, converted to MB at dispatch time
+- rename Rust CLI image build flag from `--disk` to `--disk_mb` as the
+primary public flag
+- add hidden Rust CLI image-build legacy alias `--disk` (GB), converted
+to MB at dispatch time
+- rename TypeScript sandbox-image CLI flag from `--disk` to `--disk_mb`
+and update usage/error text
+- update CLI help text to include `(default: 10240 for new sandboxes)`
+for `--disk_mb`
+- bump release versions to `0.5.3` for Rust workspace/CLI, Python
+package, and TypeScript package metadata
+
+## Validation
+- `cargo test -p tensorlake-cli sbx_create_parses_disk_mb_override --
+--nocapture`
+- `cargo test -p tensorlake-cli
+sbx_create_parses_hidden_disk_gb_override -- --nocapture`
+- `cargo test -p tensorlake-cli
+image_create_parses_cpu_memory_and_disk_overrides -- --nocapture`
+- `cargo test -p tensorlake-cli
+image_create_parses_hidden_disk_gb_override -- --nocapture`
+- `cargo run -p tensorlake-cli --bin tl -- --version` (`tl 0.5.3`)
+- `python3` read of `pyproject.toml` project version (`0.5.3`)
+- `node -p &#34;require(&#39;./typescript/package.json&#39;).version&#34;` (`0.5.3`)
+- `npm run typecheck` (typescript/)
+- `npm run test -- tests/sandbox-image.test.ts` (typescript/)
+
+- chore: bump release version to 0.5.2 (#660)
+
+## Summary
+- Bump SDK version 0.5.1 → 0.5.2 across `pyproject.toml`, `Cargo.toml`
+workspace, and `typescript/package.json`
+- Refresh `Cargo.lock` to match the new workspace version
+
+## Test plan
+- [ ] CI builds pass for Python, Rust, and TypeScript packages
+- [ ] Verify published artifacts carry version 0.5.2
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Set working directory to only publish the sdk without cli. (#662)
+
+- Use provided crates.io action (#661)
+
+- fix(ci): remove double Bearer prefix in crates.io OIDC token (#659)
+
+## Summary
+
+- Removes the `Bearer ` prefix from `CARGO_REGISTRY_TOKEN` in the
+crates.io publish workflow
+
+## Root cause
+
+Cargo constructs the `Authorization` header as `Bearer
+&lt;CARGO_REGISTRY_TOKEN&gt;`. The previous value `&#34;Bearer &lt;jwt&gt;&#34;` caused
+cargo to send `Authorization: Bearer Bearer &lt;jwt&gt;`, so crates.io
+received `Bearer &lt;jwt&gt;` as the token — which matches neither JWT format
+nor API token format, producing the 401 error.
+
+Setting `CARGO_REGISTRY_TOKEN` to the raw JWT lets cargo produce the
+correct `Authorization: Bearer &lt;jwt&gt;` header, which crates.io recognises
+as an OIDC token and validates against the trusted publisher
+configuration.
+
+## Test plan
+
+- [ ] Trigger the `Release - Rust SDK (crates.io)` workflow and verify
+it publishes successfully
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix(ci): fix crates.io trusted publishing and standardize release workflow names (#658)
+
+## Summary
+
+- **Fix crates.io publish**: `cargo publish` does not automatically
+exchange GitHub OIDC tokens. Added an explicit step that requests a JWT
+with `audience=crates.io` and passes it as `CARGO_REGISTRY_TOKEN:
+&#34;Bearer &lt;token&gt;&#34;`.
+- **Consistent naming**: All release workflows now use a `Release -
+&lt;target&gt;` naming scheme (`Release - Rust SDK (crates.io)`, `Release -
+Python SDK (PyPI)`, `Release - Python SDK (TestPyPI)`, `Release -
+TypeScript SDK (npm)`, `Release - CLI Binaries`).
+- **Dynamic run names**: Each workflow has a `run-name` showing the
+branch/tag and actor (e.g. `Release - Rust SDK (crates.io) · v0.5.1 ·
+@david`).
+
+## Test plan
+
+- [ ] Trigger the `Release - Rust SDK (crates.io)` workflow manually and
+verify it publishes successfully to crates.io
+- [ ] Confirm the run name in the Actions UI shows the branch and actor
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- feat(rust-sdk): rename crate to tensorlake and add crates.io publish workflow (#657)
+
+## Summary
+
+- Renames the `tensorlake-cloud-sdk` crate to `tensorlake` for a clean
+public name on crates.io
+- Updates all internal references (`tensorlake_cloud_sdk` →
+`tensorlake`) across Cargo.toml files and Rust source/test files
+- Adds `repository`, `homepage`, and `documentation` fields to the crate
+manifest (required by crates.io)
+- Adds `.github/workflows/publish_crates_io.yaml` — a manually triggered
+workflow that publishes to crates.io using OIDC trusted publishing (no
+`CARGO_REGISTRY_TOKEN` secret needed)
+
+## Before publishing
+
+Configure a trusted publisher on crates.io for the `tensorlake` crate:
+- Org: `tensorlakeai`, Repo: `tensorlake`, Workflow:
+`publish_crates_io.yaml`
+
+Then trigger the first publish via &#34;Run workflow&#34; in GitHub Actions.
+
+## Test plan
+
+- [x] `cargo check -p tensorlake` passes
+- [x] `cargo check -p tensorlake-cli -p tensorlake-rust-cloud-sdk-py`
+passes
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- Register sandbox images with snapshot metadata (#655)
+
+## Summary
+- send full snapshot metadata when registering sandbox images from the
+Python and TypeScript image builders
+- route `tl sbx image register` through platform API instead of posting
+raw image+snapshot ids to Indexify
+- require manual CLI registration to use a completed snapshot before
+sending explicit metadata
+
+## Validation
+- `python3 -m py_compile src/tensorlake/image/sandbox_builder.py
+src/tensorlake/sandbox/models.py`
+- `cargo test -p tensorlake-cli parse_snapshot_registration_metadata --
+--test-threads 1`
+- `cargo test -p tensorlake-cli
+image_register_parses_name_and_snapshot_id -- --test-threads 1`
+- `cargo build -p tensorlake-cli -p tensorlake-cloud-sdk --quiet`
+- `cargo fmt --all --check`
+- `npm run typecheck`
+
+## Notes
+- `npm run test -- tests/sandbox-image.test.ts` is not runnable on this
+host because the local Node runtime is `18.19.0` while
+`typescript/package.json` requires Node `&gt;=22`, and Vitest fails inside
+`undici` under Node 18.
+
+- feat: add sandbox .name / .status / .update  (#654)
+
+Right now all these are not working with Sandbox
+
+
+## Summary
+- Adds `Sandbox.name`, `Sandbox.status`, and `Sandbox.update(...)` to
+both Python and
+TypeScript SDKs, mirroring the existing `tl sbx` CLI.
+- `name` is settable: `sb.name = &#34;my-env&#34;` (Python) / `sb.name =
+&#34;my-env&#34;` (TS)
+renames via `update()`. Works for both naming an unnamed (ephemeral)
+sandbox and
+renaming a named one.
+  - `status` always fetches fresh from the server.          
+- `update()` covers `name`, `allow_unauthenticated_access`, and
+`exposed_ports` in one
+call; refreshes the cached `SandboxInfo`.
+- Fast-path in `create_and_connect` now caches `SandboxInfo` (id +
+status + name) so
+the first `name`/`status` read doesn&#39;t need an extra GET.
+- `CreateSandboxResponse` (Rust + TS models) now carries `name`, so the
+create
+  response is the source of truth when caching.
+
+---------
+
+Co-authored-by: Sumit Vij &lt;sumitvij11+github@gmail.com&gt;
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- feat: add disk_mb support for sandbox create + image build (#651)
+
+## Summary
+- add `disk_mb` support to sandbox create across Rust cloud SDK, Python
+SDK, and TypeScript SDK
+- add CLI `tl sbx new --disk &lt;GB&gt;` and plumb to `resources.disk_mb` (GB
+-&gt; MiB)
+- stop sending deprecated `ephemeral_disk_mb` on sandbox create; send
+`disk_mb` only when explicitly provided
+- add image build support for custom disk size in Python/TypeScript
+image build flows and CLI image builder path
+- update tests for create payload serialization and image builder disk
+forwarding
+
+## Verification
+- `npm --prefix typescript test -- --run tests/client.test.ts
+tests/sandbox-image.test.ts` (pass)
+- `PYTHONPATH=src python3 -m pytest tests/image/test_sandbox_builder.py
+-q` (pass)
+- `PYTHONPATH=src python3 -m pytest
+tests/sandbox/test_client_rust_backend.py -q` requires local rust client
+build in this environment (`make build_rust_py_client`)</div>
+</div>
+
+<a href="../project/tensorlakeai_tensorlake.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

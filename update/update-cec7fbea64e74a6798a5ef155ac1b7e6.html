@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (27 commits) - facebookresearch/faiss - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (27 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a> /
+    Updates in main (27 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-02 02:03 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/facebookresearch/faiss/commits/main" target="_blank">https://github.com/facebookresearch/faiss/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>FAISS теперь включает высокопроизводительный индекс SVS IVF, отличающийся сборками с AMX-ускорением, иерархической кластеризацией и различными методами сжатия, дополняя существующий SVS Vamana. Значительным улучшением удобства использования является официальная поддержка установки `faiss-cpu` через `pip install` с мультиплатформенными бинарными пакетами. Проект также расширяет аппаратную совместимость, добавляя новый графический бэкенд Metal для Apple Silicon. Улучшения производительности внедрены для поиска IVF с опциями ранней остановки и для плоского поиска с параллельным выполнением по базе данных для малозапросных нагрузок.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Enable SVS IVF Index in FAISS (#4801)
+
+Summary:
+This PR introduces SVS IVF (Inverted File) index support in FAISS, complementing the existing SVS Vamana graph‑based index. The implementation integrates Intel&#39;s Scalable Vector Search (SVS) runtime to provide a high‑performance, partition‑based ANN index with strong scalability on modern hardware.
+
+## Key Advantages of SVS IVF
+
+- **AMX‑accelerated builds** for significantly faster index training on supported Intel platforms
+- **Hierarchical clustering** (default ON) enabling much faster k‑means on large datasets
+- **LVQ and LeanVec compression** applied at search time to boost throughput while preserving recall
+- **Intra-query parallelism** to reduce latency for small‑batch or single‑query workloads
+- **Static index mode** for read‑only workloads with optimized memory layout and search performance
+
+## New Factory Strings
+
+| Factory String | IndexClass | Storage |
+|---|---|---|
+| `SVSIVF{nlist}` | IndexSVSIVF | FP32 (default) |
+| `SVSIVF{nlist},FP16` | IndexSVSIVF | Float16 |
+| `SVSIVF{nlist},SQI8` | IndexSVSIVF | Scalar quantized int8 |
+| `SVSIVF{nlist},LVQ4x0` | IndexSVSIVFLVQ | LVQ primary=4, no residual |
+| `SVSIVF{nlist},LVQ4x4` | IndexSVSIVFLVQ | LVQ primary=4, residual=4 |
+| `SVSIVF{nlist},LVQ4x8` | IndexSVSIVFLVQ | LVQ primary=4, residual=8 |
+| `SVSIVF{nlist},LVQ8x0` | IndexSVSIVFLVQ | LVQ primary=8, no residual |
+| `SVSIVF{nlist},LeanVec4x4_{dims}` | IndexSVSIVFLeanVec | LeanVec 4x4 |
+| `SVSIVF{nlist},LeanVec4x8_{dims}` | IndexSVSIVFLeanVec | LeanVec 4x8 |
+| `SVSIVF{nlist},LeanVec8x8_{dims}` | IndexSVSIVFLeanVec | LeanVec 8x8 |
+
+## Static vs Dynamic IVF Index
+
+SVS IVF supports two modes controlled by the `is_static` constructor parameter:
+
+### Dynamic IVF (default, `is_static = false`)
+- Supports `train()`, `add()`, `remove_ids()`, and `search()`
+- Vectors can be added or removed after index creation
+- Suitable for workloads where the dataset changes over time
+
+### Static IVF (`is_static = true`)
+- **All data must be provided during `train()`** — the index is built and populated in a single step
+- `add()` and `remove_ids()` will throw an exception after creation
+- Optimized for **read‑only workloads** where the dataset is fixed at build time
+- Uses `svs_runtime::IVFIndex` (static) instead of `svs_runtime::DynamicIVFIndex`
+- Serialization and deserialization are fully supported
+
+**Usage Examples(C++):**
+
+```cpp
+// Dynamic IVF with intra-query parallelism
+faiss::IndexSVSIVF index(d, nlist);
+
+// intra_query_threads must be set BEFORE train() — changes after
+// train() are not propagated to the SVS backend (current SVS runtime
+// API limitation, will be fixed in a future SVS version).
+index.intra_query_threads = 4;
+index.n_probes = 20;
+
+index.train(n, train_data);
+index.add(n, base_data);
+index.search(nq, queries, k, distances, labels);
+
+// num_threads CAN be changed between searches (synced at search time).
+index.num_threads = 8;
+index.search(nq, queries, k, distances, labels);
+
+// Static IVF (read-only, all data at build time)
+faiss::IndexSVSIVF index(d, nlist, faiss::METRIC_L2,
+                         faiss::SVSStorageKind::SVS_FP32, /*is_static=*/true);
+index.intra_query_threads = 4;  // set before train()
+index.train(n, data);           // builds and populates the index
+index.search(nq, queries, k, distances, labels);
+// index.add(...)        // throws — not supported on static index
+// index.remove_ids(...) // throws — not supported on static index
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4801
+
+Reviewed By: limqiying
+
+Differential Revision: D102536698
+
+Pulled By: mnorris11
+
+fbshipit-source-id: cbc2b882c1f7728ed54a0bd25ceacb225d5a6c74
+
+- Add pip install support via scikit-build-core + cibuildwheel (#4862)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4862
+
+Add official pip wheel packaging for `faiss-cpu`, enabling
+`pip install faiss-cpu` from PyPI. Builds binary wheels across Linux
+x86_64/aarch64, macOS arm64/x86_64, and Windows x86_64 for Python 3.10-3.14.
+Linux and macOS use Python Stable ABI (abi3) — a single cp310-abi3 wheel
+per platform works on all Python 3.10+ versions without per-version rebuilds.
+
+**BLAS strategy:**
+- Linux (x86_64 and aarch64): Threaded OpenBLAS (`libopenblaso`). The
+  CMake build prefers `libopenblaso` (OpenMP-threaded) or `libopenblasp`
+  (pthreads-threaded) over the serial default on RHEL/Fedora-based
+  manylinux containers.
+- macOS: Apple Accelerate (found automatically).
+- Windows: Prebuilt OpenBLAS from GitHub releases (v0.3.30).
+
+**SIMD optimization strategy:**
+- Linux and macOS: Dynamic Dispatch (`FAISS_OPT_LEVEL=dd`) compiles SIMD-hot
+  kernel files at multiple ISA levels (generic + AVX2 + AVX-512 on x86_64,
+  NEON + SVE on aarch64) into a single library. Runtime CPUID detection
+  selects the optimal code path automatically.
+- Windows: MSVC does not support DD, so uses `FAISS_OPT_LEVEL=generic`.
+  Shared libraries (`BUILD_SHARED_LIBS=ON`) are used to avoid MSVC&#39;s
+  single-pass static archive scanning issue.
+
+**New files:**
+- `pyproject.toml`: scikit-build-core build backend config with cibuildwheel
+  settings. Version is dynamically extracted from CMakeLists.txt. Enables
+  abi3 on Linux/macOS via SWIG 4.2+ and NumPy 2.0+ Limited API support.
+  Enables LTO and dead-code stripping for smaller wheel sizes.
+- `.github/workflows/build-pip.yml`: CI workflow using cibuildwheel to build
+  binary wheels on 5 platform runners. All GitHub Actions are pinned to
+  commit SHAs for supply chain security. Publishes wheels to PyPI via OIDC
+  trusted publishers on tag push.
+- `THIRD_PARTY_NOTICES`: License notices for bundled dependencies (OpenBLAS,
+  LLVM OpenMP).
+- `tests/test_wheel_smoke.py`: 12-test smoke suite validating import,
+  OpenMP, BLAS (FlatL2/FlatIP), index factory (IVF+PQ), HNSW, serialization
+  roundtrip, GC safety, contrib imports, and SIMD level detection.
+
+**Modified files:**
+- `faiss/CMakeLists.txt`: Added threaded OpenBLAS fallback — prefers
+  `libopenblaso` (OpenMP-threaded) or `libopenblasp` (pthreads-threaded)
+  over the serial default on RHEL/Fedora-based manylinux containers.
+- `python/CMakeLists.txt`: Added `install()` targets for scikit-build-core
+  wheel packaging, including all Dynamic Dispatch SWIG variants
+  (avx2/avx512/avx512_spr/sve). Added abi3 support: conditionally uses
+  `Python::SABIModule`, defines `Py_LIMITED_API`, and sets `.abi3.so` suffix
+  when `SKBUILD_SABI_VERSION` is set.
+- `.github/workflows/build.yml`: Wired `build-pip.yml` into the root CI
+  trigger so pip builds run alongside conda builds.
+- `tests/BUCK`: Added `python_pytest` target for the smoke test.
+
+Reviewed By: mnorris11
+
+Differential Revision: D95258115
+
+fbshipit-source-id: 3593ed4fa5c1d8b7bebfc61c933bb3204c9666eb
+
+- Fix add_sa_codes silently accepting non-int64 ids, corrupting stored labels (#5171)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5171
+
+**Problem 1 — add_sa_codes silently stores wrong ids when passed non-int64 input**
+
+replacement_add_sa_codes in class_wrappers.py passed the ids array directly to swig_ptr without dtype coercion. The C++ signature is add_sa_codes(idx_t n, const uint8_t* codes, const idx_t* xids) where idx_t = int64_t (8 bytes per element). When the caller passed int32 ids — the default output of np.arange(n) on most platforms — swig_ptr returned a pointer to 4-byte data. The C++ layer then read every 8 consecutive bytes as one int64, producing garbage labels for every stored vector. No exception was raised, no warning was emitted.
+
+This is inconsistent with every other ids-accepting wrapper in the same file. replacement_add_with_ids, replacement_remove_ids, and replacement_permute_entries all call np.ascontiguousarray(ids, dtype=&#39;int64&#39;) before swig_ptr. add_sa_codes was the only exception. Callers using np.arange(n) without an explicit dtype — common in tutorials and quick-start code — silently ingested a corrupt index.
+
+Fix: add ids = np.ascontiguousarray(ids, dtype=&#39;int64&#39;) before swig_ptr(ids), matching the pattern used by all other ids-accepting wrappers. The call is a no-op for callers already passing int64, so there is no behavior change for correct inputs.
+
+**Problem 2 — sa_encode calls sa_code_size() twice (one redundant SWIG dispatch)**
+
+replacement_sa_encode called self.sa_code_size() once in the if codes is None branch and once in the else branch. Since sa_code_size() is a virtual C++ method accessed via SWIG, this is one avoidable cross-boundary call per sa_encode invocation. The value is a pure function of index state and cannot change within a call.
+
+replacement_sa_decode in the same block already uses the correct pattern, reusing the code size from codes.shape. The inconsistency between sa_encode and sa_decode confirms this was an oversight.
+
+Fix: hoist self.sa_code_size() into code_size = self.sa_code_size() once before the branch, matching the pattern in sa_decode.
+
+Reviewed By: limqiying
+
+Differential Revision: D103384269
+
+fbshipit-source-id: 3f28a18b7e951c24d23db676be475bb6b298df2f
+
+- Introduce early stop facilities for IVF, attempt 2 (#5160)
+
+Summary:
+# Introduce early-stop controls for IVF search
+
+This PR adds optional early-stop controls to IVF search through `SearchParametersIVF`.
+
+IVF search looks in a sequence of buckets. Normally it keeps looking until it has checked all requested buckets. This PR adds a few ways to stop earlier:
+
+- stop after enough candidate vectors have been checked,
+- stop FastScan after enough buckets have been checked,
+- stop range search after several nearby buckets produce no results.
+
+All new fields default to disabled, so existing searches keep their current behavior unless callers opt in.
+
+## New SearchParametersIVF fields
+
+Default values:
+
+| Field | Default | Effect |
+|---|---:|---|
+| `ensure_topk_full` | `false` | disabled; keep the existing hard `max_codes` behavior |
+| `max_lists_num` | `0` | disabled; FastScan is bounded only by `nprobe` |
+| `max_empty_result_buckets` | `0` | disabled; range search scans all requested probes |
+
+`ensure_topk_full`
+
+For k-NN search, `max_codes` limits how many candidate vectors are scanned. With `ensure_topk_full=false`, the search stops when the budget is reached.
+
+With `ensure_topk_full=true`, very small budgets become less aggressive: `max_codes` is treated as at least `k` post-filter scans. This helps when `max_codes &lt; k`, or when an `IDSelector` filters out many candidates before a distance is computed.
+
+In the generic IVF path this is supported for `parallel_mode` 0 and 3. In FastScan k-NN it is supported by the per-query implementations 10 and 11.
+
+`max_lists_num`
+
+FastScan k-NN can also stop after visiting a limited number of inverted lists. `0` means disabled. With `ensure_topk_full`, this list budget is treated as at least `k` lists. This is only used by the FastScan per-query path (`search_implem_10`, also used for implementation 11).
+
+When FastScan is left on `implem = 0`, setting an early-stop k-NN option makes the dispatcher choose the per-query implementation automatically. If an incompatible FastScan implementation is selected explicitly, Faiss throws instead of ignoring the option.
+
+`max_empty_result_buckets`
+
+This is for range search. It stops probing a query after that many consecutive probed lists add no in-radius results. The counter resets as soon as a list adds at least one result.
+
+`0` means disabled. Setting this trades recall for less work: once nearby buckets repeatedly produce no hits, farther buckets are less likely to help.
+
+The generic IVF range path supports this in `parallel_mode == 0`. FastScan range search also supports it through implementation 10. With `implem = 0`, FastScan selects implementation 10 automatically when this option is set; explicit incompatible implementations throw.
+
+## Selector-aware scan accounting
+
+This PR adds `InvertedListScannerStats`, returned by inverted-list scanner methods. It currently reports:
+
+- `scan_cnt`: number of distances actually computed,
+- `nheap_updates`: number of result updates.
+
+The important behavior change is that `IndexIVFStats::ndis` now uses `scan_cnt`. With an `IDSelector`, candidates rejected by the selector are not counted as computed distances. Without a selector, this matches the previous count because every scanned code reaches distance computation.
+
+This same post-filter count is used by `ensure_topk_full`, so a restrictive selector no longer consumes the search budget with candidates that were never eligible for the result heap.
+
+## FastScan behavior
+
+FastScan k-NN now applies `max_codes`, `max_lists_num`, and `ensure_topk_full` in the per-query implementation. The code keeps separate counters per query, so multi-query batches have independent budgets.
+
+For `max_codes`, FastScan uses the result handler&#39;s scanned-row count. This means filtered-out rows do not consume the code budget.
+
+FastScan range search rejects k-NN-only options (`max_codes`, `max_lists_num`, and `ensure_topk_full`). It accepts `max_empty_result_buckets` when the selected implementation can preserve per-query probe order.
+
+## API exposure
+
+The new fields are exposed through:
+
+- C++ `SearchParametersIVF`,
+- Python bindings,
+- the C API.
+
+The statistics is tracked via `InvertedListScanner::scan_codes(..., ResultHandler&amp; handler)` call. In order to make it work inside `IndexIVF::search()`, it has been decided to transition it into this particular override of `InvertedListScanner::scan_codes()`. As a result, non-`ResultHandler` version of `scan_codes()` has been marked as non-virtual, so the custom `InvertedListScanner` implementations should override `ResultHandler`-based versions only. Another consequence is that `IndexIVFPQFastScanScanner` and `IndexIVFRaBitQFastScanScanner` accept only `HeapResultHandler` types of `ResultHandler`. These are the compromises that had to be made.
+
+## Tests
+
+The tests cover:
+
+- default parameters preserving baseline k-NN and range-search results,
+- `ensure_topk_full` filling more result slots under tight budgets,
+- selector-aware `IndexIVFStats::ndis`,
+- range-search early exit and counter reset behavior,
+- unsupported parallel modes and FastScan implementations,
+- FastScan k-NN and range-search early-stop behavior,
+- Python and C API field exposure.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5160
+
+Reviewed By: limqiying
+
+Differential Revision: D103044128
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 80f1241c13ffc8173a3da0f2974fa9b6dd318890
+
+- Remove flaky test (#5169)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5169
+
+Created from CodeHub with https://fburl.com/edit-in-codehub
+
+___
+
+overriding_review_checks_triggers_an_audit_and_retroactive_review
+Oncall Short Name: faiss
+
+Differential Revision: D103406045
+
+fbshipit-source-id: 20ab4bc62548b64c47014ccedd4496af9d0f4eb7
+
+- c_api: fix IndexShards own_indices getter/setter name mismatch (#5165)
+
+Summary:
+`IndexShards_c.cpp` defines:
+
+```cpp
+DEFINE_GETTER(IndexShards, int, own_indices)
+DEFINE_SETTER(IndexShards, int, own_indices)
+```
+
+while `IndexShards_c.h` defines
+```cpp
+FAISS_DECLARE_GETTER_SETTER(IndexShards, int, own_fields)
+```
+
+this mismatch causes neither `faiss_IndexShards_set_own_indices` and `faiss_IndexShards_set_own_fields` to be exported in the c_api. This patch completes the migration to `indices` instead of `fields` in the c_api.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5165
+
+Reviewed By: mnorris11
+
+Differential Revision: D103238014
+
+Pulled By: trang-nm-nguyen
+
+fbshipit-source-id: 5a972cc6b6611088f06e3388677e0cd10d9037c0
+
+- Add SuperKMeans foundations: math primitives, PDX layout, SIMD kernels
+
+Summary:
+Adds the foundational building blocks for SuperKMeans — a faster k-means alternative to `faiss::Clustering` for IVF training and other large-k workloads (diff [2/3] adds the algorithm itself; diff [3/3] wires the IVF integration and Python binding). This diff is pure infrastructure with zero impact on existing FAISS behavior.
+
+## Why these components exist
+
+SuperKMeans replaces the brute-force nearest-centroid assignment step of Lloyd&#39;s k-means with a two-phase scheme: a partial GEMM over the leading d/8 dimensions followed by progressive pruning over the remaining dimensions. This requires four new primitives that do not exist in the FAISS codebase today:
+
+1. **A chi-squared statistical threshold for pruning** — to decide, after computing partial L2 distances over only the first d_prime dimensions, whether a centroid is statistically unlikely to be the nearest. The threshold comes from the chi-squared distribution&#39;s quantile function, which in turn requires the inverse standard normal CDF.
+
+2. **A cache-friendly data layout for the trailing dimensions** — the pruning phase sweeps across surviving centroids in 64-dim blocks. Standard row-major layout causes cache misses because each centroid&#39;s block is far from the next. A block-column-major (PDX) layout interleaves all k centroids&#39; values for the same block contiguously, making the per-block L2 sweep cache-friendly.
+
+3. **SIMD-optimized block L2 distance kernels** — the inner loop of the pruning phase computes L2 distance over 64-dim PDX blocks. Vectorizing this with AVX2/AVX-512 intrinsics is where the wall-time reduction comes from (the pruning logic itself is scalar; only the distance kernel needs SIMD).
+
+4. **Shared clustering helpers** — SuperKMeans reuses four functions from vanilla `Clustering` (subsample, split_clusters, compute_centroids, get_actual_rng_seed). These are currently in Clustering.cpp&#39;s anonymous namespace. Lifting them into `faiss::detail::` avoids code duplication.
+
+## What is added
+
+### faiss::detail::normal_quantile and chi2_quantile_wh (impl/AdSampling.{h,cpp})
+
+Three pure-math functions under `faiss::detail::`:
+
+- `normal_quantile(p)`: inverse standard normal CDF. Three-branch rational polynomial approximation (Acklam). Absolute error &lt; 1.15e-9. No external dependencies (no scipy, no Boost).
+
+- `chi2_quantile_wh(p, alpha)`: chi-squared quantile via the Wilson-Hilferty cube-root approximation. For degrees of freedom p &gt;= 16 (the minimum d_prime SuperKMeans uses), the approximation is within 2% of scipy.stats.chi2.ppf. Domain constraint documented: for very small alpha and small p (&lt; 4), the cube can go negative; in practice p &gt;= 16 and alpha &gt;= 0.9375 so this never happens.
+
+- `precompute_ad_thresholds(d, epsilon)`: builds a per-prefix-length coefficient table of size d+1. Entry coeff[p] is the normalized chi-squared quantile at significance epsilon for p degrees of freedom. The SuperKMeans pruning loop reads coeff[d_prime] at the GEMM boundary and coeff[true_block_end] at each PDX block boundary. Input validated via FAISS_THROW_IF_NOT (not debug-only assert).
+
+### faiss::detail::pdxify / de_pdxify (impl/PdxLayout.{h,cpp})
+
+Row-major to block-column-major (PDX) transform and its inverse. Given k centroids in d_trail trailing dimensions with block_size = 64:
+
+- Row-major: centroid j&#39;s dims are at `Y[j * d_trail ... j * d_trail + d_trail - 1]`
+- PDX: block b contains all k centroids&#39; dims `[b*64 ... (b+1)*64-1]` interleaved as `Y_pdx[offset + j * block_dim + dim_in_block]`
+
+The trailing block handles `d_trail % 64` dims (non-power-of-2 safe). Both transforms are pure memcpy — no arithmetic, no rounding, bit-exact inverse.
+
+Also provides `compute_partial_norms(X, n, d, p, norms)`: computes `||X[i, 0:p]||^2` for the L2-from-IP identity used in the GEMM phase.
+
+### faiss::detail:: clustering helpers (impl/ClusteringHelpers.{h,cpp})
+
+Four functions lifted from `Clustering.cpp`&#39;s anonymous namespace into `faiss::detail::`:
+
+- `subsample_training_set`: cap training data to k * max_points_per_centroid via random permutation
+- `split_clusters`: replace empty centroids with perturbations of the largest cluster
+- `compute_centroids`: partition-by-centroid OpenMP reduction (no cross-thread float accumulation, so bit-deterministic at fixed thread count)
+- `get_actual_rng_seed`: resolve negative seed to high-resolution clock
+
+Pure refactor. Existing call sites in Clustering.cpp updated to qualified names. Zero behavior change — verified by existing test_clustering (13 Python tests) passing unchanged.
+
+### Per-arch block_l2 SIMD kernels (utils/simd_impl/super_kmeans_*.{h,cpp})
+
+The inner loop of SuperKMeans&#39;s pruning phase: compute L2 distance over a PDX block of n floats (typically 64, but can be smaller for the trailing block).
+
+- **Primary template** (super_kmeans_kernels.h): scalar fallback. Any architecture (x86, aarch64, anything) compiles and runs correctly via this path.
+
+- **AVX2 specialization** (super_kmeans_kernels_avx2.cpp): 8-wide `_mm256` loop. Horizontal reduction uses a shuffle+add tree (`_mm_movehdup_ps` / `_mm_movehl_ps` / `_mm_add_ss`), not `_mm_hadd_ps` (which has 3-cycle latency on Skylake-class cores vs single-cycle for each shuffle/add).
+
+- **AVX-512 specialization** (super_kmeans_kernels_avx512.cpp): 16-wide `_mm512` loop with `_mm512_fmadd_ps`. Horizontal reduction via `_mm512_reduce_add_ps` (a compiler pseudo-intrinsic that GCC/Clang expand to a shuffle+add tree — no separate manual reduction needed).
+
+- **Runtime dispatch** (super_kmeans_dispatch.h): `block_l2_dispatch()` uses the existing FAISS `with_selected_simd_levels` template machinery to select AVX-512 &gt; AVX2 &gt; scalar at process startup.
+
+Known perf gap: aarch64 (NEON/SVE) specializations are not implemented. aarch64 falls through to the scalar primary template. Validating SVE requires a Graviton-class host; deferred to a focused follow-up.
+
+## Existing code changes
+
+`Clustering.cpp`: the four helper functions are now called via `faiss::detail::subsample_training_set(...)` etc. instead of unqualified calls within the anonymous namespace. The function bodies are moved to ClusteringHelpers.cpp. No logic changes, no behavioral changes.
+
+Next in stack: [2/3] adds the SuperKMeans class that consumes all of these primitives.
+
+Reviewed By: mnorris11
+
+Differential Revision: D102713322
+
+fbshipit-source-id: ba5943843b4a3270dd78b6e5421e1ba1f92e33ac
+
+- Add Metal GPU backend for Apple Silicon (IndexFlat) (#5144)
+
+Summary:
+## Summary
+Adds a new Metal compute backend so FAISS can run GPU-accelerated similarity search on Apple Silicon (M1/M2/M3/M4/M5). This is just an initial pr, it introduces the build system integration, core Metal infrastructure, and a working `IndexFlat` with L2 and inner product search. I have some follow up prs with more functionality that I plan to submit.
+
+Addresses https://github.com/facebookresearch/faiss/issues/2386 — FAISS currently has no GPU acceleration path on Apple Silicon, forcing CPU-only execution. This Metal backend enables GPU-accelerated search on M-series chips, with follow-up PRs adding IVF indexes, Python bindings, and kernel optimizations.
+
+All Metal code lives in a new `faiss/gpu_metal/` directory, keeping `faiss/gpu/` (CUDA/ROCm) completely untouched. The backend is opt-in via `cmake -DFAISS_ENABLE_METAL=ON -DFAISS_ENABLE_GPU=OFF`.
+
+### What&#39;s included
+- **Build system**: New `FAISS_ENABLE_METAL` CMake option. When enabled, requires Apple platform, links Metal/MetalKit/MPS/Foundation frameworks, and builds `libfaiss_metal.a`. Three small additions to root `CMakeLists.txt`.
+- **MetalResources**: Owns `MTLDevice`, `MTLCommandQueue`, and buffer allocation/deallocation. Mirrors `GpuResources` roles.
+- **MetalIndex**: Base class for Metal-backed indexes (mirrors `GpuIndex`). Single-device only (device 0).
+- **MetalIndexFlat**: Flat index storing vectors in an `MTLBuffer`. Supports `add`, `add_with_ids`, `reset`, `search` for both `METRIC_L2` and `METRIC_INNER_PRODUCT`.
+- **MSL compute kernels**: `l2_squared_matrix`, `ip_matrix` (distance computation), and `topk` (sorted insertion, k ≤ 256). Embedded as a compile-time string in `MetalFlatKernels.mm`.
+- **Backend abstraction**: `get_num_gpus()`, `index_cpu_to_metal_gpu()`, `index_metal_gpu_to_cpu()`, `StandardMetalResources`, and a `GpuIndexFlat` typedef for API parity.
+- **Tests**: 8 gtest cases in `TestMetalIndexFlat.mm` — L2/IP search correctness vs CPU `IndexFlat`, `add_with_ids`, reset, empty search, `get_num_gpus`, and CPU↔Metal cloning in both directions. All tests skip gracefully if no Metal device is available.
+- Python/SWIG bindings
+
+### Planned follow up prs
+
+- Larger k support (tiling, heap-based top-k)
+- IVFFlat, IVFPQ, IVFSQ, BinaryFlat
+- Kernel optimizations (fused distance+top-k, GEMM-tiled distance, simdgroup/threadgroup parallel selection)
+
+### Build and test
+
+```bash
+mkdir -p build_metal &amp;&amp; cd build_metal
+cmake .. -DFAISS_ENABLE_METAL=ON -DFAISS_ENABLE_GPU=OFF \
+         -DBUILD_TESTING=ON -DFAISS_ENABLE_PYTHON=OFF \
+         -DCMAKE_PREFIX_PATH=&#34;/opt/homebrew/opt/libomp;/opt/homebrew&#34;
+cmake --build . --target faiss_metal TestMetalIndexFlat
+ctest -R TestMetalIndexFlat
+  ```
+&gt; The `mkdir -p` avoids the error if the directory exists, and `-DFAISS_ENABLE_PYTHON=OFF` skips the Python dependency that isn&#39;t needed for this PR.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5144
+
+Reviewed By: alibeklfc
+
+Differential Revision: D102284936
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 812fc6ceae251b7b33d25f6861fc37b8d7b475c1
+
+- Add database-parallel flat search for few-query workloads (#5000)
+
+Summary:
+When the number of queries (`nx`) is smaller than the available thread count, the current flat search underutilizes CPU cores — each thread scans the entire database for a single query. This PR adds a database-parallel code path that divides the database across threads instead, with per-thread BLAS calls and heap merging.
+
+- Activates automatically when `nx &lt; omp_get_max_threads()` and the database is large enough
+- Falls back to the existing path when an `IDSelector` is active or the database is too small to benefit
+- Works for both `METRIC_INNER_PRODUCT` (CMin) and `METRIC_L2` (CMax)
+
+## Benchmarks
+
+12 threads, `d=128`, `k=10`:
+
+| Index | ny | nx | Before | After | Speedup |
+|-------|------|------|--------|-------|---------|
+| FlatIP | 1,000,000 | 4 | 56.7 ms | 8.4 ms | **6.7x** |
+| FlatIP | 1,000,000 | 1 | 14.1 ms | 5.0 ms | **2.8x** |
+| FlatL2 | 1,000,000 | 4 | 56.7 ms | 14.0 ms | **4.0x** |
+| FlatL2 | 1,000,000 | 1 | 14.1 ms | 9.5 ms | **1.5x** |
+| FlatIP | 200,000 | 4 | 11.5 ms | 1.6 ms | **7.0x** |
+| FlatL2 | 200,000 | 4 | 11.4 ms | 2.8 ms | **4.2x** |
+
+No regression for `nx &gt;= nthreads` (existing path is unchanged).
+
+## Motivation
+
+Addresses https://github.com/facebookresearch/faiss/issues/4121. The original issue demonstrated that for few-query workloads over large databases, parallelizing over database segments instead of queries can yield multi-fold speedups. This is especially relevant for serving workloads where queries arrive one at a time.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5000
+
+Test Plan:
+- [x] All existing `TestIndexFlat` tests pass (15/15)
+- [x] Full `test_index.py` passes (47/47 including 9 new tests)
+- [x] `test_search_params.py` + `test_index_composite.py` pass (81/81)
+- [x] New `TestDbParallelSearch` covers: IP, L2, k=1, k=200, single query, few queries, thread scaling consistency
+- [x] Cross-validated against NumPy brute-force for IP and L2
+
+Reviewed By: mdouze
+
+Differential Revision: D99676059
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 3fbd17a71b446a4b4932d53d9ebc254c4510a0ca
+
+- Enforce minimum training set size for ScalarQuantizer, check nullptr (#5141)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5141
+
+Reviewed By: mnorris11
+
+Differential Revision: D102078734
+
+fbshipit-source-id: f2c9899b5a34b620a359e01dc1e530bfdd5aa960
+
+- Fix avx512 unit test (#5161)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5161
+
+T225351715 fix task as part of oncall duty
+
+Reviewed By: mnorris11
+
+Differential Revision: D103035738
+
+fbshipit-source-id: 70b0400be265fe1595ec880ee8cc92fbc177e924
+
+- Fix issue with svs tests (#5162)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5162
+
+T225351715 Fixing failed unit test as part of oncall duty. test_svs_py are failing due to timeout.
+
+In this diff, we are fixing 2 issues with the tests:
+1. setUp runs before every test method — with 11 tests per class × 8 classes = ~57 times, each regenerating the same numpy arrays. setUpClass runs once per class, so data is generated ~8 times instead of ~57. The data is deterministic (fixed np.random.seed(1234)) and no test mutates xb/xq — tests only read them. So regenerating identical arrays per-method is pure waste.
+2. Reduce test size
+
+Reviewed By: mnorris11
+
+Differential Revision: D103043664
+
+fbshipit-source-id: ac79b23910c2d936168dc7021b06f57c47a32782
+
+- Enable ccache in GitHub Actions cmake builds (#5157)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5157
+
+TLDR
+-
+ccache is like how BUCK works with partial cached artifacts for builds, but in the OSS world.
+
+https://github.com/facebookresearch/faiss/actions/runs/25118621287/job/73635614448?pr=5157 it sped up the jobs a lot, cuVS down to 40 minutes!
+
+AI stuff
+-
+
+Add ccache to the `build_cmake` composite action to speed up CI builds. Uses `hendrikmuhs/ccache-action@v1` to install ccache, restore/save caches keyed by build configuration (OS, arch, opt level, GPU, cuVS, ROCm, SVS), and set a 2GB max cache size. Passes `CMAKE_C_COMPILER_LAUNCHER`, `CMAKE_CXX_COMPILER_LAUNCHER`, and `CMAKE_CUDA_COMPILER_LAUNCHER` to cmake so all C, C++, and CUDA compilations go through ccache.
+
+On first run the cache will be cold and there is no speedup. Subsequent runs on the same branch (or PRs against main) will see cache hits for unchanged translation units, which should significantly reduce build times for incremental CI runs.
+
+Reviewed By: junjieqi
+
+Differential Revision: D102926935
+
+fbshipit-source-id: b8808a3a48edee271547a0421960261aba6ff425
+
+- Add C++ per-SIMD-level tests for distance utility functions (#5154)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5154
+
+The templated distance functions in faiss/utils/distances.h --
+fvec_L1, fvec_Linf, fvec_L2sqr_batch_4, fvec_inner_product_batch_4,
+fvec_L2sqr_ny_transposed, fvec_L2sqr_ny_nearest -- are exercised
+transitively by IndexFlat search at the binary&#39;s compiled/dispatched SIMD
+level. Direct per-level tests catch tail-handling bugs that the typical
+aligned-d transitive coverage masks.
+
+Adds tests/test_distances_dispatch.cpp with one TEST per function,
+sweeping every SIMDConfig-available level via SIMDConfig::set_level()
+and asserting equivalence against the SIMDLevel::NONE reference.
+Dimensions sweep {1, 3, 7, 8, 9, 15, 16, 17, 31, 32, 33, 64} so non-
+multiple-of-8 dims exercise the tail paths.
+
+Tolerances are calibrated to function semantics:
+* fvec_L2sqr_ny_nearest returns size_t; compared bit-exactly via
+  EXPECT_EQ on the index. The internal distances_tmp_buffer is not
+  part of the public contract (some SIMD impls don&#39;t write into it),
+  so it isn&#39;t compared.
+* fvec_Linf is a max, not a sum, so reordering doesn&#39;t change the
+  result; compared bit-exactly with EXPECT_NEAR(0.0).
+* The L1 / batch_4 / L2sqr_ny_transposed variants accumulate over d
+  terms; SIMD reductions can differ by a few ULPs from scalar. Tolerance
+  scales linearly with d (1e-6 per term, floor 1e-6).
+
+For fvec_L2sqr_ny_transposed the test uses the contract layout
+y[i + k * d_offset] (per distances_simd.cpp:62) and picks
+d_offset = ny + 5 so the stride is non-trivial AND every (i, k) access
+in [0, ny) x [0, d) is in-bounds.
+
+NaN/Inf inputs are out of scope: rand_vec produces uniform [-1, 1].
+
+___
+
+overriding_review_checks_triggers_an_audit_and_retroactive_review
+Oncall Short Name: fair_umami_cluster
+
+Differential Revision: D102821270
+
+fbshipit-source-id: d25a9da80f5c623487bdf4868a107d2b59dfe833
+
+- Add bit-exact RQ encode cross-level test (#5155)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5155
+
+The for_all_simd_levels decorator (D101822335) makes existing tests run
+once per SIMD level, but only catches dispatch drift when the test&#39;s
+correctness assertions compare against a level-independent reference.
+RQ encode (residual_quantizer_encode_steps.cpp:96,369, dispatched via
+with_simd_level_256bit) is integer-valued, but
+test_residual_quantizer&#39;s existing assertions are tolerance-based --
+silent dispatch drift between AVX2 and NONE could go undetected.
+
+Adds test_compute_codes_matches_none in test_residual_quantizer.py: at
+the decorator&#39;s level, run rq.compute_codes(xb), then switch to
+SIMDLevel.NONE, run the reference, restore the level, assert
+np.testing.assert_array_equal. Static-build lanes have only one level
+available, so the test self.skipTest()&#39;s there.
+
+LSQ icm_encode_step already has a bit-exact Python reference comparison
+(via icm_encode_step_ref) at every level, so cross-level NONE comparison
+is transitively guaranteed -- no addition needed there.
+test_extra_distances.py already has L1/Linf cases.
+
+Reviewed By: mdouze
+
+Differential Revision: D102821184
+
+fbshipit-source-id: 9061794474deb36a7e72194b68d42bb598967737
+
+- Add per-SIMD-level tests for hamming.h utils + fix crosshamming bug (#5153)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5153
+
+The standalone Hamming-distance entry points in faiss/utils/hamming.h --
+hammings, hammings_knn_mc, hamming_count_thres, match_hamming_thres,
+crosshamming_count_thres, generalized_hammings_knn_hc -- are dynamic-
+dispatch entry points (with_simd_level dispatch in hamming.cpp), but had
+no Python test that exercised them across SIMD levels. The IndexBinary
+tests cover hammings_knn_hc and hamming_range_search via the flat /
+range index; everything else was untested.
+
+Adds tests/test_hamming_utils.py with for_all_simd_levels. For each
+function the test compares the result against a NumPy popcount-xor
+reference, and additionally:
+* For hammings_knn_mc and generalized_hammings_knn_hc: asserts each
+  returned distance is no greater than the true k-th smallest (catches
+  an impl that returns a non-top-k set), asserts unique IDs per row,
+  asserts ordered-output for ordered=True.
+* For match_hamming_thres: decodes the (i, j) int64-pair packing of the
+  output (per hamming_distance/common.h match_hamming_thres_impl) and
+  verifies the returned set of pairs equals the reference set of below-
+  threshold pairs exactly.
+* For *_thres functions: uses ht values that produce non-trivial match
+  counts (assertGreater(expected, 0)), so a no-op implementation cannot
+  pass vacuously; matches the implementation&#39;s `&lt;= ht` predicate.
+
+Source fix in faiss/utils/hamming_distance/common.h:
+crosshamming_count_thres_impl had a long-standing bug: `bs2 = bs1 + 2;`
+hardcoded an offset of 2 uint64s instead of `nwords`. This is correct
+only for nwords=2 (ncodes=16); for ncodes=8 it skips a pair and reads
+out of bounds, and for ncodes&gt;=32 it reads from non-element-aligned
+memory. The crosshamming test exposed this for ncodes=32 (off by 21
+matches in 3160 pairs); the one-line fix `bs2 = bs1 + nwords` corrects it.
+
+Reviewed By: mdouze
+
+Differential Revision: D102821132
+
+fbshipit-source-id: d60f87d9726005904c90c01c68109ac851cf807c
+
+- Harden compute_query_factors: add preconditions, handle aliasing, remove dead checks
+
+Summary:
+Harden `compute_query_factors` in RaBitQUtils.cpp:
+
+- Add `FAISS_THROW_IF_NOT(d &gt; 0)` precondition, which lets us simplify `inv_d_sqrt` and remove unreachable `d == 0` branches.
+- Detect query/rotated_q pointer aliasing (used by the IVF residual path in `IndexIVFRaBitQFastScan::compute_residual_LUT`) and assert the invariant that aliasing is only valid when `centroid == nullptr`. Skip the memcpy when aliased to avoid overlapping-buffer UB.
+- Remove dead defensive checks (`if (d &gt; 0 &amp;&amp; !rotated_q.empty())`) that were always true after the `resize(d)` call.
+- Reuse the cached `qr_to_c_L2sqr` value for `qr_norm_L2sqr` in the `METRIC_INNER_PRODUCT` + `centroid == nullptr` path, avoiding a redundant `fvec_norm_L2sqr` call.
+
+Reviewed By: mnorris11
+
+Differential Revision: D102682365
+
+fbshipit-source-id: d4811a9ab98b09cb65d7035a72833522ca6829bf
+
+- Hoist per-iteration vector allocations in IndexIVFRaBitQFastScan::compute_LUT
+
+Summary:
+Move `rotated_q` and `centroid_buf` vector allocations from inside the inner loop to the `#pragma omp parallel` block scope. Previously each of the `n * nprobe` iterations allocated and freed these vectors on the heap. Now each thread allocates once and reuses capacity across all its iterations.
+
+Split `#pragma omp parallel for` into `#pragma omp parallel` + `#pragma omp for` to create a per-thread scope for the buffers.
+
+Reviewed By: mnorris11
+
+Differential Revision: D102678232
+
+fbshipit-source-id: 601022dd65943d11d53c7e5a91015553ad75870b
+
+- Validate code_size during deserialization to prevent oversized allocations (#5151)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5151
+
+Several index types read code_size directly from the serialized stream independently of the quantizer parameters that determine its correct value.  When the stored code_size is corrupt but ntotal is 0, the existing consistency check (codes.size() == ntotal * code_size) passes trivially. A subsequent search then allocates (code_size * sizeof(float)) bytes in GenericFlatCodesDistanceComputer, which can trigger an OOM exception.
+
+Two layers of protection:
+
+1. Cross-validate the deserialized code_size against the quantizer-derived value for all index types that read code_size from the stream: IndexResidualQuantizer, IndexLocalSearchQuantizer, IndexProductResidualQuantizer, IndexProductLocalSearchQuantizer, IndexIVFAdditiveQuantizer, IndexIVFScalarQuantizer, IndexLSH, and Index2Layer. The quantizer code_size is computed from validated parameters via set_derived_values() and is always authoritative.
+
+2. For IndexLattice, where code_size is derived from constructor parameters (scale_nbit, lattice_nbit, nsq) rather than read from the stream, validate that code_size does not exceed the uncompressed vector size (d * sizeof(float)). IndexLattice is a lossy compressor, so its code_size must always be smaller than the uncompressed representation. A corrupt scale_nbit can overflow the total_nbit computation, producing a code_size that wraps to a huge value; this bound catches that before any allocation is attempted.
+
+Reviewed By: mnorris11
+
+Differential Revision: D102360605
+
+fbshipit-source-id: 1f0e7262a0e0e4566d7813b7da1bf0102e6fd9bf
+
+- Set own_fields after reading Index2Layer sub-quantizer during deserialization (#5147)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5147
+
+Index2Layer deserialization reads its sub-quantizer via read_index() which allocates a new Index on the heap, but never sets q1.own_fields = true. Since Level1Quantizer::own_fields defaults to false, the deserialized Index2Layer does not own its quantizer and never frees it — leaking the allocation both on the normal path (when the Index2Layer is eventually destroyed) and on the error path (when a subsequent deserialization step throws and the partially-constructed Index2Layer is cleaned up).
+
+Every other index type in read_index_up that reads a sub-index via read_index sets own_fields = true afterwards (IndexIVF, IndexPreTransform, IndexIDMap, IndexRefine, IndexHNSW, IndexNSG, IndexNNDescent, etc.). Index2Layer was the only one missing it.
+
+Reviewed By: mnorris11
+
+Differential Revision: D102357926
+
+fbshipit-source-id: 66a64ebe406c27aeebe45924028670227feeb9d0
+
+- Fix memory leak warning for unordered_multimap in IndexIVFFlatDedup Python binding (#1667) (#5145)
+
+Summary:
+When running the Python test suite, SWIG emits a warning:
+
+```
+swig/python detected a memory leak of type &#39;std::unordered_multimap&lt; faiss::Index::idx_t,faiss::Index::idx_t &gt; *&#39;, no destructor found.
+```
+
+The root cause is that `faiss::IndexIVFFlatDedup::instances` is a `std::unordered_multimap&lt;idx_t, idx_t&gt;` member, and SWIG has no built-in destructor registration for that STL type. When SWIG wraps the field, it generates a raw pointer wrapper with no cleanup, causing the leak warning whenever an `IndexIVFFlatDedup` object is garbage-collected on the Python side.
+
+The fix adds `%ignore faiss::IndexIVFFlatDedup::instances` in `faiss/python/swigfaiss.swig` before the `%include &lt;faiss/IndexIVFFlat.h&gt;` directive. This prevents SWIG from generating the untyped wrapper for the internal dedup map (which was never exposed in the Python type stubs anyway) and eliminates the memory leak warning.
+
+Fixes https://github.com/facebookresearch/faiss/issues/1667
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5145
+
+Reviewed By: trang-nm-nguyen
+
+Differential Revision: D102668055
+
+Pulled By: mnorris11
+
+fbshipit-source-id: e865d9463aecc4d9c37447602b33e1cf71011007
+
+- Generated from a GitHub Pull Request. Run &#39;jf sync&#39; on this diff to load the correct commit data.
+
+Reviewed By: alibeklfc
+
+Differential Revision: D102487191
+
+fbshipit-source-id: ba14efa264653acf42a2eece8e28a8b0d0d50f99
+
+- Convert binary index Hamming callers to dynamic dispatch (#5071)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5071
+
+Phase 2 of the Hamming DD conversion. Converts 5 external callers of
+dispatch_HammingComputer to use per-ISA TUs so the correct
+HammingComputer structs (AVX2/NEON/generic) are used at runtime.
+
+Previously, these files compiled as common TUs with no ISA flags,
+causing hamdis-inl.h to fall through to generic-inl.h — scalar
+HammingComputer structs even on AVX2-capable machines in DD mode.
+
+Converted files:
+- IndexBinaryHNSW.cpp: get_distance_computer() factory
+- IndexBinaryIVF.cpp: get_InvertedListScanner() + search_preassigned()
+- IndexBinaryHash.cpp: 4 search entry points (knn+range × 2 index types)
+- IndexIVFSpectralHash.cpp: get_InvertedListScanner() factory
+- IndexPQ.cpp: polysemous_inner_loop dispatch
+
+NOT converted: IndexIVFPQ.cpp polysemous path — deeply interleaved
+with PQ distance computation inside IVFPQScannerT, niche (off by
+default, polysemous_ht=0). See ~/ivfpq_polysemous_dd.md for analysis.
+
+Reviewed By: mdouze
+
+Differential Revision: D100020358
+
+fbshipit-source-id: df787e5c8c095d86041f70e21cd5ae2e4e418c3b
+
+- Fix flaky test (#5150)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5150
+
+https://www.internalfb.com/intern/test/844425196588481
+We are receving alert due to unhealthy test. Claude is suggesting me to reduce the test size, I think it is worth a try.
+
+Reviewed By: mnorris11
+
+Differential Revision: D102641694
+
+fbshipit-source-id: 05c38a01e646e0f35d205e63c4c489eee8b6d986
+
+- Convert hamming.cpp public API to dynamic dispatch (#5070)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5070
+
+Convert all 8 public Hamming distance functions in `hamming.cpp` to dynamic
+dispatch so they use the best available SIMD implementation at runtime
+instead of always running at scalar speed in DD mode.
+
+This integrates Matthijs&#39;s refactor (D100004339): deduplicates the
+HammingComputer code across the 4 per-ISA backend files into a shared
+`common.h`. It is Phase 1 of the Hamming DD conversion; Phase 2 (future
+diff) will migrate external callers that use `dispatch_HammingComputer`
+directly.
+
+Key changes:
+
+- **DD dispatch**: the 8 public hamming.cpp functions now dispatch via
+  `with_simd_level` (mask A0: NONE/AVX2/AVX512/ARM_NEON) to SL-templated
+  `*_fixSL&lt;SL&gt;` entry points.
+
+- **`_fixSL` suffix** on SL-templated entry points (per Matthijs&#39;s
+  D100020358 convention), distinguishing them from the non-templated DD
+  entry points that share the same base name. Avoids silent-dispatch-vs-
+  pinned-specialization confusion at call sites.
+
+- **New `hamming_avx512.cpp` TU** — makes the pre-existing AVX-512
+  HammingComputer specializations in `avx512-inl.h` reachable from Buck
+  DD builds (previously reachable only from OSS CMake `faiss_avx512` /
+  `faiss_avx512_spr` targets). The AVX-512 TU gives SKX/CLX/Ice Lake
+  clients ZMM auto-vectorization of the hamming kernels; the
+  `_mm512_popcnt_epi64` fast path remains gated on VPOPCNTDQ (active
+  in OSS `faiss_avx512_spr` CMake target only, per pre-existing design).
+
+- **ODR fix via SIMDLevel templatization**: the 9 ISA-varying
+  `HammingComputer*` / `GenHammingComputer*` structs are now primary
+  templates `*_tpl&lt;SIMDLevel&gt;` with scalar bodies in `common.h`, and
+  per-ISA specializations in the respective `-inl.h` files. Each TU
+  picks its specialization via a `using`-alias in hamdis-inl.h keyed
+  on `FAISS_HAMMING_SL`. Distinct mangled names per SL eliminate the
+  latent ODR hazard where multiple DD TUs with different flags saw
+  differently-laid-out structs sharing the `faiss::HammingComputer*`
+  name. Verified by disassembly: distinct `&lt;SIMDLevel)0|1|2&gt;` suffixes
+  per TU.
+
+- **Silent OOB fix in `HammingComputer20::set`** (inherited from
+  D100004339): pre-diff `uint64_t a[2]` read 8 bytes on a 20-byte code
+  (past-end read, tripped by ASan); post-diff `uint32_t a32[4]` reads
+  exactly 4 bytes.
+
+- **`faiss_hamming_sl_collapse()` constexpr** in hamdis-inl.h makes the
+  AVX512_SPR→AVX512 / ARM_SVE→ARM_NEON collapse explicit at the alias
+  level, rather than relying on the raw arch-macro ladder happening to
+  match. Applies only to HammingComputer aliases; does not change the
+  dispatcher.
+
+- **popcount.h extraction**: moved `popcount32` / `popcount64` out of
+  `common.h` into a standalone `faiss/utils/popcount.h` so callers outside
+  the hamming subtree (rabitq_simd.h, rabitq_avx2/512.cpp,
+  partitioning_simdlib256.h, PolysemousTraining.cpp) have a clean
+  include. Migrated all `__builtin_popcount*` call sites. Silent Windows
+  correctness improvement: pre-diff `__builtin_popcountl` on `uint64_t`
+  truncated to 32 bits on MSVC (LLP64, `long` is 32-bit); post-diff
+  `popcount64` always dispatches to `__popcnt64`. The pre-diff
+  `__builtin_popcount → __popcnt` macro shim in `platform_macros.h` is
+  removed — no longer needed now that all call sites use the helpers.
+
+- **`FAISS_MAYBE_UNUSED` on Windows**: previously defined only in the
+  Linux/OSX branch of platform_macros.h; added to the MSVC branch so the
+  templated HammingComputer `set(..., int code_size)` ctors compile
+  cleanly on Windows under `-Wunused-parameter` + NDEBUG.
+
+Reviewed By: mdouze
+
+Differential Revision: D99994593
+
+fbshipit-source-id: 1f54e09fbade3d12b23fb787640d0b206e499859
+
+- Revert D97138228: Generated from a GitHub Pull Request. Run &#39;jf sync&#39; on this diff to load the correct commit data.
+
+Differential Revision:
+D97138228
+
+Original commit changeset: 311eafd5186a
+
+Original Phabricator Diff: D97138228
+
+fbshipit-source-id: c0aead65b62bdf6a3ccf0009ee5c3d57e5707304
+
+- Generated from a GitHub Pull Request. Run &#39;jf sync&#39; on this diff to load the correct commit data.
+
+Reviewed By: limqiying
+
+Differential Revision: D97138228
+
+fbshipit-source-id: 311eafd5186a77e1ba32805a4723662e75815593</div>
+</div>
+
+<a href="../project/facebookresearch_faiss.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

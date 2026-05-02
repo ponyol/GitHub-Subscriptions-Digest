@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (19 commits) - kagent-dev/kagent - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (19 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/kagent-dev_kagent.html">kagent-dev/kagent</a> /
+    Updates in main (19 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/kagent-dev_kagent.html">kagent-dev/kagent</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-01 13:07 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/kagent-dev/kagent/commits/main" target="_blank">https://github.com/kagent-dev/kagent/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This update introduces several key enhancements, including support for sidecar containers, a new UI for configuring skills from Git repositories, and significant user interface cleanups. It also fixes critical bugs, such as ensuring the Go ADK correctly forwards allowed headers and enabling the Python OTLP exporter to respect `OTEL_EXPORTER_OTLP_PROTOCOL` for HTTP/protobuf. Furthermore, the update improves CLI functionality by correctly recognizing all model providers and honoring config defaults, and adds `top_k` and extended thinking support for Claude models in Bedrock.
+
+---
+
+Это обновление содержит несколько ключевых улучшений, включая поддержку sidecar-контейнеров, новый пользовательский интерфейс для настройки навыков из репозиториев Git, а также значительные доработки UI. Также исправлены критические ошибки, например, корректная передача заголовков Go ADK и соблюдение Python OTLP-экспортером переменной `OTEL_EXPORTER_OTLP_PROTOCOL` для HTTP/protobuf. Кроме того, улучшена функциональность CLI за счет корректного распознавания всех поставщиков моделей и соблюдения настроек по умолчанию, а также добавлена поддержка `top_k` и расширенного мышления для моделей Claude в Bedrock.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Normalize line-endings (#1765)
+
+Couple of files had a mix of Windows and Linux line-endings, added a
+`.gitattributes` to handle this correctly in the repo and committed the
+ones with a mix of line endingins.
+
+---------
+
+Signed-off-by: Marco Franssen &lt;marco.franssen@gmail.com&gt;
+Co-authored-by: Copilot &lt;175728472+Copilot@users.noreply.github.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- fix(go-adk): forward allowedHeaders from incoming request to MCP tool calls (#1733)
+
+Closes #1679
+
+The allowedHeaders field on McpServer was being populated by the
+translator and stored in HttpMcpServerConfig/SseMcpServerConfig, but the
+Go runtime never used it. Headers from the incoming A2A request were
+silently dropped even when the operator explicitly listed them in
+allowedHeaders. The Python runtime handled this correctly already.
+
+What changed:
+
+- allowedRequestHeaders helper added to registry.go. It reads the
+a2asrv.CallContext already present in the Go context and returns only
+the header values whose names appear in the configured allowedHeaders
+list (case-insensitive). No intermediate context key, no extra copy.
+- headerRoundTripper gets an allowedHeaders field. On each outbound MCP
+HTTP request the transport calls allowedRequestHeaders and sets the
+matching headers. Static headers from the server spec are applied last
+so they always take precedence, mirroring the Python runtime behaviour.
+- CreateToolsets now passes AllowedHeaders from each MCP server config
+into the transport params.
+- executor.go no longer needs to touch headers at all. The A2A server
+already stores the CallContext in the Go context before Execute is
+called, so the round tripper picks it up automatically.
+
+The change is fully backwards compatible. If allowedHeaders is empty, no
+extra headers are forwarded.
+
+Tests use a2asrv.NewRequestMeta and a2asrv.WithCallContext to build the
+test context, matching what the real A2A server does. Coverage includes:
+normal forwarding, static-header-wins override, no A2A context,
+non-allowed header filter, and empty allowed list.
+
+Signed-off-by: mesutoezdil &lt;mesudozdil@gmail.com&gt;
+
+---------
+
+Signed-off-by: mesutoezdil &lt;mesudozdil@gmail.com&gt;
+Signed-off-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- feat: add extraContainers to SharedDeploymentSpec for sidecar support (#1724)
+
+Closes #1646.
+
+There&#39;s currently no way to run a sidecar container alongside the main
+agent pod. This adds an optional `extraContainers` field to
+`SharedDeploymentSpec` so users can inject things like token proxies,
+log shippers, or any other helper container.
+
+The field is optional and defaults to empty, so existing agents are
+unaffected. When set, the extra containers are appended after the
+primary `kagent` container in the pod spec.
+
+Changes:
+- Added `ExtraContainers []corev1.Container` to `SharedDeploymentSpec`
+in `agent_types.go`
+- Wired it through the internal `resolvedDeployment` struct in
+`deployments.go` for both inline and BYO paths
+- Updated `manifest_builder.go` to append the extra containers to the
+pod spec
+- Added a golden test with an Envoy sidecar
+
+Example:
+
+```yaml
+spec:
+  type: Declarative
+  declarative:
+    deployment:
+      extraContainers:
+        - name: token-proxy
+          image: envoyproxy/envoy:v1.30.0
+          ports:
+            - containerPort: 9901
+```
+
+---------
+
+Signed-off-by: mesutoezdil &lt;mesudozdil@gmail.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- feat: add secret creation with modelconfig in REST API (#1781)
+
+Signed-off-by: Jet Chiang &lt;pokyuen.jetchiang-ext@solo.io&gt;
+
+- chore(deps): bump softprops/action-gh-release from 2 to 3 (#1653)
+
+Bumps
+[softprops/action-gh-release](https://github.com/softprops/action-gh-release)
+from 2 to 3.
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/softprops/action-gh-release/releases&#34;&gt;softprops/action-gh-release&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;v3.0.0&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;3.0.0&lt;/code&gt; is a major release that moves the action runtime
+from Node 20 to Node 24.
+Use &lt;code&gt;v3&lt;/code&gt; on GitHub-hosted runners and self-hosted fleets that
+already support the
+Node 24 Actions runtime. If you still need the last Node 20-compatible
+line, stay on
+&lt;code&gt;v2.6.2&lt;/code&gt;.&lt;/p&gt;
+&lt;h2&gt;What&#39;s Changed&lt;/h2&gt;
+&lt;h3&gt;Other Changes 🔄&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Move the action runtime and bundle target to Node 24&lt;/li&gt;
+&lt;li&gt;Update &lt;code&gt;@types/node&lt;/code&gt; to the Node 24 line and allow future
+Dependabot updates&lt;/li&gt;
+&lt;li&gt;Keep the floating major tag on &lt;code&gt;v3&lt;/code&gt;; &lt;code&gt;v2&lt;/code&gt;
+remains pinned to the latest &lt;code&gt;2.x&lt;/code&gt; release&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;v2.6.2&lt;/h2&gt;
+&lt;!-- raw HTML omitted --&gt;
+&lt;h2&gt;What&#39;s Changed&lt;/h2&gt;
+&lt;h3&gt;Other Changes 🔄&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;chore(deps): bump picomatch from 4.0.3 to 4.0.4 by &lt;a
+href=&#34;https://github.com/dependabot&#34;&gt;&lt;code&gt;@​dependabot&lt;/code&gt;&lt;/a&gt;[bot]
+in &lt;a
+href=&#34;https://redirect.github.com/softprops/action-gh-release/pull/775&#34;&gt;softprops/action-gh-release#775&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;chore(deps): bump brace-expansion from 5.0.4 to 5.0.5 by &lt;a
+href=&#34;https://github.com/dependabot&#34;&gt;&lt;code&gt;@​dependabot&lt;/code&gt;&lt;/a&gt;[bot]
+in &lt;a
+href=&#34;https://redirect.github.com/softprops/action-gh-release/pull/777&#34;&gt;softprops/action-gh-release#777&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;chore(deps): bump vite from 8.0.0 to 8.0.5 by &lt;a
+href=&#34;https://github.com/dependabot&#34;&gt;&lt;code&gt;@​dependabot&lt;/code&gt;&lt;/a&gt;[bot]
+in &lt;a
+href=&#34;https://redirect.github.com/softprops/action-gh-release/pull/781&#34;&gt;softprops/action-gh-release#781&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;Full Changelog&lt;/strong&gt;: &lt;a
+href=&#34;https://github.com/softprops/action-gh-release/compare/v2...v2.6.2&#34;&gt;https://github.com/softprops/action-gh-release/compare/v2...v2.6.2&lt;/a&gt;&lt;/p&gt;
+&lt;h2&gt;v2.6.1&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;2.6.1&lt;/code&gt; is a patch release focused on restoring linked
+discussion thread creation when
+&lt;code&gt;discussion_category_name&lt;/code&gt; is set. It fixes
+&lt;code&gt;[#764](https://github.com/softprops/action-gh-release/issues/764)&lt;/code&gt;,
+where the draft-first publish flow
+stopped carrying the discussion category through the final publish
+step.&lt;/p&gt;
+&lt;p&gt;If you still hit an issue after upgrading, please open a report with
+the bug template and include a minimal repro or sanitized workflow
+snippet where possible.&lt;/p&gt;
+&lt;h2&gt;What&#39;s Changed&lt;/h2&gt;
+&lt;h3&gt;Bug fixes 🐛&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;fix: preserve discussion category on publish by &lt;a
+href=&#34;https://github.com/chenrui333&#34;&gt;&lt;code&gt;@​chenrui333&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/softprops/action-gh-release/pull/765&#34;&gt;softprops/action-gh-release#765&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;v2.6.0&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;2.6.0&lt;/code&gt; is a minor release centered on
+&lt;code&gt;previous_tag&lt;/code&gt; support for
+&lt;code&gt;generate_release_notes&lt;/code&gt;,
+which lets workflows pin GitHub&#39;s comparison base explicitly instead of
+relying on the default range.
+It also includes the recent concurrent asset upload recovery fix, a
+&lt;code&gt;working_directory&lt;/code&gt; docs sync,
+a checked-bundle freshness guard for maintainers, and clearer
+immutable-prerelease guidance where
+GitHub platform behavior imposes constraints on how prerelease asset
+uploads can be published.&lt;/p&gt;
+&lt;p&gt;If you still hit an issue after upgrading, please open a report with
+the bug template and include a minimal repro or sanitized workflow
+snippet where possible.&lt;/p&gt;
+&lt;h2&gt;What&#39;s Changed&lt;/h2&gt;
+&lt;!-- raw HTML omitted --&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;... (truncated)&lt;/p&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Changelog&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/softprops/action-gh-release/blob/master/CHANGELOG.md&#34;&gt;softprops/action-gh-release&#39;s
+changelog&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;0.1.13&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;fix issue with multiple runs concatenating release bodies &lt;a
+href=&#34;https://redirect.github.com/softprops/action-gh-release/pull/145&#34;&gt;#145&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/softprops/action-gh-release/commit/b4309332981a82ec1c5618f44dd2e27cc8bfbfda&#34;&gt;&lt;code&gt;b430933&lt;/code&gt;&lt;/a&gt;
+release: cut v3.0.0 for Node 24 upgrade (&lt;a
+href=&#34;https://redirect.github.com/softprops/action-gh-release/issues/670&#34;&gt;#670&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/softprops/action-gh-release/commit/c2e35e05a74208bafbfcbdae5ebc9da7236e980f&#34;&gt;&lt;code&gt;c2e35e0&lt;/code&gt;&lt;/a&gt;
+chore(deps): bump the npm group across 1 directory with 7 updates (&lt;a
+href=&#34;https://redirect.github.com/softprops/action-gh-release/issues/783&#34;&gt;#783&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;See full diff in &lt;a
+href=&#34;https://github.com/softprops/action-gh-release/compare/v2...v3&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+
+- test: move handler handler tests to testcontainers db (#1782)
+
+## Summary
+- switch HTTP handler tests from the in-memory fake database client to
+the shared Postgres testcontainers setup
+- add a shared database-backed test helper for the handlers test package
+- delete the unused fake database implementation
+
+## Testing
+- go test ./core/internal/httpserver/handlers/...
+
+Signed-off-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- fix(cli): recognize all providers in install and improve missing key error (#1716)
+
+Closes #1622.
+
+`GetModelProvider` was missing Gemini, GeminiVertexAI, AnthropicVertexAI
+and Bedrock from its switch. Any of those values in
+`KAGENT_DEFAULT_MODEL_PROVIDER` fell through to the default and came
+back as OpenAI, which then required `OPENAI_API_KEY` even though the
+user had no intention of using OpenAI.
+
+`GetProviderAPIKey` now also covers Gemini (`GOOGLE_API_KEY`). Providers
+that rely on cloud credentials rather than an API key (Ollama, Bedrock,
+VertexAI variants) already returned empty string and are left as is.
+
+The error message now mentions `KAGENT_DEFAULT_MODEL_PROVIDER` so users
+know they can switch providers instead of being stuck.
+
+Signed-off-by: mesutoezdil &lt;mesudozdil@gmail.com&gt;
+
+- [DOCS] helm: fix documentation drift in README-testing.md (#1688)
+
+fixed some documentation drift in helm/README-testing.md
+
+- `Test Structure`, `Test Coverage`
+- Update test file names to match actual files, remove the description
+of non-existent files, add missing test entries
+- `Example Test Scenarios`
+  - fix incorrect CLI flags of latest helm-unittest (v1.0.3)
+    - Recent CI also runs with helm-unittest (v1.0.3)
+    - Some options changed by version-up of helm-unittest
+
+Signed-off-by: TOMOFUMI-KONDO &lt;ugax2kontomo0314@gmail.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- [BUG] Python OTLP exporter hardcodes gRPC, ignores OTEL_EXPORTER_OTLP_PROTOCOL (#1681)
+
+## Bug Description
+
+The Python agent tracing code in
+`python/packages/kagent-core/src/kagent/core/tracing/_utils.py`
+hardcodes the gRPC OTLP exporter via top-level imports:
+
+```python
+from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+```
+
+The standard `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` and
+`OTEL_EXPORTER_OTLP_PROTOCOL` environment variables are completely
+ignored. This means agents **cannot export traces over HTTP/protobuf**,
+which is required by backends like
+[Langfuse](https://langfuse.com/docs/opentelemetry) that only support
+OTLP over HTTP (not gRPC).
+
+## Steps to Reproduce
+
+1. Deploy kagent with `otel.tracing.enabled: true` and
+`otel.tracing.exporter.otlp.protocol: http/protobuf`
+2. Point the endpoint to an HTTP-only OTLP backend (e.g., Langfuse
+`https://cloud.langfuse.com/api/public/otel`)
+3. Observe agent pods have
+`OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/protobuf` set correctly
+4. Agent pods still use the gRPC exporter and fail with:
+
+```
+opentelemetry.exporter.otlp.proto.grpc.exporter - ERROR - Failed to export traces, error code: StatusCode.UNKNOWN
+grpc._channel._InactiveRpcError: &lt;_InactiveRpcError of RPC that terminated with:
+    debug_error_string = &#34;UNKNOWN:Error received from peer {grpc_status:2, grpc_message:&#34;Received http2 header with status: 464&#34;}&#34;
+```
+
+## Expected Behavior
+
+The `configure()` function should respect
+`OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` (or the general
+`OTEL_EXPORTER_OTLP_PROTOCOL`) and dynamically select the appropriate
+exporter, per the [OpenTelemetry
+specification](https://opentelemetry.io/docs/specs/otel/protocol/exporter/):
+
+- `grpc` (default) → `opentelemetry.exporter.otlp.proto.grpc`
+- `http/protobuf` → `opentelemetry.exporter.otlp.proto.http`
+
+## Fix
+
+This PR replaces the hardcoded gRPC imports with factory functions
+(`_create_span_exporter`, `_create_log_exporter`) that resolve the
+protocol from env vars following the OTel spec precedence:
+signal-specific &gt; general &gt; default (`grpc`).
+
+The fix applies to both the trace and log exporters. Default behavior
+(gRPC) is unchanged — this is fully backwards compatible.
+
+## Environment
+
+- kagent version: v0.8.6 (also confirmed on `main` branch)
+- Backend: Langfuse Cloud (EU), which only supports OTLP over HTTP/JSON
+and HTTP/protobuf ([docs](https://langfuse.com/docs/opentelemetry))
+
+---------
+
+Signed-off-by: shmuelarditi &lt;shmuelrdt@gmail.com&gt;
+Signed-off-by: Jet Chiang &lt;pokyuen.jetchiang-ext@solo.io&gt;
+Signed-off-by: Jonathan Jamroga &lt;jjamroga@gmail.com&gt;
+Signed-off-by: shmuelarditi &lt;shmuelar@elementor.com&gt;
+Co-authored-by: Jet Chiang &lt;pokyuen.jetchiang-ext@solo.io&gt;
+Co-authored-by: Jonathan Jamroga &lt;jjamroga@gmail.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- chore(deps): bump ruff from 0.15.11 to 0.15.12 in /python in the python-minor-patch group (#1778)
+
+Bumps the python-minor-patch group in /python with 1 update:
+[ruff](https://github.com/astral-sh/ruff).
+
+Updates `ruff` from 0.15.11 to 0.15.12
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/astral-sh/ruff/releases&#34;&gt;ruff&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;0.15.12&lt;/h2&gt;
+&lt;h2&gt;Release Notes&lt;/h2&gt;
+&lt;p&gt;Released on 2026-04-24.&lt;/p&gt;
+&lt;h3&gt;Preview features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Implement &lt;code&gt;#ruff:file-ignore&lt;/code&gt; file-level suppressions (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/23599&#34;&gt;#23599&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Implement &lt;code&gt;#ruff:ignore&lt;/code&gt; logical-line suppressions (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/23404&#34;&gt;#23404&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Revert preview changes to displayed diagnostic severity in LSP (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/24789&#34;&gt;#24789&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;[&lt;code&gt;airflow&lt;/code&gt;] Implement
+&lt;code&gt;task-branch-as-short-circuit&lt;/code&gt; (&lt;code&gt;AIR004&lt;/code&gt;) (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/23579&#34;&gt;#23579&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;[&lt;code&gt;flake8-bugbear&lt;/code&gt;] Fix
+&lt;code&gt;break&lt;/code&gt;/&lt;code&gt;continue&lt;/code&gt; handling in
+&lt;code&gt;loop-iterator-mutation&lt;/code&gt; (&lt;code&gt;B909&lt;/code&gt;) (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/24440&#34;&gt;#24440&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;[&lt;code&gt;pylint&lt;/code&gt;] Fix &lt;code&gt;PLC2701&lt;/code&gt; for type parameter
+scopes (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/24576&#34;&gt;#24576&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Rule changes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;[&lt;code&gt;pandas-vet&lt;/code&gt;] Suggest &lt;code&gt;.array&lt;/code&gt; as well in
+&lt;code&gt;PD011&lt;/code&gt; (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/24805&#34;&gt;#24805&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;CLI&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Respect default Unix permissions for cache files (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/24794&#34;&gt;#24794&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Documentation&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;[&lt;code&gt;pylint&lt;/code&gt;] Fix &lt;code&gt;PLR0124&lt;/code&gt; description not to
+claim self-comparison always returns the same value (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/24749&#34;&gt;#24749&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;[&lt;code&gt;pyupgrade&lt;/code&gt;] Expand docs on reusable
+&lt;code&gt;TypeVar&lt;/code&gt;s and scoping (&lt;code&gt;UP046&lt;/code&gt;) (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/24153&#34;&gt;#24153&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Improve rules table accessibility (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/24711&#34;&gt;#24711&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Contributors&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;https://github.com/dylwil3&#34;&gt;&lt;code&gt;@​dylwil3&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/AlexWaygood&#34;&gt;&lt;code&gt;@​AlexWaygood&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/woodruffw&#34;&gt;&lt;code&gt;@​woodruffw&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/avasis-ai&#34;&gt;&lt;code&gt;@​avasis-ai&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://github.com/Dev-iL&#34;&gt;&lt;code&gt;@​Dev-iL&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/denyszhak&#34;&gt;&lt;code&gt;@​denyszhak&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/ShipItAndPray&#34;&gt;&lt;code&gt;@​ShipItAndPray&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anishgirianish&#34;&gt;&lt;code&gt;@​anishgirianish&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/augustelalande&#34;&gt;&lt;code&gt;@​augustelalande&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/amyreese&#34;&gt;&lt;code&gt;@​amyreese&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/majiayu000&#34;&gt;&lt;code&gt;@​majiayu000&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Install ruff 0.15.12&lt;/h2&gt;
+&lt;h3&gt;Install prebuilt binaries via shell script&lt;/h3&gt;
+&lt;pre lang=&#34;sh&#34;&gt;&lt;code&gt;curl --proto &#39;=https&#39; --tlsv1.2 -LsSf
+https://releases.astral.sh/github/ruff/releases/download/0.15.12/ruff-installer.sh
+| sh
+&lt;/code&gt;&lt;/pre&gt;
+&lt;!-- raw HTML omitted --&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;... (truncated)&lt;/p&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Changelog&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/astral-sh/ruff/blob/main/CHANGELOG.md&#34;&gt;ruff&#39;s
+changelog&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;0.15.12&lt;/h2&gt;
+&lt;p&gt;Released on 2026-04-24.&lt;/p&gt;
+&lt;h3&gt;Preview features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Implement &lt;code&gt;#ruff:file-ignore&lt;/code&gt; file-level suppressions (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/23599&#34;&gt;#23599&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Implement &lt;code&gt;#ruff:ignore&lt;/code&gt; logical-line suppressions (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/23404&#34;&gt;#23404&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Revert preview changes to displayed diagnostic severity in LSP (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/24789&#34;&gt;#24789&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;[&lt;code&gt;airflow&lt;/code&gt;] Implement
+&lt;code&gt;task-branch-as-short-circuit&lt;/code&gt; (&lt;code&gt;AIR004&lt;/code&gt;) (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/23579&#34;&gt;#23579&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;[&lt;code&gt;flake8-bugbear&lt;/code&gt;] Fix
+&lt;code&gt;break&lt;/code&gt;/&lt;code&gt;continue&lt;/code&gt; handling in
+&lt;code&gt;loop-iterator-mutation&lt;/code&gt; (&lt;code&gt;B909&lt;/code&gt;) (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/24440&#34;&gt;#24440&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;[&lt;code&gt;pylint&lt;/code&gt;] Fix &lt;code&gt;PLC2701&lt;/code&gt; for type parameter
+scopes (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/24576&#34;&gt;#24576&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Rule changes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;[&lt;code&gt;pandas-vet&lt;/code&gt;] Suggest &lt;code&gt;.array&lt;/code&gt; as well in
+&lt;code&gt;PD011&lt;/code&gt; (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/24805&#34;&gt;#24805&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;CLI&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Respect default Unix permissions for cache files (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/24794&#34;&gt;#24794&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Documentation&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;[&lt;code&gt;pylint&lt;/code&gt;] Fix &lt;code&gt;PLR0124&lt;/code&gt; description not to
+claim self-comparison always returns the same value (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/24749&#34;&gt;#24749&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;[&lt;code&gt;pyupgrade&lt;/code&gt;] Expand docs on reusable
+&lt;code&gt;TypeVar&lt;/code&gt;s and scoping (&lt;code&gt;UP046&lt;/code&gt;) (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/24153&#34;&gt;#24153&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Improve rules table accessibility (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/24711&#34;&gt;#24711&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Contributors&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;https://github.com/dylwil3&#34;&gt;&lt;code&gt;@​dylwil3&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/AlexWaygood&#34;&gt;&lt;code&gt;@​AlexWaygood&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/woodruffw&#34;&gt;&lt;code&gt;@​woodruffw&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/avasis-ai&#34;&gt;&lt;code&gt;@​avasis-ai&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://github.com/Dev-iL&#34;&gt;&lt;code&gt;@​Dev-iL&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/denyszhak&#34;&gt;&lt;code&gt;@​denyszhak&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/ShipItAndPray&#34;&gt;&lt;code&gt;@​ShipItAndPray&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anishgirianish&#34;&gt;&lt;code&gt;@​anishgirianish&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/augustelalande&#34;&gt;&lt;code&gt;@​augustelalande&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/amyreese&#34;&gt;&lt;code&gt;@​amyreese&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/majiayu000&#34;&gt;&lt;code&gt;@​majiayu000&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/66f93cf7ed4d36325f35a452e4afa28268fbcd28&#34;&gt;&lt;code&gt;66f93cf&lt;/code&gt;&lt;/a&gt;
+Bump 0.15.12 (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/issues/24815&#34;&gt;#24815&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/476a4d02e8e3b6c157ac39979d8b698a1b6baa91&#34;&gt;&lt;code&gt;476a4d0&lt;/code&gt;&lt;/a&gt;
+[ty] Complete support for more detailed diagnostics on possibly unbound
+error...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/ed669eab30095d6c51fe6cdef6050fb01276bcb3&#34;&gt;&lt;code&gt;ed669ea&lt;/code&gt;&lt;/a&gt;
+Implement &lt;code&gt;#ruff:file-ignore&lt;/code&gt; file-level suppressions (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/issues/23599&#34;&gt;#23599&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/e73d952e43feb51356ee740c5a973fce81396ff6&#34;&gt;&lt;code&gt;e73d952&lt;/code&gt;&lt;/a&gt;
+[ty] Include inferred type in &lt;code&gt;invalid-key&lt;/code&gt; concise
+diagnostic for union/inte...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/80feb29b31cd98c093316df2e0407b0c70c01b55&#34;&gt;&lt;code&gt;80feb29&lt;/code&gt;&lt;/a&gt;
+[ty] report only dead annotation-only locals as unused (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/issues/24811&#34;&gt;#24811&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/0fbf2bc27336a3d17d39af52cf89b78dcda8c7c8&#34;&gt;&lt;code&gt;0fbf2bc&lt;/code&gt;&lt;/a&gt;
+Drop deprecated license classifier (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/issues/24808&#34;&gt;#24808&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/43b174cc7f2fcb0080bb1d4843cd4bf6b72bbe27&#34;&gt;&lt;code&gt;43b174c&lt;/code&gt;&lt;/a&gt;
+[ty] Infer lambda parameter types with &lt;code&gt;Callable&lt;/code&gt; type
+context (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/issues/24317&#34;&gt;#24317&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/4f449ae4a2377569330a5ab94799d389357b5a3f&#34;&gt;&lt;code&gt;4f449ae&lt;/code&gt;&lt;/a&gt;
+[ty] Add error context for intersection types (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/issues/24772&#34;&gt;#24772&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/5b4e753acb46e96ad408e4904c15308e33efe307&#34;&gt;&lt;code&gt;5b4e753&lt;/code&gt;&lt;/a&gt;
+[ty] Add support for goto in literal enum member inlay hint (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/issues/24792&#34;&gt;#24792&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/e7cc76275a758ce1c636ea1c2d091fd576aac794&#34;&gt;&lt;code&gt;e7cc762&lt;/code&gt;&lt;/a&gt;
+[ty] Add error context for TypedDict assignments (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/issues/24790&#34;&gt;#24790&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/astral-sh/ruff/compare/0.15.11...0.15.12&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+
+[![Dependabot compatibility
+score](https://dependabot-badges.githubapp.com/badges/compatibility_score?dependency-name=ruff&amp;package-manager=uv&amp;previous-version=0.15.11&amp;new-version=0.15.12)](https://docs.github.com/en/github/managing-security-vulnerabilities/about-dependabot-security-updates#about-compatibility-scores)
+
+Dependabot will resolve any conflicts with this PR as long as you don&#39;t
+alter it yourself. You can also trigger a rebase manually by commenting
+`@dependabot rebase`.
+
+[//]: # (dependabot-automerge-start)
+[//]: # (dependabot-automerge-end)
+
+---
+
+&lt;details&gt;
+&lt;summary&gt;Dependabot commands and options&lt;/summary&gt;
+&lt;br /&gt;
+
+You can trigger Dependabot actions by commenting on this PR:
+- `@dependabot rebase` will rebase this PR
+- `@dependabot recreate` will recreate this PR, overwriting any edits
+that have been made to it
+- `@dependabot show &lt;dependency name&gt; ignore conditions` will show all
+of the ignore conditions of the specified dependency
+- `@dependabot ignore &lt;dependency name&gt; major version` will close this
+group update PR and stop Dependabot creating any more for the specific
+dependency&#39;s major version (unless you unignore this specific
+dependency&#39;s major version or upgrade to it yourself)
+- `@dependabot ignore &lt;dependency name&gt; minor version` will close this
+group update PR and stop Dependabot creating any more for the specific
+dependency&#39;s minor version (unless you unignore this specific
+dependency&#39;s minor version or upgrade to it yourself)
+- `@dependabot ignore &lt;dependency name&gt;` will close this group update PR
+and stop Dependabot creating any more for the specific dependency
+(unless you unignore this specific dependency or upgrade to it yourself)
+- `@dependabot unignore &lt;dependency name&gt;` will remove all of the ignore
+conditions of the specified dependency
+- `@dependabot unignore &lt;dependency name&gt; &lt;ignore condition&gt;` will
+remove the ignore condition of the specified dependency and ignore
+conditions
+
+
+&lt;/details&gt;
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+
+- fix(httpserver): replace stdlib log with structured logr in memory handler (#1773)
+
+The memory handler was the only handler in the package still using the
+stdlib `log` package. Every other handler uses `go-logr/logr`. The
+logging middleware already injects a logr logger into the request
+context via `ctrllog.IntoContext`, so switching to
+`logr.FromContextOrDiscard(r.Context())` is a straight drop-in.
+
+This makes memory handler logs consistent with the rest: same format,
+same log level control, same structured key/value fields.
+
+---------
+
+Signed-off-by: mesutoezdil &lt;mesudozdil@gmail.com&gt;
+Signed-off-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+Co-authored-by: Copilot &lt;175728472+Copilot@users.noreply.github.com&gt;
+
+- fix(deps): consolidate dependabot uv ecosystem to single workspace root (#1756)
+
+## Summary
+- replace the per-member `directories:` list under `package-ecosystem:
+uv` with a single `/python` entry so Dependabot uses the root
+`[tool.uv.workspace]` to discover members and refreshes `python/uv.lock`
+in the same PR
+- group OpenTelemetry and Google AI Python dependencies so lockstep
+families land in a single PR
+- add `applies-to: version-updates` to the Python groups so security
+updates remain ungrouped
+- ignore semver-major `/ui` npm bumps so known-breaking major frontend
+upgrades stop opening standalone PRs
+
+## Why
+Dependabot was opening separate PRs for each workspace member&#39;s
+`pyproject.toml` without refreshing the root `python/uv.lock`. Those PRs
+then failed CI when Docker runs `uv sync --locked`.
+
+In a `uv` workspace the lockfile lives only at the workspace root;
+members have only a `pyproject.toml`. Dependabot&#39;s native `uv` ecosystem
+already discovers workspace members through the root
+`[tool.uv.workspace]` section, so a single `directory: /python` entry
+covers every member and updates the root lockfile alongside any member
+manifest in the same PR — no separate workflow or write-back step
+needed.
+
+This replaces the earlier approach in this PR which used a
+`pull_request_target` workflow to run `uv lock` and push back to
+Dependabot&#39;s branch. @EItanya flagged that handoff as undesirable; this
+approach removes it entirely (and removes the new workflow file) while
+keeping the orthogonal grouping and ignore improvements.
+
+## Verification
+- `ruby -e &#39;require &#34;yaml&#34;; YAML.load_file(&#34;.github/dependabot.yml&#34;)&#39;`
+(parses cleanly)
+- Once merged, the next Dependabot run on a Monday should produce at
+most one Python PR per group with both the changed `pyproject.toml` and
+`python/uv.lock` updated together.
+
+---------
+
+Signed-off-by: Jaison Paul &lt;paul.jaison@gmail.com&gt;
+
+- clean up UI (#1764)
+
+- add a list view for agents and other UI layout improvements
+- make the create pages consistent
+- consolidate the &#34;Servers&#34; and &#34;Tools&#34; page into a single page
+- remove the dialog for creating MCP servers and render it as a page
+instead (consistent with other artifacts)
+
+&lt;img width=&#34;1289&#34; height=&#34;1050&#34; alt=&#34;Screenshot 2026-04-27 at 3 32
+13 PM&#34;
+src=&#34;https://github.com/user-attachments/assets/9ff53bff-28e7-4c80-bd6d-b96ef844d72a&#34;
+/&gt;
+
+&lt;img width=&#34;1031&#34; height=&#34;1164&#34; alt=&#34;Screenshot 2026-04-27 at 3 34
+20 PM&#34;
+src=&#34;https://github.com/user-attachments/assets/8224b02e-0fb1-4646-8dc9-24b33571c5e3&#34;
+/&gt;
+
+&lt;img width=&#34;957&#34; height=&#34;1011&#34; alt=&#34;Screenshot 2026-04-27 at 3 34 41 PM&#34;
+src=&#34;https://github.com/user-attachments/assets/3542d773-a467-42cf-b566-86552c98cdfe&#34;
+/&gt;
+
+&lt;img width=&#34;1382&#34; height=&#34;1043&#34; alt=&#34;Screenshot 2026-04-27 at 3 34
+58 PM&#34;
+src=&#34;https://github.com/user-attachments/assets/248b9be3-0d28-417e-8762-21fd2b8c4cf3&#34;
+/&gt;
+
+&lt;img width=&#34;1325&#34; height=&#34;830&#34; alt=&#34;Screenshot 2026-04-27 at 3 39 24 PM&#34;
+src=&#34;https://github.com/user-attachments/assets/11b9208d-0b34-4c2b-b54b-0e531e728f93&#34;
+/&gt;
+
+---------
+
+Signed-off-by: Peter Jausovec &lt;peter.jausovec@solo.io&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- fix(helm): fix querydoc helm unittests and include them in CI workflow (#1769)
+
+## Overview
+
+Fix broken querydoc helm-unittest tests and add them to CI.
+The tests were introduced in PR #599 (Helm refactor) but never added to
+CI, so subsequent breakage from PR #683 (Official KMCP Support) went
+undetected.
+
+close #1768 
+
+## Changes
+
+### Fix querydoc deployment test
+
+- Include `configmap.yaml` as rendered template during unittest so that
+`include` function for a checksum annotation works. Also added
+`template: deployment.yaml` directives required when multiple templates
+are listed.
+- Fixed the value`replicaCount` → `replicas` to match the actual key
+used in deployment manifest.
+- Updated the image tag to `1.1.10` in unittest to match the AppVersion
+of the chart.
+
+### Remove obsolete toolserver test
+
+`toolserver_test.yaml` referenced `templates/toolserver.yaml` which was
+deleted in PR #683 when ToolServer CRDs were replaced by Kubernetes
+Services with `kagent.dev/mcp-service` labels.
+
+### Add querydoc to CI helm-unit-tests job
+
+Added `helm unittest helm/tools/querydoc` to the `helm-unit-tests` job
+in `.github/workflows/ci.yaml` so future breakage is caught
+automatically.
+
+---------
+
+Signed-off-by: TOMOFUMI-KONDO &lt;ugax2kontomo0314@gmail.com&gt;
+
+- fix(controller): wrap secret fetch errors with %w to preserve error chain (#1772)
+
+`ReconcileKagentModelConfig` appends secret fetch errors via
+`multierror.Append`, but both `fmt.Errorf` calls used `%v` instead of
+`%w`. This means the original Kubernetes API error is stringified and
+lost — `errors.Is` and `errors.As` cannot unwrap through the multi-error
+to inspect the root cause (e.g. `apierrors.IsNotFound`).
+
+Switching to `%w` keeps the error chain intact so callers can inspect or
+match the underlying error type.
+
+Two lines changed, no behaviour change in the happy path.
+
+Signed-off-by: mesutoezdil &lt;mesudozdil@gmail.com&gt;
+
+- feat(bedrock): add top_k and extended thinking support for Claude models (#1732)
+
+Closes #1721
+
+Bedrock&#39;s Converse API keeps Claude-specific parameters separate from
+the standard InferenceConfiguration block. Fields like top_k and the
+extended thinking config have to go through
+additionalModelRequestFields. This PR wires those two fields end-to-end
+so operators can turn on Claude extended thinking via the ModelConfig
+CRD.
+
+Changes:
+
+- BedrockConfig CRD type gets optional topK and thinkingBudgetTokens
+fields. Deepcopy and CRD manifests regenerated with make manifests, Helm
+CRD template synced.
+- Go ADK Bedrock struct and BedrockModel updated.
+buildAdditionalModelRequestFields() builds the payload only when at
+least one field is set.
+- Python KAgentBedrockLlm gets matching top_k and thinking_budget_tokens
+fields and builds additionalModelRequestFields the same way.
+- The translator passes both fields from ModelConfig through to the ADK
+config.
+
+Both fields are fully optional so existing configs are not affected.
+
+Signed-off-by: mesutoezdil &lt;mesudozdil@gmail.com&gt;
+
+---------
+
+Signed-off-by: mesutoezdil &lt;mesudozdil@gmail.com&gt;
+Co-authored-by: Jet Chiang &lt;pokyuen.jetchiang-ext@solo.io&gt;
+
+- fix: honor CLI config defaults (#1746)
+
+Fixes #973
+
+## Summary
+- Load `~/.kagent/config.yaml` before constructing Cobra commands so
+saved values become the CLI defaults.
+- Keep explicit flags as overrides by binding command flags to the same
+shared config object.
+- Use the loaded namespace as the deploy `--namespace` default so
+registering that command does not reset the configured namespace.
+
+## Testing
+- `go test ./core/cli/cmd/kagent`
+- `go test ./core/cli/internal/config ./core/cli/cmd/kagent`
+- `go test ./core/cli/...`
+- `go test -race -skip &#39;TestE2E.*&#39; ./core/cli/...`
+- `go vet ./core/cli/cmd/kagent ./core/cli/internal/config`
+- `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3
+run ./core/cli/cmd/kagent ./core/cli/internal/config`
+- `git diff --check`
+- Temporary-HOME smoke check: `go run ./core/cli/cmd/kagent --help`
+shows config-file defaults for `--kagent-url`, `--namespace`,
+`--output-format`, and `--timeout`.
+
+Signed-off-by: Akash Kumar &lt;meakash7902@gmail.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+Co-authored-by: J.M. Huibonhoa &lt;jmhbh@users.noreply.github.com&gt;
+
+- add UI for configuring skills from git repos (#1747)
+
+- adds the UI to configure git skills
+- fixes an issue with configuring skills that use path names -- it uses
+the folder where the SKILL.md is as the first folder under the /skills
+folder in the container vs. the name of the repo
+- changes the permissions of the cloned skill (otherwise we get
+permission denied when agent tries to load the skill file)
+
+fixes #1731
+
+---------
+
+Signed-off-by: Peter Jausovec &lt;peter.jausovec@solo.io&gt;
+
+- fix: use python user in skills-init container (#1762)
+
+fixes https://github.com/kagent-dev/kagent/issues/1761
+
+---------
+
+Signed-off-by: Jesus Munoz &lt;jesus.munoz@solo.io&gt;
+Co-authored-by: Copilot &lt;175728472+Copilot@users.noreply.github.com&gt;</div>
+</div>
+
+<a href="../project/kagent-dev_kagent.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
