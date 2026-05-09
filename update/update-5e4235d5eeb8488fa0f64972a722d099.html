@@ -1,0 +1,3204 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (66 commits) - comet-ml/opik - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (66 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/comet-ml_opik.html">comet-ml/opik</a> /
+    Updates in main (66 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/comet-ml_opik.html">comet-ml/opik</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-08 19:12 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/comet-ml/opik/commits/main" target="_blank">https://github.com/comet-ml/opik/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление направлено на повышение надежности системы и улучшение опыта разработчиков, в частности, за счет устранения критических проблем с целостностью данных в Python SDK, связанных со стримингом и завершением клиентских операций, а также улучшения работы локального эмулятора. Бэкенд представляет мощные инструменты LLM для оценки утверждений в контексте трассировки, создает постоянную таблицу метаданных рабочих пространств и значительно повышает производительность для пакетных вставок в ClickHouse и запросов сравнения экспериментов. Улучшения во фронтенде включают новые скелетные загрузчики для лучшей отзывчивости, переработанные процессы выполнения экспериментов и унифицированные компоненты пользовательского интерфейса для более согласованного взаимодействия с пользователем.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Update versions to 2.0.27 and bump base version to 2.0.28
+
+- [OPIK-6444] [PY-SDK] fix: improve streamer reliability (#6648)
+
+* [OPIK-6444] [PY-SDK] fix: serialize flush with BatchManager lock to stop silent trace drops
+
+FlushingThread.run() called batcher.flush() without holding
+BatchManager._lock, while BatchManager.process_message holds it for
+add(). Messages appended during the post-iteration tail of
+_create_batches_from_accumulated_messages() (notably the recursive
+payload-size walk in sequence_splitter.split_into_batches) were not in
+the returned batches, but were wiped by self._accumulated_messages = [].
+
+Pass BatchManager._lock into FlushingThread and acquire it for the full
+probe iteration. Also wrap the loop body in try/except so a single bad
+flush no longer silently kills the daemon thread.
+
+Reproduced ~1.2% drops at production cadence (2s flush interval, steady
+traffic) and 22-60% under bursty / aggressive flushing - both go to 0
+with the fix. Added two regression tests covering the race and the
+thread-death-on-exception path.
+
+* fix(sdk): isolate try/except per batcher in FlushingThread
+
+Addresses PR #6648 review: a failing flush on one batcher no longer
+skips the remaining batchers in the same probe iteration. Each batcher
+gets its own try/except so a transient encoder/anonymizer failure on
+one type doesn&#39;t starve the others until the next 100ms tick.
+
+* refactor(sdk): hide locking behind BatchManager.flush_ready
+
+FlushingThread no longer needs to know about batchers or the BatchManager
+lock. It now just invokes a caller-supplied callable on its probe
+interval. BatchManager owns the locking + iteration logic in a new
+flush_ready() method, which is what FlushingThread calls.
+
+Same correctness as before for OPIK-6444, cleaner separation of
+concerns. Adds a unit test asserting that a failing batcher in
+flush_ready() does not skip the rest in the same tick.
+
+* Fix lint errors
+
+- [OPIK-6443] [PY-SDK] fix: prevent silent data loss in client.end() due to drain/attachment re-enqueue race (#6643)
+
+* [OPIK-6443] [PY-SDK] fix: prevent silent data loss in client.end() due to drain/attachment re-enqueue race
+
+Streamer.close() sets _drain=True before consumers finish processing.
+AttachmentsExtractionProcessor re-enqueues messages via streamer.put(),
+which silently drops them when _drain is set — causing ~5-6% data loss.
+
+Add force parameter to put() so internal re-enqueue bypasses the drain
+guard, and flush the batch preprocessor on each poll iteration so
+force-put messages don&#39;t get stuck in the stopped batcher.
+
+* fix(streamer): force-enqueue attachment upload messages during drain
+
+The _process_attachments() call site also enqueues messages via
+streamer.put() during pipeline processing — same silent-drop risk
+as the re-enqueue on line 80.
+
+- [NA] [SDK] [DOCS] Update automatically OpenAPI spec and Fern code (#6642)
+
+- [NA] [PY-SDK] fix: run worker_threads=1 in the caller thread (#6641)
+
+* [NA] [PY-SDK] fix: run worker_threads=1 in the caller thread
+
+StreamingExecutor previously built a ThreadPoolExecutor(max_workers=1)
+even for workers=1, so run_tests/evaluate spawned one worker thread
+instead of executing inline. The docstring already promised sequential
+execution in the current thread.
+
+Users typically pass worker_threads=1 when the task pipeline isn&#39;t
+thread-safe, or when the task drives asyncio / a custom event loop in
+which case running in a worker thread forces them to spin up a separate
+loop. In both cases the extra thread is risk without performance gain.
+
+When workers == 1 the executor now skips the thread pool, runs each
+submitted task synchronously in the caller, and scopes the
+context-local Opik client to the executor lifetime via a ContextVar
+token so the threaded and sync paths stay observationally identical.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* style(tests): apply ruff format
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-6409] [BE] feat: add V1 workspace allowlist (#6631)
+
+* [OPIK-6409] [BE] feat: add v1WorkspaceAllowlist config + service short-circuit
+
+Symmetric counterpart of the existing v2WorkspaceAllowlist: a comma-separated
+list of workspace IDs that always resolve to version_1, short-circuiting
+cache, auth gate, entity check, and fallback. Use case is customer-driven V1
+stickiness — pinning specific workspaces to legacy navigation without the
+deployment-wide impact of TOGGLE_FORCE_WORKSPACE_VERSION.
+
+- ServiceTogglesConfig: new v1WorkspaceAllowlistIds Set + @JsonSetter, parsed
+  identically to its V2 sibling. The two setters now share a private
+  parseAllowlist helper (comma-split, strip whitespace, filter blanks,
+  unmodifiable).
+- config.yml: new v1WorkspaceAllowlist key reading TOGGLE_V1_WORKSPACE_ALLOWLIST
+  with the same operational notes as the V2 entry, slotted between v2WorkspaceAllowlist
+  and forceWorkspaceVersion. Both v2WorkspaceAllowlist and forceWorkspaceVersion
+  comments updated to reflect the new priority order (V2 &gt; V1 &gt; force-version).
+- AbstractWorkspaceVersionService.getWorkspaceVersion: V1 allowlist short-circuit
+  inserted immediately after the V2 allowlist check and before getForcedVersion();
+  emits an info log on hit mirroring the V2 message. The constructor now logs a
+  one-time warn at startup when any workspace ID appears in both lists (V2 wins,
+  per the priority order — but operators should know).
+
+Allowlist hits return before reaching computeVersion/persistAndEmit, so no
+workspaces-table write or workspace_version_determined analytics event is
+emitted on a hit (matches the V2 allowlist behaviour).
+
+* [OPIK-6409] [BE] test: V1WorkspaceAllowlistTest covering positive/miss/precedence
+
+Mirrors V2WorkspaceAllowlistTest. Single nested class drives the full priority
+matrix in one parameterized test:
+
+- V1 allowlist hit on V1_ALLOWLISTED_ID_1 / V1_ALLOWLISTED_ID_2 → version_1,
+  even though forceWorkspaceVersion=version_2 is set globally
+  (proves the V1 allowlist wins over the force-version override).
+- Workspace ID present in BOTH allowlists → version_2
+  (proves the V2 allowlist wins over the V1 allowlist on overlap).
+- Random non-allowlisted workspace → version_2 via forceWorkspaceVersion
+  (proves the miss path falls through to the next priority step).
+
+Plus a focused v1AllowlistHit__doesNotPersistRowToWorkspacesTable test that
+asserts findById returns empty after a V1 allowlist hit, confirming the
+short-circuit happens before persistAndEmit reaches the workspaces table.
+
+* [OPIK-6409] [BE] refactor: inline single-flip helper, drop SELECT FOR UPDATE on version
+
+Per Andrés&#39;s review on the OPIK-4933 PR (carried over here on rebase):
+- Inline `markFirstTraceReported` and `markMigrationSkipped`. Each method now
+  owns its full UPDATE → INSERT → retry-UPDATE flow; the shared
+  `transitionFlagAtomically` helper and `isDuplicateKeyViolation` predicate
+  are removed. Methods can evolve independently (SRP).
+- Drop `upsertVersionAndReturnPrevious` and the DAO&#39;s `findVersionForUpdate`.
+  Restore the prior `findById + upsertVersion` pair in `persistAndEmitBlocking`.
+  Acceptable per the review: this signal feeds analytics where full precision
+  is not required.
+
+- [OPIK-5745] [BE] feat: add LLM tools for full trace context in eval suite assertions (#6511)
+
+* [OPIK-5745] [BE] feat: add LLM tools for full trace context in eval suite assertions
+
+Eval suite assertions can now inspect sub-span behavior (tool calls, LLM model,
+intermediate steps) via two on-demand LLM tools: get_trace_spans and
+get_span_details. Tools are only offered when experimentId is present (test suite
+assertions); regular online scoring is unchanged.
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-5745] [BE] refactor: improve system prompt tool usage guidelines for eval suite assertions
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* fix: preserve ChatRequest parameters when adding tool specs
+
+Removing .parameters(null) from addToolSpecs() — it was stripping
+maxCompletionTokens which Anthropic requires, causing
+&#34;maxCompletionTokens cannot be null&#34; errors for Claude models.
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-5745] [BE] fix: address PR review - use InstructionStrategy for assertions, fix ChatRequest builder conflict
+
+- Force InstructionStrategy for test suite assertions so format instructions
+  survive responseFormat stripping when adding tool specs
+- Fix &#34;Cannot set both parameters and toolSpecifications&#34; by building fresh
+  ChatRequest instead of using toBuilder()
+- Guard handleToolCalls with experimentId != null check
+- Use constants for tool names in system prompt
+- Reduce tool call logging to debug level
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-5745][BE] Refactored trace span tools and introduced modular execution framework.
+
+- Removed `TraceSpanToolDefinition` and transitioned to a modular setup for LLM-as-judge tools.
+- Introduced `ToolRegistry`, `ToolExecutor` interface, and dedicated tool implementations (`GetTraceSpansTool`, `GetSpanDetailsTool`, `ReadTool`) for improved extensibility and maintainability.
+- Added infrastructure for tool execution contexts (`TraceToolContext`) and entity compression (`GenericCompressor`, `PathAwareTruncator`, `Tokens`, etc.).
+- Refined logic for trace/span serialization with truncation markers and jq path annotations.
+- Updated core application wiring and tests to support the new tool-based architecture.
+
+* [OPIK-5745][BE] Introduced test coverage and input validation for LLM-as-Judge scoring.
+
+- Added `OnlineScoringLlmAsJudgeScorerTest` to validate tool-enabled scoring logic and regression guard for structured requests.
+- Introduced `OnlineScoringEngineCapReplacementsTest` to test variable substitution with input capping logic.
+- Enhanced `OnlineScoringEngine` with a capped variable substitution path for large trace inputs, improving token efficiency and leveraging tool-based retrieval for full data.
+
+* [OPIK-5745][BE] Add JqTool for evaluating jq expressions on cached entities.
+
+- Introduced `JqTool` to execute jq expressions on cached JSON entities (e.g., spans, traces, datasets) using `jackson-jq`.
+- Registered `JqTool` in `ToolsModule` and updated `TestSuitePromptConstants` to include usage guidance.
+- Implemented argument validation, output capping, and error handling for malformed or runtime errors in expressions.
+- Added comprehensive unit tests for `JqTool` to validate spec adherence, expression handling, and caching behavior.
+- Updated `pom.xml` to include `jackson-jq` dependency.
+
+* [OPIK-5745][BE] Add SearchTool for regex-based searches in cached entities.
+
+- Implemented `SearchTool` to perform case-insensitive regex searches on cached JSON entities (e.g., spans, traces).
+- Registered `SearchTool` in `ToolsModule` and `TestSuitePromptConstants` with detailed usage guidance.
+- Added argument parsing, output capping at 50 matches, value truncation, and robust error handling for malformed inputs.
+- Developed comprehensive unit tests covering pattern matching, path scoping, and edge cases.
+- Introduced functionality to return matched paths and truncated values for follow-up extraction with `JqTool`.
+
+* [OPIK-5745][BE] Introduce `shouldUseTools` utility to centralize tool path enablement logic.
+
+- Replaced repetitive `experimentId` checks with `shouldUseTools` for improved code readability and maintainability.
+- Added JavaDoc to clarify tool path scope and future extensibility.
+- Updated `OnlineScoringLlmAsJudgeScorer` to leverage the utility in tool-specific conditions.
+
+* [OPIK-5745][BE] Add builder pattern to `CompressionResult` and refactor compressors.
+
+- Annotated `CompressionResult` with `@Builder` to enable builder pattern and immutability.
+- Refactored `GenericCompressor`, `TraceCompressor`, and `DatasetCompressor` to use `CompressionResult.builder()` for object instantiation.
+
+* [OPIK-5745][BE] Extract and centralize span hierarchy logic into `SpanHierarchy`.
+
+- Consolidated span tree-building logic from `SpanTreeSerializer` and `TraceCompressor` into a shared `SpanHierarchy` utility for reusability and consistency.
+- Added unit tests in `SpanHierarchyTest` to validate root promotion, child attachment, and edge cases.
+- Refactored `SpanTreeSerializer` and `TraceCompressor` to leverage `SpanHierarchy.toTree` for span tree generation.
+
+* [OPIK-5745][BE] Add sticky cache truncation warnings and downgrade tier for capped entries.
+
+- Modified `ReadTool` to persist `cache_warning` on subsequent reads of previously truncated entities.
+- Updated `applyCacheCap` to handle `ref` and `ctx`, marking truncated entries for consistent behavior.
+- Introduced `effectiveTier` to downgrade compression tier to `MEDIUM` when `cache_warning` is present.
+- Extended `TraceToolContext` with tracking for capped entries (`markTruncated`, `isTruncated`).
+- Added unit tests to validate persistent warnings and tier downgrades for capped entities.
+
+* [OPIK-5745][BE] Enhance truncation logic with configurable suffix styles.
+
+- Introduced `PathAwareTruncator.SuffixStyle` to support `WITH_JQ_HINT` and `BARE` options for truncation markers.
+- Updated `GenericCompressor` and `TraceCompressor` to accept custom suffix styles for truncated output.
+- Modified `ReadTool` to dynamically select suffix styles based on cache state, ensuring consistent output for capped entries.
+- Extended unit tests to validate behavior with both suffix styles and scenarios involving cache capping.
+- Refactored and documented truncation logic to clarify suffix behaviors and usage contexts.
+
+* [OPIK-5745][BE] Improve cache capping with fallback thresholds and enhanced truncation logic.
+
+- Added multi-tier fallback thresholds (`CAP_FALLBACK_LIMITS`) to gracefully handle oversized cached entities.
+- Replaced fixed truncation with dynamic fallback logic in `fitWithinCap` to prioritize caching highest-fidelity data within memory limits.
+- Simplified redundant cache pre-checks to ensure consistent behavior when updating cached entries.
+- Extended unit tests to validate multi-tier fallback scenarios and ensure capped entities respect `CACHE_CAP_CHARS`.
+
+* [OPIK-5745][BE] Remove thread support and improve validation in tools.
+
+- Removed `type=thread` support in `JqTool`, `SearchTool`, and `ReadTool` due to unsupported caching.
+- Enhanced error messages for invalid thread-type usage and updated argument validation.
+- Fixed logging messages for clarity and consistency.
+- Updated `ReadToolTest` to reflect thread rejection with improved error text.
+
+* [OPIK-5745][BE] Extract shared argument handling and cache utilities to `ToolArgs`.
+
+- Moved common argument parsing and cache utilities from `JqTool`, `SearchTool`, and `ReadTool` to a new `ToolArgs` utility class for reusability and consistency.
+- Removed redundant methods like `textOrNull`, `errorJson`, and `capWithHint` from individual tools and replaced them with centralized counterparts in `ToolArgs`.
+- Updated tools to leverage `ToolArgs` for cleaner and more maintainable code.
+- Simplified unit tests by aligning with shared utility behaviors.
+
+* [OPIK-5745][BE] Add `withTools` support to test suite prompts and scoring logic.
+
+- Introduced `withTools` flag to conditionally include tool-teaching addendum in system prompts.
+- Refactored `TestSuitePromptConstants` with methods to handle dynamic prompt generation.
+- Updated `EvaluatorMapper`, `TestSuiteAssertionSampler`, and scorers to propagate `withTools` configuration.
+- Added `LlmAsJudgeToolsMode` utility to centralize tool path enablement logic.
+- Ensured consistent application of tool-teaching logic across test suite evaluation flows.
+
+* [OPIK-5745][BE] Centralize truncation logic and enhance tooling support.
+
+- Extracted shared truncation logic into a new utility class `TruncationMarker` for consistency across the codebase.
+- Updated `OnlineScoringEngine`, `PathAwareTruncator`, and related tools to use `TruncationMarker` for unified string truncations.
+- Improved logging and error handling in `ReadTool` with correlation IDs for secure debugging.
+- Applied builder pattern to `ParsedArgs` and `CacheOutcome` for cleaner object construction and immutability.
+- Refactored suffix-handling logic in `PathAwareTruncator` for modularity.
+
+* [OPIK-5745][BE] Rename `TruncationMarker` to `StringTruncator` and refactor truncation logic.
+
+- Renamed `TruncationMarker` to `StringTruncator` for clearer intent and consistency.
+- Refactored shared truncation methods (`apply` to `truncate`) for improved readability and usage.
+- Updated `SpanTreeSerializer`, `DatasetCompressor`, and related tools to use `StringTruncator.truncate` for centralization.
+- Removed redundant local truncation implementations in favor of the utility method.
+
+* [OPIK-5745][BE] Improve exception logging in `ReadTool` deserialization.
+
+- Updated `log.warn` to include full exception details when deserialization fails for better debugging.
+
+* [OPIK-5745][BE] Replace per-tool truncation with centralized `StringTruncator`.
+
+- Updated `JqTool` and `SearchTool` to use `StringTruncator.truncate` for string truncation.
+- Removed `capWithHint` from `ToolArgs` in favor of centralized truncation logic.
+- Added a new `separator` option to `StringTruncator.truncate` for improved flexibility.
+
+* [OPIK-5745][BE] Add debug logging for tool execution and cache behavior.
+
+- Enhanced debugging in `JqTool`, `SearchTool`, `ReadTool`, and `GetTraceSpansTool` with detailed logs for valid arguments, cache misses, and entity truncation.
+- Added `@Slf4j` annotation to `GetTraceSpansTool` to support logging.
+
+* [OPIK-5745][BE] Add detailed debug logging for tool execution summaries.
+
+- Enhanced `JqTool`, `SearchTool`, and `ReadTool` with additional debug logs to capture key execution details.
+- Logged arguments, output size, truncation status, and other relevant summary metrics for improved traceability.
+
+* [OPIK-5745][BE] Refactor `OnlineScoringLlmAsJudgeScorer` to enforce structured LLM outputs.
+
+- Introduced explicit strategy to force JSON-only responses after tool usage.
+- Added `UserMessage` to clarify response expectations and prevent prose in final output.
+- Improved handling of tool-driven and structured LLM requests for consistency.
+
+* [OPIK-5745][BE] Enhance workspace name resolution and update prompt path conventions.
+
+- Added `resolveWorkspaceName` method to `OnlineScoringLlmAsJudgeScorer` for workspace name lookup with fallback behavior.
+- Updated `TestSuitePromptConstants` with detailed path conventions for tool usage and jq expressions.
+
+* [OPIK-5745][BE] Prioritize Anthropic for tool-driven LLM judge assertions; update fallback provider and documentation.
+
+* [OPIK-5745][BE] Update judge provider ordering rationale and enhance debug logging.
+
+- Refined `SupportedJudgeProvider` ordering explanation with additional empirical details and caveats.
+- Added detailed debug logs in `GetTraceSpansTool` to capture trace ID, span count, and output size for improved logging granularity.
+
+* [OPIK-5745][BE] Force initial tool engagement for OpenAI judges; adjust fallback behavior.
+
+- Updated `addToolSpecs` to use `ToolChoice.REQUIRED` on the first call, ensuring at least one tool interaction for OpenAI judges with tool-loop bias.
+- Refined follow-up behavior with `ToolChoice.AUTO` to allow models to decide when to stop investigating.
+- Enhanced test coverage to verify tool engagement and output propagation under forced and automatic modes.
+- Updated rationale in `SupportedJudgeProvider` comments to reflect empirical results and fallback adjustments.
+
+* [OPIK-5745][BE] Update model usage to GPT-4O-MINI and refine logging for LLM requests and responses.
+
+* [OPIK-5745][BE] Refine logging for debug and user-facing messages.
+
+- Updated debug logging in `GetTraceSpansTool` and `ReadTool` to improve clarity and uniformity.
+- Guarded `userFacingLogger` invocations in `OnlineScoringLlmAsJudgeScorer` with `isInfoEnabled` to prevent unnecessary computation for deferred logging.
+
+* [OPIK-5745][BE] Update log assertions in `AutomationRuleEvaluatorsResourceTest` to validate both refactored and legacy log formats.
+
+* [OPIK-5745][BE] Enforce safe jq path expressions in `SearchTool` and add corresponding test coverage.
+
+- Introduced regex validation to restrict `path` to simple jq scope expressions.
+- Updated `ParsedArgs` to reject unsafe `path` inputs.
+- Added tests to validate safe and unsafe `path` behaviors.
+
+* [OPIK-5745][BE] Handle tool execution exceptions gracefully; propagate fatal errors.
+
+- Updated `ToolRegistry` to return error JSON for exceptions while allowing fatal errors to propagate.
+- Added tests to verify behavior for runtime exceptions and fatal errors.
+
+* [OPIK-5745][BE] Refine debug logging in `ReadTool` for capped entity size.
+
+- Replaced inline `toString().length()` with a variable for improved clarity in log statements.
+
+* [OPIK-5745][BE] Decouple truncation warnings from capping logic in `ReadTool`.
+
+- Separated truncation flag handling from size-based capping decisions to ensure independence.
+- Updated cache warning behavior to surface only when truncation is flagged.
+
+* [OPIK-5745][BE] Extract common header generation logic into `headerPrefix` in `SearchTool`.
+
+- Refactored `successHeader` and `errorHeader` to share a common `headerPrefix` method for consistent header construction.
+
+* [OPIK-5745][BE] Add tests to validate `handleToolCalls` behavior for failure propagation and max round handling.
+
+- Verified error propagation for transient failures without masking issues.
+- Ensured max round cap triggers final structured call with proper contract adherence.
+
+* [OPIK-5745][BE] Avoid field loss regression in `addToolSpecs` by switching to `toBuilder`.
+
+- Replaced the manual builder with `toBuilder` to ensure all top-level fields in `ChatRequest` are preserved.
+- Prevents silent field omissions in `addToolSpecs` during tool specification updates.
+
+* [OPIK-5745][BE] Refactor error JSON generation in `ToolRegistry`.
+
+- Replaced inline formatted strings with `ToolArgs.errorJson` for consistency and maintainability in error responses.
+
+---------
+
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+Co-authored-by: Iaroslav Omelianenko &lt;yaric_mail@yahoo.com&gt;
+
+- [OPIK-6368] [BE] feat: auto-create environments from trace ingestion (#6638)
+
+* Auto create environments based on trace ingestions
+
+* address comments
+
+* address comments
+
+- [OPIK-6339] [PY-SDK] feat: respect search rate limits in search_traces and search_spans (#6629)
+
+* [OPIK-6339] [PY-SDK] feat: respect search rate limits in search_traces and search_spans
+
+Wraps the per-page REST calls in search_helpers with the existing
+ensure_rest_api_call_respecting_rate_limit helper so 429 responses on
+POST /v1/private/{traces,spans}/search are awaited and continued instead
+of propagating to the caller. The helper now takes an optional
+operation_name to make rate-limit log lines identifiable, and the level
+was bumped to WARNING since a 429 is actionable signal.
+
+Also tightens the read_source type on read_and_parse_full_stream:
+last_retrieved_id is a UUID string, not an int.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* test(search_helpers): assert sleep value not call count
+
+mock.patch on time.sleep is global; on Python 3.14 background-thread
+sleeps inflate the call count and break assert_called_once_with /
+assert_not_called. Switch to scanning call_args_list for the specific
+seconds value instead.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* test(search_helpers): align test names with WHAT__CASE__RESULT convention
+
+Per .agents/skills/python-sdk/testing.md.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(sdk): surface evaluation task failures (#6624)
+
+* fix(sdk): surface evaluation task failures
+
+* fix(evaluation): address review feedback on task error handling
+
+- Always close trace and insert experiment item on task failure
+- Simplify error-classification conditional via local variable
+- Tie synthetic testResult traceId assertion to captured trace in test
+- Update suite test to expect task_error result for failed items
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* fix(sdk): address review feedback on evaluation task error handling
+
+- Replace EvaluationItemRunError exception with ItemRunOutcome tagged union
+  so the expected task-failure path no longer uses throw for control flow
+- Narrow try/catch in executeItemRun to task execution only; wrap the
+  experiment insert in its own try/catch so the original task error is
+  never swallowed by a failed insert
+- Fix createFailedTestResult: use honest taskOutput: {} and route
+  scoringInputs through prepareScoringInputs so scoringKeyMapping applies
+  consistently on failed rows
+- Export TASK_ERROR_SCORE_NAME constant (__opik_task_error__) from types
+  and use it everywhere instead of a bare string literal
+- Add JSDoc on EvaluationResult.testResults and
+  EvaluationScoreResult.scoringFailed calling out the reserved name
+- Add assertion that createExperimentItems is called for failed runs
+- Add test for the insert-failure path (original task error always wins)
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Petro Tiurin &lt;2856640+petrotiurin@users.noreply.github.com&gt;
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- [OPIK-6391] [FE] fix: send thread_model_id when adding thread comments (#6639)
+
+* [OPIK-6391] [FE] fix: send thread_model_id when adding thread comments
+
+ThreadAnnotatePanel was using the user-facing threadId as the URL path
+parameter when creating or batch-deleting thread comments. The backend
+endpoint resolves the thread by trace_threads.id (the UUID
+thread_model_id), so the lookup failed with 404 and the comment was not
+saved. Pass thread.thread_model_id explicitly and gate the panel render
+on the thread being loaded.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* test(thread-panel): assert comment mutations route through thread_model_id
+
+Adds a regression test for ThreadAnnotatePanel that mocks the comment
+mutations and asserts createThreadCommentMutation and
+threadCommentsBatchDeleteMutation receive payloads carrying
+thread_model_id (not the user-facing thread_id). Catches the OPIK-6391
+regression directly.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Update versions to 2.0.26 and bump base version to 2.0.27
+
+- [OPIK-4933] [BE] feat: add workspaces metadata table for version, first-trace, migration state (#6615)
+
+* [OPIK-4933] [BE] feat: add workspaces metadata table and persistence layer
+
+New per-workspace state table consolidates three previously ad-hoc workarounds:
+- Workspace V1/V2 version (was Redis-only, 5-min TTL).
+- First-trace analytics dedup (was Redis, 30-day TTL).
+- Migration trapped-workspace flag (was process-local in-memory set).
+
+The schema is intentionally generic (NULLable feature columns, audit columns)
+so it can grow into the long-term workspace metadata table without further
+migrations. Mutations go through idempotent upserts; first-trace uses a
+single-statement upsert + read-back-equality to give correct first-writer-wins
+semantics under concurrency without depending on the connector&#39;s
+useAffectedRows flag or the lock-prone two-step pattern.
+
+* [OPIK-4933] [BE] feat: persist V1/V2 determinations and emit analytics event
+
+After every successful version determination (cache-miss, not allowlist /
+forced-version override), upsert the result into the workspaces table and
+emit a workspace_version_determined analytics event with previous/new version
+and a version_changed boolean. Both side effects are fire-and-forget on the
+boundedElastic scheduler and never propagate to the response, mirroring the
+existing cacheResult pattern. Cache hits still bypass both side effects so
+subsequent reads do not pollute the data.
+
+* [OPIK-4933] [BE] refactor: migrate first-trace dedup from Redis to MySQL
+
+The Redis-backed firstTraceCreatedDedupTtl key (30-day TTL) is replaced with
+the workspaces.first_trace_reported_at column. Dedup is now permanent: a
+workspace&#39;s first trace is forever its first trace, and the state survives
+JVM restarts and is visible from outside the running process.
+
+Removes the analytics.firstTraceCreatedDedupTtl config key and its YAML
+defaults; existing event-emission paths (BI event + analytics event) are
+unchanged.
+
+* [OPIK-4933] [BE] refactor: replace in-memory trapped-workspace set with table
+
+The static TRAPPED_WORKSPACE_IDS set is removed; trapped workspaces are now
+persisted via workspaces.migration_skipped_at and the cycle-start exclusion
+list and cycleTrappedWorkspaces gauge read from the table.
+
+Behavior change worth calling out: the skip is now permanent until a deleted
+project is restored or an operator clears the row. The previous
+reset-on-JVM-restart behavior was a workaround artifact, not a feature.
+
+* [OPIK-4933] [BE] refactor: address review feedback on workspaces persistence
+
+- persistAndEmit is now truly fire-and-forget via Schedulers.boundedElastic().schedule(...)
+  instead of being chained through .flatMap, so the workspace-version response no longer
+  waits on the DB write or the analytics call. Errors are caught inside the scheduled
+  runnable so nothing propagates.
+- Single Instant.now() snapshot reused for both the upsert timestamp and the analytics
+  event &#34;date&#34; property.
+- DAO naming consistency: markMigrationSkipped renamed to upsertMigrationSkipped to
+  match the other upsert verbs.
+- Javadoc additions: persistAndEmit now documents the auth one-way V2 gate behaviour
+  (it persists, intentionally, since the auth gate is the authoritative source for
+  those workspaces). findLastKnownVersion notes the silent fallback when the stored
+  string does not match a current OpikVersion enum value. markFirstTraceReported
+  documents the microsecond-collision trade-off as conscious — the SELECT FOR UPDATE
+  alternative deadlocks under contention because of InnoDB lock-upgrade semantics on
+  shared INSERT-IGNORE locks.
+
+* [OPIK-4933] [BE] test: end-to-end coverage for workspaces table flows
+
+Closes the gap between the DAO-level WorkspacesServiceTest and the ticket&#39;s acceptance
+criteria by asserting on the workspaces table state from the resource-level tests:
+
+- WorkspaceVersionResourceTest.EntityWorkspaceVersionTest:
+  - versionDetermination__persistsDeterminedVersionToWorkspacesTable: a real
+    determination lands in workspaces.last_known_version (awaited because persist is
+    fire-and-forget).
+  - versionDetermination__updatesPersistedRowWhenVersionChanges: pre-populates the
+    row with V1, triggers a fresh determination of V2, and asserts the row was
+    overwritten — implicitly verifies the analytics event would carry
+    version_changed=true.
+- WorkspaceVersionResourceTest.V2WorkspaceAllowlistTest:
+  - overridePaths__doNotPersistRowToWorkspacesTable: both the allowlist (→V2) and
+    forceWorkspaceVersion (→V1) override paths must skip persistAndEmit so the
+    table is not polluted with non-determined values.
+- ExperimentProjectMigrationJobTest.skipExperimentWhenInferredProjectWasDeleted:
+  asserts the trapped workspace appears in workspacesService.findMigrationSkippedWorkspaceIds()
+  after the cycle, so the next cycle&#39;s exclusion set has the right contents.
+
+* [OPIK-4933] [BE] refactor: trim Javadoc to non-obvious facts; tighten override-skip test
+
+Doc cleanup — keep only what would surprise a future reader:
+- WorkspacesService method docs reduced to the non-obvious contract bits
+  (overwrite vs idempotent, first-writer-wins boolean semantics, unknown-enum
+  fallback). Class-level Javadoc removed; the package and method names are
+  self-explanatory.
+- persistAndEmit Javadoc trimmed to the auth one-way V2 gate caveat (the only
+  detail not derivable from the implementation).
+- markFirstTraceReported impl Javadoc reduced to the microsecond-truncation
+  rationale; the alternative-patterns analysis belongs in the PR description.
+
+Test:
+- overridePaths__doNotPersistRowToWorkspacesTable now uses Awaitility
+  during(1s).atMost(3s) so the assertion must hold continuously, proving no
+  late-firing background write surfaces.
+
+* [OPIK-4933] [BE] test: shorten override-skip Awaitility window to 300ms
+
+boundedElastic schedules within ms; a 300ms continuous-absence window is
+sufficient to prove no late-firing background write surfaces. Cuts the
+overridePaths__doNotPersistRowToWorkspacesTable active wait from 1s to 300ms
+(test runtime 32s → 22.7s, dominated by container startup).
+
+* [OPIK-4933] [BE] test: rewrite WorkspacesServiceTest as a Mockito unit test
+
+The previous version booted the full Dropwizard stack (MySQL + ClickHouse +
+Redis + WireMock) to drive 9 DAO-level integration assertions through the
+service. That work belongs at the controller layer, not on the service test.
+
+Replaced with a true unit test that mocks TransactionTemplate, Handle, and
+WorkspacesDAO and verifies the service-level contract: enum-to-wire-value
+mapping on upsertVersion, unknown-enum fallback on findLastKnownVersion,
+microsecond truncation on markFirstTraceReported, read-back-equality boolean
+semantics, and DAO method delegation for the migration-skip operations.
+
+Runtime drops from ~57s (containers) to ~0.7s (13 tests, no containers).
+
+The SQL-level behaviours previously asserted here (idempotency, COALESCE,
+TIMESTAMP(6) precision, concurrency under contention) remain covered at the
+controller layer via BiEventListenerTest, WorkspaceVersionResourceTest, and
+ExperimentProjectMigrationJobTest, all of which exercise the real DB through
+the resource API.
+
+* [OPIK-4933] [BE] test: WireMock-based coverage for workspace_version_determined event
+
+Closes the three remaining acceptance-criteria gaps that were previously only
+guaranteed by chain ordering:
+
+- firstDetermination__emitsEventWithVersionChangedTrue (AT: emit on first determination)
+- cacheHit__doesNotEmitAdditionalEvent (AT: cache hit must not write/emit)
+- sameVersionRecompute__emitsVersionChangedFalse (AT: version_changed=false)
+- differentVersionRecompute__emitsVersionChangedTrue (AT: version_changed=true)
+
+New top-level test class with caching enabled (PT5M TTL) and the analytics
+endpoint stubbed via the existing WireMock plumbing. Each assertion is scoped
+to the test&#39;s unique workspace_id so events from sibling tests don&#39;t bleed in.
+
+4 tests, ~25s runtime (dominated by container startup).
+
+* [OPIK-4933] [BE] test: replace inline org.mockito.Mockito.never() with static import
+
+Backend code style requires static imports over inline fully-qualified class
+names except on name collisions. The three readOnlyMethodsHaveNoWriteSideEffects
+verify(...) calls were qualifying never() inline; switched to a static import
+matching the rest of the file&#39;s Mockito usage.
+
+* [OPIK-4933] [BE] test: rename cacheHit test to cover the no-write half of the AT
+
+The acceptance criterion is &#34;subsequent cache-hit reads do not write or emit&#34;
+— the existing test was only named for the no-emit half. persistAndEmitBlocking
+writes and emits as a single unit (no early return between them), so an
+unchanged event count after a cache hit is logically sufficient to prove the
+upsert also did not run; the test now states this in a method-level comment
+and asserts the row state is consistent with a single determination.
+
+* [OPIK-4933] [BE] test: assert pre-marked trapped workspace is excluded from cycle
+
+The previous skipExperimentWhenInferredProjectWasDeleted asserted that the
+trap flag is set in the workspaces table after a workspace becomes trapped
+(persistence side). The acceptance criterion also requires that a trapped
+workspace is excluded from the next cycle&#39;s eligible set (consumption side).
+
+Adds skipPreMarkedTrappedWorkspaces — mirrors the existing skipExcludedWorkspaces
+pattern but uses the skip flag instead of migration.excludedWorkspaceIds config.
+A workspace is pre-marked via workspacesService.markMigrationSkipped before
+seeding an eligible experiment; the experiment must remain unmigrated across
+cycles, proving the workspace is omitted from the union exclusion set in
+runMigrationCycle.
+
+* [OPIK-4933] [BE] refactor: review fixes — schema, Workspace record, DAO/service rewrite
+
+Address review feedback on the workspaces persistence layer:
+
+Schema (000067):
+- Rename PK column workspace_id → id (matches the entity-table convention).
+- Drop workspaces_version_idx (no DAO query reads by version yet).
+- Keep workspaces_migration_skipped_idx (used by the cycle&#39;s exclusion query).
+
+Model + DAO:
+- New api/Workspace record (raw DB shape; service layer converts last_known_version
+  to OpikVersion via findByValue, treating unrecognised values as empty).
+- DAO collapsed to a single findById(id) returning Optional&lt;Workspace&gt;; service does
+  field selection. Per-field finders removed.
+- All upserts populate created_by/last_updated_by explicitly with SYSTEM_USER and
+  touch last_updated_by on real changes (IF guard keeps the audit unchanged on
+  COALESCE no-ops, so row counts still distinguish first-writer vs no-op).
+- markFirstTraceReported now uses ROW_COUNT-based first-writer detection
+  (Connector/J default useAffectedRows=false: 1=insert, 2=transition, 0=no-op),
+  eliminating the microsecond-collision false positive baz-reviewer flagged.
+
+Service:
+- Drop Instant parameters; Instant.now() is sourced internally to prevent wrong
+  uses (audit columns / version_determined_at / first_trace_reported_at).
+- Drop @NonNull on findById&#39;s workspaceId; blank input returns Optional.empty()
+  (callers receive natural empty result instead of NPE).
+- DAO row counts propagated through int returns on upsertVersion and
+  markMigrationSkipped (caller can ignore but the data is available).
+- Replace findLastKnownVersion with findById; persistAndEmitBlocking maps
+  Workspace.lastKnownVersion through OpikVersion.findByValue.
+- Replace &#34;none&#34; with &#34;unknown&#34; for previous_version on the
+  workspace_version_determined analytics event.
+
+Consumers updated for the new signatures (BiEventListener,
+ExperimentProjectMigrationService).
+
+* [OPIK-4933] [BE] refactor: move persistAndEmit into computeVersion
+
+Move the fire-and-forget persistAndEmit call into the terminal step of
+computeVersion (both the auth one-way V2 gate and the entity-scan branches),
+so future call sites of computeVersion can&#39;t accidentally skip persistence.
+getWorkspaceVersion no longer needs the .doOnNext wrappers.
+
+* [OPIK-4933] [BE] test: consolidate workspaces tests into existing classes
+
+Per review feedback (don&#39;t add a separated class for analytics; inline into
+existing tests; drop negative emission tests; remove the redundant unit test):
+
+- Delete WorkspaceVersionAnalyticsEmissionTest. WireMock for the analytics
+  endpoint is now wired into EntityWorkspaceVersionTest&#39;s AppContextConfig
+  (usageReportUrl + usageReportEnabled + analytics.enabled custom config + a
+  catch-all stub). Class-level helper verifyEvent(...) is shared across the
+  nested classes.
+- Inline the persistence + analytics-event payload assertions into the
+  existing happy-path test workspaceVersion__whenDatasetEntities__returnsExpectedVersion;
+  it already exercises a V2 -&gt; V1 entity-driven recompute, which now also
+  asserts findById(id) reflects the persisted version after each call and
+  the analytics event payload includes version_changed=true with the right
+  previous/new values.
+- Drop the dedicated tests
+  versionDetermination__persistsDeterminedVersionToWorkspacesTable and
+  versionDetermination__updatesPersistedRowWhenVersionChanges (their coverage
+  is folded into the inline assertions above).
+- Drop overridePaths__doNotPersistRowToWorkspacesTable: per the reviewer,
+  negative emission tests slow the suite down and add little value beyond
+  what chain ordering already mechanically guarantees.
+- Delete WorkspacesServiceTest. Its DAO contracts are exercised end-to-end
+  through the controller-level tests; the only behaviours that were
+  unit-only (microsecond truncation, equality-based dedup) no longer exist
+  with the ROW_COUNT-based dedup in the previous refactor.
+- ExperimentProjectMigrationJobTest.skipPreMarkedTrappedWorkspaces updated
+  for the new markMigrationSkipped(workspaceId, reason) signature.
+
+* [OPIK-4933] [BE] fix: split markFirstTraceReported into UPDATE-then-INSERT
+
+CI surfaced that the single-statement upsert + ROW_COUNT-based detection is
+unreliable: Connector/J defaults to useAffectedRows=false (CLIENT_FOUND_ROWS=on),
+which makes a matched-but-unchanged upsert return 1 — indistinguishable from a
+fresh insert. BiEventListenerTest.shouldReportFirstTraceEvents observed both
+the first and second trace creations emitting the analytics event because both
+calls returned true.
+
+Replaced with two atomic primitives in a single transaction, exactly matching
+the reviewer&#39;s suggestion (one extra query under the same transaction, handle
+the conflict exception):
+
+- updateFirstTraceIfNull: UPDATE ... WHERE first_trace_reported_at IS NULL.
+  Row count is unambiguous — only the writer that flipped the column from NULL
+  to the timestamp gets a row count of 1.
+- insertFirstTrace: plain INSERT (no upsert). Throws on duplicate-key when
+  another writer inserted first; caller catches SQLSTATE 23000 and returns
+  false.
+
+Race-safe: both queries run in the same WRITE transaction, the UPDATE WHERE
+clause is atomic at the row level, the INSERT is atomic at the PK level, and
+the lock acquisition order is uniform so no deadlock cycle is possible.
+BiEventListenerTest.shouldReportFirstTraceEvents now passes locally.
+
+* [OPIK-4933] [BE] refactor: bump migration to 000068 + move Workspace record to domain
+
+Round-4 review fixes (Andrés):
+
+- Bump the create-workspaces-table migration from 000067 to 000068. main now
+  carries 000067_reseed_default_environment_colors.sql, so our changeset
+  number was outdated.
+- Move com.comet.opik.api.Workspace → com.comet.opik.domain.workspaces.Workspace.
+  The api/ package is for request/response DTOs; this record is an internal
+  DB model and lives next to the DAO/service that use it.
+- Drop all @JsonProperty annotations on the record. JDBI3&#39;s ConstructorMapper
+  is the only consumer; the record is never serialised to JSON, so the
+  annotations were dead weight.
+
+* [OPIK-4933] [BE] refactor: split markMigrationSkipped into UPDATE-then-INSERT
+
+Round-4 review fix (Andrés): the previous ON DUPLICATE KEY UPDATE with
+COALESCE looked like an update on duplicate but always preserved the existing
+values, which was misleading. Per the reviewer&#39;s suggestion, an INSERT IGNORE
+would communicate intent better — but pure INSERT IGNORE silently fails to
+mark workspaces whose row already exists with migration_skipped_at = NULL
+(common path: a prior version-determination upsert created the row before the
+migration job got there).
+
+Switched to the same UPDATE-then-INSERT pattern used for markFirstTraceReported:
+- updateMigrationSkippedIfNull: UPDATE ... WHERE migration_skipped_at IS NULL
+  flips a NULL flag to ts atomically; row count is unambiguous.
+- insertMigrationSkipped: plain INSERT for the missing-row branch; caller
+  catches SQLSTATE 23000 if another writer trapped the workspace first.
+
+Same idempotent semantics as before (already-trapped → no-op), but the SQL
+honestly reflects what we actually do.
+
+* [OPIK-4933] [BE] feat: plumb API user via reactive context for audit columns
+
+Round-4 review fix (Andrés): the SYSTEM_USER constant was being stamped on
+every workspaces row, regardless of whether the call originated from a user
+request or a background job. Per the reviewer:
+  - upsertVersion / markFirstTraceReported: API call → API user.
+  - markMigrationSkipped: system job → SYSTEM user (kept internal, unchanged).
+
+WorkspacesService API:
+  - upsertVersion(workspaceId, version, userName)
+  - markFirstTraceReported(workspaceId, userName)
+  - markMigrationSkipped(workspaceId, reason)  // SYSTEM_USER stays internal
+
+Plumbing:
+  - WorkspacesResource.getWorkspaceVersion now wraps the call with
+    .contextWrite(ctx -&gt; setRequestContext(ctx, requestContext)) so the API
+    user lands in the Reactor context.
+  - AbstractWorkspaceVersionService.getWorkspaceVersion reads RequestContext.USER_NAME
+    via Mono.deferContextual (no Provider&lt;RequestContext&gt;.get() inside the chain
+    — that anti-pattern would break on Schedulers.boundedElastic where the
+    request scope is gone). userName is threaded through computeVersion and
+    persistAndEmit/persistAndEmitBlocking down to WorkspacesService.upsertVersion.
+  - BiEventListener already had event.userName(); pass it directly to
+    markFirstTraceReported.
+
+Also fixes the changeset id inside 000068_create_workspaces_table.sql
+(file rename in the previous commit didn&#39;t update the inline `--changeset`
+declaration, causing a Liquibase checksum mismatch on existing test DBs).
+
+* [OPIK-4933] [BE] fix: race in version persistence via single-tx SELECT FOR UPDATE
+
+The two-step findById + upsertVersion across separate transactions could
+emit duplicate version_changed=true events when concurrent determinations
+ran for the same workspace (both readers saw the same pre-write snapshot).
+
+Replace with upsertVersionAndReturnPrevious, which performs SELECT … FOR
+UPDATE → upsert in one WRITE transaction so each writer observes the prior
+writer&#39;s commit.
+
+* [OPIK-4933] [BE] refactor: extract single-flip helper, drop duplicate SYSTEM_USER, @NonNull id
+
+- WorkspacesService: extract transitionFlagAtomically + isDuplicateKeyViolation helpers
+  shared by markFirstTraceReported and markMigrationSkipped (both are UPDATE-if-null →
+  INSERT-or-ignore-duplicate). markMigrationSkipped now returns boolean (callers discard
+  the value).
+- AbstractWorkspaceVersionService: drop the private SYSTEM_USER constant in favor of
+  RequestContext.SYSTEM_USER.
+- Workspace: mark id (NOT NULL PK) with @NonNull so the builder/JDBI ConstructorMapper
+  enforce the invariant.
+- Migration 000068: trailing blank line per migrations.md.
+
+* [OPIK-4933] [BE] fix: retry UPDATE on duplicate-key in single-flip helper
+
+The duplicate-key on the INSERT branch was wrongly treated as &#34;another
+writer flipped this flag.&#34; A duplicate-key just means the row exists —
+it may have been inserted by an unrelated writer (version determination,
+migration job) that didn&#39;t touch our target column. Retry the
+UPDATE-if-null after duplicate-key to disambiguate: if the column is
+still NULL, this caller flips it (true); otherwise some prior caller
+already set it (false).
+
+Fixes the concurrency hole flagged on markFirstTraceReported and
+markMigrationSkipped — both go through the helper.
+
+* [OPIK-4933] [BE] style: static-import RequestContext.SYSTEM_USER
+
+Match the convention already used in WorkspacesService — code-style rule
+prefers static imports over inline fully-qualified class names.
+
+* [OPIK-4933] [BE] style: @NonNull on findById workspaceId for consistency
+
+Every other public method in WorkspacesService annotates `workspaceId`
+with @NonNull. findById was the lone exception. Keeping the blank-tolerance
+(empty Optional on blank id) since that&#39;s the documented contract.
+
+- [NA] [BE][FE] chore: sync provider model definitions (#6637)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [NA] [BE] Update model prices file (#6636)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [NA] [SDK] [DOCS] Update automatically OpenAPI spec and Fern code (#6634)
+
+- Update versions to 2.0.25 and bump base version to 2.0.26
+
+- [OPIK-6265] [BE] feat: add environment field to spans, traces, and threads (#6608)
+
+* Add environment to spans/traces/threads
+
+* address comments
+
+* fix
+
+* fix tests
+
+* fix tests
+
+* add filters
+
+* address comments
+
+* address comments
+
+- [NA] [SDK] [DOCS] Update automatically OpenAPI spec and Fern code (#6633)
+
+- [OPIK-6260] [BE] [FE] feat: display recent activity on project home page (#6595)
+
+* [OPIK-6260] [BE] [FE] feat: display recent activity on project home page
+
+BE: New aggregated endpoint GET /v1/private/projects/{projectId}/recent-activity
+that fetches the most recent items across 6 entity types (experiments,
+optimizations, dataset/test suite versions, agent config blueprints, alert
+events) in parallel, merges and returns the top N sorted by date.
+
+Also enriches alert event logs with project_id in markers for project-scoped
+filtering.
+
+FE: Redesigned project home page with greeting, action buttons, and recent
+activity feed. Split sidebar into Home + Ollie tabs. Added /ollie route for
+full-page assistant (previous home behavior).
+
+* Revision: address PR review comments
+
+- Fix import order in RecentActivitySection (external before internal)
+- Add @Max(100) to size query param in RecentActivityResource
+- Pass size through to per-source queries instead of hardcoded limit
+- Use UserLog constants for marker keys and add null guard in fetchAlertEvents
+- Fix dataset/test suite links to navigate to /items directly
+
+* Revision 2: Add unit tests for RecentActivityService
+
+Tests cover: merge/sort across sources, size limiting, graceful
+degradation (partial + total failure), alert event null guard filtering,
+and empty project handling.
+
+* Revision 3: Show Home in sidebar even when Ollie is disabled
+
+Home should always be visible; only Ollie depends on the assistant plugin.
+
+* Revision 4: Address FE review comments
+
+- Rename showHome → showOlliePage (only controls Ollie visibility now)
+- Replace Button+onClick with Link for nav buttons and activity items
+- Move formatRelativeDateTime to @/lib/date.ts alongside other date utils
+
+* Revision 5: Address BE review comments and add resource-level tests
+
+- Rename endpoint path to /activities (RESTful plural)
+- Add @Consumes(JSON), @JsonView, @ApiResponse docs (200, 400, 500)
+- Add pagination (RecentActivityPage with page/size/total/projectId/content)
+- Add createdBy field to RecentActivityItem
+- Use @Builder pattern for all DTOs and construction
+- Remove top-level onErrorResume (errors bubble as 500)
+- Add class-level javadoc documenting page-1 limitation
+- Parallelize JDBI sources (datasets + agent configs as separate Monos)
+- Merge dataset/test suite query into single call (drop type filter)
+- Add UUIDv7 30-day lookback filter for dataset query scan reduction
+- Import HashMap instead of inline java.util.HashMap
+- Update unit tests: @InjectMocks, Podam, precise mocks, full object assertions
+- Add resource-level black box tests with Testcontainers (all entity types,
+  sort order, project isolation, permission enforcement)
+
+* Revision 6: Gate dashboards button with permission, guard future timestamps
+
+- Hide &#34;View dashboards&#34; button when canViewDashboards is false
+- Guard future timestamps in formatRelativeDateTime to prevent &#34;0 days ago&#34;
+
+* Revision 8: Address remaining review comments
+
+- Remove projectId from RecentActivityPage (not a page-level field)
+- Reorder createdBy before createdAt in RecentActivityItem
+- Add @NonNull to RecentDatasetVersion DB-enforced fields
+- Use InstantToUUIDMapper.toLowerBound() for proper UUIDv7 lower bound
+- Extract RecentActivityResourceClient for test reuse
+- Full object assertion on empty project test, field assertions on combined test
+- Make Podam instance field (thread safety)
+- Document graceful degradation in class javadoc
+- Rename Ollie to Opik Connect in sidebar
+
+* Revision 9: Temporarily hide home page, show Opik Connect as default
+
+Home page hidden until redesign is complete. /home route renders OlliePage,
+sidebar shows Opik Connect only. TODO comments mark all temporary changes
+for easy restoration in follow-up PR.
+
+- [OPIK-6370] [BE] fix: tolerate plain-string UUIDs in Redis stream deserialization (#6610)
+
+* [NA] [BE] fix: tolerate plain-string UUIDs in Redis stream deserialization
+
+The Redis stream codec used by experiment_denormalization_stream and other
+Java-codec streams wraps a Jackson ObjectMapper with default typing enabled.
+Older opik-backend versions ran on a different default-typing configuration
+and left messages with UUID fields serialized as plain strings in PEL; the
+current version&#39;s deserializer expects Jackson&#39;s As.WRAPPER_ARRAY shape
+([&#34;java.util.UUID&#34;,&#34;&lt;uuid&gt;&#34;]). XAUTOCLAIM repeatedly tries to reclaim those
+stuck messages, fails with MismatchedInputException, and emits an ERROR log
+every pending-message-duration window.
+
+Add a LenientUUIDDeserializer that accepts both shapes and register it on
+the mapper handed to JsonJacksonCodec inside RedisStreamCodec. Scoped to
+the Redis stream codec only — the global JsonUtils.MAPPER is untouched, so
+HTTP API JSON behavior is unchanged.
+
+Includes a unit test covering plain-string, As.WRAPPER_ARRAY, and a
+round-trip case to confirm we don&#39;t break the happy path.
+
+* [NA] [BE] fix: override deserializeWithType so the lenient UUID deserializer fires under WRAPPER_ARRAY default typing
+
+The original commit registered LenientUUIDDeserializer via addDeserializer
+on the codec mapper, but that only wires it as the value-level deserializer
+called AFTER the TypeDeserializer strips the wrapper. With Redisson&#39;s
+JsonJacksonCodec enabling default typing, every UUID property gets an
+AsArrayTypeDeserializer in front of it: it expects START_ARRAY for the
+type id and explicitly throws MismatchedInputException on a bare string
+before delegating to the value deserializer. So plain-string UUIDs in PEL
+were never reaching our lenient logic.
+
+Fix by overriding deserializeWithType: it runs BEFORE the type deserializer
+takes over. We peek at the current token and short-circuit when it&#39;s a
+VALUE_STRING (legacy bare-string format), letting the standard UUIDDeserializer
+parse it directly. For START_ARRAY we delegate to the type deserializer&#39;s
+normal path, so current WRAPPER_ARRAY-format messages still decode correctly.
+
+Also adds a production-shape test that wires LenientUUIDDeserializer onto a
+real JsonJacksonCodec (default typing on, snake_case naming, etc.) and
+verifies all three round-trips: encoded shape contains the wrapper as
+expected, plain-string payloads decode, WRAPPER_ARRAY payloads decode.
+This is the test that caught the gap left by the original commit.
+
+* [NA] [BE] fix: assert END_ARRAY in WRAPPER_ARRAY UUID branch to reject malformed payloads
+
+The wrapper-array branch advanced past the type-id and value tokens but
+didn&#39;t assert the next token was END_ARRAY, so a payload like
+[&#34;...&#34;,&#34;&lt;uuid&gt;&#34;,&#34;extra&#34;] would silently parse the UUID and leave the
+parser positioned mid-array — corrupting the next field. Throw a
+MismatchedInputException when the closing token isn&#39;t END_ARRAY.
+
+Adds a regression test that builds a 3-element wrapper-array payload and
+asserts the deserializer rejects it instead of silently accepting it.
+
+- [OPIK-5694] [BE] fix: eliminate FORMAT Values fast-path noise in batch inserts (#6572)
+
+* [OPIK-5694] [BE] fix: stop tripping FORMAT Values fast-path in trace/span/thread batch INSERTs
+
+Per Liya Katz&#39;s investigation on OPIK-5694, the silent error counter
+pollution in production ClickHouse (~system.errors codes 26 / 27 / 43 /
+70) traces back to datetime function expressions being substituted into
+the per-row tuple in `FORMAT Values`:
+
+  parseDateTime64BestEffort(:start_time, 9),
+  if(:end_time IS NULL, NULL, parseDateTime64BestEffort(:end_time, 9)),
+  if(:last_updated_at IS NULL, now64(6), parseDateTime64BestEffort(...)),
+  ...
+
+Empirical isolation against ClickHouse 25.3.6.56 (test container) and
+25.3.8 (production version) confirmed: every datetime cell expressed as
+a function call adds +1 to code 27 per statement; NULL substituted into
+a non-nullable column adds +1 to code 70. The Values fast-path parser
+only recognises canonical text literals for DateTime64 cells; any
+function or `::` cast falls back to the slow path and counts the
+assertion in system.errors.
+
+Fix: format datetime values to canonical ClickHouse text in Java
+(`yyyy-MM-dd HH:mm:ss.SSSSSSSSS` for precision 9, `.SSSSSS` for
+precision 6) and bind them as plain strings, dropping every parse /
+if-wrap from the per-row tuple. The clickhouse-r2dbc driver substitutes
+String values as `&#39;&lt;canonical&gt;&#39;` literals which the Values fast-path
+recognises directly.
+
+Same canonical-literal idea applied to:
+- TraceDAO.BATCH_INSERT: start_time, end_time, last_updated_at,
+  visibility_mode (was an `if(... IS NULL, &#39;default&#39;, ...)` wrap;
+  now bound as &#39;default&#39; literal when null)
+- SpanDAO.BULK_INSERT: start_time, end_time, last_updated_at
+  (toDecimal128 / mapFromArrays for cost / usage left for a follow-up
+  per scope discussion)
+- TraceThreadDAO.INSERT_THREADS_SQL: created_at, last_updated_at, and
+  sampling_per_rule (the existing mapFromArrays(:rule_ids, :sampling)
+  was replaced by binding a Java Map directly — the clickhouse-r2dbc
+  driver natively serialises Map&lt;UUID, Boolean&gt; as `{&#39;uuid&#39;: true}` map
+  literal, no SQL function needed)
+
+New util: ClickHouseDateTimeFormat with NANOS / MICROS formatters in UTC.
+
+Tests: regression tests in TracesResourceTest$BatchInsert and
+SpansResourceTest$BatchInsert assert codes 26 / 27 / 43 / 70 deltas
+against system.errors before/after batchCreateTraces /
+batchCreateSpans:
+- Traces: all four codes assert isZero (covers BATCH_INSERT and the
+  side-effect trace_threads INSERT_THREADS_SQL that ingestion triggers)
+- Spans: code 70 asserts isZero. Codes 26 / 27 / 43 are NOT asserted on
+  spans because BULK_INSERT still has toDecimal128 / mapFromArrays in
+  non-datetime cells; eliminating those is out of scope for this PR.
+
+Behaviour for clients is unchanged: `lastUpdatedAt` still defaults to
+&#34;now&#34; when omitted; `visibilityMode` still defaults to &#39;default&#39;.
+
+* fix(spans): bind BigDecimal/Map directly to drop toDecimal128 + mapFromArrays from BULK_INSERT
+
+Same FORMAT Values fast-path issue as the rest of OPIK-5694: function
+expressions in tuple cells trip ClickHouse&#39;s Values fast-path parser
+and bump system.errors codes 26 / 27 / 43.
+
+In SpanDAO.BULK_INSERT the remaining offenders were:
+- toDecimal128(:total_estimated_cost, 12)  -- Decimal128 column
+- mapFromArrays(:usage_keys, :usage_values) -- Map(String, Int32) column
+
+The clickhouse-r2dbc driver natively serialises both types as canonical
+literals: BigDecimal -&gt; plain numeric (e.g. 0.000123), Map -&gt; {key : value}
+literal. So we just bind the values directly:
+- bindCost: pass BigDecimal (not .toString()) so SQL gets `0.000123`
+  instead of `&#39;0.000123&#39;` (the quoted form also trips the fast-path,
+  empirically verified)
+- usage: assemble a Map&lt;String, Integer&gt; in Java and bind it; the driver
+  emits `{&#39;in&#39; : 2, &#39;out&#39; : 5}` map literal
+
+Other SpanDAO templates (single-row INSERT, UPDATE_SPAN_SQL) still use
+toDecimal128/mapFromArrays and are intentionally untouched -- those are
+INSERT...SELECT statements, not FORMAT Values, so they don&#39;t hit the
+Values fast-path.
+
+Tests: SpansResourceTest now asserts all four codes (26/27/43/70) stay
+at zero after batchCreateSpans, matching the traces test.
+
+* test: cover null and non-null branches of every changed field in batch insert tests
+
+Audit of the regression tests revealed a gap: the new batch-insert tests
+only exercised some null/non-null permutations of the fields this PR
+touches. Beef up both tests so every branch the SQL/binding cares about
+is hit:
+
+Traces test (3 rows in one batch):
+- Row A: endTime=null, lastUpdatedAt=null, visibilityMode=null
+- Row B: endTime!=null, lastUpdatedAt!=null, visibilityMode=DEFAULT
+- Row C: endTime!=null, lastUpdatedAt!=null, visibilityMode=HIDDEN
+
+Spans test (2 rows in one batch):
+- Row A: endTime=null, lastUpdatedAt=null, usage=null, totalEstimatedCost=null
+- Row B: endTime!=null, lastUpdatedAt!=null, usage={prompt:12, completion:7},
+  totalEstimatedCost=BigDecimal(&#34;0.000123456789&#34;)
+
+Both tests still strictly assert codes 26 / 27 / 43 / 70 deltas == 0
+against system.errors.
+
+startTime is @NotNull at the API layer for both Trace and Span, so the
+null branch is unreachable through the public batch endpoint and not
+worth testing here.
+
+* fix(spans): split bindCost into single-row vs BULK_INSERT variants
+
+CI surfaced a precision regression in SpansResourceTest$CreateSpan#createAndGetCost
+and $UpdateSpan#update__whenCostIsChanged after the previous commit changed
+bindCost to bind BigDecimal directly.
+
+Root cause: bindCost is shared across SQL templates with different shapes.
+- BULK_INSERT now writes the cell as a bare :placeholder (Decimal128(12)
+  column). It needs a BigDecimal binding so the driver emits an unquoted
+  numeric — CH parses straight into Decimal128 and is lossless.
+- The single-row INSERT and UPDATE templates still wrap the cell as
+  toDecimal128(:cost, 12). Those need a String binding so the driver wraps
+  with single quotes and CH parses via the Decimal-aware string path. With
+  a BigDecimal binding the unquoted literal toDecimal128(123.45, 12) routes
+  through Float64 and drops digits beyond ~17 significant figures (the test
+  failure mode).
+
+Fix:
+- Restore bindCost to the original String binding (.toString()) — keeps
+  INSERT/UPDATE precision intact.
+- Add bindCostForBulkInsert that binds BigDecimal directly. Used only in
+  the BULK_INSERT loop. Keeps that cell at +0 system.errors increments.
+
+Also added a brief section to the ClickHouse skill documenting the rule:
+in FORMAT Values templates, every cell must be a plain placeholder bound
+to a value the driver serialises as a canonical literal — function calls
+in cells flood system.errors / pod stderr even when the insert itself
+succeeds.
+
+* refactor: inline BULK_INSERT cost binding, trim ClickHouse skill section
+
+- Inline the BigDecimal-direct cost bind at the BULK_INSERT call site (only
+  call site for that variant), drop the bindCostForBulkInsert helper and
+  the docstring on the existing bindCost — both unnecessary for one
+  callsite.
+- Tighten the ClickHouse skill addition to drop the redundant single-row
+  INSERT/UPDATE caveat (the rule scope is already in the heading) and
+  dedupe overlapping language.
+
+* fix(batch): capture now() once per batch for null lastUpdatedAt rows
+
+CI surfaced ProjectsResourceTest$FindProject#getProjects__whenProjectsHasTracesBatch__thenReturnProjectWithLastUpdatedTraceAt
+failing with a sub-millisecond timestamp diff between getById of the last
+trace and the project&#39;s MAX(last_updated_at). Reproduces under CI load
+but not deterministically in isolation.
+
+Root cause: the prior server-side wrap was if(:last_updated_at IS NULL,
+now64(6), parseDateTime64BestEffort(...)). ClickHouse evaluates now64() once
+per query — every batch row with null lastUpdatedAt got the SAME timestamp,
+making `getById(any).lastUpdatedAt == MAX(...)` trivially true. After the
+canonical-literal refactor we were calling Instant.now() per row in the bind
+loop, so each null-lastUpdatedAt row got a distinct sequential timestamp.
+While `getById(traces.getLast())` should still equal MAX in the steady case,
+JVM scheduling jitter under CI load made the assertion fragile.
+
+Fix: capture Instant.now() once per batch (outside the bind loop) and reuse
+it for every row whose client did not provide lastUpdatedAt. Restores the
+prior single-timestamp-per-batch invariant the test relies on.
+
+Same change in SpanDAO. TraceThreadDAO doesn&#39;t need it — that DAO never
+falls back to Instant.now(); it always uses item.lastUpdatedAt() / item.createdAt().
+
+* fix(threads): bind scored_at as canonical ClickHouse text everywhere
+
+Review feedback on PR #6572:
+
+The scored_at cell in INSERT_THREADS_SQL is a real fast-path concern that
+slipped through the original audit. INSERT_THREADS_SQL is a FORMAT Values
+template and binds scored_at as a bare :placeholder (no parseDateTime64BestEffort
+wrap). Until now we passed Instant.toString() (ISO-8601 with T/Z), which the
+new ClickHouseDateTimeFormat util explicitly warns against — when scoredAt is
+non-null (re-insert after scoring), CH would not recognise the literal and
+would trip codes 26/27/43 the same way the rest of the PR addresses.
+
+Fix line 335 to use ClickHouseDateTimeFormat.formatNanos(item.scoredAt()).
+
+Also applied the same canonical-text format at the two other scored_at bind
+sites (UPDATE_THREAD_SQL line 516 and UPDATE_THREAD_SCORED_AT line 566) — those
+are INSERT...SELECT / UPDATE statements wrapped in parseDateTime64BestEffort
+so they were not affected by the fast-path issue, but consistent canonical
+binding is zero-cost and avoids someone copy-pasting the ISO-8601 form into
+a future FORMAT Values template.
+
+Aligned bindNull(&#34;scored_at&#34;, Instant.class) → String.class with the rest of
+the nullable-DateTime cells in this PR.
+
+* refactor(spans): single bindCost helper, drop toDecimal128 wraps everywhere
+
+Per Andres&#39;s review feedback on PR #6572:
+
+- Drop toDecimal128(:total_estimated_cost, 12) from all four SQL templates
+  (single-row INSERT, UPDATE_SPAN_SQL, two SELECT-style templates). Bare
+  :total_estimated_cost lets the unquoted BigDecimal literal go straight
+  into the Decimal128(12) column without the Float64 detour that made the
+  earlier &#34;two helpers&#34; split necessary.
+- Restore a single bindCost helper that binds BigDecimal directly. No more
+  String/.toString() form (which was triggering the FORMAT Values fast-path
+  fallback when used in BULK_INSERT) and no more separate bindCostForBulkInsert.
+- Add @NonNull to ClickHouseDateTimeFormat.formatNanos / formatMicros for
+  defensive null-arg handling.
+
+Empirically verified via curl that CH accepts plain numeric literals (0,
+0.000123, 434852338.34043884, 1.23E-11, 1.23E+10, 0E-11) into Decimal128(12)
+columns in both INSERT...SELECT and FORMAT Values contexts without
+precision drift.
+
+* Revert &#34;refactor(spans): single bindCost helper, drop toDecimal128 wraps everywhere&#34;
+
+This reverts commit 315dea4085 except for the @NonNull addition on
+ClickHouseDateTimeFormat, which is kept.
+
+CI surfaced the constraint: the SELECT-style INSERT templates use
+multiIf(old_span.total_estimated_cost &gt; 0, old_span.total_estimated_cost,
+new_span.total_estimated_cost) to fall back between existing-row and new-row
+values. With the toDecimal128(...) wrap removed, new_span.total_estimated_cost
+is typed as Float64 (CH&#39;s default for unquoted decimal literals), and CH
+refuses the multiIf with &#34;NO_COMMON_TYPE: Decimal(38, 12), Float64 because
+some of them have no lossless conversion to Decimal&#34;.
+
+The single-helper / drop-the-wrap approach therefore can&#39;t satisfy three
+constraints at once:
+  - precision (no Float64 detour),
+  - clean fast-path for FORMAT Values (no toDecimal128 wrap, no quoted decimal),
+  - correct type matching in SELECT-style multiIf.
+
+Going back to the two-helper split: bindCost (String -&gt; toDecimal128(&#39;str&#39;, 12)
+in SELECT templates -&gt; string-direct, lossless, Decimal128-typed result column)
+and bindCostForBulkInsert (BigDecimal -&gt; bare placeholder in FORMAT Values cell
+-&gt; direct write into Decimal128 column, no fast-path fallback).
+
+Will reply on the PR thread with this evidence.
+
+- [NA] [GHA] chore: upsert PR linter comment instead of spamming (#6632)
+
+* [NA] [GHA] chore: upsert PR linter comment instead of spamming new ones
+
+When the linter fails, update the existing comment rather than posting a new
+one on every push. When all checks pass, delete the comment automatically.
+Uses an HTML marker to identify the managed comment.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* test change
+
+* [NA] [GHA] fix: paginate comments and handle duplicate linter markers
+
+- Use github.paginate to fetch all comment pages before searching
+- Collect all marker comments with filter() instead of find()
+- On failure: keep newest marker comment (update it), delete extras
+- On success: delete all marker comments with Promise.all
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* Revert &#34;test change&#34;
+
+This reverts commit 62218dcd5a2503929c77482288fc7be842f1de9a.
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- [OPIK-6177] [BE] fix: dedupe by stable dataset_item_id in experiment comparison (#6507)
+
+* [OPIK-6177] [BE] fix: dedupe by stable dataset_item_id in experiment comparison
+
+When comparing experiments whose runs span multiple dataset versions of
+the same item, the comparison endpoint returned one row per
+(dataset_item_id, dataset_version_id) instead of one row per stable
+dataset_item_id. The FE then rendered each row separately, showing
+&#34;skipped&#34; for the experiments not present in that row&#39;s
+run_summaries_by_experiment.
+
+Collapse dataset_items_resolved and dataset_items_aggr_resolved CTEs to
+one row per stable dataset_item_id (latest version) via LIMIT 1 BY
+dataset_item_id, and drop the now-redundant
+di.dataset_version_id = ei.resolved_dataset_version_id constraint from
+the LEFT JOINs so each ei row matches the canonical di row regardless of
+which version the experiment was linked to.
+
+Implements OPIK-6177: Experiment Comparison is duplicating rows in
+direct comparison of two test suites
+
+* fix(dataset-items): drop version-equality on top_dataset_items push-top join
+
+Mirror the same change to the push-top-limit branch&#39;s `dataset_items_aggr_resolved`
+join. Without it, when comparing aggregated experiments linked to different
+dataset versions of the same item, items whose linked version is older than the
+canonical (latest) one in `dataset_items_aggr_resolved` produced NULL `di_t.*`
+in the JOIN, making `any(di_t.*)` sort expressions unstable and pagination
+non-deterministic.
+
+Also removes the now-unused INNER JOIN to `experiment_aggregated_scope_ids` —
+its only purpose was to provide `eas_t.resolved_dataset_version_id` for the
+predicate.
+
+Caught by reviewer.
+
+* refactor(dataset-items): adopt Option 5 — resolve ei.dataset_item_id to stable id upstream
+
+Replaces this PR&#39;s earlier OPIK-6177 approach (which regressed OPIK-4518&#39;s
+legacy row_id case per #5852) with andrescrz&#39;s Option 5 design from the
+review. The resolution CTE pattern produces a `stable_dataset_item_id` for
+every experiment_items row regardless of whether ei.dataset_item_id holds
+the stable id (modern writes, post-OPIK-4518 BE cutover) or a per-version
+dataset_item_versions.id (legacy writes pre-cutover).
+
+Resolution shape: inline LEFT JOIN to dataset_item_versions FINAL keyed on
+(workspace_id, id) — the per-version row PK. For modern rows the JOIN
+misses and `if(notEmpty(lookup_div.dataset_item_id), …, ei.dataset_item_id)`
+falls back to ei.dataset_item_id (already the stable id). For legacy rows
+the JOIN matches and projects div.dataset_item_id (the stable id).
+
+A standalone `ei_id_lookup` CTE was tried first but caused ClickHouse&#39;s
+analyzer to drop left rows when the CTE materialized empty (deletion-cascade
+scenarios where dataset_item_versions has no rows for the dataset). Direct
+table reference avoids that.
+
+Downstream JOIN simplifies from
+  `(di.id = ei.dataset_item_id OR di.row_id = ei.dataset_item_id)
+   AND di.dataset_version_id = ei.resolved_dataset_version_id`
+to the single condition
+  `di.id = ei.stable_dataset_item_id`,
+removing the OR-JOIN structural smell from 5 sites in the comparison row +
+count + push-top + stats queries plus 2 sites in ExperimentAggregatesDAO,
+and dropping #5852&#39;s per-experiment version-equality predicate (it is no
+longer needed once resolution happens upstream).
+
+GROUP BY in both UNION branches now keys on stable_dataset_item_id; the
+existing `LIMIT 1 BY dataset_item_id` in dataset_items_*resolved gives one
+canonical (latest-version) `di` row per stable id, so per-version `di.*`
+columns in GROUP BY are functionally determined by stable_dataset_item_id
+and don&#39;t split rows.
+
+`buildTopItemsSorting`/`getTopSortExpression` updated to project the
+resolved expression for sorting fields that reference the experiment-side
+key.
+
+Implements Option 5 as agreed with @andrescrz in the PR review thread.
+Fixes the OPIK-6177 duplicate-row symptom AND restores OPIK-4518&#39;s legacy
+row_id rendering in a single, unified shape.
+
+All 549 comparison-endpoint + stats + ExperimentAggregatesIntegration tests
+pass (1 pre-existing flake unrelated to these changes).
+
+* chore(backend): remove debug log accidentally left in DAO
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(backend): dedupe across UNION branches in compare query
+
+When one experiment has rows in experiment_aggregates and another does
+not (transient post-experiment window before aggregation catches up),
+the compare query unioned both branches without an outer dedup, so the
+same stable_dataset_item_id surfaced twice — once with experiment A,
+once with experiment B — instead of merging into a single row whose
+experiment_items_array carries both.
+
+Adds an outer GROUP BY u.id over the UNION ALL with:
+- groupArrayArray(experiment_items_array) to flatten both branches&#39;
+  per-experiment item arrays into one merged array.
+- argMax(col, last_updated_at) for dataset-derived scalars so the row
+  shows the newer-version&#39;s data when branches resolved different
+  dataset_version_ids — matching single-branch latest-wins semantics.
+- max(last_updated_at) for the timestamp itself.
+
+Inner branches stay unchanged. Count, stats, and push-top variants are
+unaffected (count already wraps with COUNT(DISTINCT); stats union by
+ei.id which is disjoint between branches; push-top is gated by !hasRaw).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* test(backend): add cross-branch dedup regression for compare endpoint
+
+Verifies that when one experiment is in experiment_aggregates and
+another is not (mixed hasAggregated=true &amp;&amp; hasRaw=true), the compare
+endpoint returns one merged row per stable_dataset_item_id with both
+experiments&#39; items in experiment_items_array — not 2× rows split by
+branch as it did before the outer GROUP BY fix.
+
+Confirmed sensitive: fails with &#34;Expected size: 5 but was: 10&#34; when the
+outer GROUP BY is reverted; passes with the fix.
+
+Also wires Injector into setUpAll to inject ExperimentAggregatesService
+so populateAggregations(...) can be invoked from tests in this file.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* style(test): use imported ArrayList/HashSet instead of FQN in new test
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(backend): backfill experiment_item_aggregates.dataset_item_id to stable id
+
+OPIK-6177 — adds Liquibase migration 000084 that rewrites legacy rows in
+experiment_item_aggregates whose dataset_item_id is a per-version row_id
+(pre-OPIK-4518 BE cutover). After this migration, eia.dataset_item_id IS
+the stable dataset_item_id (matches dataset_item_versions.dataset_item_id),
+which lets the compare query reference the column directly without a
+per-query lookup_div LEFT JOIN — restoring skip-index pushdown and
+fixing the ~11x regression thiagohora measured.
+
+Mechanism: INSERT INTO experiment_item_aggregates SELECT ... INNER JOIN
+dataset_item_versions FINAL ... WHERE the lookup actually changes the
+value. ReplacingMergeTree dedupes on (workspace_id, experiment_id, id)
+PK with last_updated_at (set to now64(9) here) as version column, so
+the rewritten rows supersede the legacy ones on next merge. Filter
+condition limits the rewrite to legacy rows only — modern writes (where
+eia.dataset_item_id is already the stable id) are untouched.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(backend): resolve stable dataset_item_id at aggregation time
+
+OPIK-6177 — modifies GET_EXPERIMENT_ITEMS to LEFT JOIN dataset_item_versions
+and project the resolved stable dataset_item_id when reading raw experiment_items
+into the aggregation pipeline. New aggregations write the stable id directly to
+experiment_item_aggregates (going forward); the 000084 migration rewrites legacy
+rows that pre-date this change.
+
+For modern post-OPIK-4518 writes, ei.dataset_item_id is already the stable id,
+the LEFT JOIN typically misses (or matches a v1 DIV row whose dataset_item_id
+== id), and the if(notEmpty(...)) fallback returns the same value — no behavior
+change. For legacy writes where ei.dataset_item_id is a per-version row id,
+lookup_div finds the DIV row and projects its (stable) dataset_item_id —
+fixes the OPIK-4518 backwards-compat case at write time.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* perf(backend): drop read-time lookup_div from aggregated branch + swap argMax tiebreaker
+
+OPIK-6177 — now that experiment_item_aggregates.dataset_item_id is the stable id
+(via the 000084 migration + write-time resolution), the compare query references
+eia.dataset_item_id directly, dropping the per-query LEFT JOIN dataset_item_versions
+and if(notEmpty(...)) wraps. This restores the minmax skip-index pushdown that
+thiagohora measured as ~11x faster on the OPIK-6311 push-top path (~10.88s → ~0.99s
+for filtered queries; full skip-index pruning of experiment_item_aggregates from
+~341 of 342 granules read down to ~2 of 342).
+
+Sites simplified (all aggregated-branch):
+- top_dataset_items (push-top, !push_top_needs_div) — drops lookup_div join + filter wrap
+- top_dataset_items (push_top_needs_div) — same
+- item_agg_count CTE (count query) — same
+- item_agg inner SELECT in row query — same
+- buildTopItemsSorting / getTopSortExpression helpers — direct eia_t.dataset_item_id
+
+Cross-branch outer GROUP BY also fixed for MEDIUM #5: swap argMax key from
+last_updated_at to dataset_version_id so cross-branch and single-branch agree on
+which version&#39;s metadata wins (single-branch dedup is dataset_version_id DESC,
+LIMIT 1 BY dataset_item_id — the new outer argMax matches that semantic).
+Adds di.dataset_version_id projection through both inner branches.
+
+Raw branch&#39;s lookup_div is unchanged — it reads from experiment_items (source
+table) which is not migrated; raw-branch volume is small (only experiments not
+yet aggregated), and the OPIK-4518 backwards-compat for legacy rows there
+remains valuable.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* test(backend): add EIA-filter cross-version regression test for OPIK-6177
+
+Adds multiVersionExperimentsEiaFilterConsistentBeforeAndAfterAggregates,
+mirroring multiVersionExperimentsFilterConsistentBeforeAndAfterAggregates
+but exercising an experiment_item_aggregates-side filter (duration &gt; 0)
+rather than a dataset_item filter. Both filters activate push_top_limit&#39;s
+top_dataset_items CTE differently:
+
+- DI-side filter renders dataset_items_filtered_ids CTE (existing test)
+- EIA-side filter renders the experiment_item_filters clause directly
+  against eia.duration (new test, post-OPIK-6177 stable-id migration
+  preserves skip-index pushdown on this path)
+
+Asserts before-aggregation result == after-aggregation result for the
+same two experiments at distinct dataset versions, locking in the
+correctness contract regardless of which branch (raw vs aggregated)
+serves the request.
+
+Addresses @baz-reviewer&#39;s MEDIUM #6 from PR #6507 review.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* style(backend): add trailing empty line to OPIK-6177 migration per migrations.md convention
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* perf(backend): drop lookup_div from FromAggregates dev/test queries
+
+OPIK-6177 — extends the same simplification applied to the production
+DatasetItemVersionDAO compare query (commit 23da40bdde) to the
+ExperimentAggregatesDAO dev/test parity queries
+(SELECT_DATASET_ITEM_VERSIONS_WITH_EXPERIMENT_ITEMS_COUNT and
+SELECT_DATASET_ITEM_VERSIONS_WITH_EXPERIMENT_ITEMS).
+
+These two queries are reached via getDatasetItemsWithExperimentItemsFromAggregates
+and countDatasetItemsWithExperimentItemsFromAggregates, used as a parity
+harness in ExperimentAggregatesIntegrationTest to validate that the
+&#34;from aggregates&#34; path returns the same results as the original DAO.
+Not in the production hot path, but kept for consistency with the prod
+query post-migration.
+
+Post-migration eia.dataset_item_id IS the stable id, so direct column
+references replace the lookup_div LEFT JOIN + if(notEmpty(...)) wrap
+in 3 sites (count clause + count JOIN-on + find JOIN-on). Skip indexes
+applicable in dev/test runs too. 18 parity tests still pass; 138/138
+EAI integration tests green.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* revert(backend): drop OPIK-6177 backfill migration approach
+
+Reverts the migration-based path per @andrescrz&#39;s CHANGES_REQUESTED on PR
+#6507 (&#34;Let&#39;s avoid introducing a data migration here&#34;), aligned with
+@thiagohora&#39;s follow-up (&#34;ship the change in the aggregation population
+and discuss about the backfill separately&#34;).
+
+This squashes 4 reverts into one to keep history readable:
+- f2bd5d6da4 (Liquibase migration 000084)
+- c1f4f9b011 (trailing newline in migration file)
+- 23da40bdde (read-path lookup_div drop + argMax swap — read-path drop
+  depended on the migration; argMax swap will be re-applied on top of
+  Alt 7)
+- 4de440d5c9 (dev/test query lookup_div cleanup — same dependency)
+
+Keeps:
+- 08b184b619 (write-time stable_dataset_item_id resolution in
+  GET_EXPERIMENT_ITEMS) — no behavior change to existing rows; cleans
+  the data going forward, useful when revisiting backfill in a
+  follow-up.
+- febcee05c9 (cross-branch outer GROUP BY for Bug 2)
+- abed2c67c2 / af864c5ae4 (regression tests)
+
+State after this revert is pre-migration: lookup_div LEFT JOIN +
+if(notEmpty(...)) wraps remain in the aggregated-branch read path, which
+is what triggered @thiagohora&#39;s perf concern on the OPIK-6311 path. Next
+commit replaces that pattern with Alternative 7 (slim
+eligible_dataset_item_lookup CTE + plain IN/equi-JOIN), preserving
+OPIK-4518 backwards-compat AND skip-index pushdown without a backfill
+migration.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(backend): Alt 7 — slim id-resolution CTE for read-time stable id lookup
+
+OPIK-6177 — addresses @andrescrz&#39;s CHANGES_REQUESTED (&#34;Let&#39;s avoid introducing
+a data migration here&#34;) on PR #6507. Replaces the deferred-but-rejected
+backfill migration with a read-time resolution that satisfies all three
+constraints:
+
+  (a) OPIK-4518 backwards-compat for legacy experiment_items rows that store
+      per-version row_ids
+  (b) OPIK-6311 perf path (no if(notEmpty(lookup_div...)) wraps that defeat
+      the EIA-side idx_experiment_item_aggregates_dataset_item_id minmax
+      skip index)
+  (c) No data migration
+
+Shape: a slim eligible_dataset_item_lookup CTE scoped to current experiments&#39;
+dataset versions emits both per-version row_ids AND stable_dataset_item_ids
+via arrayJoin([div.id, div.dataset_item_id]). Used as a skip-index-friendly
+IN list when DI filters are active — `eia.dataset_item_id IN (SELECT lookup_id
+FROM eligible_dataset_item_lookup)` — same pattern OPIK-6311 measured at
+13× speedup.
+
+Notably the CTE is NOT used as a JOIN target. A CTE-based LEFT JOIN drops
+rows on deletion-cascade in ClickHouse (known analyzer behavior, also
+documented inline on experiment_items_scope from a prior incident). The
+resolution itself uses LEFT JOIN against the direct dataset_item_versions
+table — same shape as Option 5 / experiment_items_scope&#39;s raw-branch JOIN.
+
+Sites updated:
+
+  DatasetItemVersionDAO.java (compare query, aggregated branch)
+  - Count query item_agg_count: added eligible_dataset_item_lookup CTE,
+    direct DIV LEFT JOIN, IN-against-CTE WHERE filter when dataset_item_filters
+    is active.
+  - Row query item_agg inner SELECT: same pattern.
+  - top_dataset_items × 2: reverted to main&#39;s raw eia.dataset_item_id shape
+    (resolution happens in outer row query).
+  - Sorting helpers (buildTopItemsSorting, getTopSortExpression): reverted
+    to eia_t.dataset_item_id.
+  - Outer cross-branch GROUP BY argMax tiebreaker: re-applied
+    last_updated_at → dataset_version_id swap (re-applies @baz-reviewer&#39;s
+    MEDIUM #5; was reverted along with the migration approach).
+
+  ExperimentAggregatesDAO.java (FromAggregates dev/test queries)
+  - Both COUNT and FIND queries: same pattern (direct DIV LEFT JOIN +
+    if(notEmpty(...))) for parity with the production query.
+  - GET_EXPERIMENT_ITEMS write-path resolution kept as best-effort hygiene
+    (cleans new EIA rows going forward without a backfill migration).
+
+All 251 integration tests pass: 138 ExperimentAggregatesIntegrationTest +
+113 DatasetsResourceTest$FindDatasetItemsWithExperimentItems* +
+GetDatasetExperimentItemsStats. Includes the deletion-cascade test that
+caught the CTE-LEFT-JOIN issue in earlier iterations.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* style(backend): move OPIK-6177 SQL inline comments into Java
+
+Per @thiagohora&#39;s review: SQL templates should not carry rationale
+comments inline; the prose belongs as Java // comments above the
+relevant SQL constants where it doesn&#39;t clutter the rendered query.
+
+Hoists 6 multi-line `-- ...` blocks out of the SQL templates and
+re-attaches their content as Java `//` comment blocks above the
+corresponding `private static final String &lt;NAME&gt;` declarations.
+Same context preserved (stable-id resolution, deletion-cascade
+ClickHouse-analyzer note, eligible_dataset_item_lookup CTE rationale,
+outer cross-branch GROUP BY argMax tiebreaker semantics) — just at
+the Java level.
+
+No SQL change. 138/138 ExperimentAggregatesIntegrationTest +
+64/64 compare-experiments tests pass.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* perf(backend): gate eligible_dataset_item_lookup CTE on !push_top_limit
+
+Per @thiagohora&#39;s EXPLAIN benchmark on the v2 shape (review 4229616845):
+the eligible_dataset_item_lookup CTE was reading ~33% of dataset_item_versions
+on the push_top_limit path because its WHERE clause filters by
+dataset_version_id, a non-leading PK column that doesn&#39;t engage the
+dataset_item_id-targeted skip indexes. Resulted in a 2.62× regression vs
+main on a representative experiment (page-25 sorted by id DESC, DI-side
+filter, 5 rounds: main 1.005s vs v2 2.634s).
+
+When push_top_limit is on, the inner SELECT already has
+`eia.dataset_item_id IN (SELECT dataset_item_id FROM top_dataset_items)`
+which constrains EIA to ~25 paged items. The lookup_div FINAL LEFT JOIN
+then translates whichever id form was stored back to stable_dataset_item_id
+via the if(notEmpty(...)) fallback — single-granule lookup because the IN
+pre-prunes EIA. The CTE-based IN predicate is purely defensive on this
+path and adds no correctness benefit.
+
+@thiagohora&#39;s bench confirmed dropping the CTE on the push-top path is
+byte-identical (MD5-match across 25 result rows) and recovers ~99% of
+the optimization (1.088s — essentially main&#39;s 1.005s).
+
+Implementation: in SELECT_DATASET_ITEM_VERSIONS_WITH_EXPERIMENT_ITEMS,
+wrap the eligible_dataset_item_lookup CTE definition in &lt;if(!push_top_limit)&gt;
+and gate the IN-predicate `eia.dataset_item_id IN (SELECT lookup_id ...)`
+the same way. The count query (SELECT_DATASET_ITEM_VERSIONS_WITH_EXPERIMENT_ITEMS_COUNT)
+is unchanged — it doesn&#39;t go through top_dataset_items so the eligibility
+filter still serves a purpose there.
+
+Tests: deletion-cascade canary
+(experimentItemsForDeletedDatasetItemConsistentBeforeAndAfterAggregates) +
+113 compare-experiments tests pass. Full EAI suite running in background.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* perf(backend): collapse eligible_dataset_item_lookup into inline arrayJoin IN
+
+Address PR #6507 review 4229992011: count-query path was 2.85x slower
+than main (1.517s -&gt; 4.327s) because eligible_dataset_item_lookup did
+an unindexed dataset_item_versions FINAL scan. Drop the CTE and use
+the same inline arrayJoin([id, row_id]) FROM dataset_items_agg_resolved
+pattern that main already uses, so the IN list can leverage the EIA
+skip index. Same fix applied to the row query&#39;s !push_top_limit
+branch; push_top_limit branch retained its existing outer-id IN check
+(top_dataset_items already filters there).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(backend): cover all-versions in count IN-set via lookup_for_count CTE
+
+Address PR #6507 baz-reviewer finding (comment 3190434359) and
+thiagohora&#39;s confirmation (comment 3191033224): after collapsing
+eligible_dataset_item_lookup, count&#39;s arrayJoin([id, row_id]) FROM
+dataset_items_agg_resolved (LIMIT 1 BY dataset_item_id) only emits
+the LATEST version&#39;s row_id per item, so legacy EIA rows referencing
+an OLDER version&#39;s row_id (pre-OPIK-6177 + post-version-bump) fail
+the IN-check and undercount. Push-top row branch is unaffected because
+its lookup_div FINAL handles all versions.
+
+Add a lookup_for_count CTE that narrows by &lt;dataset_item_filters&gt;
+first then INNER JOINs dataset_item_versions FINAL, emitting both
+div.id (every version&#39;s row_id) and the stable id. Bloom skip-index
+on dataset_item_id helps because the inner join is dataset_item_id-
+narrowed (unlike the previously-removed eligible CTE which was
+version-only-narrowed and couldn&#39;t prune). Bench (per thiagohora):
+count 1.964s vs 1.827s (+0.14s) and full cross-version correctness.
+
+Same shape applied to row query !push_top_limit branch (CTE name
+shared because the queries are separate StringTemplate constants).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs(backend): update OPIK-6177 comments to reference lookup_for_count
+
+The eligible_dataset_item_lookup CTE was replaced by lookup_for_count
+in 1c34a84061. Update the two stale Javadoc/inline comment blocks in
+DatasetItemVersionDAO to reference the new CTE name and capture the
+narrow-by-filter / arrayJoin shape that covers all-version row_ids.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* perf(backend): drop FINAL on dataset_item_versions reads + clean up CTEs
+
+Address PR #6507 andrescrz feedback (comments 3194973428, 3195000400,
+3195054140, 3195055228):
+
+1. Remove dead eligible_dataset_item_lookup CTE definitions in
+   ExperimentAggregatesDAO (the count + row parity-harness queries)
+   that were never referenced in their SQL — leftover from the Alt 7
+   shape that didn&#39;t end up wiring the IN predicate in this file.
+2. Promote OPIK-6177 // inline comment blocks above SQL constants
+   into proper Javadoc in both files (per andrescrz&#39;s nit).
+3. Drop FINAL on every dataset_item_versions read in both files. The
+   table is a ReplicatedReplacingMergeTree where every writer generates
+   a fresh per-row id (BATCH_INSERT_ITEMS, EDIT_ITEM_VIA_SELECT_INSERT,
+   COPY_VERSION_ITEMS) and the one-shot COPY_ITEMS_FROM_LEGACY is
+   double-guarded by DatasetVersioningMigrationService.ensureDataset
+   Migrated, so no write path re-INSERTs the same (workspace_id,
+   dataset_id, dataset_version_id, id) tuple. Pre-merge duplicates
+   can&#39;t arise; FINAL was theoretical defense. Documented in the
+   SELECT_DATASET_ITEM_VERSIONS_WITH_EXPERIMENT_ITEMS Javadoc with a
+   note for future maintainers to restore FINAL if any non-key column
+   becomes mutable via re-INSERT.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(backend): restore FINAL on dataset_item_versions reads
+
+Revert the FINAL drop from 5a56e2fc5a. The immutability assumption
+documented there was wrong: PUT /datasets/items is a real upsert flow
+that re-INSERTs the same (workspace_id, dataset_id, dataset_version_id,
+id) tuple when a client PUTs the same item ids twice with changed data,
+description, tags, evaluators, or execution_policy. Pre-merge
+duplicates are routine on this table; FINAL is required so reads see
+only the latest row per PK.
+
+CI surfaced this via DatasetsResourceTest$GetDatasetItemsByDatasetId.
+getDatasetItemsByDatasetId__whenItemsWereUpdated__thenReturnCorrectItemsCount
+which PUTs items twice with changed data and asserts that
+SELECT_COLUMNS_BY_VERSION returns only the latest version&#39;s columns —
+without FINAL the query saw both pre-merge rows.
+
+Restored FINAL only where reads don&#39;t already dedupe via
+LIMIT 1 BY dataset_item_id ORDER BY (..., dvid) DESC, last_updated_at
+DESC (those subqueries pick the latest row themselves so FINAL is
+redundant on the inner scan). Updated the
+SELECT_DATASET_ITEM_VERSIONS_WITH_EXPERIMENT_ITEMS Javadoc to capture
+that FINAL is load-bearing for this table given the upsert contract.
+
+Keeps the dead eligible_dataset_item_lookup CTE removal and Javadoc
+promotions from 5a56e2fc5a — those remain correct.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-6309] [FE] feat: unify top bars across side panels (#6627)
+
+* [OPIK-6309] [FE] feat: introduce SheetTopBar with form/info variants
+
+Replace private DefaultSheetHeader with exported SheetTopBar (form/info
+variants) inside ui/sheet.tsx. Add blockOverlayClose contract on
+SheetContent + SideDialog so form panels can guard against dirty-state
+overlay close. Migrate AddOptimizationDialog to the info variant and
+drop the centered title/subtitle block per design.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(sheet-panels): adopt SheetTopBar across v2 sheet usages
+
+Roll the unified SheetTopBar pattern out to every v2 panel that lives
+on the Sheet primitive: AddExperimentDialog, QuickstartDialog,
+SetGuardrailDialog, AgentConfigurationEditPanel and TraceLogsSidebar.
+Inner SheetTitle blocks are removed in favour of the top-bar slot,
+right-side actions move into the SheetTopBar children, and
+AgentConfigurationEditPanel wires blockOverlayClose to its dirty state
+so unsaved edits can&#39;t be dismissed by an overlay click.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(resizable-side-panel): extend top-bar pattern to RSP
+
+Add ResizableSidePanelTopBar (form/info variants — X / chevron close,
+title slot, leftIcon, right-aligned actions) and a self-contained
+ResizableSidePanelArrowNavigation helper that owns the J/K hotkeys
+(plus visible Previous/Next buttons with HotkeyDisplay). RSP itself
+gains a `header` prop for full top-bar replacement and `blockOverlayClose`
+for form-panel dirty guards. Drop closeButtonPosition (zero callers) and
+hideDefaultControls (replaced by `header` semantics).
+
+Migrate every v2 RSP consumer to the new header slot:
+
+- TraceDetailsPanel / ThreadDetailsPanel: dedup the inline
+  chevron+title+nav JSX, drop their custom J/K useHotkeys (now owned
+  by the helper)
+- CompareExperimentsPanel: chevron + Share + Copy ID + Previous/Next;
+  Share/Copy ID downsized to 2xs to match the nav buttons
+- TestSuiteExperimentPanel: chevron + Share + Copy ID + Previous/Next,
+  empty title (body content owns the heading)
+- DatasetItemEditorAutosaveLayout: chevron + &#34;Dataset item &lt;id&gt;&#34;
+  (full id on hover) + dropdown menu + Previous/Next
+- TestSuiteItemPanel: chevron + &#34;Add item&#34; / &#34;Edit item&#34; + dropdown
+  (only when not new) + Previous/Next
+- AddItemPanelWrapper: form variant (X) + &#34;Add item&#34;
+- CreateDatasetSidebar: form variant (X) + dirty-state overlay block
+
+ShareURLButton accepts an optional `size=&#34;2xs&#34;` so consumers can match
+the new top-bar density. v1 mirrors untouched — RSP&#39;s default render
+path is preserved verbatim.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor(playground-logs): align empty + no-match states with main Logs page
+
+Swap DataTableNoData for the richer DataTableEmptyContent (light/dark
+empty-logs illustrations, title, description) and DataTableNoMatchingData
+(empty-search illustrations, Clear filters button). Wire handleClearFilters
+to reset search and filters in one click. Mirrors the TracesSpansTab
+treatment so the playground logs sidebar feels consistent with the parent
+Logs page.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor(side-panels): tighten OPIK-6309 follow-ups
+
+- CompareExperimentsPanel: pass ignoreHotkeys={isTraceDetailsOpened} to
+  the arrow-nav helper so J/K don&#39;t navigate the outer panel while a
+  trace details child panel is open (mirrors TestSuiteExperimentPanel)
+- ResizableSidePanel: drop the redundant {headerContent &amp;&amp; headerContent}
+  guard
+- Extract DatasetItemActionsDropdown — Share / Copy item ID / Delete item
+  menu was inlined in DatasetItemEditorAutosaveLayout and TestSuiteItemPanel
+  with identical structure; now a single shared component
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* test(side-panels): add ResizableSidePanelArrowNavigation tests
+
+11 vitest cases covering: render-nothing-when-no-nav, Previous/Next
+button render + click handlers, disabled states from hasPrevious /
+hasNext, J / K keyboard handlers, ignoreHotkeys gate, and J/K no-op
+when the corresponding direction is unavailable.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor(side-panels): apply UX feedback on top-bar panels
+
+- AddExperimentDialog / AddOptimizationDialog: tighten content padding
+  to 20 px (px-5) so it aligns with the top bar, and drop the
+  max-w-[1250px] cap so the central content grows with the panel
+- TraceLogsSidebar (Playground / Optimization / Experiment logs):
+  remove the right-side &#34;Back&#34; button per UX. Cleans up the now-unused
+  backLabel prop chain through TraceLogsSidebarButton, TrialDetails,
+  PlaygroundHeader, and CompareExperimentsDetails.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Update versions to 2.0.24 and bump base version to 2.0.25
+
+- Update default environment colors (#6626)
+
+- [OPIK-6308] [BE] feat: tune shared Jersey HTTP client with pooling and timeouts (#6623)
+
+- [NA] [BE][FE] chore: sync provider model definitions (#6625)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- Update versions to 2.0.23 and bump base version to 2.0.24
+
+- [OPIK-6307] [FE] feat: redesign Run experiment flow in Prompt Playground (#6571)
+
+* [OPIK-6307] [FE] feat: redesign Run experiment flow in Prompt Playground
+
+- Replace &#34;Test on&#34; dropdown with single &#34;Run experiment&#34; entry-point button
+- Rebuild dialog with Dataset / Test suite segmented control + smart-default
+- Empty-state CTA opens AddEditDataset/TestSuite dialog with Figma-matched icon
+- Move dataset filter pill out of the dialog onto the header, beside the chip
+- Pre-select most-recently-used dataset/test suite per type (persisted)
+- Restore per-dataset score selection on re-open (persisted)
+- Reset filters when applying a different dataset; remove RunOnDatasetDialog
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6307] [FE] fix: align Run experiment segmented control with Figma
+
+Switch from ToggleGroup ghost variant to Tabs segmented variant so the
+Dataset/Test suite control matches the Figma spec — neutral
+slate-300/40 active background and foreground hover, no blue tint.
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6307] [FE] style: prettier formatting for TabsTrigger
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6307] [FE] fix: use ToggleGroup ghost for segmented control hover
+
+Match the alert form&#39;s Destination selector: ToggleGroup variant=&#34;ghost&#34;
+gives hover:text-primary-hover (blue text on hover), which the segmented
+Tabs variant did not provide.
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6307] [FE] fix: address review feedback on RunExperimentDialog
+
+- Normalize composite vs plain dataset id when comparing for filter reset
+- Hydrate scores from per-dataset map alongside dataset id (was unused)
+- Use canCreateDatasets / canUsePlayground gates instead of canCreateProjects
+- Mark defaults applied on manual toggle so smart default does not override
+- Refactor hydration into pure resolveSlotForType + idempotent hydrateSlot
+  helpers, removing the per-type-switch effect
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6307] [FE] fix: drop stale dataset id when list refresh removes it
+
+Add a re-validation effect that clears datasetIdByType[type] when the
+underlying list no longer contains the stored id (e.g. deleted server-side
+while the dialog was open) so stale selections never reach
+useDatasetVersionsList / useDatasetItemsList / onRun.
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6307] [FE] feat: add dark variant for empty-dataset-or-suite icon
+
+Rename existing asset to empty-dataset-or-suite-light.svg and add a dark
+counterpart following the same palette mapping as other empty-state pairs
+(canvas #030712, slate #64748B, lime #CCFE41 unchanged). EmptyDatasetState
+now reads the theme via useTheme() and swaps the source.
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6307] [FE] chore: explicit React import in EmptyDatasetState
+
+Codebase convention is to import React explicitly when using React.FC;
+the file used the type without importing the namespace. Build passes
+under jsx:react-jsx but follow the project pattern.
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6307] [FE] refactor: extract toPlainDatasetId helper
+
+Replace the repeated parseDatasetVersionKey(x)?.datasetId ?? x pattern
+with a small helper in datasetVersionStorage.ts. Used in
+RunExperimentDialog (resolveSlotForType, stale-list cleanup, dataset
+change handler) and PlaygroundHeader (filter-reset comparison and
+score persistence) so the storage-key handling stays in sync.
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+- [OPIK-6346] Silent-skip playground logging when permissions are missing (#6574)
+
+* [OPIK-6346] Silent-skip playground logging when permissions are missing
+
+When a user has Use playground but lacks Log trace, span or thread,
+clicking Run produced a destructive red toast because the playground
+unconditionally posted to /traces/batch and /spans/batch (returning
+401). Same for Create experiment in dataset mode.
+
+Gate createLogPlaygroundProcessor on canLogTraceSpanThread (and
+additionally on canCreateExperiments in dataset mode). When
+prerequisites are missing, swap in a no-op processor so no API calls
+are made and no toast fires; the LLM run still completes and renders.
+The destructive toast now only fires for genuine failures.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor(playground): hoist no-op log processor to shared constant
+
+Address review feedback on PR #6574: the inline
+{ log: () =&gt; {}, finishLogging: () =&gt; {} } empty state was duplicated
+in three call sites. Hoist it to NOOP_LOG_PROCESSOR alongside the
+LogProcessor interface and reuse from both v1 and v2.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor(playground): extract buildLogProcessor helper for shared gating
+
+Address review feedback on PR #6574: the gating block (datasetName +
+permissions -&gt; processor or noop) was duplicated across three call
+sites (v1 runAll, v2 runAllViaFrontend, v2 runSingleViaFrontend).
+Extract buildLogProcessor in createLogPlaygroundProcessor and reuse
+from all three.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(playground): hide &#34;Test on&#34; entry when experiment perms missing
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(playground): require both experiment perms to show &#34;Test on&#34;
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor(playground): collapse Test on visibility gate to single condition
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor(playground): apply De Morgan to Test on visibility gate
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-6348] [BE] fix: rename BI event key &#39;environment&#39; to &#39;config_environment&#39; (#6612)
+
+* [OPIK-6348] [BE] fix: rename BI event key &#39;environment&#39; to &#39;config_environment&#39;
+
+The &#39;environment&#39; key in agent config BI events was being overwritten by
+the server-level environment field, causing the config environment value
+to be lost in Segment analytics.
+
+Implements OPIK-6348: [BI] staging BI events appear in production in Segment
+
+* extend test
+
+* fix test
+
+- [OPIK-6334] [FE] fix: render page-surface assistant loader and error state full-bleed (#6620)
+
+* [OPIK-6334] [FE] fix: render page-surface assistant loader and error state full-bleed
+
+The Project Home loader/error were inheriting the persisted right-rail
+sidebar-collapsed flag, so on the full-bleed page surface the OllieLoader
+fell into the 24px no-text &#34;collapsed&#34; variant and the error card
+rendered as the 33px vertical-text rail. Derive the surface variant
+once (page | sidebar | collapsed) and pass it to both OllieLoader and
+AssistantErrorState; promote the variant type to types/assistant-sidebar
+so it has a single home.
+
+* fix(assistant): drop sidebar chrome from page-variant error state
+
+Threads the surface variant through FirstRetryError and EscalatedError
+so the page surface no longer renders the left rail border or the
+sidebar close button. CollapsedError unchanged.
+
+- [OPIK-6372] [SDK] fix: merge duplicate Create messages in local emulator (#6613)
+
+* [OPIK-6372] [SDK] fix: merge duplicate Create messages in emulator instead of overwriting
+
+The streamer&#39;s batch + replay machinery can deliver the START and FULL
+CreateSpan/CreateTrace messages to the local emulator out of order. The
+old _save_trace/_save_span only handled &#34;newer end_time wins&#34;: if the
+START message arrived after the FULL one, the existing FULL entry was
+left in _trace_trees, the START was unconditionally appended (producing
+a duplicate), and _trace_observations[id] was overwritten with the
+START — losing type, output, end_time on subsequent reads.
+
+Replace the directional check with a real merge: pick the more complete
+entry (end_time set wins; later end_time among completes; last_updated_at
+as tiebreaker), fill any None gaps from the other, and keep at most one
+entry per id in _trace_trees / _span_trees. Late STARTs no longer
+overwrite recorded parent_span_id / trace_id with stale None.
+
+Other emulator improvements caught while auditing the same path:
+- _handle_update_* no longer raises KeyError when an update arrives
+  before its CREATE; the payload is queued and applied on save.
+- Orphan-parent warning in _build_spans_tree is deduped per
+  (child, parent) so repeated reads don&#39;t spam the log.
+- Children/spans sorted once per parent at the end of the pass.
+
+Tests: 7 new regression cases in
+TestLocalEmulatorMessageProcessorDuplicateCreateMessages cover both
+orderings (FULL→START, START→FULL), batch-message variants, attached-
+children preservation, and the merge_duplicates=False opt-out.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6381] [SDK] fix: support google-adk 1.32.0 (base_agent.tracer attribute removed)
+
+google-adk &gt;= 1.32 dropped the module-level `tracer` symbol from
+`google.adk.agents.base_agent` — agent invocation now goes through
+`google.adk.telemetry._instrumentation.record_agent_invocation`, which
+internally uses `telemetry.tracing.tracer`. The previous patcher
+unconditionally assigned to `base_agent.tracer.*`, raising
+AttributeError on import for any user on adk &gt;= 1.32.
+
+Gate the assignment behind `hasattr(base_agent, &#34;tracer&#34;)`. The
+existing `adk_telemetry.tracer.*` patches above the gate already cover
+every internal call site — `adk_telemetry.tracer`, `tracing.tracer`,
+and (on older versions) `base_agent.tracer` are all references to the
+same singleton ProxyTracer object, so mutating its methods propagates
+everywhere including the new `_instrumentation` path.
+
+Verified `tests/library_integration/adk/` passes on both google-adk
+1.32.0 and 1.23.0 (32 passed, 1 skipped each).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* Fix lint errors
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-6334] [FE] feat: add skeleton loaders to Prompt and Agent Playgrounds (#6618)
+
+* [OPIK-6334] [FE] feat: add skeleton loader to Prompt Playground
+
+Replace full-page Loader on PlaygroundPage with a custom skeleton
+matching Figma 533:83979 (main panels) and 533:84053 (right
+AddVariant column). Page chrome (PlaygroundHeader with title +
+actions) renders immediately; the prompt editor and outputs area
+show shimmer placeholders until provider keys load.
+
+Also fixes a header layout regression introduced by removing the
+early-return Loader: headerMaxWidth was computed as
+calc(promptCount * --max-prompt-width + --add-variant-width), which
+collapses to 90px while promptCount=0 during the initial load. Skip
+the maxWidth constraint while pending so the header fills full width
+and justify-between renders title/actions on opposite ends.
+
+* [OPIK-6334] [FE] feat: add skeleton loader to Agent Playground
+
+Replace the brief flash of &lt;AgentRunnerEmptyState&gt; on first render with
+a skeleton placeholder for users whose agent is already paired. The
+skeleton mirrors the connected layout (ResizablePanelGroup with Input
+and Result panels) and shares autoSaveId=&#34;agent-sandbox-layout&#34; so it
+respects the user&#39;s persisted resize ratio — no jump when the
+connected state mounts.
+
+Expose isInitialLoading from usePairingState (true only until the
+first response from useSandboxConnectionStatus, derived from
+isFetched). isPending alone toggled true on every poll cycle while
+the connection-status query stayed in error/no-data state, causing
+the skeleton to blink every 3 seconds against a permanently-erroring
+backend; isFetched becomes stable after the first response and
+prevents that blink.
+
+Update usePairingState and AgentRunnerContent tests/mocks to reflect
+the new field name.
+
+* fix(skeleton): use theme-aware bg-background in playground skeletons
+
+Replace hard-coded bg-white with bg-background on the bottom panel of
+both playground skeletons so they render correctly in dark mode and
+match the actual loaded state&#39;s background (PlaygroundOutputs and
+AgentRunnerResult both use bg-background).
+
+- Update versions to 2.0.22 and bump base version to 2.0.23
+
+- [NA] [BE][FE] chore: sync provider model definitions (#6617)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [NA] [BE] Update model prices file (#6616)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [OPIK-6269] [FE] feat: align diff dialog and version list with Figma (#6605)
+
+* [OPIK-6269] [FE] feat: align diff dialog and version list with Figma
+
+- Tighten the agent-config diff dialog to match Figma: 20px outer padding,
+  16px gap between title and table, X close button repositioned to match.
+- Title font size set to 16/20 (Inter Medium) per Figma Title/XSmall token.
+- Replace DiffVersionPopover with a DiffVersionMenu rendered as a single-line
+  dropdown menu that matches the project/workspace menu style: 32px rows,
+  version name + tags on the left, clock + relative time on the right, and
+  a separator under the &#34;Compare against&#34; label.
+- Pass an explicit maxWidth to AgentConfigTagList so the +N counter is
+  stable (avoids the measurement loop that flickered without a fixed width).
+- Always use the older version as the diff baseline (older as base, newer as
+  diff) so the comparison direction matches the timeline order regardless of
+  which version is currently displayed.
+- Update the dropdown-menu sm variant to use rounded-sm (4px) instead of
+  rounded-md so the design-system menus match Figma&#39;s 4px corner radius.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(agent-config-diff): clear stale comparison and harden base/diff helper
+
+- Reset comparedVersion and diffOpen when item.id changes so switching
+  between configurations doesn&#39;t leave the dialog open with stale data.
+- Extract the inline IIFE into a getDiffDialogProps helper that parses
+  created_at safely (Number.isFinite guard) and falls back to the current
+  item as base when either timestamp is missing or invalid, so the diff
+  orientation cannot silently flip on bad data.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [NA] [SDK] chore: remove redundant litellm version exclusions (#6607)
+
+* [NA] [SDK] chore: remove redundant litellm version exclusions
+
+The lower bound `&gt;=1.79.2` already excludes all `!=1.75.x`, `!=1.77.x`,
+`!=1.78.x`, `!=1.79.0`, and `!=1.79.1` pins. Drop them and their
+now-stale comment bullets from both sdks/python/setup.py and
+sdks/opik_optimizer/pyproject.toml.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* [NA] [SDK] chore: sync litellm constraint in opik_optimizer/setup.py
+
+setup.py is the source used by `make build` (python setup.py sdist bdist_wheel)
+but still had the old, redundant !=1.75.x/1.77.x/1.78.x/1.79.x exclusions.
+Bring it to exactly match pyproject.toml: &gt;=1.79.2 with only the post-minimum
+exclusions (!=1.81.*, !=1.82.*, !=1.83.0-1.83.6) for the CVE/supply-chain pins.
+Drop the stale comment bullets for versions already below the lower bound.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- [OPIK-6365] [BE] fix: python sandbox packages to match litellm 1.83.7 pin (#6609)
+
+* [OPIK-6365] [BE] fix: python sandbox packages to match litellm 1.83.7 pin
+
+* fix(sandbox): bump litellm to 1.83.14 (mitigate python-dotenv CVE-2026-28684)
+
+- [NA] [DOCS] Add changelog for 2026-05-05 (#6611)
+
+Co-authored-by: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+- [OPIK-6057] [BE] fix: skip online-scoring feedback rows when judge returns null (#6577)
+
+* [OPIK-6057] [BE] fix: skip online-scoring feedback rows when judge returns null
+
+A judge response of `{&#34;metric&#34;: {&#34;score&#34;: null, &#34;reason&#34;: &#34;...&#34;}}` was being
+persisted as 0.0. Jackson&#39;s NullNode.decimalValue() silently returns
+BigDecimal.ZERO, and the existing missing-field guard in
+OnlineScoringEngine.toFeedbackScores only checked whether the score key
+was absent — not whether its value was null. That made &#34;not applicable&#34;
+verdicts indistinguishable from real low scores and dragged metric averages
+down.
+
+Fix adds an explicit actualScore.isNull() check that returns null from the
+map (filtered out by the existing .filter(Objects::nonNull)). Mirrors the
+offline evaluate(...) flow: no row written, so ClickHouse avg() over the
+LEFT JOIN excludes it from both numerator and denominator.
+
+Wrote a reproducing test first (3-metric judge response with the middle
+score null asserts only 2 rows come back), confirmed it failed before the
+fix, then applied the fix.
+
+* refactor(online-scoring): surface null-skipped scores via user-facing log
+
+Address PR review feedback:
+
+1. Rename the new test method from `testToFeedbackScores__whenScoreValueIsNull__thenSkipsThatScore`
+   to `whenScoreValueIsNull_thenSkipsThatScoreAndReportsItAsSkipped` per
+   `.claude/skills/opik-backend/testing.md` (the `testXxx()` style is forbidden).
+
+2. Tell users which scores were dropped. `OnlineScoringEngine.toFeedbackScores`
+   now returns a `ParsedFeedbackScores(scores, nullScoreNames)` record. Each
+   of the three LLM-as-judge scorers (trace, span, thread) iterates
+   `nullScoreNames` and emits an info entry to its `userFacingLogger`
+   explaining that the judge returned null and the score was treated as
+   not applicable. Previously a customer would see fewer feedback rows
+   than expected with no indication why.
+
+* refactor(online-scoring): dedupe skipped-score logging and demote engine logs
+
+Address Baz review feedback on PR #6577:
+
+- Demote the helper-level &#34;no score found&#34; / &#34;null value&#34; log lines in
+  OnlineScoringEngine.toFeedbackScores from INFO to DEBUG. The user-facing
+  logging in the three scorers now covers the null-skip case at INFO, so
+  the engine logs were duplicate noise on a happy path with multi-metric
+  rubrics.
+
+- Extract OnlineScoringEngine.logSkippedNullScores(logger, parsed, type, id)
+  to remove the identical 3-line forEach pattern that the trace, span, and
+  thread scorers were each carrying.
+
+- [OPIK-6334] [FE] feat: add skeleton loaders on main list pages (#6604)
+
+* [OPIK-6334] [FE] feat: add skeleton loaders on main list pages
+
+Replace full-page Loader spinners across v2 list and nested-table pages
+with table skeleton rows so the title, CTA, filters, and search render
+immediately while data is fetching. Defensive isTableLoading flag aligns
+with parent pattern (isPending || (isPlaceholderData &amp;&amp; rows.length === 0))
+to avoid the empty-state flash on sibling-route switches and
+zero-match refilters.
+
+Top-level list pages (Group A):
+- Projects, Datasets / Test Suites, Online Evaluation,
+  Annotation Queues, Workspace Dashboards, Alerts.
+
+Nested table tabs:
+- Dataset items, Dataset version history, Annotation queue items
+  (thread + trace), Compare experiments items, Trial items, Automation
+  logs, Feedback definitions, AI providers, Compare experiments
+  configuration / feedback scores, Members (comet plugin).
+
+Experiments and Optimization runs (Group B):
+- Drop full-page Loader; render a placeholder card above the table
+  matching the FeedbackScoresChartsWrapper shape. Propagate
+  isExistencePending from ExperimentsPage so the table skeleton stays
+  until the parent probe resolves — closes the race that showed an
+  inline &#39;There are no experiments yet&#39; before the parent&#39;s
+  PageEmptyState illustration appeared. Drop the duplicate
+  &#39;Optimization runs&#39; h2 (the page-level h1 already provides the title).
+
+Empty-state cleanup:
+- Replace dual-message DataTableNoData (which redundantly carried a
+  &#39;There are no X yet&#39; fallback string and an inline create link) with
+  the standard DataTableNoMatchingData and wire a Clear filters
+  callback. The truly-empty case is fully handled by the page-level
+  PageEmptyState illustration.
+
+Wrapper Loader removal:
+- DatasetItemsPage&#39;s early-return Loader was a duplicate of the route
+  shell&#39;s useDatasetById fetch (deduped by React Query); drop it so
+  page chrome and the items table render immediately.
+
+* refactor(skeleton): memoize handleClearFilters in OptimizationsPage
+
+Wrap in useCallback for stable reference equality across re-renders,
+matching GeneralDatasetsTab and avoiding needless DataTableNoMatchingData
+re-mounts.
+
+- [OPIK-6269] [FE] feat: improve agent configuration diff view (#6594)
+
+* [OPIK-6269] [FE] feat: improve agent configuration diff view
+
+- Replace the two-column blueprint diff with a single unified column.
+- Move &#34;Show differences only&#34; toggle into the table header.
+- Drop description block; rename modal title to &#34;Comparing X to Y&#34;.
+- Wrap value content in a primary-foreground code-block container.
+- Render added/removed rows with colored cards in both Key and Value cells
+  and matching dark-tinted type icons; use inline word-level highlights for
+  changed values.
+- Render the no-differences empty state inside the table body with a
+  git-compare icon to match the Figma layout.
+- Consolidate duplicate diff components in pages-shared.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor(agent-config-diff): consolidate diff styling helpers
+
+- Extend BlueprintTypeIcon with size and tone props; drop the duplicated
+  type-icon mapping from the diff cell.
+- Add diff-removed-border / diff-added-border to the Tailwind theme and
+  switch literal var() classes to the named tokens.
+- Extract a single MODE_TOKENS map for added/removed surface and text
+  colors, used by the key card, value box, and prompt commit tag.
+- Compute DiffMode in the pairs memo so the row no longer derives it from
+  a tri-state changed flag.
+- Group prompt base/diff fields into a single object.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(agent-config-diff): make diff modal theme-aware and align row heights
+
+- Use bg-background instead of bg-white for body rows and the empty-state
+  cell so the surface flips with dark mode.
+- Pair the type icon&#39;s bg/fg with --diff-*-text and --diff-*-bg in the
+  diff tone so the contrast holds in both light and dark themes.
+- Bump value box min-height to match the key card height (24px) so
+  added/removed rows do not visually shrink relative to the key cell.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-6365] [SDK] chore: mitigate litellm CVE-2026-42208 (exclude 1.81.*-1.83.6) (#6602)
+
+- [OPIK-6296] [DOCS] feat: auto-refresh PR description on git push to prevent drift (#6546)
+
+* [OPIK-6296] [INFRA] feat: add shared PR description sync sub-skill
+
+Introduce .agents/commands/comet/_pr-description-sync.md as a single
+source of truth for refreshing a PR description after every git push,
+so descriptions don&#39;t drift from what actually shipped (concrete drift
+case: PR #6391 — endpoint paths, method names, and emitted events the
+review cycle reshaped after the description was written).
+
+The sub-skill regenerates from the canonical pull_request_template.md,
+preserves images/videos/Loom embeds and hand-edits, validates against
+pr-lint rules, and confirms with the user via AskUserQuestion. Per-repo
+&#34;always&#34; / &#34;never&#34; choices persist to user memory keyed by the
+normalized remote URL, so the prompt only fires where the user wants it.
+
+Idempotent and a no-op when no PR exists for the branch.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(skills): wire post-push PR description sync into the three skills
+
+Three integration points for the new _pr-description-sync sub-skill:
+
+- create-pr.md Step 3 — call the sub-skill after the post-rebase
+  force-with-lease push. Step 4&#39;s &#34;PR exists&#34; branch no longer
+  duplicates description-refresh logic; the sub-skill already ran.
+- work-on-jira-ticket.md Step 10 — add an explicit post-push contract
+  so any push that happens during the implementation phase triggers
+  the refresh.
+- address-github-pr-comments.md Step 6 deferred replies — sync the
+  description after the fix push and before posting the &#34;Fixed in
+  &lt;sha&gt;&#34; replies. Highest-drift moment in the PR lifecycle.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(skills): validate pr_number and disambiguate PR lookup; soften create-pr Step 4 wording
+
+Address review feedback on PR #6546:
+
+- _pr-description-sync.md Step 1: when pr_number is passed, always
+  fetch headRefName/state and verify they match branch before any
+  read or write; on mismatch, fall back to the branch lookup instead
+  of editing the wrong PR.
+- _pr-description-sync.md Step 1 branch lookup: replace the implicit
+  &#39;.[0]&#39; selector with explicit headRefOid==local HEAD disambiguation.
+  0 matches -&gt; no-op; 1 match -&gt; use it; &gt;1 matches -&gt; log and skip
+  rather than guess. Closes the High-severity case where multiple
+  forks/remotes can share a head-branch name.
+- create-pr.md Step 4: soften wording so it doesn&#39;t claim the
+  description &#34;was already refreshed&#34; when _pr-description-sync may
+  have no-op&#39;d (user opted out, gh unavailable, or already in sync).
+
+Item 4 (dedup with create-pr Step 6/7) addressed via PR reply — the
+sub-skill already points at Step 6/7 as canonical; the bullets that
+follow are sync-specific qualifiers.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(skills): tighten _pr-description-sync spec — section-hash marker, semantic idempotence, concrete memory path
+
+Address audit findings from PR #6546 self-review:
+
+- H1: Replace the underspecified &#34;preserve hand-edits that don&#39;t
+  conflict&#34; rule with a concrete merge algorithm. Each refresh writes a
+  hidden HTML comment &lt;!-- pr-sync: {&#34;&lt;Section&gt;&#34;:&#34;&lt;sha1&gt;&#34;} --&gt; at the
+  body bottom. On next run, recompute each section&#39;s sha1 and compare
+  to the stored hash: equal -&gt; overwrite with regenerated content;
+  differs -&gt; user touched it, keep verbatim. No fuzzy matching.
+- H2: Redefine idempotence as sha1(body without marker). Resolves the
+  prior failure mode where Testing&#39;s commit list changed every push so
+  byte-equality never held — meaningful drift now triggers the prompt,
+  noise doesn&#39;t.
+- H4: Replace the {user-memory-dir} placeholder with concrete path
+  resolution: walk up from cwd looking for the project&#39;s MEMORY.md
+  index; fall back to ~/.claude/memory/ if absent.
+- M2: Step 1a now fails closed on pr_number/branch mismatch instead of
+  silently switching to the branch lookup. A caller passing a
+  mismatching hint is a bug; surfacing it is safer than guessing.
+- M3: Tighten the pr-lint placeholder check so bodies that legitimately
+  quote &#34;&lt;!-- REPLACE ME&#34; while documenting this skill itself pass.
+  The check now matches the literal template comment block as the only
+  content of a section, not arbitrary substring occurrences.
+- Step 2 now uses mktemp and references the resolved PR number from
+  Step 1, not the (potentially unset) input hint.
+- Step 4 split into two parts: the marker-based section merge (4) and
+  always-on media preservation (4b). Step 4b&#39;s &#34;extra ## sections&#34;
+  rule clarified to anchor above the marker.
+- Marker-absent first run: regenerate everything, let user review the
+  full diff in Step 7. Their confirmation is the act of opting into
+  managed mode; the marker installs on first apply.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(skills): scope Step 4b media extraction to template-managed sections only
+
+Address Baz review on PR #6546 (comment 3168840537):
+
+Step 4b&#39;s &#34;scan the current body for media&#34; rule could lift media out
+of a user-added custom ## section AND keep that section intact at the
+bottom — resulting in duplicate writes or reorders when a custom
+section contains image syntax.
+
+Tighten the scope: media scan + reinsertion now apply only to
+template-managed ## sections (those defined in pull_request_template.md).
+Media inside custom sections travels verbatim with the section&#39;s
+intact appended block; it is never independently scanned or moved.
+
+Also clarify that sections preserved verbatim under the Step 4 marker
+check carry their media along automatically — no separate lift needed.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(skills): flip _pr-description-sync default to auto-apply
+
+Address andrescrz review feedback on PR #6546:
+
+&gt; Minor: let&#39;s remove friction by having more automation. I&#39;d rather
+&gt; not request confirmation. It&#39;s quite clear that we want up to date
+&gt; PR descriptions.
+&gt;
+&gt; As mentioned, no need for user confirmation here.
+&gt;
+&gt; I suggest reducing friction. LGTM, you can always change that in a
+&gt; follow-up PR.
+
+Refresh is a routine bookkeeping action, not a decision. By the time
+Step 7 runs, the body has already passed pr-lint, preservation rules
+have already protected user edits, and idempotence has already
+filtered out no-op cases. The four-option AskUserQuestion was friction
+on every push for marginal value.
+
+New behavior:
+- Default: silent auto-apply via gh pr edit. No prompt.
+- Opt-out: per-repo `never` list in the memory file. Sub-skill reads
+  it; users edit it (or ask the agent to) when they want to disable
+  auto-refresh for a specific repo. The `Always` list is gone — auto-
+  apply IS the always mode.
+- Media-stale reminder demoted from a pre-apply prompt preface to a
+  post-apply log line. Apply still happens; user is just informed.
+
+Updated:
+- Overview bullet 14: &#34;Auto-applies by default&#34; instead of &#34;Confirms
+  via AskUserQuestion&#34;.
+- Step 4 marker-absent paragraph: drops references to user reviewing
+  diff in Step 7; first-run is implicit adoption of managed mode.
+- Step 7: rewritten as &#34;Apply (auto, no prompt)&#34;. Single gh pr edit
+  call, no decision tree.
+- Step 8 (was Step 9): memory file now has only the Never list.
+  Sub-skill is read-only against the file; users opt out manually.
+
+Caller files (create-pr, work-on-jira-ticket, address-github-pr-comments)
+already say &#34;the user opted out for this repo&#34; / similar — those still
+read correctly under the new spec, so no caller edits needed.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(skills): drop the Never opt-out clause from _pr-description-sync
+
+Per discussion on PR #6546: the per-repo opt-out was vestigial after we
+flipped the default to auto-apply. Adds spec surface and a memory file
+the sub-skill must read on every invocation, for a path that&#39;s likely
+never used. The natural recovery for an unwanted refresh is `gh pr edit`
+or the GitHub UI — and the marker check (Step 4) then treats those
+edits as user-owned on subsequent runs and leaves them alone, so no
+permanent opt-out is required.
+
+Removed:
+- Step 1b (mute memory check) — gone; Step 1 is now flat with no
+  sub-step labels.
+- Step 7&#39;s Opt-out paragraph — replaced with a Recovery paragraph
+  pointing at gh pr edit / GitHub UI.
+- Step 8 (Memory entry — feedback_pr_description_auto_refresh.md) —
+  deleted entirely. No memory file, no path resolution, no normalization
+  rule for repo URLs.
+- Failure mode &#34;Memory file read fails&#34; — gone (no file to read).
+
+Updated:
+- Overview bullet 14 — &#34;There is no opt-out flag; if a refresh ever
+  produces unwanted content, the user edits the body in the GitHub UI
+  or via gh pr edit, and the marker check leaves those edits alone on
+  subsequent runs.&#34;
+- Step 4 marker-absent paragraph — drops &#34;opt the repo out&#34; reference;
+  recovery guidance points at GitHub UI editing.
+
+Net: spec drops from 8 sections to 7, ~50 lines lighter, simpler
+surface for reviewers and implementers.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-6263] [BE] feat: seed default environments for workspaces (#6593)
+
+* Create default environments
+
+* address comment
+
+- [NA] [SDK] [DOCS] Update automatically OpenAPI spec and Fern code (#6598)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [NA] [BE][FE] chore: sync provider model definitions (#6597)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- Update versions to 2.0.21 and bump base version to 2.0.22
+
+- [OPIK-6360] [INFRA] feat: add force_regen toggle to provider model sync (#6589)
+
+Allows manual workflow_dispatch with force_regen=true to regenerate
+files and re-upload YAML to S3 even when no new upstream models are
+found — useful when sync logic changes and the CDN YAML needs to be
+republished without waiting for an upstream provider delta.
+
+- [OPIK-6244] [BE][FE] feat: per-model Anthropic capability map (Opus 4.7 sampling params + xhigh effort) (#6523)
+
+* [OPIK-6244] [BE] feat: add supportsSamplingParams flag to LlmModelDefinition
+
+* [OPIK-6244] [BE] feat: mark Claude Opus 4.7 as not supporting sampling params
+
+* [OPIK-6244] [BE] test: cover supportsSamplingParams flag deserialization
+
+* [OPIK-6244] [BE] feat: strip temperature and top_p for Anthropic models that reject them
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* docs(anthropic): note the strip-rebuild must mirror mapper fields
+
+* [OPIK-6244] [FE] feat: expose supportsSamplingParams on LlmModelDefinition DTO
+
+* [OPIK-6244] [FE] feat: track supportsSamplingParams in model flag store
+
+* [OPIK-6244] [FE] feat: add supportsSamplingParams helper
+
+* [OPIK-6244] [FE] feat: hide temperature and top_p sliders for Anthropic models that reject them
+
+* [OPIK-6244] [FE] feat: omit temperature default for Anthropic models that reject it
+
+* [OPIK-6244] [FE] feat: omit temperature default in optimizer for Anthropic models that reject it
+
+* style(fe): apply prettier to OPIK-6244 test files
+
+* [OPIK-6244] [BE] refactor: use builder.from() in Anthropic sampling-params strip
+
+* [OPIK-6244] [BE] feat: skip temperature for LLM-as-Judge on Anthropic models that reject sampling params
+
+* [OPIK-6244] [BE] refactor: dedup supportsSamplingParams onto LlmModelRegistryService
+
+* [OPIK-6244] [FE] fix: hardcode Opus 4.7 as no-sampling-params to cover hydration and stale BE responses
+
+* [OPIK-6244] [BE][FE] refactor: replace YAML/registry plumbing with hardcoded model list
+
+* [OPIK-6244] [FE] fix: don&#39;t disable model-config trigger when configs object is empty
+
+* [OPIK-6244] [FE] fix: default Anthropic maxCompletionTokens before sending playground request
+
+* [OPIK-6244] [BE] revert: drop sampling-params strip; FE gate is the only enforcement point
+
+* [OPIK-6244] [FE] chore: trim stale BE-mirror comments after dropping the BE strip
+
+* [OPIK-6244] [FE] feat: add xhigh thinking effort for Opus 4.7; collapse Anthropic quirks into one capability map
+
+* [OPIK-6244] [FE] fix: fall back to high when stored thinking effort isn&#39;t valid for current model
+
+* [OPIK-6244] [FE] fix: normalize stale thinkingEffort in form state, not just display
+
+* [OPIK-6244] [FE] refactor: centralize Anthropic capability normalization in updateProviderConfig
+
+* [OPIK-6244] [FE] refactor: extract sanitizeConfigForRequest helper, key off provider not substring
+
+* [OPIK-6244] [BE][FE] feat: relax LlmAsJudgeModelParameters.temperature, normalize loaded judge rules
+
+* [OPIK-6244] [FE] chore: trim leftovers from earlier iterations
+
+* [OPIK-6244] [FE] fix: also strip temperature in sanitizeConfigForRequest for models that reject sampling params
+
+* [OPIK-6244] [FE] fix: don&#39;t disable model-config trigger on empty configs (handles stale persisted state)
+
+* [OPIK-6244] [BE] fix: null-guard temperature read in VertexAIClientGenerator
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- [NA] [BE][FE] chore: sync provider model definitions (#6590)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [OPIK-6248] [FE] feat: trace details main content area – tabs, message container, LLM messages, feedback scores, error callout (#6568)
+
+* [OPIK-6248] [FE] feat: trace details main content area – tabs, message container, LLM messages, feedback scores, error callout
+
+Continues the trace-details main content redesign (PR #6552 covered the
+skeleton loader and tag colors). Reworks the right-pane content area to
+match Figma 457:82978.
+
+Tabs (2b)
+- Add a new `segmented` variant to `&lt;Tabs&gt;` matching the Figma pill style.
+- Switch all five trace-details tabs (Messages, Details, Feedback scores,
+  Agent graph, Configuration) from `underline` to `segmented`.
+
+Containers (2c)
+- Add `CollapsibleSection` primitive — chevron-on-left + label + actions
+  slot — for sections that don&#39;t need the full code-viewer chrome
+  (Attachments, loading skeletons, LLM messages wrapper).
+- Add `CodeBlock` compound (`CodeBlock`, `CodeBlockBody`, `CodeBlockCopy`,
+  `CodeBlockModeSelect`, `CodeBlockSearch`) backed by the existing
+  `useSyntaxHighlighter*` hooks. Used by Details Input/Output, Events,
+  and the new error callout.
+- `DetailsTab`, `AttachmentsList`, `EventsList` migrated off Radix
+  Accordion onto these new primitives.
+
+LLM messages (2d)
+- Wrap the messages list in `&lt;CollapsibleSection title=&#34;LLM messages&#34;&gt;`
+  with the expand/collapse and copy-all buttons in the actions slot.
+- Tighten the per-message role label (`comet-body-s-accented` →
+  `comet-body-xs-accented`, `text-light-slate` → `text-muted-slate`).
+
+Feedback scores (2e)
+- Make `ColumnsButton` use `layout=&#34;labeled&#34;` and downsize the section
+  title to `comet-body-xs-accented` for the new tabs alignment.
+
+Error callout (2f)
+- Add `ErrorCallout` (CodeBlock with destructive border + AlertTriangle
+  icon, collapsed by default) rendered above the tabs when
+  `data.error_info` is present.
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6248] [FE] fix: address review comments on segmented tabs and CodeBlock
+
+- tabs.tsx: switch the new `segmented` variant from hardcoded `bg-white`
+  to `bg-soft-background` so the panel respects dark mode (matches the
+  rest of the new section primitives).
+- CodeBlockBody.tsx: fix `remarkGfm` import specifier from the broken
+  `node_modules/remark-gfm/lib` path to the published package
+  `remark-gfm`.
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6248] [FE] fix: address designer polish on trace details main content
+
+Apply Jolanta&#39;s review items: stats bar typography (body-s + 14px muted-slate
+icons), transparent segmented tabs, rotating chevron on the Pretty/Code mode
+selector, hide line-number and fold gutters in trace code blocks, tighten
+tag-to-content gap, fix outline button text weight at 2xs/3xs, and align
+CodeBlock/CollapsibleSection paddings with the spec.
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6248] [FE] fix: muted shortcut letters and code-block icon color
+
+Address Jolanta&#39;s last polish: outline-variant HotkeyDisplay now uses
+text-muted-foreground in light mode so Previous/Next J/K read as muted-grey
+(matches Annotate&#39;s A). CodeBlock header search/copy icons switched from
+light-slate to muted-slate for better visibility against the dropdown text.
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+- [NA] [SDK] [DOCS] Update automatically OpenAPI spec and Fern code (#6586)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [OPIK-6308] [BE] fix: make online evaluation score path non-blocking end-to-end (#6584)
+
+* [OPIK-6308] [BE] fix: make online evaluation score path non-blocking end-to-end
+
+Production metrics showed JVM threads piling up in WAITING state on
+Mono.block() calls in the online evaluation path during a span ingestion
+spike that coincided with a spike of Online Evaluation requests for
+Python custom metrics. Per-call, the Java BE was holding a workersScheduler
+thread, a global Schedulers.boundedElastic() thread, and a Jersey
+ClientExecutor thread for the entire upstream wait — even when the upstream
+was just slow, not failing.
+
+* fix(python-evaluator): use jakarta @NotNull for timeout fields to fail fast on missing config
+
+* fix(online-eval): drop redundant error.getMessage() in trace-thread Python outer doOnError
+
+The outer .doOnError on score() in OnlineScoringTraceThreadUserDefinedMetricPythonScorer
+called log.error with both an inline {} placeholder for error.getMessage() and the error
+itself as a trailing Throwable, so the error message was printed twice (once inline and
+once at the head of SLF4J&#39;s stack trace). Drop the inline placeholder and keep only the
+trailing Throwable, matching the trace-thread LLM scorer&#39;s existing pattern.
+
+- [OPIK-6311] [BE] perf: extend push-top-limit to filtered queries via slim DI ID CTE (#6567)
+
+* [OPIK-6311] [BE] perf: push Top-N filter into dataset_items_aggr_resolved CTE
+
+Extends push_top_limit so it also activates for the default-sort case
+(no sortingFields, no filters, no search) used by the experiment compare
+page. In that case the Top-N CTE is defined before
+dataset_items_aggr_resolved, and dataset_item_id IN (top_dataset_items)
+is pushed into the dedup CTE so the existing bloom_filter / minmax skip
+indexes on dataset_item_versions and experiment_item_aggregates can prune
+granules.
+
+When sorting requires the dataset-items join (push_top_needs_div), keep
+the previous CTE order to avoid forward references.
+
+Implements OPIK-6311.
+
+* [OPIK-6311] [BE] test: cover default-sort, filtered, searched, and orphaned paths on aggregated branch
+
+Adds four integration tests in ExperimentAggregatesIntegrationTest that
+exercise the has_aggregated branch of the dataset items + experiment
+items endpoint, locking in regression coverage that was previously
+missing for the comparison endpoint.
+
+- defaultSortPaginationConsistentBeforeAndAfterAggregates: queries page
+  1 and page 2 without a sorting parameter, before and after calling
+  populateAggregations on both experiments. Asserts page IDs match
+  exactly and pages do not overlap. The existing parameterized
+  pagination test always supplies an explicit sort, so this is the
+  first coverage of the default-sort pushdown path.
+
+- filteredResultsConsistentBeforeAndAfterAggregates: parameterized over
+  three duration filter cases (matches all, matches none, matches a
+  subset). Asserts filtered IDs and totals match exactly before and
+  after aggregation.
+
+- searchedResultsConsistentBeforeAndAfterAggregates: applies a search
+  term that matches some items and one that matches none, asserting
+  IDs and totals match before and after aggregation.
+
+- experimentItemsForDeletedDatasetItemConsistentBeforeAndAfterAggregates:
+  deletes half of the dataset items so experiment_items become
+  orphaned, then asserts the comparison endpoint returns identical
+  results before and after aggregation.
+
+* [OPIK-6311] [BE] perf: simplify GROUP BY in aggregated comparison query when push_top_limit is active
+
+When push_top_limit activates the row-volume in the aggregated branch
+of /v1/private/datasets/{id}/items/experiments/items collapses to ~N
+items per page. In that regime, hashing the wide GROUP BY key (14
+columns including Map and Array types) for every joined row dominates
+runtime relative to the same work performed via any() aggregates.
+
+This change introduces a push_top_limit-gated alternative for the
+projection and GROUP BY of the aggregated branch:
+
+- Projection: di.* references in the outer SELECT are wrapped with
+  any() (they are uniform within a group keyed by dataset_item_id and
+  resolved_dataset_version_id, so any() is semantically equivalent to
+  including them in the group key for current data shapes).
+- GROUP BY: drops the redundant di.* columns and keeps only
+  ei.dataset_item_id, dataset_id, and COALESCE(di.data, map()).
+  Keeping data in the group key preserves the single column most
+  likely to differ between rows under any future change to the OR-join
+  semantics, while still removing 11 hashes per row.
+
+Behavior is unchanged when push_top_limit is false: the original
+projection and full 14-column GROUP BY are used, avoiding the +15%
+slow-path regression observed when this rewrite is applied to large
+groups.
+
+Measured on a representative workload (single experiment, ~2.4M items,
+default-sort 25-row page, post-OPT3 baseline 0.45s): query time drops
+to ~0.43s (-4%). When combined with OPT3, this brings the same query
+from the original ~10.5s down to ~0.43s overall.
+
+* [OPIK-6311] [BE] fix: gate push-top-limit off when filters or search are present
+
+The Top-N CTE selects items by sort BEFORE the outer query applies
+filters and search. When filters or search are active the outer scan
+strips items from the top-N, which silently returns short pages even
+though additional matches exist below the cutoff.
+
+Tightens the pushTopLimit gate to require !hasFilters &amp;&amp; !hasSearch
+across both the explicit-sort and default-sort branches. The
+default-sort branch already had this guard; this lifts it to also
+cover the explicit-sort path that has been latent since the original
+push-top-limit work.
+
+Adds a regression test in ExperimentAggregatesIntegrationTest that
+reproduces the bug: items with deterministic durations 10s, 20s,
+... per index; sorted by duration ASC with filter duration &gt; 30000ms;
+page size 2. Without the fix, the unfiltered top-2 picks the lowest
+durations which then fail the filter, returning an empty page even
+though items at index 3+ match. With the fix, the raw-branch result is
+preserved post-aggregation. Verified via assertDatasetItemsWithExperimentItems
+for full-object equality.
+
+* [OPIK-6311] [BE] fix: pick di metadata via argMax tied to resolved_dataset_version_id
+
+In the push_top_limit branch the previous any(di.*) aggregates picked
+metadata non-deterministically across resolved_dataset_version_id
+boundaries: when the same dataset_item_id is referenced by experiments
+that resolved to different dataset versions, the JOIN produces one
+ei row per (experiment, version) and any() could return description /
+tags / etc. from the wrong version.
+
+Replaces the di.* aggregates with argMax(di.X, eas.resolved_dataset_version_id)
+so the result is deterministic — always the metadata from the highest
+(latest) resolved version for that dataset_item_id. Also drops
+COALESCE(di.data, map()) from the GROUP BY since it now goes through
+argMax too, leaving the group key as just (ei.dataset_item_id, dataset_id).
+
+Behavior is unchanged when push_top_limit is false. Common case (all
+experiments share the same resolved version) is unaffected.
+
+Measured DB benchmark median across 5 rounds: ~0.425s (was ~0.432s
+with data kept in GROUP BY, was ~0.436s for OPT3 alone). Cumulative
+speedup vs original (10.5s -&gt; 0.425s) ~ 24.7x.
+
+* [OPIK-6311] [BE] perf: extend push-top-limit to filtered queries via slim DI ID CTE
+
+Folds all filter blocks into the pre-DI top_dataset_items CTE so the IN
+filter on dataset_item_id can prune the dataset_items_aggr_resolved
+dedup CTE and the outer EIA scan via the existing bloom_filter / minmax
+skip indexes — the same mechanism the no-filter OPT3 path uses.
+
+For dataset_item_filters (filters on DI columns like id, source,
+trace_id, tags, created_at, etc.), introduces a slim
+dataset_items_filtered_ids CTE that pre-resolves filter-matching IDs
+from dataset_item_versions. top_dataset_items joins those IDs via
+arrayJoin([id, row_id]) IN, so the rest of the pipeline gets the
+narrowed ID set automatically.
+
+Gate logic skips pushdown for:
+- search (search references di.data, would force post-DI placement,
+  which we measured as a net regression).
+- sort-on-DI fields combined with any filter (post-DI doesn&#39;t fold
+  filters and adding them duplicates the outer JOIN+GROUP BY).
+- sort-on-DI without filter: keeps the existing post-DI placement
+  unchanged.
+
+DB benchmarks on a representative experiment (~2.4M items, page 25
+sorted by id DESC, 10 rounds each):
+
+EIA-only filter (ilike(output, &#39;%true%&#39;) matching ~82k EIA rows):
+  no pushdown: 4.37s median → with pushdown: 0.33s median (13.0x).
+
+Dataset-item filter (ilike(data[&#39;input&#39;], &#39;%comedy%&#39;) matching ~128k DI
+rows):
+  no pushdown: 5.81s median → with pushdown: 0.80s median (7.3x).
+
+Both paths produce byte-identical 25-row outputs (MD5 verified).
+EXPLAIN confirms dataset_item_versions scans drop from 405 granules to
+1 via the existing skip indexes.
+
+Targeted tests pass: 21 in ExperimentAggregatesIntegrationTest (incl.
+the existing 20-variant parameterized sort + the explicit-sort+filter
+reproducer that now exercises the new pre-DI-with-filter path) + 117 in
+DatasetsResourceTest comparison-endpoint suites. mvn spotless:check and
+mvn -DskipTests compile both pass.
+
+* [OPIK-6311] [BE] chore: use imports and builders in explicitSortAndFilter test
+
+Address review nits on the explicitSortAndFilterConsistentBeforeAndAfterAggregates
+test: import SortingField/Direction instead of using fully-qualified class names,
+and switch the SortingField and ExperimentsComparisonFilter constructions to the
+builder pattern for readability.
+
+* [OPIK-6311] [BE] revert: drop push_top_limit-gated GROUP BY simplification
+
+Reverts 382e61cc48 (perf: simplify GROUP BY in aggregated comparison query
+when push_top_limit is active) and 453f6cacce (fix: pick di metadata via
+argMax tied to resolved_dataset_version_id), the follow-up that depended on
+it. Restores the original 14-column GROUP BY projection for all paths.
+
+The benchmark gain measured for the simplification was inside the noise
+band of the OPT3 + dataset_items_filtered_ids pushdowns it stacked on top
+of, and the path it added (push_top_limit-gated argMax aggregates) is not
+worth the extra branch in the StringTemplate, so dropping it.
+
+* [OPIK-6311] [BE] test: cover dataset_item filter across two distinct dataset versions
+
+Adds multiVersionExperimentsFilterConsistentBeforeAndAfterAggregates plus
+createExperimentPinnedToFreshDatasetVersion helper. Each helper invocation
+inserts a fresh dataset_items batch (emitting a new dataset_version) and
+then creates the experiment so it auto-pins to the just-published version,
+so calling it twice on the same dataset gives two experiments at two
+distinct resolved_dataset_version_id values.
+
+The query then forces the dataset_items_filtered_ids CTE to render via a
+DI-strategy filter on id (a tautology, id != random uuid), exercising the
+FROM dataset_item_versions FINAL dedup across multiple version rows in
+scope, and asserts before-aggregation and after-aggregation results stay
+identical.
+
+- [OPIK-6360] [INFRA] fix: emit labels for every dropdown entry in regenerated YAML and fix path in job (#6588)
+
+* [OPIK-6360] [INFRA] fix: emit labels for every dropdown entry in regenerated YAML
+
+The skip-emit-when-label-equals-id optimization in regenerate_llm_models_yaml
+made every OpenRouter model invisible in the FE dropdown once the CDN-served
+YAML became the runtime source of truth. OpenRouter&#39;s FE labels are
+identical to its ids by convention, so the optimization stripped all
+~800 OpenRouter labels — and the FE filter uses label-presence as the
+&#34;is this dropdown-visible?&#34; signal, dropping the entire list.
+
+Removing the `entry.label != model_id` check restores labels for every
+dropdown-visible entry. Adds ~30KB to the cold-cached YAML, which is
+trivial compared to the correctness fragility of the omit-when-equal
+rule (and the byte cost was the only argument for it).
+
+The YAML itself is intentionally not regenerated in this commit — the
+daily sync workflow (sync_provider_models.yml) will pick up this script
+change on its next run and produce a normal sync PR with the
+regenerated llm-models-default.yaml.
+
+OPIK-6360
+
+* [OPIK-6360] [INFRA] fix: stage provider models from new constants/ location in sync workflow
+
+The Sync Provider Models Daily workflow&#39;s `git add` list still referenced
+the pre-OPIK-5021 location of PROVIDER_MODELS
+(apps/opik-frontend/src/hooks/useLLMProviderModelsData.ts), but that
+constant moved to apps/opik-frontend/src/constants/providerModels.ts.
+
+Symptoms:
+- Sync runs that produced real changes to the constant left the new file
+  unstaged. The peter-evans/create-pull-request action&#39;s &#34;Uncommitted
+  changes found. Adding a commit.&#34; fallback caught it on the action side
+  and made a second commit, but this split one logical change across two
+  commits in the resulting PR and would have lost the change entirely
+  if anyone disabled that fallback.
+- Visible in PR #6576 which ended with 0 changed files: the staged set
+  was already redundant against main, and the unstaged providerModels.ts
+  changes were the only meaningful diff that could have prevented that.
+
+One-line path swap.
+
+- build(deps): bump software.amazon.awssdk:bom in /apps/opik-backend (#6583)
+
+Bumps software.amazon.awssdk:bom from 2.42.4 to 2.44.0.
+
+---
+updated-dependencies:
+- dependency-name: software.amazon.awssdk:bom
+  dependency-version: 2.44.0
+  dependency-type: direct:production
+  update-type: version-update:semver-minor
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- build(deps): bump org.jdbi:jdbi3-stringtemplate4 in /apps/opik-backend (#6582)
+
+Bumps [org.jdbi:jdbi3-stringtemplate4](https://github.com/jdbi/jdbi) from 3.52.0 to 3.53.0.
+- [Release notes](https://github.com/jdbi/jdbi/releases)
+- [Changelog](https://github.com/jdbi/jdbi/blob/master/RELEASE_NOTES.md)
+- [Commits](https://github.com/jdbi/jdbi/compare/v3.52.0...v3.53.0)
+
+---
+updated-dependencies:
+- dependency-name: org.jdbi:jdbi3-stringtemplate4
+  dependency-version: 3.53.0
+  dependency-type: direct:production
+  update-type: version-update:semver-minor
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- build(deps): bump dev.langchain4j:langchain4j-bom in /apps/opik-backend (#6581)
+
+Bumps [dev.langchain4j:langchain4j-bom](https://github.com/langchain4j/langchain4j) from 1.13.0 to 1.14.0.
+- [Release notes](https://github.com/langchain4j/langchain4j/releases)
+- [Commits](https://github.com/langchain4j/langchain4j/compare/1.13.0...1.14.0)
+
+---
+updated-dependencies:
+- dependency-name: dev.langchain4j:langchain4j-bom
+  dependency-version: 1.14.0
+  dependency-type: direct:production
+  update-type: version-update:semver-minor
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [issue-6421] [FE] fix: truncate v1 SME threads list and surface items load errors (#6570)
+
+Apply the same fix already shipped in v2 to the v1 SME annotation flow:
+
+- Pass truncate=true to useThreadsList so heavy threads don&#39;t blow past
+  ClickHouse streaming limits and get the connection closed mid-stream
+  (the production &#34;Premature end of chunk coded message body&#34; failure
+  mode that surfaced as the misleading &#34;all items processed&#34; alert).
+  Detail views fetch full untruncated content on demand, so this is
+  functionally safe.
+- Capture isError from both list hooks and expose isItemsError on the
+  context, scoped to the queue&#39;s active scope (TRACE vs THREAD).
+- Split the previously combined !annotationQueue || isError check in
+  SMEFlowPage into three explicit branches: queue-error, no-queue, and
+  items-error (with retry).
+- Replace NoDataView&#39;s hasQueueId boolean with a variant discriminator
+  and add a dedicated items-error state with a retry action so users
+  see a real error instead of the misleading &#34;all items processed&#34;
+  alert.
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [NA] [BE][FE] chore: sync provider model definitions (#6580)
+
+* [NA] [BE][FE] chore: sync provider model definitions
+
+* [create-pull-request] automated change
+
+---------
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [NA] [BE] Update model prices file (#6579)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;</div>
+</div>
+
+<a href="../project/comet-ml_opik.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (15 commits) - FluidInference/FluidAudio - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (15 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a> /
+    Updates in main (15 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-09 04:25 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/FluidInference/FluidAudio/commits/main" target="_blank">https://github.com/FluidInference/FluidAudio/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>В проект был интегрирован новый CoreML-бэкэнд StyleTTS2 с подробным описанием его архитектуры, который, однако, впоследствии был удален. Значительные улучшения были внесены в возможности синтеза речи на мандаринском языке для модели Kokoro, включая комплексные доработки G2P, POS-зависимое сандхи тонов, поддержку пользовательских лексиконов и вербализацию чисел. Модель Magpie TTS получила обновления в виде нового, более эффективного `nanocodec_decoder_v4`, предлагающего улучшенную точность и меньший размер, а также привязку к ANE для существующих версий нанокодека. Кроме того, были внесены исправления для предотвращения сбоев Metal в Kokoro TTS и решения проблем компиляции `Float16` для универсальных сборок на архитектурах x86_64.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- feat(tts): StyleTTS2 LibriTTS (iteration_3) CoreML backend (#588)
+
+## Summary
+
+Swift port of `mobius/models/tts/styletts2/coreml/inference.py` against
+the `FluidInference/StyleTTS-2-coreml/iteration_3/compiled` mlmodelc
+assets. New `StyleTTS2Manager` actor exposes the same public shape as
+`MagpieTtsManager` / `KokoroSynthesizer`, plus a `--backend styletts2`
+route in the CLI.
+
+## Architecture
+
+`StyleTTS2Manager` orchestrates four pieces:
+1. `StyleTTS2ModelStore` — actor-managed lazy load of the 8 default
+`.mlmodelc` stages plus 6 token-axis bucket variants (T = 64 / 128 / 256
+fp16).
+2. `StyleTTS2Phonemizer` — wraps shared `MultilingualG2PModel`
+(CharsiuG2P) with an espeak-fallback note in the docs;
+`synthesize(ipa:)` escape hatch preserves parity for callers that
+already have espeak output.
+3. `StyleTTS2MelExtractor` — vDSP FFT + 80-bin HTK mel filterbank with
+the training-time `sample_rate=16000` quirk for the speaker-reference
+path.
+4. `StyleTTS2Synthesizer` — drives the 8-stage CoreML graph
+(`text_encoder`, `bert`, `ref_encoder`, `fused_diffusion_sampler`,
+`duration_predictor`, `fused_f0n_har_source`, `decoder_pre`,
+`decoder_upsample`) and returns 24 kHz mono Float32 PCM.
+
+Eager-glue ops (`StyleTTS2GlueOps`) bridge the stages on the CPU side:
+sigmoid+round of duration logits, one-hot alignment matrix, BLAS
+`cblas_sgemm` matmul, vDSP transpose, HiFi-GAN causal asr-shift, and the
+alpha/beta style blend (`s_pred[:, 128:]` / `s_pred[:, :128]`).
+
+The fused diffusion sampler consumes pre-materialized noise —
+`StyleTTS2DiffusionSchedule` provides the Karras sigma formula plus a
+SplitMix64 + Box-Muller source so a fixed `noiseSeed` reproduces the
+same audio.
+
+## CLI
+
+```
+swift run fluidaudiocli tts &#34;Hello from StyleTTS2.&#34; \
+    --backend styletts2 \
+    --reference path/to/speaker.wav \
+    --output out.wav \
+    --alpha 0.3 --beta 0.7 --seed 0
+```
+
+`--ipa` overrides the text path with a verbatim IPA string for espeak
+parity.
+
+## Test plan
+
+- [x] `swift build` clean
+- [x] `swift format lint` clean on touched files
+- [x] `swift test --filter StyleTTS2` — 32 / 32 passing
+- `StyleTTS2TextCleanerTests` — symbol vocab + encode round-trip +
+drop-unknown
+- `StyleTTS2GlueOpsTests` — duration rounding, alignment matrix, BLAS
+matmul, transpose, HiFi-GAN shift, alpha/beta blend
+- `StyleTTS2DiffusionScheduleTests` — Karras boundary conditions +
+monotonicity, RNG determinism, Gaussian stats
+- `StyleTTS2MultiArrayTests` — Float32 / Int32 round-trip,
+`extractFloats` for double / int32 backings
+- [ ] End-to-end smoke run via `swift run fluidaudiocli tts ...
+--backend styletts2 --reference ...` against a downloaded
+`iteration_3/compiled` asset bundle
+
+- Fix: Prevent Metal crash when targetTokens is 0 in Kokoro TTS (#586)
+
+Adds a defensive guard against targetTokens == 0 reaching CoreML in the Kokoro TTS pipeline. A zero-length int put_ids tensor causes the Metal backend to dispatch compute shaders with threadgroupsPerGrid.width(0), which is an uncatchable assertion failure:
+
+-[MTLDebugComputeCommandEncoder dispatchThreadgroups:threadsPerThreadgroup:]:1377:  failed assertion `(threadgroupsPerGrid.width(0) * ...) must not be 0.&#39;
+
+Changes
+1. KokoroSynthesizer.swift — synthesizeChunk() now throws a descriptive TTSError.processingFailed when targetTokens == 0, before any MLMultiArray allocation or model prediction. This converts an uncatchable Metal assertion into a recoverable Swift error.
+2. KokoroModelCache.swift — Cached token lengths are clamped with max(1, inferTokenLength(...)) at all 3 caching sites (loadModelsIfNeeded, tokenLength(for:), registerPreloadedModels). Defense-in-depth: although inferTokenLength() already returns a positive value or falls back to 124, this guarantees the cache invariant is locally enforced regardless of future changes to the inference helper.
+
+
+Testing
+- Manual: confirmed synthesizeChunk now throws TTSError.processingFailed instead of trapping when a 0 token length is forced.
+
+- Add Utter app to showcase in README.md (#585)
+
+### Why is this change needed?
+Adding a showcase app to the readme so people can find it.
+
+- chore(tts): remove StyleTTS2 backend, models, and references
+
+- fix(tts): guard direct Float16 reads with #if arch(arm64) (CosyVoice3, StyleTTS2) (#582)
+
+## Summary
+
+`Float16` is an arm64-only Swift built-in, so any direct `Float16`
+typing fails to compile in the x86_64 slice of a Universal build. Four
+sites in CosyVoice3 and StyleTTS2 do raw `Float16` pointer binds with no
+arch guard, which currently breaks Universal archive builds with errors
+like:
+
+```
+&#39;Float16&#39; is unavailable in macOS
+No exact matches in call to initializer
+Failed to produce diagnostic for expression; please submit a bug report
+```
+
+Affected sites:
+-
+`Sources/FluidAudio/TTS/CosyVoice3/Pipeline/Synthesize/CosyVoice3SpeechEmbeddings.swift:65`
+— `assumingMemoryBound(to: Float16.self)` for the fp16 safetensors
+lookup table.
+-
+`Sources/FluidAudio/TTS/CosyVoice3/Pipeline/Synthesize/CosyVoice3Synthesizer.swift:554`
+— fp16 branch of the Flow→HiFT mel copy in `runHiFT`.
+-
+`Sources/FluidAudio/TTS/StyleTTS2/Pipeline/StyleTTS2Synthesizer.swift:288`
+— fp16 case in `sliceFirstAxis2D`.
+-
+`Sources/FluidAudio/TTS/StyleTTS2/Pipeline/StyleTTS2Synthesizer.swift:541`
+— fp16 case in `readMLMultiArrayPrefix`.
+
+This PR mirrors the package&#39;s existing pattern for fp16 reads on
+non-arm64 (`ASR/Qwen3/Qwen3AsrModels.swift:310`,
+`Diarizer/Sortformer/SortformerModelInference.swift:278`): wrap each
+`Float16`-touching arm in `#if arch(arm64) ... #endif`.
+
+## Behavior on x86_64
+
+- **CosyVoice3SpeechEmbeddings** — throws
+`CosyVoice3Error.predictionFailed(&#34;requires Apple Silicon (arm64); fp16
+lookup table cannot be read on x86_64&#34;)`. The `speech_embedding`
+safetensors table is fp16-only on disk with no fp32 alternative, so this
+matches the Qwen3-ASR posture (its embedding table is also fp16-only on
+disk; it `fatalError`s on x86_64).
+- **CosyVoice3Synthesizer.runHiFT** — the `case .float16:` arm is
+omitted on x86_64. The `case .float32:` path is unchanged. If a Flow
+variant emits fp16 at runtime on Intel, control falls into the existing
+`default:` arm, which already throws `&#34;runHiFT: unexpected Flow mel
+dtype …&#34;`.
+- **StyleTTS2Synthesizer (`sliceFirstAxis2D`,
+`readMLMultiArrayPrefix`)** — the `case .float16:` arm is omitted on
+x86_64. fp16 arrays fall through to the existing NSNumber-bridged
+`default:` arm (`arr[i].floatValue` / `fill { arr[$0].floatValue }`),
+which already converts fp16 correctly. Slightly slower on Intel; no
+behavior regression.
+
+No new error types or dependencies. Diff is +13 lines across 3 files.
+
+## Why this approach (vs. vImage byte-level conversion)
+
+FluidAudio already uses two patterns for cross-arch fp16 handling:
+- **`#if arch(arm64)` guard** — used for fp16 *reads* in
+`Qwen3AsrModels.swift` and `SortformerModelInference.swift`.
+- **vImage `Planar16FtoPlanarF` / `PlanarFtoPlanar16F`** — used for fp16
+*writes* in `KokoroAneSynthesizer+Conversion.swift`, `TtsModels.swift`,
+`KokoroSynthesizer.swift`, with the explicit comment in
+`TtsModels.swift:182`: *&#34;This avoids direct Float16 usage which isn&#39;t
+available in all build configurations&#34;*.
+
+This PR matches the existing fp16-read precedent (Pattern A). A
+follow-up could port these read paths to vImage for full Intel runtime
+support (Pattern B), but that&#39;s a larger change and would need testing
+on Intel hardware. The minimal goal here is unblocking the Universal
+compile.
+
+## Test plan
+
+- [x] Universal archive build of a downstream macOS app that links
+FluidAudio as a local SPM package now succeeds (failed prior to this
+patch with the errors above).
+- [ ] CI lint / build on the package itself.
+- [ ] No CosyVoice3 / StyleTTS2 runtime regression on Apple Silicon (the
+arm64 path is byte-identical to before).
+
+- feat(tts/magpie): nanocodec v4 (fp32 + int8 palettize) precision (#581)
+
+## Summary
+
+Add `MagpieNanocodecPrecision.fp32Pal` selecting `nanocodec_decoder_v4`:
+v3&#39;s fp32 architecture with 8-bit kmeans-palettized weights.
+Acoustically transparent vs v3 at ~4× smaller on disk and ~11% lower
+peak RSS. Same recipe Kokoro Noise uses for `fp32 + int8pal`.
+
+Compute units track precision: `.fp32Pal` pins `.cpuOnly` (palettized
+weights dequantize to fp32 at runtime; ANE refuses fp32 / GPU is 50%+
+slower than CPU on fp32 codec).
+
+## Bench (M2, 16 GB, .cpuOnly, T_in=24, 5 warmup + 50 timed iters)
+
+| metric              | v3 fp32 | v4 fp32+int8pal | delta  |
+|---------------------|---------|-----------------|--------|
+| mlpackage on disk   | 121.0MB |          30.9MB |   -74% |
+| post-load RSS delta | +59.9MB |         +61.7MB |    eq. |
+| peak RSS            | 700.8MB |         621.8MB |   -11% |
+| latency median      | 117.6ms |         117.1ms |    eq. |
+| latency p95         | 145.9ms |         123.6ms |   -15% |
+| RTFx (codec)        |   9.48× |           9.52× |    eq. |
+| SNR vs v3 (AR codes)|    inf. |          33.6dB | clean* |
+
+*User-confirmed acoustically transparent on AR-emitted speech.
+
+## Fallback chain
+
+Each candidate carries its own config so the fallback doesn&#39;t inherit
+the primary&#39;s compute-unit selection. fp16 (v2) is only reached when
+explicitly requested or when no other candidate is present, since it&#39;s
+audibly noisy on voiced speech:
+
+| Requested      | Order                    |
+|----------------|--------------------------|
+| `.fp32Pal`     | v4 → v3 → v2             |
+| `.fp32`        | v3 → v4 → v2             |
+| `.fp16`        | v2 → v4 → v3             |
+
+If every chunked artifact is missing the loader falls through to legacy
+monolithic v1 with `.cpuOnly` (audibly noisy).
+
+## HF artifacts
+
+Already uploaded to
+`FluidInference/magpie-tts-multilingual-357m-coreml`:
+- `nanocodec_decoder_v4.mlmodelc/`
+- `nanocodec_decoder_v4.mlpackage/`
+
+## Companion PR
+
+mobius converter: https://github.com/FluidInference/mobius/pull/54
+
+## Test plan
+- [x] `swift build` green
+- [x] `swift test --filter MagpieConstantsTests` 5/5 pass
+- [x] `swift format lint` clean for changed files
+- [ ] End-to-end `MagpieTtsManager` synth with `.fp32Pal` once HF
+artifacts propagate to user caches
+
+- feat(tts/magpie): nanocodec v1/v2/v3 + decoder_step ANE pin + dual-precision API (#580)
+
+## Summary
+
+Companion to mobius PR FluidInference/mobius#53. Wires the new nanocodec
+v2/v3 builds into the FluidAudio Magpie runtime, plus pins
+`decoder_step` to ANE for ~2× wall speedup.
+
+## Commits
+
+- `5879a32b3` — `fix(tts/magpie): pin decoder_step to ANE for ~2x
+speedup + correct EOS`
+- `decoder_step.mlmodelc` was running CPU+GPU. Pinning to
+`.cpuAndNeuralEngine` halves wall on M2.
+  - EOS handling: don&#39;t emit the post-EOS frame.
+- `ec7051504` — `feat(tts/magpie): chunked T=24 fp32 nanocodec +
+edge-pad (Phase C v2)`
+- Slide a 24-frame window with stride 8, overlap 16 (= dilated-conv
+input receptive field).
+- Edge-replicate context at sequence boundaries instead of zero-padding
+(zero-pad produces a sharp pop in the first ~30 ms).
+- `2f0aab7a7` — `feat(tts/magpie): dual fp16/fp32 nanocodec t24 builds
+via MagpieNanocodecPrecision`
+  - New `MagpieNanocodecPrecision` enum (`.fp16` / `.fp32`).
+- Compute-unit dispatch: fp32 → `.cpuOnly` (ANE is fp16-only); fp16 →
+`.cpuAndNeuralEngine` unless caller pinned CPU.
+- Plumbed through `MagpieModelStore.init` and `MagpieTtsManager.init` /
+`downloadAndCreate`.
+- `4bd31469f` — `refactor(tts/magpie): nanocodec v1/v2/v3 versioning
+(drop t24 prefix)`
+- Final naming: v1 = legacy mono, v2 = chunked fp16, v3 = chunked fp32.
+- `requiredModels` now lists `nanocodecDecoderV3File` so legacy v1-only
+users auto-upgrade on next bulk fetch.
+- Load chain: primary (precision-matched) → secondary (cross-precision
+warning) → legacy v1 fallback.
+
+## Production state
+
+| Build | File | Precision | Shape | Selector | Audio |
+|---|---|---|---|---|---|
+| v1 | `nanocodec_decoder.mlmodelc` | fp16 | T=256 monolithic | legacy
+fallback | noisy + slow |
+| v2 | `nanocodec_decoder_v2.mlmodelc` | fp16 | T_in=24 chunked |
+`MagpieNanocodecPrecision.fp16` | noisy / fast |
+| v3 | `nanocodec_decoder_v3.mlmodelc` | fp32 | T_in=24 chunked |
+`MagpieNanocodecPrecision.fp32` (default) | clean |
+
+All three live on `FluidInference/magpie-tts-multilingual-357m-coreml`.
+
+## Background
+
+Phase F mixed-precision sweep (mobius#53) confirmed no fp16 op/location
+combination recovers cleanliness — production stays on v3 (fp32) with v2
+as opt-in for throughput-bound callers willing to accept the 27 dB SNR
+floor.
+
+## Test plan
+
+- [x] `swift format` clean
+- [x] `swift build` clean
+- [ ] Sanity-check `swift test --filter MagpieTtsTests` (if present)
+- [ ] Spot-check synthesis via CLI on default speaker
+
+- feat(tts/kokoro-ane/zh): consolidated Mandarin G2P (erhua + jieba HMM + g2pW) (#572 items 1, 3, 4) (#579)
+
+## Summary
+
+Consolidates PRs #574, #575, and #576 into a single landing for Mandarin
+G2P enhancements per [issue
+#572](https://github.com/FluidInference/FluidAudio/issues/572). All
+three features are non-overlapping and stack cleanly inside
+`MandarinG2P.phonemize`:
+
+- **Item 3 — Erhua merging** (was #574): folds trailing `儿` into the
+previous syllable so `小孩儿` emits a single r-coloured token instead of a
+stray `er` tail.
+- **Item 4 — Jieba HMM tail** (was #575): re-segments OOV runs of
+single-char fallbacks via a 4-state B/M/E/S Viterbi to recover
+proper-noun boundaries (`特朗普`, `比特币`); recovered words are then retried
+against the phrase dict before per-char fallback.
+- **Item 1 — g2pW polyphone disambiguation** (was #576): int8 BERT-base
+classifier (152 MB CoreML) picks the right reading for polyphonic Hanzi
+(`行`/`长`/`重`/`朝`/…) using the full sentence as context. Best-effort:
+falls back to dict-only when assets are missing.
+
+Item 2 (number normalization) already merged via #573. Items 5 (POS
+sandhi, #577) and 6 (custom lexicon, #578) remain as separate PRs.
+
+## Pipeline order
+
+```
+text
+  → MandarinNumberNormalizer.normalize        (already on main)
+  → normalizeText (punctuation)
+  → segment(): FMM phrases + jieba HMM tail   (NEW: item 4)
+  → polyphone disambiguation via g2pW         (NEW: item 1)
+  → diacritic → digit (MandarinPinyinNormalizer)
+  → MandarinErhua.merge                       (NEW: item 3)
+  → MandarinToneSandhi.apply
+  → MandarinBopomofoMap.encode
+```
+
+## API changes
+
+- `MandarinG2P.phonemize` is now `async throws` (g2pW disambiguation
+requires async). Backwards-compatible callers must add `try await`.
+- `MandarinG2P.init(dict:, jiebaHmm:, g2pw:)` — both new parameters are
+optional, default `nil` keeps baseline behaviour.
+- New `Segment.bopomofoOverride(String)` case carries g2pW&#39;s pre-encoded
+bopomofo + tone digit; bypasses sandhi.
+
+## Asset requirements
+
+Pulled from `huggingface.co/FluidInference/kokoro-82m-coreml`:
+
+- `ANE-zh/g2pw/g2pw.mlmodelc/` — bulk `ensureModels` (added to
+`requiredModelsZh`)
+- `ANE-zh/g2pw/vocab.txt` + `POLYPHONIC_CHARS.txt` —
+`ensureMandarinG2pw` lazy fetch
+- `ANE-zh/assets/jieba_hmm_{start,trans,emit}.bin` —
+`ensureMandarinJiebaHmm` lazy fetch
+
+All three optional asset groups degrade gracefully: missing g2pW falls
+back to dict-first reading, missing jieba HMM falls back to per-char
+singles.
+
+## Test plan
+
+- [x] `swift build` clean
+- [x] 102 tests pass across `MandarinG2PTests`, `MandarinErhuaTests`,
+`MandarinJiebaHmmTests`, `MandarinPolyphoneCatalogTests`,
+`MandarinBertTokenizerTests`, `MandarinNumberNormalizerTests`
+- [x] Polyphone target tracking through jieba HMM resegmentation:
+`flushHanziRun` carries absolute char positions so g2pW sees the right
+context window
+- [x] Backward-compat: `MandarinG2P(dict:)` (no jieba, no g2pW) still
+passes baseline tests
+
+## Closes
+
+- #574 (erhua)
+- #575 (jieba HMM)
+- #576 (g2pW)
+
+Refs #572.
+
+- feat(tts/kokoro-ane/zh): POS-aware tone sandhi (#572 item 5) (#577)
+
+## Summary
+
+Issue #572 item 5. The baseline \`MandarinToneSandhi\` rules are
+POS-independent and audibly misfire on three contexts:
+
+- **一 ordinals** (\`第一 dì-yī\`, \`一月 yī-yuè\`, \`一号\`) keep
+  tone 1; baseline promotes them to 2/4 unconditionally
+- **不 reduplication** (\`要不要\`, \`好不好\`, \`行不行\`) keeps
+  \`不\` at tone 4 inside \`[X, 不, X]\`; baseline misfires with
+  bu4+tone4 → bu2
+- **3+3 chains** apply within prosodic words; cross-word 3+3 only
+  promotes the word-final syllable. Baseline&#39;s pure-run rule
+  cascades too far left (\`我也想去\` → wrong \`2 2 2 3\` instead of
+  correct \`2 2 3 4\`)
+
+## Design
+
+\`MandarinToneSandhiPOS.apply(_:words:tags:)\` — pure function, takes
+the syllable buffer plus pre-computed word ranges + jieba POS tags.
+Backward-compat path stays on \`MandarinToneSandhi.apply\` for
+callers without a POS tagger (existing behavior preserved).
+
+## Test plan
+
+- [x] 一 ordinal carve-outs (\`第一\`, \`一月\`)
+- [x] 一 contextual sandhi still fires in non-numeral words
+      (\`一定\`, \`一起\`)
+- [x] 不 reduplication keeps tone 4 (\`要不要\`)
+- [x] 不 promotion still fires for non-reduplication (\`不要\`)
+- [x] In-word 3+3 run promotes all but last
+- [x] Cross-word 3+3 only promotes the boundary
+- [x] Cross-word chain stops at non-3 (\`我是你的\`)
+- [x] Backward-compat for single-word ranges
+- [x] \`swift build\` + \`swift format lint\` clean
+- 14 unit tests, all passing
+
+## Out of scope (follow-up)
+
+- **MandarinG2P routing** to \`MandarinToneSandhiPOS\` lands once
+  PR #575 (jieba HMM + POS tagger tables) merges and the POS tagger
+  is loaded by \`KokoroAneModelStore.mandarinG2PPipeline\`. Until
+  then this module is testable in isolation via synthetic POS input.
+
+## Depends on
+
+- #575 — for the POS tagger Viterbi + tables that produce the
+  \`words\`/\`tags\` arrays at runtime
+
+- feat(tts/kokoro-ane): user-supplied Mandarin custom lexicon (#572 item 6) (#578)
+
+## Summary
+
+Issue #572 item 6. Lets app developers ship a project-specific
+Mandarin lexicon that overrides both the bundled phrase dict and
+g2pW. Useful for proper nouns the bundled dict doesn&#39;t cover
+(brand names, technical jargon, regionalisms) and for cases where
+the user knows the correct reading and wants to bypass any
+heuristic.
+
+## Test plan
+
+- [x] Custom lexicon entry overrides phrase dict
+- [x] Custom lexicon entry overrides single-char dict
+- [x] Empty lexicon = no-op (baseline preserved)
+- [x] \`swift build\` + \`swift format lint\` clean
+
+## Independent
+
+This PR is independent of #573–#577. Land in any order.
+
+- feat(tts/kokoro-ane/zh): number/date/currency verbalization (#572 item 2) (#573)
+
+## Summary
+
+Issue #572 item 2. Pre-pass that verbalizes numerics, dates, times,
+percentages, fractions, and currencies into Hanzi *before*
+`MandarinG2P` segments the text. Without it, conversational input
+like \`¥120\`, \`2025年5月3日\`, \`8:30\`, \`99%\` either fragments
+into per-digit literals or gets dropped entirely by the segmenter.
+
+- Port misaki/zh/num.py rules: cardinals up to 兆 (10¹²), decimal
+  point form, percentages with 百分之, fractions (二分之一), money
+  (¥/$/€/￥), dates (YYYY年MM月DD日, YYYY/MM/DD), times (HH:MM[:SS])
+- Hook in `MandarinG2P.phonemize` before punctuation normalization
+- Pure function, no new public API surface on `KokoroAneManager`
+
+## Test plan
+
+- [x] `MandarinNumberNormalizerTests` covers cardinals, decimals,
+      percentages, fractions, money, dates, times
+- [x] `MandarinG2PTests` baseline regression (no behavior change on
+      pure-Hanzi input)
+- [x] `swift build` + `swift format lint` clean
+
+- Finalized DiarzerTimeline segment updates no longer commit tentative segments (#568)
+
+There was a bug that would cause the trailing diarizer segment to
+disappear if minFramesOff was nonzero once the person stopped talking.
+
+---------
+
+- feat(tts/kokoro-ane): add Mandarin (v1.1-zh) variant (#570)
+
+## Summary
+
+Phase 1 — variant plumbing + phonemes-bypass synthesis for
+Kokoro-82M-v1.1-zh
+on the existing 7-stage CoreML chain. Callers that supply pre-computed
+Bopomofo (e.g. via misaki[zh] in Python or a future Swift G2P) can now
+synthesize Mandarin audio. Mandarin text-to-Bopomofo G2P is deferred to
+a
+separate Phase 2 PR.
+
+The 7-stage chain is **language-agnostic by construction** — input ids,
+voice slices, and per-stage I/O contracts are identical across v1.0
+(English) and v1.1-zh (Mandarin). Only the embedding vocab (177 → 171),
+the
+HF subdir (`ANE/` → `ANE-zh/`), the voice-file layout (flat →
+`voices/&lt;voice&gt;.bin`), and the default voice (`af_heart` → `zf_001`)
+differ.
+
+## Changes
+
+- New `Repo.kokoroAneZh` → `FluidInference/kokoro-82m-coreml/ANE-zh`
+with
+  `subPath = ANE-zh`, `folderName = kokoro-82m-coreml/ANE-zh`.
+- `ModelNames.KokoroAne.requiredModelsZh` references `voices/zf_001.bin`
+so the downloader&#39;s all-files-present check resolves correctly when the
+  file lands at `&lt;repoDir&gt;/voices/zf_001.bin`.
+- New `KokoroAneVariant` enum (`.english` / `.mandarin`) with
+  `defaultVoice`, `useVoicesSubdir`, and `repo` accessors.
+- `KokoroAneResourceDownloader.ensureModels` and `ensureVoicePack`
+accept a
+  `variant` param (default `.english` keeps existing callers
+  source-compatible). Mandarin voice fetch creates the `voices/` parent
+  directory on demand.
+- `KokoroAneModelStore` and `KokoroAneManager` thread the variant
+through
+  to download + load.
+- `KokoroAneManager.synthesize(text:)` and `synthesizeDetailed(text:)`
+  reject Mandarin with a clear error directing callers to
+  `synthesizeFromPhonemes()`. The phonemes-bypass entry point already
+  works for any vocab via `vocab.encode → 7-stage chain`.
+- CLI `--variant` flag accepts `en` / `english` / `zh` / `mandarin` for
+  the `kokoro-ane` backend. Mandarin runs treat the input text as
+  pre-computed Bopomofo and call `synthesizeFromPhonemesDetailed`.
+- 12 new unit tests (`KokoroAneVariantTests`): variant defaults, repo
+  wiring, required-files set routing, manager init signatures, and
+  Mandarin text-path rejection on both `synthesize` and
+  `synthesizeDetailed`.
+
+End-to-end Mandarin synthesis verified against PyTorch ground truth on
+`zf_001` and `zm_009`. Background-noise investigation tracked separately
+in #569 (atan2 phase correction in upstream `CoreMLForwardSTFT`).
+
+## Test plan
+
+- [x] `swift build` clean
+- [x] `swift test --filter KokoroAneVariantTests` — 12/12 pass
+- [x] `swift format lint` clean (only pre-existing warnings on
+`fastV2_1`/`balancedV2_1`/`highContextV2_1` enum cases unrelated to
+      this PR)
+- [ ] After HF upload of `ANE-zh/` bundle, end-to-end smoke test:
+`swift run fluidaudiocli tts &#34;ㄋㄧˇㄏㄠˇㄕˋㄐㄧㄝˋ。&#34; --backend kokoro-ane
+--variant zh --voice zf_001 --output /tmp/zh.wav`
+- [ ] No regressions on existing English path (default-arg behavior
+      preserved)
+
+## Out of scope
+
+- Mandarin text-to-Bopomofo G2P — Phase 2 (separate PR).
+- HF upload of `ANE-zh/` bundle — handled outside this repo.
+- Updating `Documentation/` with Mandarin voice list — defer to Phase 2
+  when the path is fully usable end-to-end.
+
+- Fixed an LS-EEND constructor (#567)
+
+The asynchronous constructor for `LSEENDDiarizer` that simultaneously
+loads the model did not update the timeline config&#39;s speaker count or
+frame duration, as it would&#39;ve if using
+```swift
+diarizer = LSEENDDiarizer()
+await diarizer.initialize(variant: .dihard3, stepSize: .step500ms)
+```
+
+---------
+
+- Fixed short segment filter for trailing tentative segments in DiarizerTimeline (#566)
+
+Apparently i did it incorrectly last time.
+
+---------
+
+Co-authored-by: devin-ai-integration[bot] &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;</div>
+</div>
+
+<a href="../project/FluidInference_FluidAudio.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (7 commits) - exo-explore/exo - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (7 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/exo-explore_exo.html">exo-explore/exo</a> /
+    Updates in main (7 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/exo-explore_exo.html">exo-explore/exo</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-08 17:50 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/exo-explore/exo/commits/main" target="_blank">https://github.com/exo-explore/exo/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Последние обновления вносят значительные улучшения в EXO. Введены блокировка PID-файлов для предотвращения дублирования процессов и комплексная инфраструктура автоматизированного интеграционного тестирования с использованием `pytest` и `eco` для валидации кластеров. Также реализован более точный, взвешенный по времени расчет энергопотребления, а пользовательские карты моделей теперь сохраняются в долговременном состоянии приложения. Помимо этого, устранены критические ошибки, связанные с некорректным размещением RDMA-инстансов на отключенных узлах и взаимоблокировкой при тензорно-параллельном выводе благодаря обеспечению единообразного порядка задач.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Create PID file locking for EXO (#2072)
+
+## Motivation
+
+EXO should be PID file locked, to prevent duplicate processes from
+clobbering the log, right now this isn&#39;t the case.
+
+## Changes
+
+I added a wrapper around a Rust PID file lock library, and used it to
+implement PID locking for EXO, with the PID file being in exo cache
+directory.
+
+## Test Plan
+
+### Manual Testing
+Tested on e11, trying to spawn duplicate EXO processes prevented.
+
+- Integration tests infra (#1995)
+
+## Motivation
+
+No automated integration tests exist for exo. Manual testing against
+real hardware clusters is slow and error-prone. We need a pytest
+framework that deploys clusters via `eco`, runs inference scenarios, and
+tears down cleanly.
+
+## Changes
+
+- **`tools/src/exo_tools/`** — New workspace member shared by bench,
+eval, and tests:
+- `client.py` — `ExoClient` HTTP client (extracted from
+`bench/harness.py`)
+- `harness.py` — instance lifecycle helpers (placement, wait-for-ready,
+etc.)
+- `cluster.py` — `EcoSession` for eco cluster lifecycle
+(deploy/stop/start/release/logs/exec) with unique `USER=&lt;prefix&gt;-&lt;uuid&gt;`
+per session and atexit/signal cleanup
+- **`tests/integration/`** — 17 pytest tests across 5 files:
+- `test_1node.py` — place, chat, multi-turn, delete, state/models
+endpoints, cluster snapshot, download-from-scratch
+- `test_2node.py` — parametrized tensor/jaccl + pipeline/ring inference
+and multi-turn
+- `test_4node.py` — parametrized 4-node pipeline/ring inference, cluster
+state
+- `test_resilience.py` — full disconnect/reconnect cycle (2-node →
+disconnect → 1-node → reconnect → 2-node)
+- `test_dashboard.py` — Playwright: dashboard loads, shows node info,
+chat flow
+- `helpers.py` — placement/inference helpers, re-exports from
+`exo_tools`
+- `conftest.py` — session-scoped cluster fixtures with constraint-based
+eco reservations; `--hosts` override; `EXO_REF` env var for CI
+deployments from a GitHub branch
+- **`bench/`** — Updated imports from `exo_tools.client` /
+`exo_tools.harness`
+- **`pyproject.toml`** — Added `tools` workspace member, `playwright`
+dev dep, `--ignore=tests/integration`
+
+## Why It Works
+
+Tests use `eco` for cluster lifecycle and `ExoClient` for API
+interactions — same tools humans use. Session-scoped fixtures deploy
+once per file. Unique eco users prevent test runs from interfering with
+each other or manual usage.
+
+## Test Plan
+
+### Automated Testing
+
+- `uv run pytest tests/integration/ -v -s` — full suite (~4-5 min, 17/17
+passing)
+- `uv run pytest tests/integration/ -v -s --hosts s4,s9,s10,s22` — pin
+specific hosts
+- `EXO_REF=main uv run pytest tests/integration/ -v` — deploy from a
+GitHub branch (CI)
+- `uv run pytest` — confirms integration tests are excluded from default
+runs
+
+- Use time-weighted power sampling (#2038)
+
+## Why
+
+The power sampler currently averages sampled wattage values
+arithmetically. That can be materially wrong when sample intervals are
+uneven: a short high-power spike gets the same weight as a long steady
+interval. Energy should be computed by integrating power over time, and
+average power should be derived from energy / elapsed time.
+
+## How
+
+- Store each power sample with its relative timestamp.
+- Anchor the first sample at `t=0` and take a final sample at `elapsed`
+when producing results.
+- Integrate per-node power using the trapezoidal rule.
+- Sum node energy for total cluster energy, then derive total average
+system power from total energy / elapsed.
+- Add focused unit tests for uneven sample intervals and the
+single-sample fallback.
+
+## Tests
+
+- `uv run pytest src/exo/utils/tests/test_power_sampler.py`
+- `uv run basedpyright`
+- `uv run ruff check src/exo/utils/power_sampler.py
+src/exo/utils/tests/test_power_sampler.py`
+- `nix fmt`
+
+- Store custom model cards in State (#2024)
+
+## Why
+
+Workers currently update their custom model-card cache by reacting to
+`CustomModelCardAdded` / `CustomModelCardDeleted` events directly. That
+is another snapshot footgun: a worker restored from State may never see
+the historical add/delete event, so the durable State must include the
+desired custom-card set.
+
+## How
+
+- Add `State.custom_model_cards`, keyed by `ModelId`.
+- Reduce `CustomModelCardAdded` into State.
+- Reduce `CustomModelCardDeleted` into State.
+- Add focused reducer tests for add and delete.
+
+This PR only makes custom cards durable in State. A follow-up PR will
+make workers reconcile their on-disk custom-card cache from this state
+instead of relying on those events directly.
+
+## Tests
+
+- `uv run pytest
+src/exo/shared/tests/test_apply/test_apply_custom_model_cards.py
+src/exo/shared/tests/test_state_serialization.py`
+- `uv run pytest`
+- `uv run ruff check src/exo/shared/types/state.py
+src/exo/shared/apply.py
+src/exo/shared/tests/test_apply/test_apply_custom_model_cards.py`
+- `uv run basedpyright`
+- `nix fmt`
+
+- fix(placement): gate RDMA on nodeRdmaCtl.enabled at both endpoints (#2014)
+
+## Summary
+
+- Fixes a bug where `POST /place_instance` (and the dashboard UI) would
+accept an MlxJaccl/RDMA instance spanning nodes whose
+`nodeRdmaCtl.enabled` was `false`, because topology + placement
+consulted Thunderbolt-derived RDMA edges without checking the per-node
+`rdma_ctl` status.
+- Three-layer fix: topology only emits `RDMAConnection` edges when both
+endpoints have `nodeRdmaCtl.enabled = true`; flipping a node to disabled
+immediately purges every RDMA edge touching it; `place_instance`
+additionally rejects RDMA cycles containing any disabled or unobserved
+node as a defense-in-depth check on the API/master path.
+
+## Details
+
+- `src/exo/shared/apply.py`
+- `MacThunderboltConnections` case now filters out RDMA connections
+whose source or sink lacks observed-and-enabled `rdma_ctl` status
+(missing entry → treated as disabled).
+- `RdmaCtlStatus` case now calls
+`topology.remove_all_rdma_connections_touching(node_id)` when the node
+reports disabled, so consumers don&#39;t have to wait for the next TB poll.
+- `src/exo/shared/topology.py`
+- New `Topology.remove_all_rdma_connections_touching(node_id)` removes
+every RDMA edge incident to the node (incoming and outgoing) while
+leaving socket edges intact.
+- `src/exo/master/placement.py`
+- `place_instance` accepts `node_rdma_ctl: Mapping[NodeId,
+NodeRdmaCtlStatus] | None`. The `is_rdma_cycle` filter now also requires
+`nodeRdmaCtl.enabled` for every node in the cycle. MlxJaccl placement
+raises the existing &#34;no RDMA-connected cycles available&#34; error if no
+qualifying cycle remains.
+- `src/exo/api/main.py`, `src/exo/master/main.py`
+  - Both placement entrypoints now pass `state.node_rdma_ctl` through.
+
+## Tests
+
+- `src/exo/shared/tests/test_apply/test_apply_rdma_gating.py` (new): six
+unit tests covering enabled/disabled/missing combinations on apply, the
+immediate-purge transition, and that purging RDMA edges leaves socket
+edges untouched.
+- `src/exo/master/tests/test_placement.py`: existing
+`test_tensor_rdma_backend_connectivity_matrix` updated to pass
+`node_rdma_ctl`. Two new tests assert MlxJaccl placement is rejected
+when any cycle node is `enabled=false` or has no `rdma_ctl` entry.
+
+## Test plan
+
+- [x] `uv run basedpyright` — 0 errors
+- [x] `uv run ruff check` — clean
+- [x] `nix fmt`
+- [x] `uv run pytest` — 429 passed, 1 skipped
+- [ ] On a real mixed cluster (s15/s16 disabled, s17/s18 enabled),
+confirm:
+- [ ] `POST /place_instance` for an RDMA instance including s15 or s16
+returns an error
+  - [ ] An RDMA instance can still be placed across {s17, s18}
+- [ ] `GET /state` shows no `sourceRdmaIface`/`sinkRdmaIface` on s15↔s16
+connections
+- [ ] Dashboard previews don&#39;t surface RDMA-spanning options that
+include s15/s16
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(inference): prevent TP collective deadlock via agree_on_tasks order (#2048)
+
+If you have two machines and make two requests at the same time, it can
+crash. This is because the tasks can sometimes end up in different
+orders on different machines. We need to sort the tasks and
+mx_all_gather_tasks already sorts the tasks but the code ignores that
+ordering. The fix is to make sure the sort order is preserved.
+
+The rest is written by Sonnet (reviewed by me):
+
+Tensor-parallel inference requires that every rank enqueues tasks in the
+same order before running agree_on_tasks collectives. The old
+implementation filtered from _maybe_queue:
+
+self._queue.extend(task for task in self._maybe_queue if task in agreed)
+self._maybe_queue = [task for task in self._maybe_queue if task in
+different]
+
+Because _maybe_queue is independently ordered per-rank (tasks arrive via
+gRPC in whatever order the API server sends them), two concurrent
+requests could produce different _maybe_queue orderings on rank 0 vs
+rank 1. The filter then preserved those different orders into _queue, so
+each rank started processing tasks in a different sequence. The next mlx
+collective (all_reduce, all_gather, etc.) on rank 0 corresponded to a
+different task than on rank 1 → permanent deadlock.
+
+Fix: extend from agreed directly. mx_all_gather_tasks returns agreed as
+a list sorted by task_id on all ranks, so every rank appends the same
+sequence regardless of local arrival order.
+
+Applies to both SequentialGenerator and BatchGenerator.
+
+## Motivation
+
+`agree_on_tasks` is called on every rank after accumulating new requests
+in
+`_maybe_queue`. Its job is to run an `all_gather` collective so all
+ranks agree
+on which tasks to promote to `_queue` before the next inference step.
+
+The old implementation re-imposed **local arrival order** when extending
+`_queue`:
+
+```python
+self._queue.extend(task for task in self._maybe_queue if task in agreed)
+```
+
+`mx_all_gather_tasks` already returns `agreed` sorted by `task_id` — the
+same
+deterministic order on every rank. But iterating `self._maybe_queue`
+instead of
+`agreed` discarded that sort and substituted the local gRPC arrival
+order, which
+differs per rank under concurrent load. Two concurrent requests arriving
+in
+`[A, B]` order on rank 0 and `[B, A]` on rank 1 caused the first MLX
+collective
+in the next step to hang permanently: each rank was executing a
+different task&#39;s
+collective and would never match.
+
+## Changes
+
+`SequentialGenerator.agree_on_tasks` and
+`BatchGenerator.agree_on_tasks`:
+
+```python
+# Before
+self._queue.extend(task for task in self._maybe_queue if task in agreed)
+self._maybe_queue = [task for task in self._maybe_queue if task in different]
+
+# After
+self._queue.extend(agreed)          # preserves mx_all_gather_tasks sort order
+self._maybe_queue = list(different) # already in local order; filter was redundant
+```
+
+## Why It Works
+
+`mx_all_gather_tasks` (in `utils_mlx.py`) computes the agreed set then
+sorts by
+`task_id`:
+
+```python
+agreed = [local_tasks[tid] for tid in sorted(agreed_ids)]
+```
+
+Because `task_id` is a UUID and the sort is lexicographic, every rank
+produces
+the same `agreed` list regardless of local arrival order. Using `agreed`
+directly
+preserves this guarantee. The `different` list (tasks not yet seen on
+all ranks)
+is built by iterating `tasks` in local order, which is already correct.
+
+## Test Plan
+
+### Manual Testing
+
+**Hardware:** 2× Mac Studio M3 Ultra 512 GB, Thunderbolt 5 direct
+bridge,
+`MlxJaccl` RDMA tensor-parallel (`moonshotai/Kimi-K2.6`, 595 GB INT4, 61
+layers).
+
+- Sent concurrent streaming requests; confirmed all complete without
+deadlock.
+- This hardware configuration (sub-millisecond inter-node latency) is
+the most
+likely to trigger the race, as requests from separate HTTP connections
+can
+reach rank 0 and rank 1 in opposite order before `agree_on_tasks` runs.
+
+### Automated Testing
+
+All existing tests pass: `pytest src -m &#34;not slow&#34;
+--import-mode=importlib`
+— 422/422 passed. The existing `test_event_ordering.py` covers the
+`agree_on_tasks` call path with a mock that returns tasks in consistent
+order;
+the race requires real distributed hardware to reproduce
+deterministically.
+
+- Initialise _cancelled_tasks in ImageEngine (#2051)
+
+we yielded nonsense chunks from engines; we didn&#39;t initialize the image
+engine correctly. mostly rewrite of #2049
+
+---------
+
+Co-authored-by: ciaranbor &lt;ciaranborourke-dev@proton.me&gt;</div>
+</div>
+
+<a href="../project/exo-explore_exo.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
