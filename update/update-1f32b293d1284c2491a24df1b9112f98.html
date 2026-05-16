@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (34 commits) - m0n0x41d/haft - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (34 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/m0n0x41d_haft.html">m0n0x41d/haft</a> /
+    Updates in main (34 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/m0n0x41d_haft.html">m0n0x41d/haft</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-13 18:59 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/m0n0x41d/haft/commits/main" target="_blank">https://github.com/m0n0x41d/haft/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Релиз 7.1.0 значительно улучшает стек агентов `v8`, уделяя особое внимание стабильности, корректности и надежности API за счет многочисленных исправлений гонок данных, целостности журнала и обработки ошибок HTTP. Введены новые функции `FPF C.28` и `A.15.4`, включающие структурированные типы причинных доказательств, ограничение оценки для чисто симуляционных/нереализуемых оснований и футер восстановления источника для проекций. Кроме того, релиз добавляет команду CLI `complete-external` и устраняет проблему #77, корректно используя псевдоним `artifact_ref` в действиях `haft_decision`.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Merge pull request #80 from m0n0x41d/dev
+
+Release 7.1.0: complete-external CLI, v8 foundation, #77 fix
+
+- docs(changelog): document post-cut v8 P2 fixes and -race CI test-side stability
+
+Three commits landed after the 7.1.0 changelog cut (e5a5b25d) and were not
+yet documented:
+
+- 5d4954e7 fix(review): journal authoritative + empty tool args
+- d45a6e70 test(agentdriver): drain SSE before cleanup race
+- e3cad19b test(agentdriver): sync fakeTools.calls
+
+Extend the v8 hardening Added bullet with the two P2 fixes from 5d4954e7
+(journal-authoritative writeMeta, empty tool args -&gt; JSON null), and add
+a new Fixed bullet for the test-side -race stability work that was
+blocking CI on PR #80.
+
+- fix(review): keep journal authoritative and normalise empty tool args
+
+Two Codex P2 findings on PR #80:
+
+- agentstore.Store.Append: writeMeta running after a successful journal
+  commit could surface a &#34;publish failed&#34; error to the driver for an
+  event already durable on disk. In the turn.started path that made the
+  driver skip emitting turn.failed for a turn the journal would replay
+  as Running, leaving HasLiveTurn permanently blocked. The journal is
+  the authoritative record; meta.json is a denormalised cache for List.
+  Treat the meta refresh as best-effort post-commit (Create and Append).
+- agentdriver/agentcore: a provider tool call with non-nil empty []byte
+  for Args would marshal as invalid JSON via json.RawMessage, failing
+  PartToolUseStartedEvent encoding and aborting the turn before the
+  tool runs. Normalise empty/nil inputs to a nil Args in
+  NewToolUsePart so RawMessage encodes as JSON null; have the driver
+  emit the part&#39;s normalised Args on the wire.
+
+Tests:
+- TestStore_AppendSucceedsWhenMetaWriteFails locks the session dir
+  read-only so writeMeta cannot create a tempfile, while the open
+  journal FD keeps accepting Appends.
+- TestDriver_ToolCall_EmptyArgsEncodes drives an empty-args tool call
+  and round-trips the resulting event through EncodeEvent.
+
+- test(agentdriver): drain in-flight dispatcher goroutines before store.Close to fix -race CI
+
+CI&#39;s race-test job kept failing on TestIntegration_TurnCancel and
+TestDispatcher_ModelSet_RejectsDuringRunningTurn with the same root
+cause: srv.Shutdown waits for HTTP handlers but NOT for goroutines
+spawned inside them — handleTurnSubmit fires a detached DriveTurn
+goroutine, and the test exits while that goroutine is still journaling
+events. Result on Linux runners under -race:
+
+  WARNING: DATA RACE
+  Write at ... by Store.Close → Journal.Close (j.w = nil)
+  Previous read at ... by DriveTurn → CombinedSink.Publish →
+     Store.Append → Journal.Append (j.w.Write)
+
+Cancel + drain pattern, test-only, no production v8 change:
+
+- drainRunningTurn(t, dispatcher, sessionID) issues TurnCancel and polls
+  the dispatcher until it returns agentserver.ErrTurnNotRunning. That
+  error is the synchronization point: the dispatcher&#39;s deferred
+  delete(d.running, ...) clears the map AFTER DriveTurn returns and the
+  goroutine finishes, so seeing ErrTurnNotRunning guarantees the journal
+  Append goroutine has fully unwound.
+
+- bootIntegrationServer.cleanup now drains every session listed by
+  store.List(&#34;&#34;) before calling store.Close. Covers any integration test
+  routed through the helper (currently TurnRoundTrip, TurnCancel,
+  PermissionRoundTrip) without per-test plumbing.
+
+- TestDispatcher_ModelSet_RejectsDuringRunningTurn uses its own
+  Dispatcher (not the boot helper), so it gets an explicit defer
+  drainRunningTurn call before its store.Close defer.
+
+10x -race runs on the agentdriver package now pass clean. Full repo
+under -race is green.
+
+- test(agentdriver): sync fakeTools.calls and drain SSE until turn.completed before asserting
+
+Two related races surfaced under -race on the v8 driver integration test
+TestIntegration_PermissionRoundTrip:
+
+1. fakeTools.calls was an unsynchronized slice appended from the
+   dispatcher goroutine (Driver.Drive → ToolDispatcher.Run) while the
+   test goroutine read len(tools.calls) in a busy-wait loop. Guard the
+   slice with a mutex and expose a Calls() snapshot accessor; the test
+   reads through Calls() so the read is properly synchronized.
+
+2. Even with calls synchronized, the integration test could observe
+   tools.Calls() != 0 and exit while the dispatcher was still mid-flight
+   journaling turn.completed to the store. The deferred TempDir cleanup
+   then races with the still-running goroutine writing into the store
+   directory and surfaces as a cleanup failure.
+
+   Replace the len(tools.calls) busy-wait with an SSE drain that consumes
+   stream lines until &#34;turn.completed&#34; is observed. The dispatcher always
+   journals turn.completed after the tool result, so seeing it on the
+   wire is a synchronization point — by then the goroutine has finished
+   writing to the store and the deferred cleanup is safe.
+
+- feat(surface): C.28 schemas + soft warning + A.15.4 carrier footer on /h-view projections
+
+MCP and CLI transports both expose the new C.28 fields symmetrically:
+haft_decision(action=&#34;evidence&#34;) accepts causal_support_basis (with the
+short alias list and the CC-B3.9 cap callout in the description), and
+predictions[] on the decide action accepts realizability with the three
+canonical verdicts. internal/tools/haft.go, internal/cli/serve.go, and
+internal/fpf/server.go all carry the schema entries so the parity test
+stays in lockstep.
+
+Soft warning lands on both transports: if EvidenceItem.Content reads like
+a causal-use claim (causal, intervention, counterfactual, uplift,
+treatment effect, ...) but CausalSupportBasis is empty, append a C.28 /
+CC-B3.9 advisory to the result text. Warning, not reject — legacy ingest
+continues unchanged; the surface signals to the LLM caller that an
+undeclared basis cannot raise R for a causal-ladder climb.
+
+A.15.4 Work-Relevant Source Restoration footer renders on every
+/h-view projection (engineer, manager, audit, compare, delegated-agent,
+change-rationale). Section &#34;## Carrier — Not Source of Truth (A.15.4)&#34;
+lists every underlying artifact ref the projection was built from
+(problems, portfolios, decisions, deterministic ordering), plus the
+haft_query(action=&#34;get&#34;, ref=&#34;&lt;id&gt;&#34;) recovery path and the on-disk
+.haft/{decisions|problems|solutions|evidence}/&lt;id&gt;.md source locations.
+Empty graphs still render the section with an informational fallback
+line so the carrier semantics stay visible even with no sources. Lives
+in internal/present (flow layer) — Core boundary unaffected.
+
+7 new tests: 1 in internal/fpf/server_test.go asserts the MCP-advertised
+schema exposes causal_support_basis with the C.28 description and
+predictions[].realizability; 6 in internal/present/projection_carrier_test.go
+pin the footer across all four primary views plus the no-sources
+fallback and the recovery-path citation.
+
+CHANGELOG [7.1.0] gains two new Added entries documenting the C.28
+typed binding (with the cap semantics and TODO note) and the A.15.4
+carrier footer.
+
+- feat(artifact): add C.28 CausalEvidenceSupportBasis and RealizabilityVerdict types
+
+Embed the new FPF ee40821 C.28 controlled vocabulary structurally on the
+artifact graph, not only as corpus text.
+
+CausalEvidenceSupportBasis is a typed string with 5 canonical values:
+observationalAssociationSupportBasis, interventionalActionSupportBasis,
+realizedCounterfactualSampleSupportBasis,
+identifiedCounterfactualEstimateSupportBasis, and
+simulationOnlyCounterfactualOutputBasis. ParseCausalSupportBasis
+canonicalizes operator-friendly aliases (observational, simulation_only,
+etc.) on read — long FPF names also accepted. Unknown values are rejected
+at the artifact boundary, not silently dropped.
+
+RealizabilityVerdict carries the C.28 CounterfactualSamplingRealizability
+profile verdict at three values: realizable, nonrealizable, unknown.
+
+EvidenceItem gains causal_support_basis (omitempty); AttachEvidence parses
+and validates the value at ingest. DecisionClaim and DecisionPrediction
+gain realizability (omitempty), plumbed through newDecisionClaims,
+decisionClaimsFromPredictions, normalizeDecisionClaims, and
+decisionPredictionsFromClaims mirroring the existing verify_after pattern
+buck-for-buck so the round-trip is invariant under any reshape sequence.
+PredictionInput on the wire-input layer gains realizability too.
+
+WLNK scoreEvidence in decision.go now routes through
+reff.ScoreEvidenceWithCausalBasis so the C.28 cap (CC-B3.9) fires in the
+artifact-summary path in lockstep with the assurance engine. Realizability
+plumbing per-claim through WLNK is TODO(post-7.1); cap fires on
+CausalSupportBasis alone here.
+
+Legacy decisions/evidence without the new fields round-trip unchanged and
+score identically to pre-7.1.0 (verified by reff parity test landed in
+the prior commit).
+
+6 new artifact tests pin the contract: alias canonicalization for both
+basis and realizability, realizability preservation through every
+normalize step, EvidenceItem JSON round-trip honors omitempty.
+
+- feat(reff): cap R at 0.5 for simulation-only and nonrealizable causal basis (CC-B3.9)
+
+Add ScoreEvidenceWithCausalBasis wrapping ScoreTypedEvidence with the C.28
+causal-support-basis cap per CC-B3.9: when the basis is simulation-only OR
+the linked claim&#39;s realizability verdict is &#34;nonrealizable&#34;, the resulting
+R is capped at 0.5 regardless of verdict, evidence type, or CL. &#34;unknown&#34;
+realizability does NOT cap — bounded use under C.28 may still be admissible.
+Expired evidence remains at 0.1; the cap floors at 0.5 and does not raise
+weak scores. Empty basis/realizability falls through to ScoreTypedEvidence
+unchanged so legacy callers preserve pre-7.1.0 semantics bit-for-bit.
+
+Add CausalSupportBasis and forward-compat ClaimRealizability to reff.Evidence;
+ComputeClaimAssurance now scores via ScoreEvidenceWithCausalBasis so the
+assurance engine honors the cap when callers populate the new fields.
+Per-claim realizability resolution from ClaimRefs is marked TODO(post-7.1)
+and degrades gracefully — empty realizability behaves identically to the
+legacy path.
+
+5 new reff tests pin the contract: cap fires on simulation_only and
+nonrealizable, no-op on unknown, parity with ScoreTypedEvidence for
+legacy empty-basis inputs, expired evidence not raised by cap.
+
+- docs(changelog): expand 7.1.0 v8 hardening list + artifact store meta-write fix
+
+Two gaps after the initial 7.1.0 cut:
+
+  - a8d72b89 and d5001d60 landed AFTER the changelog was cut. The
+    v8 hardening bullet now mentions journaled-canceled-permissions
+    + failTurn publish errors and the snake_case JSON wire tagging
+    on ModelChoice + agentstore.SessionMeta explicitly. Reorganized
+    the bullet into themed groups (concurrency / HTTP surface / wire
+    protocol / turn lifecycle / permission gate) so the 17-item list
+    is readable instead of a wall of commas.
+
+  - ea68b72f bundled two fixes; only the bindDecisionRef alias half
+    was captured (as a follow-on note on the #77 bullet). The other
+    half — writeMeta race on the fixed meta.json.tmp filename in
+    internal/artifact/store — is a legitimate concurrent-safe Store
+    contract violation that affects v7 paths too, not just v8.
+    Surfaced as its own Fixed entry.
+
+- fix(review): tag ModelChoice and SessionMeta for snake_case JSON wire
+
+ModelChoice and agentstore.SessionMeta were serialized with their Go
+field names — REST clients sending `credential_key` could not populate
+ModelChoice.CredentialKey (case-insensitive matching does not bridge
+snake_case to camelCase), and `GET /session` responses leaked
+`ProjectID`/`CreatedAt`/`EventCount` while the rest of the protocol
+speaks snake_case. Add explicit json tags so the wire shape matches the
+rest of agentproto.
+
+- chore(fpf): refresh corpus to ee40821 + add X-SOURCE-RESTORATION pattern
+
+FPF submodule moves from 34b4d63 → ee40821 (&#34;formatting for GitHub&#34;,
+2026-05-12). The seven upstream commits in between are not cosmetic:
+
+  9cb163b  Causality and Realizability  (+1524 net, C.27 + C.28)
+  f73766d  functional descriptions + A.15.4  (+684 net, new pattern)
+  1f7c9e5  authority-looking reliance tuning  (+552 net)
+  1f21daa  counterfactuality terminology  (cleanup)
+  136be3b  A.6.P terminology cleanup  (cleanup)
+  2b3e0f4  admissible action in problematic situations  (Readme)
+  ee40821  formatting for GitHub  (style)
+
+Substantive content: a new architectural region for causal evidence
+(C.27 Causal-use calculus + C.28 CounterfactualSamplingRealizabilityProfile
+with controlled CausalEvidenceSupportBasis vocabulary), and a new A.15
+cluster member A.15.4 &#34;Work-Relevant Source Restoration&#34; governing the
+recover-source-before-reliance step when an encountered item is about
+to support a work/reliance claim by appearance.
+
+Index rebuild via task fpf-index --force:
+  indexed_chunks 4972 → 5062  (+90; 4996 spec + 66 patterns)
+  fpf_commit ee40821c  (matches submodule HEAD)
+
+Skill floor update — two minimal additions, not a rewrite:
+
+internal/fpf/patterns/cross-cutting.md
+  + X-SOURCE-RESTORATION pattern. The detection rule
+    &#34;Object ≠ Description ≠ Carrier&#34; was already in the floor; the
+    operational rule (&#34;before reliance, recover the project source
+    that makes the action admissible&#34;) was not. Names dashboards,
+    generated explanations, credential views, projection outputs
+    (/h-view brief|rationale|audit), copied approvals, provenance
+    labels, schema/API text, composed source chains explicitly.
+
+internal/cli/skill/h-reason/SKILL.md
+  + DEC-06 Predictions sentence: predictions are causal claims;
+    check realizability under physical / ethical / operational
+    constraints before committing them as acceptance gates. Points
+    to C.27 / C.28 on demand — full calculus stays out of the
+    L1 floor to avoid ceremony creep.
+  + Cross-cutting block adds X-SOURCE-RESTORATION reference.
+
+Terminology cleanups in A.6.P and counterfactuality propagate through
+fpf search automatically because the skill cites pattern IDs (CHR-10
+etc) and never the surface text of the spec section.
+
+- Merge pull request #79 from karabelaselias/feature/commission-complete-external
+
+Add CLI command to complete external WorkCommissions
+
+- fix(review): journal canceled permissions and surface failTurn publish errors
+
+Two correctness fixes in the agent driver:
+
+- gatePermission: when Wait returns ctx.Err(), emit a permission.resolved
+  (denied) event before propagating the error. Without it, the journal
+  has permission.requested with no resolution while the in-memory gate
+  entry is already gone — replay surfaces a stuck Pending permission
+  that no POST /permission/{id} can resolve.
+
+- failTurn: capture and wrap Sink.Publish errors on the turn.failed
+  event instead of silently dropping them. A failed journal write left
+  the durable record as Running while the local session moved to Failed,
+  silently blocking every future submit via HasLiveTurn until manual
+  repair.
+
+- docs(changelog): cut [7.1.0] — complete-external CLI + v8 foundation + #77 fix
+
+7.1.0 is a SemVer minor bump on top of 7.0.0:
+- feat: haft commission complete-external CLI (#79)
+- feat: v8 agent stack foundation M1/M2 + review hardening pass
+- fix: artifact_ref alias on haft_decision measure/baseline/apply (#77)
+- fix: install.sh CLI archive selection
+- chore: FPF corpus refresh to 34b4d63; drop darwin-amd64 from CLI matrix
+
+The earlier &#34;Unreleased — #77 only&#34; stanza is folded into 7.1.0;
+the v8 foundation and complete-external entries are added so the
+release notes don&#39;t lose those contributions silently.
+
+- Merge pull request #79 from karabelaselias/feature/commission-complete-external
+
+feat(commission): CLI complete-external for externally-run WorkCommissions (#78)
+
+- fix(review): cancel-aware turn completion and stale-cancel HTTP status
+
+Driver.streamTurn now checks ctx.Err() before completing a turn on
+ProviderTurnDone, mirroring the closed-channel guard. Both branches can
+be ready in the same select cycle (provider had queued done while
+handleToolCall was running and ctx was canceled); without the check the
+race could journal turn.completed for a canceled turn.
+
+Dispatcher.handleTurnCancel now returns ErrTurnNotRunning /
+ErrTurnMismatch sentinels (defined in agentserver), and writeResult maps
+them to 404 / 409 respectively. Stale cancels and mistyped turn IDs no
+longer surface as 500.
+
+- fix(review): serialize store.Load with concurrent Append writes
+
+A journal Append on a session larger than a single page-write can be
+observed mid-write by a concurrent reader using a separate file handle,
+so the bufio scanner in ReadAll can decode a truncated line and fail.
+Switch sessLock to RWMutex; Load takes RLock, Append keeps the write
+lock. Append&#39;s internal replay uses a non-locking helper to avoid
+re-entering the lock.
+
+- fix(review): map permission errors to 400/404 in HTTP transport
+
+PermissionGate.Resolve returns ErrInvalidDecision for malformed payloads
+and ErrUnknownPermission for stale IDs; writeResult was bucketing both
+into 500. Lift the sentinels to agentcore (ErrPermissionDecision,
+reusing existing ErrPermissionNotFound), wrap the agentdriver-local
+ones via %w, and map them to 400 / 404 in writeResult.
+
+- fix(review): serialize wire-safe SessionPayload on resume
+
+handleSessionResume returned agentcore.Session directly through
+writeJSON, but agentcore.Part is a sealed interface whose concrete
+structs keep ID/CreatedAt in an unexported partBase. encoding/json
+produced entries like {&#34;Text&#34;:&#34;...&#34;} with no kind discriminator, so
+clients resuming after any completed turn could not reconstruct part
+IDs or kinds. Route the response through agentproto.EncodeSession,
+which wraps every Part in PartPayload — same envelope shape the event
+stream already uses.
+
+- fix(review): serialize model.set against turn.submit Load
+
+handleModelSet sampled d.running and released d.mu before appending
+model_switched, while handleTurnSubmit loaded the session before
+locking. A model.set that won the running-empty check could append
+between submit&#39;s Load and its running registration — the goroutine
+then drove the provider with the old session.Model while the journal
+already showed model.switched preceding turn.started.
+
+Move submit&#39;s Store.Load and HasLiveTurn check inside d.mu, and hold
+d.mu across handleModelSet&#39;s Store.Append. The two paths now serialize
+on the same lock: either the switch lands and the next submit reads
+the new model, or the submit registers first and the switch is
+rejected.
+
+- fix(review): map ErrTurnAlreadyRunning to 409 Conflict
+
+Double-submitting a turn while one is already running is a client-visible
+state conflict, not a server failure. writeResult was returning 500 for
+the wrapped ErrTurnAlreadyRunning from the dispatcher; map it to 409 so
+clients can distinguish retryable turn conflicts from server errors.
+
+- fix(review): flush deltas on provider error; reject model.set mid-turn
+
+ProviderError now flushes pending text/reasoning before turn.failed to
+match the provider.go contract — replay was dropping partial output
+operators had already seen over SSE.
+
+handleModelSet now rejects with ErrTurnAlreadyRunning when a turn is in
+flight (in-memory map and post-restart HasLiveTurn check). Previously
+a model_switched event could land between handleTurnSubmit registering
+d.running and DriveTurn journaling turn.started, recording the switch
+ahead of a turn the provider was still driving with the old model.
+
+- fix(review): reject replayed running turns synchronously
+
+After a process restart, Store.Load can return a session whose journal
+still has a Running turn from the previous instance. The in-memory
+running map is empty, so handleTurnSubmit was accepting the submit and
+spawning a goroutine that then failed StartTurn with
+ErrTurnAlreadyRunning and dropped the error — leaving the client with
+an accepted turn_id that never produced events.
+
+Check session.HasLiveTurn() right after Load and reject with
+ErrTurnAlreadyRunning before allocating a new turn id.
+
+- fix(review): serialize per-session Append; safe Hub cancel
+
+agentstore: hold a per-session mutex across Load/Apply/Append so two
+concurrent mutations cannot validate against the same snapshot and then
+write events that are individually valid but jointly unreplayable
+(e.g. model.switched admitted on top of a turn that another goroutine
+just started).
+
+agentserver: drop the channel-close path on Hub Subscribe cancel and
+signal shutdown via a per-subscriber done channel instead. Publish
+selects on done so a snapshot of a since-cancelled subscriber no longer
+panics on send to a closed channel.
+
+- fix(review): send tool args as raw JSON instead of base64
+
+[]byte fields serialize to base64 in encoding/json, so wire consumers
+(SSE clients, TS SDK) received an opaque blob in place of the tool
+arguments. Switch the wire-format Args fields on PartToolUseStartedEvent,
+PermissionRequestedEvent and the toolUseBody PartPayload to
+json.RawMessage so the original JSON shape passes through unchanged.
+
+- fix(review): fail turn on tool/flush errors; journal assistant text/reasoning
+
+Codex P1 findings on PR #80:
+
+- handleToolCall (and the surrounding flushText/flushReasoning) used to
+  return their error directly from streamTurn. When an error landed
+  after turn.started — e.g. context.Canceled while gatePermission was
+  waiting on the PermissionGate — the journal kept the turn in Running
+  state forever, blocking the next submit until manual repair. Route
+  every post-start error through failTurn so every started turn gets a
+  terminal event.
+
+- Assistant text and reasoning parts only existed in the in-memory
+  Session value Drive returned; the dispatcher reloads from Store.Load
+  on the next turn, so the prior assistant response was lost. Add
+  PartTextCompletedEvent and PartReasoningCompletedEvent to Layer P,
+  journal+apply them in agentstore, and have the driver publish them
+  before AppendPart. Replay now reconstructs the same Session value
+  Drive returned.
+
+- fix(review): validate journal appends, dedupe streamed part ids
+
+Three Codex P1/P2 findings:
+
+- agentstore.Append now Load+Apply-validates before writing. A rejected
+  transition (e.g. model.switched during a running turn) no longer
+  poisons the journal with an unreplayable event.
+- agentstore.Append refuses missing sessions via Load → ErrSessionNotFound
+  rather than letting openJournal materialize an empty events.jsonl
+  under a fresh directory.
+- agentdriver allocates one part_id per accumulating text/reasoning
+  buffer and reuses it for every delta AND the materialized part, so
+  protocol-compliant clients can reconstruct one logical part by id.
+
+- fix(review): tighten permission validation, match cancel to turn id, share hub
+
+Address Codex P1/P2 findings on PR #80.
+
+* Driver: treat any non-&#34;approved&#34; permission decision as denial. The
+  prior check only matched the exact &#34;denied&#34; value, so a client posting
+  decision: &#34;approve&#34; (typo) or any malformed string would silently
+  fall through to Tools.Run.
+* PermissionGate.Resolve: reject decisions other than approved/denied
+  at the boundary as defense-in-depth.
+* Dispatcher: pre-allocate the turn ID before launching Drive and
+  record it alongside the cancel func; turn.cancel must now match the
+  active turn or be rejected. Add Driver.DriveTurn(turnID) for the
+  pre-allocated case; Drive keeps its old signature for tests.
+* agentserver.NewServer: accept a Hub explicitly so callers cannot
+  accidentally subscribe SSE clients to a different hub than the one
+  the dispatcher publishes to.
+
+- fix(review): order turn.started after StartTurn; treat closed-stream-with-canceled-ctx as canceled
+
+P1: Drive used to publish turn.started before validating the in-memory
+transition. After a server restart that replays to a Running turn while
+the dispatcher&#39;s running map is empty, a new submit would journal a
+second turn.started and only then StartTurn would reject it — leaving
+an unreplayable journal. Validate first, then publish.
+
+P2: When the provider closes its event channel as a documented reaction
+to ctx cancellation, both ctx.Done() and the closed-channel receive can
+be ready, and select picks at random. If the !open branch won we would
+journal turn.completed for a turn that was actually canceled. Check
+ctx.Err() before completing on channel close.
+
+Regression tests cover both paths.
+
+- fix(review): honor artifact_ref alias in bindDecisionRef; unique tmp for meta writes
+
+P1 — bindDecisionRef only inspected `decision_ref`, so an `artifact_ref`
+pointing at a foreign DecisionRecord was silently overwritten with the
+active-cycle ref, and measure/baseline recorded against the wrong
+decision. Treat artifact_ref as an alias before deciding whether to
+inject the active ref — foreign refs now hit the guardrail.
+
+P2 — writeMeta used a fixed `meta.json.tmp` filename, racing under the
+Store&#39;s documented concurrent-safe contract. Switch to os.CreateTemp so
+each writer gets a unique temp file, then rename.
+
+Regression test pins the P1 bug shape: artifact_ref pointing outside
+the active cycle must produce the alignment guardrail, not a silent
+swap.
+
+- fix(review): address Codex P1/P2 findings on agent driver
+
+- Reject concurrent turn.submit instead of cancel-and-replace. The old
+  goroutine still owns the journal until it appends a terminal event;
+  starting a new Drive immediately appended turn.started while replay
+  still saw a live turn, producing an unreplayable journal.
+- Register the permission gate entry before publishing
+  permission.requested. A fast operator could POST /permission/{id}
+  before Open ran, causing ErrUnknownPermission on a valid request.
+  Adds PermissionGate.Discard for publish-failure rollback.
+- Carry project_id in SessionCreatedEvent so replay reconstructs the
+  same Session value that Create returned. Updated dispatchers, store,
+  and the test header to populate it.
+
+- docs(changelog): record #77 fix under Unreleased
+
+The fix landed in a74d0857 but Unreleased was empty — adding the
+entry now so the upcoming release notes don&#39;t miss it.
+
+- fix(serve): accept artifact_ref as alias for decision_ref in measure/baseline/apply (#77)
+
+`haft_decision(measure|baseline|apply)` only read args[&#34;decision_ref&#34;]
+and silently fell through to a most-recent-decision auto-detect when
+the key didn&#39;t match. LLM clients naturally generalise from
+`haft_refresh` (where artifact_ref is universal) and from the schema
+docs (which described artifact_ref as the evidence target with no
+mention that decision_ref is the magic word for these other actions).
+Reported repros show evidence/baselines landing on the wrong
+DecisionRecord — the kind of silent corruption the artifact graph
+cannot detect after the fact.
+
+Fix applies to both code paths (MCP serve handler and the registry-
+gated tool runner):
+
+  - measure, baseline now accept either `decision_ref` or
+    `artifact_ref`; if neither resolves, they return guidance text
+    asking for the explicit ref instead of auto-detecting. The
+    silent ListByKind(KindDecisionRecord, 1) fallback is gone for
+    these two actions — corrupting authoritative state is worse
+    than refusing to proceed.
+  - apply also accepts both keys but keeps the auto-detect fallback,
+    since apply is a read-only &#34;generate brief&#34; path with no
+    persistent side effect.
+  - Schema descriptions for decision_ref / artifact_ref updated to
+    list every action that accepts each key.
+
+Regression tests pin the bug shape: two DecisionRecords exist, the
+caller asks to baseline/measure the older one via artifact_ref, and
+the test fails if the implementation reaches for the newer one. A
+third test guards the new error path when no ref is supplied.
+
+Audit: no production caller relies on the removed auto-detect.
+Documentation everywhere already shows the explicit decision_ref.
+Auto-baseline after decide uses the freshly-created DecisionRecord
+ID directly and never went through the buggy path. FPF guardrails
+bind decision_ref from the cycle when the registry is active, so
+guarded flows are unaffected.
+
+Out of scope: the side observation about a stale `needs_onboard`
+readiness signal in haft_decision responses — filing separately as
+reported.
+
+Fixes #77
+
+- Add external WorkCommission completion CLI</div>
+</div>
+
+<a href="../project/m0n0x41d_haft.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

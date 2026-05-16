@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (5 commits) - wshobson/agents - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (5 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/wshobson_agents.html">wshobson/agents</a> /
+    Updates in main (5 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/wshobson_agents.html">wshobson/agents</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-14 13:04 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/wshobson/agents/commits/main" target="_blank">https://github.com/wshobson/agents/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Два значительных исправления улучшили работу `plugin-eval`: первое расширило шаблон обнаружения триггеров для корректного распознавания большего количества фраз активации навыков, а второе начало явно уведомлять пользователей, когда полная глубокая оценка не выполнялась для целых плагинов, вместо того чтобы молча использовать только статическую проверку. Кроме того, компонент `meigen-ai-design` был обновлен до версии 1.0.7, представив новые возможности генерации видео Veo 3.1 и функцию продолжения видео Seedance 2.0, а также был добавлен новый плагин &#34;ship-mate&#34;. Наконец, различные файлы документации были синхронизированы для отражения актуальных данных о количестве плагинов, агентов и навыков, а также обновленной статистики распределения моделей.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix(plugin-eval): broaden MISSING_TRIGGER pattern to match canonical phrasings (#530)
+
+The static-layer trigger heuristic was a literal substring match on
+&#34;Use when …&#34; / &#34;Use this skill when …&#34; / &#34;Use proactively&#34; / &#34;Trigger
+when …&#34;. Three real-world phrasings were missed:
+
+1. Third-person canonical form recommended by Anthropic&#39;s own plugin-dev
+   skill-development skill: &#34;This skill should be used when …&#34; (contains
+   &#34;used when&#34;, not &#34;use when&#34;). Running the previous regex on plugin-dev
+   itself produces 7 false-positive MISSING_TRIGGER flags.
+
+2. Prepositional temporal triggers: &#34;Use after …&#34;, &#34;Use before …&#34;,
+   &#34;Use immediately before …&#34;, &#34;Use whenever …&#34;. Common in self-audit
+   and hook-adjacent skills (e.g. functional-emotions: 6 flags).
+
+3. Path-triggered self-documenting skills: &#34;Auto-loads when …&#34;.
+
+Extract the pattern to a module-level `_TRIGGER_PATTERN` and share it
+between the anti-pattern detector and `_description_pushiness` so the
+two sites stay in sync. Expand it to match `(should be )?use(d)?
+(this skill )?(immediately )?(when|after|before|whenever)` plus
+`auto-loads when` and `trigger when`.
+
+Verification:
+- plugin-dev (Anthropic&#39;s own): 33.82 → 55.18, MISSING_TRIGGER cleared
+- functional-emotions: 39.04 → 59.68, all 6 false positives cleared
+- 22 tests pass, including 11 new positive-form parametrised cases
+  and 2 regression tests against canonical Anthropic phrasings.
+
+- fix(plugin-eval): surface plugin-level depth downgrades loudly (#532)
+
+`plugin-eval certify &lt;plugin-dir&gt;` advertises a deep, three-layer
+evaluation (static + judge + Monte Carlo) but `EvalEngine.evaluate_plugin`
+only runs the static layer regardless of requested depth, since judge
+and Monte Carlo are per-skill primitives. The docstring on that method
+acknowledges this, but nothing surfaces it to the user:
+
+  - The CLI emits no warning.
+  - The markdown report prints `**Depth:** deep` even though only the
+    static layer ran.
+  - The user&#39;s only signal is a footnote (&#34;No model usage&#34;) near the
+    bottom of the report and the `Confidence: Estimated` row — both
+    easy to miss when the requested depth said otherwise.
+
+This change makes the downgrade impossible to miss without changing
+the underlying eval behaviour (per-skill judge aggregation is a larger
+feature, not a bug fix):
+
+1. **CLI warning to stderr.** `_run_score` detects plugin-target runs
+   at non-quick depth and prints a yellow `warning:` line to stderr
+   naming the skipped layers and the workaround (run on a single skill
+   to get the deeper layers).
+
+2. **In-band markdown callout.** `Reporter` now derives the *effective*
+   depth from the set of layers actually present in the result. When it
+   differs from the requested depth, the report header reads
+   `Depth: deep (requested) → quick (effective)` and a `&gt; Note:` block
+   above the score table explains why and how to get the deeper layers.
+
+3. **Effective-depth helper.** `_effective_depth(result)` maps the set
+   of layer names (`static` / `judge` / `monte_carlo`) back to a `Depth`
+   value, so the reporter never has to trust `result.config.depth` when
+   describing what actually ran.
+
+Tests:
+  - `TestDepthDowngradeWarning` (4 tests): asserts the helper, the
+    &#34;no warning when honored&#34; path, and the warning content for both
+    deep and standard requests.
+  - `TestCLI` (2 new tests): asserts the stderr warning is emitted on
+    plugin-level certify and is *not* emitted at quick depth.
+
+Full plugin-eval suite (75 tests) passes.
+
+- meigen-ai-design: bump to 1.0.7, pin npm to meigen@1.3.1 (#527)
+
+Supersedes #525 (1.0.6 / meigen@1.3.0).
+
+What&#39;s new in npm meigen@1.3.1:
+
+- Veo 3.1 capability expansion: fast/pro tiers + 4/6/8s durations +
+  720p/1080p/4K resolutions at the same price per tier+duration.
+- Seedance 2.0 reference-video continuation: new `referenceVideo` +
+  `referenceVideoDuration` paired params for semantic continuation
+  of a previous clip.
+
+No schema breaking changes — every new field is optional. Existing
+1.3.0 calls continue to work unchanged.
+
+Release notes: https://github.com/jau123/MeiGen-AI-Design-MCP/releases/tag/v1.3.1
+
+- feat: add ship-mate plugin (#505)
+
+- docs: synchronize plugin/agent/skill counts (closes #517) (#522)
+
+* docs: synchronize plugin/agent/skill counts (closes #517)
+
+Live counts are 80 local plugins (81 incl. external git-subdir),
+185 agents, 153 skills, 100 commands. Six docs were stale:
+
+- marketplace.json metadata.description: 79/184/150 -&gt; 80/185/153
+- docs/plugins.md: 78 plugins (77 local) -&gt; 81 plugins (80 local)
+- docs/agents.md: 184 agents -&gt; 185
+- docs/agent-skills.md: 150 skills / 37 plugins -&gt; 153 skills / 40 plugins
+- docs/architecture.md: 79 plugins, 99 agents, 150 skills -&gt; 81/185/153
+- docs/usage.md: 150 skills, 79 plugins -&gt; 153 skills, 80 plugins
+
+Companion to 159ce68 which fixed README.md and CLAUDE.md.
+
+* docs: fix model distribution sums + plugins.md framing
+
+CodeRabbit follow-up on PR #522:
+
+- docs/agents.md model distribution table summed to 99 (42+39+18) but
+  the header now says 185 agents. Recounted from frontmatter:
+  opus 54, sonnet 62, haiku 20, inherit 49 = 185. Added the missing
+  Inherit row.
+- docs/architecture.md model distribution table had the same stale
+  42/39/18 sum; updated to 54/62/20/49 and renamed &#34;Two-Tier&#34; to
+  &#34;Four-Tier&#34; since Inherit is now load-bearing.
+- docs/architecture.md &#34;average plugin size: 3.4 components&#34; → 5.5,
+  matching (185 + 153 + 100) / 80.
+- docs/plugins.md headline reframed from &#34;81 ... 80 local + 1 external&#34;
+  to &#34;80 ... plus 1 externally-hosted&#34; to match the GEMINI.md
+  path-based rule (catalog headline counts local plugins).</div>
+</div>
+
+<a href="../project/wshobson_agents.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (7 commits) - microsoft/onnxruntime-genai - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (7 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/microsoft_onnxruntime-genai.html">microsoft/onnxruntime-genai</a> /
+    Updates in main (7 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/microsoft_onnxruntime-genai.html">microsoft/onnxruntime-genai</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-15 05:56 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/microsoft/onnxruntime-genai/commits/main" target="_blank">https://github.com/microsoft/onnxruntime-genai/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>A recent regression in `DecoderState` for VLMs caused models like Mistral3 to fail if their decoder ONNX graph didn&#39;t explicitly accept `input_ids`. This issue arose because an `input_ids` check incorrectly used a combined session information, leading to false positives as the embedding session always uses `input_ids`. The fix scopes the check to a decoder-only session, ensuring it accurately identifies when the decoder itself requires `input_ids` and preventing failures in affected models.
+
+***
+
+Недавняя регрессия в `DecoderState` для мультимодальных моделей (VLM) приводила к сбоям в работе таких моделей, как Mistral3, если их граф ONNX декодера явно не принимал `input_ids`. Эта проблема возникла из-за того, что проверка `input_ids` ошибочно использовала объединенную информацию о сессиях, вызывая ложные срабатывания, поскольку сессия встраивания (embedding) всегда использует `input_ids`. Исправление ограничивает проверку только сессией декодера, гарантируя, что она правильно определяет, когда сам декодер требует `input_ids`, и предотвращает сбои в затронутых моделях.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Fix DecoderState input_ids check regression introduced in #2103 (#2148)
+
+## Problem
+
+PR #2103 (_Add Gemma4 multimodal support_) introduced an optional
+`decoder_input_ids_` in `DecoderState` for models like Gemma4 that
+require `input_ids` alongside `inputs_embeds`. The guard condition was:
+
+```cpp
+if (model_.session_info_.HasInput(model_.config_-&gt;model.decoder.inputs.input_ids)) {
+```
+
+However, `model_.session_info_` is a **combined** `SessionInfo`
+aggregating inputs from ALL sessions — decoder, embedding, vision, and
+speech. Since the **embedding** session always takes `input_ids` as its
+primary input, `HasInput(&#34;input_ids&#34;)` returns `true` for every VLM that
+has an embedding model, even when the decoder ONNX itself has no
+`input_ids` input.
+
+## Impact
+
+Any VLM using the 3-model pipeline (embedding + decoder) where the
+**decoder does not have `input_ids`** will fail at inference with:
+
+```
+RuntimeError: Invalid input name: input_ids
+```
+
+Confirmed broken: **mistral3** (Ministral-3B / Pixtral family), whose
+decoder only accepts `inputs_embeds`.
+
+## Fix
+
+Scope the check to a **decoder-only** `SessionInfo` so it only fires
+when the decoder ONNX itself declares `input_ids` as an input:
+
+```cpp
+// Use a decoder-only SessionInfo to avoid false positives from the embedding session
+SessionInfo decoder_only_info;
+decoder_only_info.Add(*model_.decoder_session_);
+if (decoder_only_info.HasInput(model_.config_-&gt;model.decoder.inputs.input_ids)) {
+    decoder_input_ids_ = std::make_unique&lt;DefaultInputIDs&gt;(*this);
+    decoder_input_ids_-&gt;Add();
+}
+```
+
+Gemma4 is unaffected — its decoder ONNX genuinely has `input_ids` as an
+input, so the narrowed check still fires correctly for that model.
+
+## Verification
+
+Tested with the exported Ministral-3B-Instruct-2512 (mistral3 type,
+3-model VLM):
+- `generator.set_inputs(inputs)` no longer throws
+- Token generation succeeds end-to-end
+
+Regressed by: #2103
+
+---------
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+Co-authored-by: Akshay Sonawane &lt;asonawane@microsoft.com&gt;
+
+- Update Copilot instructions for reviewing model builder (#2164)
+
+### Description
+
+This PR adds an extra line to the Copilot review instructions for the
+model builder.
+
+### Motivation and Context
+
+There are several open PRs for the model builder. This is one of the
+code style items that should be looked for during a PR review.
+
+- Gate leaked-object error reporting in Shutdown() to debug builds or when logging is enabled (#2162)
+
+`Generators::Shutdown()` walks the LeakChecked&lt;T&gt; counters and prints
+messages of the form:
+
+```
+OGA Error: N instances of &lt;type&gt; were leaked.
+    Please see the documentation for the API being used to ensure proper cleanup.
+```
+
+to stderr whenever any tracked object is still alive at process exit.
+
+FoundryLocal offers a model.unload. But if users do not unload the
+model, they will run into this std::cerr error on their console.
+
+With this pull-request, the leak dump is now gated:
+
+- Debug builds (NDEBUG not defined): leaks are reported as before
+- Release builds: leaks are reported only when logging is enabled.
+
+- Limit the CUDA cmake architectures to 86 for CI builds (#2161)
+
+- Update Extensions Commit to Fix Id2Token Bugs (#2159)
+
+Includes fixes in
+https://github.com/microsoft/onnxruntime-extensions/pull/1060.
+
+Co-authored-by: Sayan Shaw &lt;sayanshaw@microsoft.com&gt;
+
+- Address win-cuda pipeline errors (#2154)
+
+- [Qwen3.5] dedup position ids (#2102)
+
+Extract _make_synthetic_position_ids() to derive `batch_size` and
+`sequence_length` from the position_ids model input [3, B, S] instead of
+Shape on intermediate Q/K tensors. Use a fixed basename so make_node
+dedup creates the subgraph once and reuses it across all layers and Q/K
+calls.
+
+- Reduces ONNX graph size by eliminating per-layer duplicates
+
+- Eliminates redundant INT64 Mul nodes that cause CPU fallback on WebGPU
+(WebGPU Mul does not support INT64)</div>
+</div>
+
+<a href="../project/microsoft_onnxruntime-genai.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

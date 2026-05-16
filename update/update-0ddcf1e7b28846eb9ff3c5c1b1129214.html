@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (7 commits) - tensorlakeai/tensorlake - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (7 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/tensorlakeai_tensorlake.html">tensorlakeai/tensorlake</a> /
+    Updates in main (7 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/tensorlakeai_tensorlake.html">tensorlakeai/tensorlake</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-15 21:23 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/tensorlakeai/tensorlake/commits/main" target="_blank">https://github.com/tensorlakeai/tensorlake/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This update enhances sandbox image build reliability by introducing a background keepalive mechanism to prevent timeouts during long Dockerfile `RUN` steps and setting a fixed 5-minute sandbox timeout. It also unifies image build orchestration within the Rust SDK, making CLI and Python SDKs thinner wrappers, and simplifies custom image registration by allowing authentication solely via `TENSORLAKE_API_KEY`. Additional improvements include utilizing an offline rootfs builder and optimizing file upload streaming.
+
+---
+
+Это обновление повышает надежность сборки образов песочницы за счет внедрения механизма поддержки активности в фоновом режиме для предотвращения таймаутов во время длительных шагов `RUN` в Dockerfile, а также установки фиксированного 5-минутного таймаута для песочницы. Кроме того, оно унифицирует оркестрацию сборки образов в Rust SDK, превращая CLI и Python SDK в более тонкие обертки, и упрощает регистрацию пользовательских образов, разрешая аутентификацию исключительно с помощью `TENSORLAKE_API_KEY`. Дополнительные улучшения включают использование автономного сборщика корневых файловых систем и оптимизацию потоковой загрузки файлов.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- sandbox image build: keep builder sandbox alive during long Dockerfile RUN steps (#684)
+
+Summary
+-------
+- Set `timeout_secs = 300` (5 min) on the temporary rootfs-builder
+sandbox created by `tl sbx image create` / `build_sandbox_image` instead
+of passing `None` (which fell through to whatever default the Platform
+API / plan quotas decided to apply).
+- Spawn a background keepalive task while `run_rootfs_builder` is in
+flight that pings the builder sandbox&#39;s `/api/v1/health` endpoint via
+`SandboxProxyClient::health()` every 120s, so a single long-running
+Dockerfile RUN step (e.g. `dd if=/dev/urandom of=... count=11000`, large
+`apt install`, big `pip install`) does not look idle to the Platform.
+- Bump workspace / package versions 0.5.11 -&gt; 0.5.12 across Rust
+workspace, Cargo.lock, root pyproject.toml, the PyO3 bridge
+pyproject.toml, and the TypeScript package.json / package-lock.json, so
+this change can be released.
+
+Background / why
+----------------
+The &#34;Test Sandbox in dev&#34; workflow in `tensorlakeai/indexify-deployment`
+has been failing for ~10 consecutive runs on the
+`stress-test-large-disk` step (e.g. run 25890767228, job 76255917380):
+
+  Error: Server error: 400 Bad Request -
+  {&#34;error&#34;:&#34;Sandbox &#39;o2bd6899hshs52dqd11st&#39; is not running
+   (status: suspending).&#34;,&#34;code&#34;:&#34;SANDBOX_NOT_RUNNING&#34;}
+
+That test invokes `tl sbx image create Dockerfile.large-disk-builder
+--disk 20`, whose Dockerfile body is essentially a single
+
+    RUN dd if=/dev/urandom of=/opt/image-bigfile.bin bs=1M count=11000
+        &amp;&amp; sha256sum /opt/image-bigfile.bin | ...
+
+i.e. one ~11 GiB urandom write followed by a sha256sum. While that RUN
+step runs, the builder sandbox produces no client traffic — the SDK is
+just blocked waiting for the streamed process to exit. The Platform
+transitions the sandbox to `Suspending { reason: Timeout }` mid-build,
+and the next call from the SDK (used for log streaming / process
+polling) returns the 400 above.
+
+The CLI side of the build is implemented in
+`crates/cloud-sdk/src/sandbox_images.rs::build_sandbox_image`. Before
+this change it was creating the builder with `timeout_secs: None`, so
+the lifetime budget came entirely from the server&#39;s
+`default_sandbox_timeout_secs` (and any per-plan
+`sandbox_default_timeout_secs` cap). That is not under SDK control and
+varies by environment, which is exactly why the dev runs were dying
+inside a single RUN step.
+
+What the fix does
+-----------------
+1. Explicit 5-minute initial budget. `timeout_secs: Some(300)` means
+every environment gets the same starting budget, independent of
+Platform-side defaults. This is enough headroom for most Dockerfile
+builds we expect to run via `tl sbx image create`.
+
+2. Background keepalive via `SandboxProxyClient::health()` every 120s.
+The keepalive runs inside a dedicated `tokio::spawn` task that is
+`abort()`ed the moment `run_rootfs_builder` returns (success or
+failure), so it cannot outlive the build phase and never pokes a sandbox
+we are about to delete. The keepalive uses the proxy path (i.e. talks to
+the dataplane / container daemon) rather than the Platform API directly,
+so it constitutes real inbound traffic to the sandbox — the same kind of
+activity the builder normally produces when it streams logs.
+
+`health()` errors during keepalive are intentionally swallowed: if the
+sandbox is genuinely gone, the streaming process call inside
+`run_rootfs_builder` will surface the real error with full context; we
+don&#39;t want to clobber that with a flaky keepalive warning.
+
+3. The first `interval.tick()` is consumed before the loop body so we
+don&#39;t emit a redundant ping immediately after the build context upload
+(which is already activity).
+
+Files touched
+-------------
+- `crates/cloud-sdk/src/sandbox_images.rs`
+- New constants `BUILDER_SANDBOX_TIMEOUT_SECS` (300s) and
+`BUILDER_SANDBOX_KEEPALIVE_INTERVAL` (120s).
+- Pass `timeout_secs: Some(BUILDER_SANDBOX_TIMEOUT_SECS)` on the builder
+`CreateSandboxRequest`.
+- New `spawn_builder_keepalive(SandboxProxyClient)` helper that returns
+the `JoinHandle` so the caller can `abort()` it.
+  - Wrap the `run_rootfs_builder` call with the keepalive lifecycle.
+- Version bumps to 0.5.12 in `Cargo.toml`, `Cargo.lock`,
+`pyproject.toml`, `crates/rust-cloud-sdk-py/pyproject.toml`,
+`typescript/package.json`, `typescript/package-lock.json`.
+
+Validation
+----------
+- `RUSTFLAGS=&#34;-D warnings&#34; cargo build --workspace --bins --tests
+--locked` (clean).
+- `cargo fmt -p tensorlake -p tensorlake-cli -p
+tensorlake-rust-cloud-sdk-py --check` (clean).
+- `cargo test -p tensorlake --lib --locked` (48 passed).
+- End-to-end validation is the failing `Test Sandbox in dev` workflow in
+indexify-deployment; we expect it to pass once a 0.5.12 release is cut
+and the `tl` binary on the runner picks it up.
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Share Rust sandbox image builder across SDKs (#682)
+
+## Summary
+- move sandbox image build orchestration into the Rust cloud SDK and
+make the CLI a thin wrapper around it
+- expose the Rust image builder through PyO3 and route Python SDK image
+builds through it
+- let Python Image builds pass generated Dockerfile text plus an
+explicit context directory into Rust, avoiding temp Dockerfiles inside
+the uploaded context
+- add builder disk sizing to Python and TypeScript SDK image build APIs,
+keeping disk_mb/diskMb as generated rootfs size
+- honor `.dockerignore` in the Rust context upload path used by CLI and
+Python
+- leave the existing TypeScript native orchestration path in place for
+now
+
+## Validation
+- cargo test -p tensorlake sandbox_images -- --nocapture
+- cargo test -p tensorlake-cli image_create -- --nocapture
+- RUSTFLAGS=&#34;-D warnings&#34; cargo build -p tensorlake-cli --bins --tests
+- RUSTFLAGS=&#34;-D warnings&#34; cargo build -p tensorlake-rust-cloud-sdk-py
+- cargo fmt -p tensorlake -p tensorlake-cli -p
+tensorlake-rust-cloud-sdk-py --check
+- python3 -m py_compile src/tensorlake/image/sandbox_builder.py
+src/tensorlake/image/image.py
+- PYTHONPATH=src poetry run python tests/image/test_sandbox_builder.py
+- npm run typecheck
+
+Note: local TypeScript test execution is blocked by Node v18.19.1 in
+this environment; package.json requires Node &gt;=22 and Vitest fails
+importing undici with File undefined.
+
+- Fix Rust cache poisoning in workflows
+
+- Bump release version to 0.5.10 (#680)
+
+## Summary
+- bump npm, Rust workspace/Cargo.lock, and PyO3 package metadata to
+0.5.10
+- switch the npm release workflow&#39;s remaining Node 20 setup steps to
+Node 22 to match package engines and avoid undici runtime warnings
+
+## Why
+The npm publish job in
+https://github.com/tensorlakeai/tensorlake/actions/runs/25827280902/job/75884632133
+failed because it attempted to publish tensorlake@0.5.9, which npm
+already has. npm reports tensorlake@0.5.10 is not published.
+
+## Validation
+- npm view tensorlake@0.5.10 version confirmed 0.5.10 is not currently
+published
+- npm pkg get version
+- npm pack --dry-run --ignore-scripts
+- cargo metadata --locked --no-deps --format-version 1
+- cargo check -p tensorlake-cli --locked
+- npx -y -p node@22 -c &#39;node --version &amp;&amp; npm test&#39;
+- npx -y -p node@22 -c &#39;node --version &amp;&amp; npm run build:sdk &amp;&amp; npm pack
+--dry-run --ignore-scripts&#39;
+- git diff --check
+
+Note: running npm test with this machine&#39;s default Node 18 fails because
+undici@8 expects Node 22 globals; the Node 22 run passes.
+
+- fix build
+
+- Use offline rootfs builder for sandbox image creation (#677)
+
+## Summary
+- route `tl sbx image create` through the offline rootfs builder path
+- preserve parent rootfs disk size for diff builds
+- set the rootfs builder PATH when invoking the builder wrapper
+- stream sandbox file uploads from the Rust CLI/SDK and Python SDK
+instead of buffering entire files in memory
+
+## Verification
+- `cargo check -p tensorlake -p tensorlake-cli -p
+tensorlake-rust-cloud-sdk-py`
+- `poetry run black --check src/tensorlake/sandbox/sandbox.py
+src/tensorlake/sandbox/async_sandbox.py
+src/tensorlake/image/sandbox_builder.py`
+- manual dev smoke with runtime metadata injected: registered
+`codex-runtime-metadata-fix-20260513011752`, booted it successfully, and
+verified `/root/build-marker` contained `fixed-runtime-metadata`
+
+## Notes
+- Large build contexts still need the matching Compute Engine
+container-daemon streaming PR deployed; otherwise the deployed daemon
+returns HTTP 413 before the streamed client path can help.
+
+- feat(sandbox-image): register custom images with just TENSORLAKE_API_KEY (#676)
+
+## Summary
+
+- Both SDKs (Python and TypeScript) now register custom sandbox images
+via the new scope-less route `POST /platform/v1/sandbox-templates` when
+a `TENSORLAKE_API_KEY` is configured. The server resolves the org and
+project from the key itself.
+- Callers no longer need to set `TENSORLAKE_ORGANIZATION_ID` and
+`TENSORLAKE_PROJECT_ID` env vars on the API-key path.
+- PAT auth (`TENSORLAKE_PAT`) keeps its current behavior — PATs aren&#39;t
+project-scoped, so they continue to require explicit IDs and
+`X-Forwarded-*` headers.
+
+## Motivation
+
+Customer complaint: the TS SDK demands `TENSORLAKE_ORGANIZATION_ID` and
+`TENSORLAKE_PROJECT_ID` env vars to register custom images, even though
+an API key uniquely identifies its (org, project) on the backend. The
+Python SDK has the same gap. The platform-api change in
+tensorlakeai/platform-api#501 exposes a scope-less endpoint that uses
+the API key&#39;s binding directly — no introspect round-trip needed, the
+server already has the answer at auth time.
+
+## Server-side dependency
+
+This PR depends on
+[tensorlakeai/platform-api#501](https://github.com/tensorlakeai/platform-api/pull/501).
+Land that first; this client change is backwards-compatible because PAT
+auth still hits the old route, and API keys hit the new route only after
+#501 ships.
+
+## Test plan
+
+- [x] `poetry run python tests/image/test_sandbox_builder.py` — all 15
+tests pass, including 5 new ones covering API-key vs PAT branching
+- [x] `pnpm vitest run tests/sandbox-image.test.ts` — all 17 tests pass,
+including 5 new ones
+- [x] `tsc --noEmit` clean
+- [ ] End-to-end manual: build a Dockerfile via `tl sandbox image build`
+against staging with only `TENSORLAKE_API_KEY` set (blocked until #501
+deploys to staging)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;</div>
+</div>
+
+<a href="../project/tensorlakeai_tensorlake.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

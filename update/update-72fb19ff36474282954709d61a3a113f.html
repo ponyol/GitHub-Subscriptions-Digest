@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (6 commits) - facebookresearch/faiss - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (6 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a> /
+    Updates in main (6 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-15 19:26 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/facebookresearch/faiss/commits/main" target="_blank">https://github.com/facebookresearch/faiss/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Недавние обновления Faiss устраняют критическую утечку памяти в Python-биндингах для `IDSelector` в `SearchParameters` путем корректного управления владением SWIG-объектами. Они также позволяют пользователям Python настраивать типы данных `IVFPQSearchCagraConfig`, что приводит к значительному приросту производительности сборок CAGRA с LUT-таблицами низкой точности. Дополнительные исправления включают корректировку преобразования `IDSelectorBitmap` для битовых наборов cuVS и унификацию проверки `SVS storage_kind` для повышения надежности. Наконец, были устранены несколько сбоев в CI при сборке и тестировании.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Fix IDSelectorBitmap conversion to cuVS bitset (#5211)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5211
+
+`convert_to_bitset_bitmap` in `CuvsFilterConvert.cu` assumed that `IDSelectorBitmap.n` was the bit/vector count, but it can also be the byte count of the bitmap array (which is how the Python wrapper constructs it via `faiss.IDSelectorBitmap(numpy_array)`). This caused two bugs:
+
+1. The `RAFT_EXPECTS(bitset.size() == n)` check failed when `n` was the byte count (e.g., 6.25M bytes vs 50M bits), throwing a `raft::logic_error` that propagated up and caused filtered search to silently fall back to unfiltered results.
+
+2. `n_elements = (selector.n + 7) / 8` divided the byte count by 8 again, copying only 1/8 of the bitmap data when `n` was already the byte count.
+
+The fix handles both conventions by computing the actual number of bytes to copy as `min(n, ceil(bitset_size / 8))`. This works regardless of whether `n` represents bytes or bits:
+- Python wrapper (n = byte count): copies all n bytes
+- C++ convention (n = bit count): copies ceil(bit_count / 8) bytes (the minimum needed)
+
+Reviewed By: pankajsingh88
+
+Differential Revision: D104935985
+
+fbshipit-source-id: 72665b3cfe1074083c57661a624294fe2b2207ef
+
+- Validate SVS storage_kind via shared helper at all deserialization read sites (#5204)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5204
+
+read_index_up reads the SVS storage_kind field from two distinct fourcc paths — the IndexSVSVamana family (ILVQ/ISVL/ISVD/ISV2) and the IndexSVSIVF family (ISIQ/ISIL/ISID).  The Vamana branch read the value into a plain int, range-checked it against [0, SVS_count), and then cast to SVSStorageKind, so a malformed payload was rejected at the deserialization boundary with a clear error.  The IVF branch read the value directly into the SVSStorageKind enum field with no range check.  A corrupt or maliciously constructed payload could store an out-of-range enum value and continue reading several more fields; the bad value was only noticed later from to_svs_storage_kind() inside IndexSVSIVF::deserialize_impl, after the SVS runtime load had been entered, producing a less actionable error from a deeper site.
+
+Replace the open-coded Vamana check and the missing IVF check with a single static read_svs_storage_kind(IOReader*) helper in index_read.cpp.  The helper performs the four-byte read and the [0, SVS_count) validation in one place and returns the validated enum, so each call site collapses to a one-line assignment.  Future SVS read sites cannot diverge in their validation strategy without going around this helper.  The helper preserves the existing &#34;invalid SVS storage_kind=N (must be in [0, M))&#34; error message, so no externally-visible error string changes.
+
+Reviewed By: mnorris11
+
+Differential Revision: D104481541
+
+fbshipit-source-id: 7e67d84b93ed142fcac39336c6bd6fdeda48cdb5
+
+- Fix IDSelector leak via SearchParameters.sel setter (#5208)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5208
+
+A user-reported leak (https://github.com/facebookresearch/faiss/issues/2996 follow-up) reproduces on faiss 1.14.1 when an `IDSelectorBatch` is assigned to a `SearchParameters` field after construction. Each iteration of the reporter&#39;s loop leaks ~160 MB; over a long-running serving process this grows unbounded.
+
+# Root cause
+
+The Python wrapper for `IDSelectorBatch` carries a SWIG `thisown` flag that controls who calls C++ `delete`. The SWIG-generated property setter for `SearchParameters.sel` flips `thisown` to 0 on the assumption that the enclosing C++ object will take responsibility, but `SearchParameters`&#39;s C++ destructor does not free `sel` (the field is borrowed by design). Result: the C++ `IDSelectorBatch` (a 40 MB sorted `std::vector&lt;idx_t&gt;` for the reporter&#39;s case) plus the retained numpy buffer are orphaned forever.
+
+`handle_SearchParameters` in `class_wrappers.py` already protected the kwargs construction path (`SearchParameters(sel=x)`) by wrapping the assignment in `RememberSwigOwnership` and `add_to_referenced_objects`. The bare-attribute path was unprotected.
+
+# Fix
+
+Override `__setattr__` on the base `SearchParameters` class so the same ownership protection runs for both `SearchParameters(sel=x)` and `params.sel = x`. The override filters via `hasattr(v, &#34;thisown&#34;)` so only SWIG-wrapped C++ objects go through the dance; SWIG internals like `self.this` (a `SwigPyObject` without `thisown`), bookkeeping lists, and plain Python values bypass it.
+
+`replacement_init` is slimmed to a pure delegator: the protection moves into `replacement_setattr` so a single source of truth handles both code paths. Keeping both layers would double-wrap on kwargs construction.
+
+The filter changes from a denylist (`type(v) not in (int, float, bool, str)`) to a duck-type check (`hasattr(v, &#34;thisown&#34;)`). The new filter is stricter: numpy arrays, lists, and `None` no longer get appended. Safe in practice because `SearchParameters` SWIG fields are typed as C++ pointers and only legitimately accept SWIG wrappers; numpy buffers passed indirectly (e.g., to `IDSelectorBatch`) are kept alive by the inner wrapper&#39;s own `add_to_referenced_objects`.
+
+The duck-type filter is field-name-agnostic, so other `SearchParameters` subclass fields with the same C++ shape (`Foo* field = nullptr` with no destructor freeing `field`) benefit from the same protection automatically. Examples include `SearchParametersPreTransform.index_params` and `SearchParametersIVF.quantizer_params`.
+
+# Per-field ref tracking
+
+A naive implementation that uses the existing `add_to_referenced_objects` helper (which appends to a list) leaks under a different access pattern: `params = SearchParameters(); for ...: params.sel = ...` accumulates one entry per reassignment because nothing drops the prior ref. This is a common pattern in long-lived servers that initialize a `SearchParameters` once and rebind `params.sel` per request.
+
+Fixed by using a per-field dict `self._sp_field_refs` keyed by attribute name. Reassigning the same field replaces the entry in the dict, so the prior wrapper loses its Python ref and the C++ object is freed. The else branch of `replacement_setattr` also drops any prior ref when the field is set to None or to a non-SWIG value, so explicit clear (`params.sel = None`) releases the C++ object immediately.
+
+# Subclass guard
+
+`__setattr__` is installed only once per class hierarchy. SWIG generates per-class `__init__` slots but does NOT generate per-class `__setattr__`, so subclasses (`SearchParametersIVF`, `SearchParametersHNSW`, ...) inherit the override via MRO. Without the `_protected_setattr` sentinel, calling `handle_SearchParameters(SearchParametersIVF)` would capture the inherited `replacement_setattr` as `parent_setattr`, then install a second `replacement_setattr` on top - chained calls would fire field tracking twice. The guard uses `getattr` (which walks the MRO) rather than `__dict__` lookup (own-attribute only) so subclasses correctly see the base&#39;s marker.
+
+`replacement_init` does not need this guard because each SWIG class generates its own `__init__` in its own `__dict__`; wrapping always captures SWIG&#39;s fresh init, never an inherited replacement.
+
+# Prior attempts and why this approach is targeted
+
+This bug has been attempted twice before via the SWIG layer:
+
+- https://github.com/facebookresearch/faiss/pull/3139 (Apr 2024, abandoned)
+- https://github.com/facebookresearch/faiss/pull/3810 (Sept 2024, changes requested)
+
+Both added a `%typemap(in) SWIGTYPE *` in `swigfaiss.swig` that strips the `$disown` flag globally, so SWIG never transfers ownership for any pointer field assignment anywhere in the bindings. The minimal change is one typemap.
+
+The trade-off proved untenable. PR 3810 surfaced the smoking gun while testing: `test_graph_based.test_io_no_storage` started crashing with heap-use-after-free at `index.storage = faiss.clone_index(index.storage)` with `own_fields = True`. The author worked around it by introducing a temp variable and flipping `own_fields = False` - but that flip is itself a behavior change to a documented FAISS contract that downstream users build on.
+
+The right framing is not &#34;SWIG&#39;s default ownership transfer is always wrong&#34; (the typemap assumption) but &#34;SWIG&#39;s default ownership transfer is wrong specifically for `SearchParameters` because that class lacks a destructor for its borrowed pointer fields.&#34; This diff scopes the change to that class hierarchy; every other SWIG-managed field keeps its existing semantics. No `swigfaiss.swig` change, no surprising downstream breakage.
+
+The memory regression test pattern (`np.arange(5_000_000)` × N iterations, measure `faiss.get_mem_usage_kb`) was independently validated by PR 3810&#39;s `test_ownership_2` and is reused here. ASAN cannot catch this leak because the C++ object remains reachable from a Python wrapper that simply has no Python-side references - it is a Python-level reference leak, not a C++-level dangling pointer.
+
+Reviewed By: mnorris11
+
+Differential Revision: D104750178
+
+fbshipit-source-id: 41f865028d0dc863fe560d1fd1bbe979dc8e8e8f
+
+- Fix CI: (cuVS) conda shards cache lock, (ARM) bump openblas, (SVS) fix LeanVec double-destruction (#5209)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5209
+
+Three fixes for GitHub Actions CI build/test failures:
+
+1. sqlite3 &#34;database is locked&#34; error (cuVS cmake builds)
+
+conda-libmamba-solver 26.4.0 uses a SQLite shards cache for package index
+data. When consecutive conda install commands run in the same job step,
+the SQLite lock from the first install is not fully released before the
+second install begins, causing:
+sqlite3.OperationalError: database is locked
+
+Fix: Add conda clean --index-cache between the cuVS and PyTorch conda
+installs to flush the shards cache and release the lock.
+
+2. OpenBLAS version pin conflict (ARM64 conda builds)
+
+conda-forge removed openblas 0.3.32, making it unresolvable. The conda
+recipes pinned 0.3.32 for non-x86_64 (ARM64) and macOS builds, causing:
+package libfaiss requires openblas 0.3.32.*, but none of the providers can be installed
+
+Fix: Bump all openblas/libopenblas pins from 0.3.32 to 0.3.33 in the
+conda recipes and from 0.3.29 to 0.3.33 in the cmake CI action.
+
+3. Flaky SVS LeanVec test aborts (SVSLL tests)
+
+IndexSVSVamanaLeanVec::~IndexSVSVamanaLeanVec() explicitly called
+IndexSVSVamana::~IndexSVSVamana(), but C++ destructor chaining already
+calls the base destructor automatically. This caused double-destruction of
+base class members (notably std::vector&lt;float&gt; stored_vectors), resulting
+in a double-free and non-deterministic SIGABRT. The IVF variant
+(IndexSVSIVFLeanVec) correctly omits this call.
+
+Fix: Remove the explicit base destructor call; let C++ handle it.
+
+Reviewed By: pankajsingh88
+
+Differential Revision: D104902441
+
+fbshipit-source-id: c4ab80a4c1fdeb9976c4e089dfb95814284824a7
+
+- Make IVFPQSearchCagraConfig dtype fields settable from Python (#5191)
+
+Summary:
+`IVFPQSearchCagraConfig.lut_dtype` and `.internal_distance_dtype` are
+typed as `cudaDataType_t` (a C enum from CUDA `&lt;library_types.h&gt;`).
+Without an int typemap SWIG generates accessors that read/write a
+`cudaDataType_t*` `SwigPyObject`, which Python users cannot construct,
+so the fields are effectively read-only from Python:
+
+```python
+&gt;&gt;&gt; import faiss
+&gt;&gt;&gt; c = faiss.IVFPQSearchCagraConfig()
+&gt;&gt;&gt; c.lut_dtype
+&lt;Swig Object of type &#39;cudaDataType_t *&#39; at 0x...&gt;
+&gt;&gt;&gt; c.lut_dtype = 2          # CUDA_R_16F
+TypeError: in method &#39;IVFPQSearchCagraConfig_lut_dtype_set&#39;,
+          argument 2 of type &#39;cudaDataType_t&#39;
+&gt;&gt;&gt; faiss.CUDA_R_16F          # also not exported
+AttributeError: module &#39;faiss&#39; has no attribute &#39;CUDA_R_16F&#39;
+```
+
+The doc comment on `IVFPQSearchCagraConfig.lut_dtype`
+(`faiss/gpu/GpuIndexCagra.h`) recommends low-precision LUT for
+large-dimension datasets — *&#34;fast shared memory kernels can be used
+even for datasets with large dimensionality&#34;* — but the Python binding
+does not let users act on that recommendation.
+
+After this PR:
+
+```python
+c = faiss.IVFPQSearchCagraConfig()
+c.lut_dtype = faiss.CUDA_R_16F   # or CUDA_R_8U / CUDA_R_32F
+c.internal_distance_dtype = faiss.CUDA_R_16F
+```
+
+The C++ ABI is unchanged; only the SWIG wrapper for these existing
+fields changes. The typemap is added inside the `FAISS_ENABLE_CUVS`
+block because that is where `cudaDataType_t` is referenced.
+
+## Why it matters
+
+`lut_dtype` controls whether cuVS&#39; IVF-PQ `compute_similarity_kernel`
+keeps the LUT in shared memory or falls back to a global-memory
+variant. A quick before/after on an A10
+(`MaxSharedMemoryPerBlockOptin = 99 KiB`) running the CAGRA build path
+on a 768D / 1M-vector dataset (`pq_dim=192`, `pq_bits=8`):
+
+| `lut_dtype`            | LutT in kernel template | EnableSMemLut | Per-kernel duration |
+|------------------------|-------------------------|---------------|---------------------|
+| `CUDA_R_32F` (default) | `float`                 | 0             | 187 ms              |
+| `CUDA_R_16F`           | `__half`                | 0             | 166 ms              |
+| `CUDA_R_8U`            | `fp_8bit&lt;5, 1&gt;`         | **1**         | **119 ms**          |
+
+End-to-end CAGRA `gpu_build` time on the same dataset goes from ~45 s
+(default) to ~26 s (`CUDA_R_8U`). Recall@100 delta on the converted
+HNSW index, normalized input, ef_search=100, 1000 queries:
+−0.25 pp for fp8, +0.09 pp for fp16, both within run-to-run noise.
+This is the lever the doc comment is pointing at; before this PR it
+just was not reachable from Python.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5191
+
+Test Plan:
+- New test: `faiss/gpu/test/test_lut_dtype_binding.py` (gated on
+  `&#34;CUVS&#34; in faiss.get_compile_options()`). 5 cases — constants
+  exported with the right values, default is `CUDA_R_32F`, set via
+  `faiss.CUDA_R_*`, set via raw int, and field independence. All pass
+  on a local `FAISS_ENABLE_CUVS=ON` build.
+- Existing `faiss/gpu/test/test_cagra.py` (18) and
+  `faiss/gpu/test/test_binary_cagra.py` (4) unchanged, all pass.
+- Sanity sweep on the patched build of `tests/test_factory.py +
+  test_index.py + test_index_accuracy.py + test_io.py +
+  test_product_quantizer.py + test_fast_scan.py +
+  test_fast_scan_ivf.py`: 407 pass, 1 unrelated skip, 0 fail.
+
+## Out of scope
+
+This PR does **not** change the C++ default of `lut_dtype`. cuVS&#39; own
+CAGRA wrapper (`cpp/include/cuvs/neighbors/graph_build_types.hpp`,
+`cagra::graph_build_params::ivf_pq_params` constructor) defaults to
+`CUDA_R_16F`, but aligning faiss with that default is a behaviour
+change that deserves more cross-GPU and cross-dataset validation than
+this PR carries. Best handled as a follow-up.
+
+## Related
+
+There is no prior issue or PR tracking this — searched the repository
+issues, PRs, and the web. Happy to file a tracker issue if reviewers
+prefer that pattern.
+
+Reviewed By: mnorris11
+
+Differential Revision: D104891046
+
+Pulled By: bshethmeta
+
+fbshipit-source-id: 96b550957fd01a8f2c249228b835ba7c42ef3abd
+
+- Fix python_unnecessary_generator_set_comprehension issues in faiss/.../bench_fw/optimize.py (#5205)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5205
+
+Differential Revision: D104626788
+
+fbshipit-source-id: e73b744ab36002c04b0d36baa9dfef43a0030546</div>
+</div>
+
+<a href="../project/facebookresearch_faiss.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

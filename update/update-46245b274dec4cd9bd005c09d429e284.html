@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (45 commits) - ruvnet/RuView - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (45 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/ruvnet_RuView.html">ruvnet/RuView</a> /
+    Updates in main (45 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/ruvnet_RuView.html">ruvnet/RuView</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-15 02:14 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/ruvnet/RuView/commits/main" target="_blank">https://github.com/ruvnet/RuView/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это всеобъемлющее обновление внедряет новую систему интроспекции в реальном времени (ADR-099) с покадровым анализом и обнаружением &#34;изменений режима&#34;, доступную через новые WebSocket и REST конечные точки. Также интегрируется `rvCSI` (ADR-097) как основная среда выполнения для периферийных ВЧ-сенсоров, улучшая обработку данных CSI, добавляя поддержку Raspberry Pi 5 и повышая точность для Nexmon/ESP32. Кроме того, релиз включает существенные исправления конвейера CI/CD, обновленную публикацию Docker-образов, улучшенную аутентификацию API и обновления конвейера обучения для интеграции сигнальных функций.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Update README.md
+
+- Merge pull request #554 from ruvnet/feat/midstream-introspection
+
+feat(introspection): ADR-099 midstream tap + /ws/introspection + /api/v1/introspection/snapshot
+
+- docs(changelog): ADR-099 introspection tap — entry under [Unreleased]
+
+Lists the new `/ws/introspection` + `/api/v1/introspection/snapshot`
+endpoints, the empirical baseline (0.041 ms p99 update, 5-frame shape
+match on 1-D L1 stand-in), and the honest D8 amendment.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- feat(introspection): I6 — regime-changed signal + per-frame analyze + honest ADR-099 D8 amendment
+
+Three threads in this commit:
+
+1) Per-frame attractor analysis (default analyze_every_n: 8 → 1).
+   The I5 benchmark put per-frame update at 0.012 ms p99 — 83× under D4&#39;s
+   1 ms budget. The cost case for the every-8th-frame default doesn&#39;t hold;
+   per-frame analysis is what makes regime_changed a viable early-detection
+   trigger.
+
+2) New `regime_changed: bool` field in IntrospectionSnapshot — flips on any
+   frame whose attractor regime classification differs from the previous
+   frame&#39;s. Pairs with top_k_similarity (full-shape match) to give
+   downstream consumers two latencies with different robustness profiles.
+
+3) Honest amendment of ADR-099 D8 to reflect empirical reality:
+   - L1 stand-in achieves 3.20× ratio (5-frame shape match vs 16-frame
+     event-path floor); the 10× aspirational bar is architecturally
+     unreachable at 1-D scalar feature resolution.
+   - regime_changed didn&#39;t fire in the 10-frame motion window — the
+     200-frame noise trajectory dominates the Lyapunov classification, and
+     short perturbations don&#39;t shift the regime fast enough on a scalar
+     feature.
+   - Path to 10×: ADR-208 Phase 2 (Hailo NPU vec128 embeddings) — multi-dim
+     partial matches discriminate from noise in 1-2 frames, not 5.
+   - Side finding: midstream temporal-compare::DTW uses *discrete equality*
+     cost (designed for LLM tokens), not numeric distance — swapping it in
+     for f64 amplitude scoring would be strictly worse than the L1 stand-in.
+     A numeric DTW is a separate concern (hand-roll or new crate).
+   - Revised D8: ship behind --introspection (off by default) until multi-
+     dim features land. Per-frame update budget IS met (0.041 ms p99 in this
+     bench, ~24× under the 1 ms bar) — the feature is cheap enough to
+     carry dark today.
+
+cargo test -p wifi-densepose-sensing-server --no-default-features:
+  introspection (lib): 8 passed, 0 failed
+  introspection_latency (test): 5 passed, 0 failed (incl. new
+                                 regime_change_path_latency)
+clippy: clean on the introspection surface (pre-existing approx_constant
+        lints in pose.rs / main.rs unchanged).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- test(sensing-server): ADR-099 latency benchmark — record empirical baseline
+
+I5. Measures the architectural latency floor of the introspection path
+vs. the window-aggregated event path, plus the per-frame update cost.
+
+  Result on this run:
+    ADR-099 D8 floor ratio    : 3.20× (16 frames / 5 frames)
+                                D8 target ≥10× — NOT YET MET on the host-side
+                                L1 stand-in scoring; I6 closes the gap.
+    ADR-099 D4 update p50/p99 : 0.001 ms / 0.012 ms (~83× under the 1 ms
+                                budget on a desktop runner; even with thermal
+                                throttling on a Pi 5 we have orders of
+                                magnitude of headroom).
+    Regime after 200 frames   : Idle, lyapunov=-2.32, confidence=1.0
+                                (attractor analyzer is firing as designed).
+
+The D8 gap is structural to the current scoring: signature_score() uses a
+length-normalised L1 over the trailing window, which requires roughly the
+full signature length of in-shape frames before crossing
+promotion_threshold. Closing it is the I6 work — swap in the real
+midstreamer-temporal-compare DTW (partial-match scoring) and/or surface
+the attractor&#39;s regime-change as an *earlier* trigger than full signature
+match.
+
+The latency-ratio test asserts a regression bar (≥3.0×) on the L1 baseline,
+prints the D8 ratio + whether it&#39;s met, and explicitly defers the ≥10×
+target to I6 in the docstring. Better empirical reporting than a flag that
+silently fails until tuned.
+
+ESP32 sanity (independent of the benchmark): COM7 device alive at csi_collector
+cb #84500 (~30 min uptime), len=128/256 HT20/HT40, ch5, RSSI swings -44 to
+-79 (= real motion in the room). UDP target still unreachable from this
+host per the earlier diagnosis; that&#39;s a deployment fix, not a measurement
+gate.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- feat(sensing-server): wire ADR-099 introspection tap + /ws/introspection + /api/v1/introspection/snapshot
+
+I3 (per ADR-099). Three changes in main.rs:
+
+1) AppStateInner: + intro: IntrospectionState + intro_tx: broadcast::Sender&lt;String&gt;
+   (256-slot ring, same shape as the existing tx).
+
+2) ESP32 frame path: after the global frame_history push, before the
+   per-node mutable borrow of s.node_states, compute the per-frame derived
+   feature (mean amplitude across subcarriers), call s.intro.update(ts_ns,
+   feature), and broadcast the snapshot JSON to s.intro_tx. Placement is
+   deliberate — between the global state&#39;s mutable touch and the per-node
+   &amp;mut so borrow-checking stays linear; ns is borrowed *after* the tap
+   completes its s.intro / s.intro_tx access.
+
+3) Routes:
+     ws_introspection_handler   → /ws/introspection
+     api_introspection_snapshot → /api/v1/introspection/snapshot
+   Same Axum + tokio::sync::broadcast pattern as ws_sensing_handler,
+   subscribed against s.intro_tx. Wrapped by the bearer-auth middleware
+   already on /api/v1/* — orchestrator probes and unauthenticated /ws/sensing
+   reachers continue to land on the existing topic.
+
+Verified:
+  cargo build -p wifi-densepose-sensing-server --no-default-features ✓
+  cargo test  -p wifi-densepose-sensing-server --no-default-features
+    lib:           207 passed, 0 failed (199 pre-tap + 8 introspection)
+    integration suites: 70, 8, 16, 18 passed, 0 failed
+  cargo clippy: clean on the introspection surface (pre-existing warnings
+                on -core / -ruvector / -signal unchanged).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- feat(sensing-server): introspection module skeleton (ADR-099 D1+D7+D8)
+
+Adds the per-frame introspection state that ADR-099 specifies, plus the two
+midstream dependencies. Pure addition — no other code touched.
+
+  v2/crates/wifi-densepose-sensing-server/Cargo.toml
+    + midstreamer-temporal-compare = &#34;0.2&#34;
+    + midstreamer-attractor        = &#34;0.2&#34;
+
+  v2/crates/wifi-densepose-sensing-server/src/introspection.rs (new, 530 lines)
+    pub struct IntrospectionState
+      ├─ midstreamer-attractor&#39;s AttractorAnalyzer (regime + Lyapunov)
+      ├─ SignatureLibrary (JSON-loaded labelled segments)
+      ├─ VecDeque&lt;f64&gt; sliding amplitude buffer (default 128 points)
+      └─ update(timestamp_ns, derived_feature) — never window-blocked
+         + snapshot() -&gt; IntrospectionSnapshot
+            { timestamp_ns, frame_count, regime, lyapunov_exponent,
+              attractor_dim, attractor_confidence, top_k_similarity }
+    pub enum Regime { Idle, Periodic, Transient, Chaotic, Unknown }
+    pub struct Signature { id, label, vectors, dtw, promotion_threshold }
+    pub struct SimilarityMatch { signature_id, score, above_threshold }
+
+DTW path is currently a host-side stand-in (length-normalised L1 with the
+real DTW call deferred to I3/I5 once vec128 embeddings exist — ADR-099 P1).
+The attractor path is wired to midstream directly. The analyze() step only
+runs every N frames (default 8) to stay under the per-frame ms budget.
+
+8 unit tests (snapshot defaults, frame-count + timestamp advance, empty
+library, scoring + ordering invariants, threshold gating, empty-signature
+fault-tolerance, regime classification after 200 frames). 199 → 207 lib tests,
+0 failures. cargo build clean (only pre-existing warnings).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(adr): ADR-099 — adopt midstream as RuView&#39;s real-time introspection + low-latency tap (Proposed)
+
+ADR-098 rejected midstream as a *replacement* for RuView&#39;s existing seams.
+ADR-099 is the other half: midstream&#39;s `temporal-compare` (DTW) and
+`temporal-attractor-studio` (Lyapunov + regime classification) crates as a
+*parallel* per-frame introspection tap, alongside the existing window-aggregated
+event pipeline.
+
+The 8 decisions:
+
+  D1 — Only midstreamer-temporal-compare 0.2 + midstreamer-attractor 0.2;
+       scheduler / neural-solver / strange-loop are out of scope of this ADR.
+  D2 — Tap point: post-validate, parallel to WindowBuffer::push in csi.rs.
+       The existing /ws/sensing path is unchanged.
+  D3 — New /ws/introspection topic + /api/v1/introspection/snapshot REST endpoint
+       carrying IntrospectionSnapshot { regime, lyapunov_exponent,
+       attractor_dim, top_k_similarity }.
+  D4 — Per-frame updates only, never window-blocked. Soonest-event latency on
+       the &#34;shape recognized&#34; path collapses from ~533 ms (16-frame @ 30 Hz
+       window) to ~33 ms (one frame), a ~16× win.
+  D5 — temporal-neural-solver (LTL) is out of scope (separate MAT audit ADR).
+  D6 — ESP32 firmware unchanged; deployment is host-side only.
+  D7 — Signature library is JSON, on-disk, customer-owned; three reference
+       signatures ship as developer fixtures.
+  D8 — Promotion bar is empirical: ≥10× p99 latency reduction vs. the existing
+       /ws/sensing event path, or the feature stays behind a CLI flag.
+
+Indexed in docs/adr/README.md. Phased adoption (P0 spike + benchmark → P1 first
+real signature library → P2 dashboard widget → P3 capture workflow → P4 optional
+adaptive_classifier hook). Implementation lands as ~150–250 lines + one
+integration test in v2/crates/wifi-densepose-sensing-server in follow-up PRs.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- Merge pull request #549 from ruvnet/docs/adr-097-adopt-rvcsi
+
+docs(adr): ADR-097 — adopt rvCSI as RuView&#39;s primary CSI runtime (Proposed)
+
+- Merge pull request #547 from ruvnet/fix/docker-publish-and-api-auth
+
+feat(docker+sensing-server): refresh Docker publish + opt-in bearer-token API auth (closes #520 #514 #443)
+
+- ci: step-level continue-on-error on every step of the flaky scan jobs
+
+Job-level `continue-on-error: true` (from d6a73b6) makes the *workflow*
+conclude success, but the individual job&#39;s own check rollup still shows
+failure if any step in the job fails — so the PR check list stays red even
+though the workflow is green. To get all per-job checks green, every step
+in the affected jobs needs step-level `continue-on-error: true`.
+
+Applies idempotently to every step (no-ops where it&#39;s already set):
+
+  security-scan.yml  — 43 steps across the 8 scan jobs (sast, dependency,
+                       container, iac, secret, license, compliance, report)
+  ci.yml             — 17 steps across docker-build / code-quality / test
+
+The scans still run; their reports still upload as artifacts when possible;
+they just stop gating the PR. Companion to ADR-097 / PR #547 / PR #549.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(adr): ADR-097 — adopt rvCSI as RuView&#39;s primary CSI runtime (Proposed)
+
+rvCSI was extracted to its own repo (PR #542→#544): 9 crates on crates.io @
+0.3.1, `@ruv/rvcsi` on npm, vendored at `vendor/rvcsi`. RuView currently
+*vendors but does not consume* it — zero `rvcsi-*` deps in `v2/`, zero
+`use rvcsi_…` imports, zero `@ruv/rvcsi` JS imports. ADR-097 decides:
+
+  D1 — Depend on the published crates from crates.io, not the submodule path.
+  D2 — Pilot in `wifi-densepose-sensing-server` (smallest, best-bounded
+       touchpoint: UDP receiver + handlers + WS fan-out).
+  D3 — `wifi-densepose-signal` is *layered on top of* rvCSI, not replaced.
+       The SOTA / RuvSense modules go beyond rvCSI&#39;s scope and stay in
+       RuView; they consume `rvcsi_core::CsiFrame`. Overlapping basic DSP
+       primitives delegate to `rvcsi-dsp` or become thin shims.
+  D4 — `wifi-densepose-hardware` stops carrying ESP32 wire-format parsing;
+       the parser moves to a new `rvcsi-adapter-esp32` crate (ADR-095 §1.2
+       / D15 follow-up, owned in the rvCSI repo).
+  D5 — `wifi-densepose-ruvector` (training pipeline) and `rvcsi-ruvector`
+       (runtime RF memory) stay separate for now; a follow-up unifies them
+       once the production RuVector binding lands.
+  D6 — `rvcsi_core::CsiFrame` is the boundary type at the runtime edge;
+       one explicit `From`/`Into` conversion point at that edge.
+  D7 — Track via `rvcsi-* = &#34;0.3&#34;` SemVer ranges + bump the `vendor/rvcsi`
+       submodule pin per RuView release for reproducible offline builds.
+  D8 — Once every consumer depends on crates.io, decide (separately)
+       whether to drop the submodule.
+
+Adoption is phased (P1 pilot → P2 signal shim → P3 ESP32 adapter →
+P4 clean-up → P5 submodule review); each phase is one PR with tests.
+
+Indexed in docs/adr/README.md.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- ci: also install libudev-dev + libdbus-1-dev (tokio-serial / dbus)
+
+After adding the GTK/glib set, the next blocker was `libudev-sys` (pulled by
+`tokio-serial` in `wifi-densepose-desktop`):
+
+  pkg-config exited with status code 1
+  &gt; pkg-config --libs --cflags libudev
+  The system library `libudev` required by crate `libudev-sys` was not found.
+
+Add `libudev-dev` (and `libdbus-1-dev` defensively — Tauri&#39;s runtime
+notification/tray paths use it).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- ci: unblock the pre-existing CI/Security failures so PR pipelines go green
+
+The CI and Security workflows have been red on every push to main since the
+v1→v2 reorg (Python moved to archive/v1/, Rust workspace gained the Tauri 2
+desktop crate). This PR&#39;s earlier Tauri-deps fix unblocks `Rust Workspace
+Tests`. This commit unblocks the rest:
+
+ci.yml:
+- `Code Quality &amp; Security` (black/flake8/mypy/bandit): repoint paths from
+  src/ + tests/ (don&#39;t exist) to archive/v1/src + archive/v1/tests, mark each
+  step + the job `continue-on-error: true` — the archive is frozen reference
+  code, lint hits there are informational, not blocking.
+- `Tests` (Python 3.10/3.11/3.12 matrix): same path repoint
+  (tests/{unit,integration}/ → archive/v1/tests/{unit,integration}/), same
+  continue-on-error treatment.
+- `Docker Build &amp; Test`: points at a non-existent root `Dockerfile` with a
+  `target: production` that doesn&#39;t exist, pushes to a mis-cased image name
+  — fundamentally broken AND superseded by the new
+  `sensing-server-docker.yml` (which handles the real build properly). Mark
+  this old job continue-on-error until it&#39;s deleted/rewritten in a follow-up.
+
+security-scan.yml:
+- All 8 scan jobs (sast / dependency-scan / container-scan / iac-scan /
+  secret-scan / license-scan / compliance-check / security-report) get
+  `continue-on-error: true` at the job level. Third-party scanner actions
+  (Checkov, KICS, GitLeaks, Semgrep, Trivy) and SARIF uploads to GitHub Code
+  Scanning are flaky/permissions-dependent; the scans still run and their
+  reports still upload as artifacts, they just don&#39;t gate the pipeline.
+
+Net effect: CI + Security workflows report `success` on this PR (and on main
+going forward) as soon as the real workspace builds pass. Each loosened step
+has an inline comment so a follow-up &#34;tighten the security gates&#34; PR knows
+exactly where to look.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- ci: install Tauri/GTK Linux dev libs so the Rust workspace test compiles
+
+`wifi-densepose-desktop` is a Tauri v2 app and pulls glib-sys / gtk-sys /
+webkit2gtk-sys / libsoup-sys via its (build-)dependencies. Those crates&#39;
+build.rs uses pkg-config, which needs the matching `-dev` packages on the
+runner — without them the build aborts at `glib-sys` long before any test
+runs (&#34;pkg-config exited with status code 1: glib-2.0 not found&#34;). Every
+recent CI run on main has been red on this exact step (last green Rust
+workspace test predates the Tauri 2 desktop crate).
+
+Install the standard Tauri-on-Ubuntu set in the Rust tests job so the
+workspace test can actually exercise the workspace (the binary itself isn&#39;t
+built into a release here — these are just the libraries `pkg-config --cflags`
+needs to see).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- feat(docker+sensing-server): refresh Docker publish + opt-in bearer-token API auth
+
+Closes #520, #514, #443.
+
+## #520 / #514 — stale Docker image, missing UI assets
+
+`ruvnet/wifi-densepose:latest` was published before `ui/observatory*` and
+`ui/pose-fusion*` were added; users see /app/ui missing those files and the
+v0.6+ packet format doesn&#39;t reach the server. Two fixes:
+
+1. `docker/Dockerfile.rust` now `RUN`s a build-time guard after `COPY ui/`
+   that fails the build if `index.html` / `observatory.html` / `pose-fusion.html`
+   / `viz.html` (or the `observatory/` / `pose-fusion/` / `components/` /
+   `services/` directories) are missing, plus an exec-bit check on
+   `/app/sensing-server`. A stale image can never be silently produced again.
+
+2. New `.github/workflows/sensing-server-docker.yml` rebuilds + pushes on
+   every change to the Dockerfile, the server crate, the signal/vitals/
+   wifiscan crates, the workspace manifests, the `ui/` tree, or itself —
+   plus `v*` tags and manual dispatch. Pushes to both `docker.io/ruvnet/
+   wifi-densepose` AND `ghcr.io/ruvnet/wifi-densepose` with `latest` +
+   `vX.Y.Z` + `sha-&lt;short&gt;` tags, then post-push smoke-tests the artifact:
+   /health, /api/v1/info, the observatory + pose-fusion HTML, AND the
+   bearer-auth path (no token → 401, wrong → 401, correct → 200). Uses the
+   `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` repo secrets; ghcr.io rides on
+   the workflow&#39;s GITHUB_TOKEN.
+
+## #443 — sensing-server REST API auth model
+
+QE security audit raised that 40+ /api/v1/* routes have no auth layer with
+a default `0.0.0.0` bind. New `wifi_densepose_sensing_server::bearer_auth`
+module + middleware:
+
+  - Env-var-gated: `RUVIEW_API_TOKEN` unset/empty ⇒ middleware is a no-op
+    (current LAN-mode behaviour preserved — **no default change**); set ⇒
+    every `/api/v1/*` request must carry `Authorization: Bearer &lt;token&gt;`
+    or the server returns 401.
+  - Constant-time byte compare via local `ct_eq` (no new dep).
+  - `/health*`, `/ws/sensing`, and `/ui/*` are intentionally never gated
+    (orchestrator probes + local browsers).
+  - Startup logs which mode is active and warns when auth is ON with a
+    `0.0.0.0` bind.
+  - 8 unit tests on the middleware via `tower::ServiceExt::oneshot`
+    (sensing-server lib tests 191 → 199, 0 failures).
+
+Verified locally: `cargo build --workspace --no-default-features` ✓,
+`cargo test -p wifi-densepose-sensing-server --no-default-features` ✓.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- Merge pull request #544 from ruvnet/chore/rvcsi-via-submodule
+
+chore(rvcsi): drop inline v2/crates/rvcsi-* — consume vendor/rvcsi + crates.io
+
+- chore(rvcsi): drop inline v2/crates/rvcsi-* — consume the vendor/rvcsi submodule / crates.io instead
+
+rvCSI now lives in its own repo (github.com/ruvnet/rvcsi), vendored here as
+`vendor/rvcsi` (PR #543) and published to crates.io as `rvcsi-* 0.3.x` /
+to npm as `@ruv/rvcsi`. The inline copies in `v2/crates/rvcsi-*` (added in
+#542) were a duplicate; this removes them and re-points the docs.
+
+- `git rm -r v2/crates/rvcsi-{core,dsp,events,adapter-file,adapter-nexmon,ruvector,runtime,node,cli}`
+- `v2/Cargo.toml`: remove the 9 from `members` (note: `vendor/rvcsi/Cargo.toml`
+  is its own workspace — depend on the published crates or the submodule paths,
+  not as v2 workspace members).
+- `CLAUDE.md`: the 9 crate-table rows collapse to one `vendor/rvcsi` row.
+- `README.md` docs table: rvCSI entry points at the standalone repo + notes the
+  submodule / crates.io / npm / plugin.
+- `CHANGELOG.md`: `[Unreleased]` entry.
+
+The ADRs (ADR-095, ADR-096), PRD, and DDD model stay in `docs/` as the design
+record of the incubation. `cargo build --workspace --no-default-features` and
+`cargo test --workspace --no-default-features` stay green.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- Merge pull request #543 from ruvnet/chore/vendor-rvcsi-submodule
+
+chore(vendor): add rvcsi as a vendor submodule
+
+- chore(vendor): add rvcsi as a vendor submodule (github.com/ruvnet/rvcsi)
+
+rvCSI — the edge RF sensing runtime incubated here as `v2/crates/rvcsi-*`
+(ADR-095, ADR-096, PR #542) — now has a standalone home at
+github.com/ruvnet/rvcsi (9 crates published to crates.io, @ruv/rvcsi on npm,
+a Claude Code plugin). This vendors it under `vendor/rvcsi`, alongside
+`vendor/ruvector` / `vendor/midstream` / `vendor/sublinear-time-solver`.
+
+Follow-up: migrate the workspace to consume `vendor/rvcsi/crates/rvcsi-*`
+and drop the inline `v2/crates/rvcsi-*` copies (kept for now so this change
+is a pure addition).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- Merge pull request #542 from ruvnet/claude/design-rvcsi-platform-X7yJR
+
+docs: rvCSI edge RF sensing platform — PRD, ADR-095, DDD domain model
+
+- fix(rvcsi): scale-relative baseline-drift thresholds + ESP32 end-to-end validation
+
+BaselineDriftDetector compared `mean_amplitude` against its EWMA baseline
+with *absolute* thresholds (anomaly 1.0, drift 0.15). Fine for the synthetic
+unit tests (amplitudes ~1.0), but raw ESP32 CSI is int8 I/Q with amplitudes
+up to ~128, so window-to-window RMS distance is routinely 5-50 &gt;&gt; 1.0 and
+AnomalyDetected fired on ~96% of windows (319/331 on a real node-1 capture).
+
+Drift is now `||current - baseline||2 / ||baseline||2` (a fraction, with an
+eps floor that falls back to absolute for a degenerate near-zero baseline),
+so one tuning is valid across raw-int8 ESP32, int16-scaled Nexmon, and
+baseline-subtracted streams. AnomalyDetected drops to 40/331 on the same
+data; the existing detector tests still pass (their explicit configs are
+valid relative thresholds too); added baseline_drift_is_scale_invariant_
+no_anomaly_storm. rvcsi-events 18 -&gt; 19 tests; 162 rvcsi tests, 0 failures,
+clippy-clean.
+
+Surfaced by an end-to-end test against real ESP32 CSI on COM7: the device
+(ESP32-S3, node 1, ADR-018 firmware, WiFi &#34;ruv.net&#34; ch5 RSSI -39, CSI cb
+only because nothing listens at .156). rvcsi has no ESP32 adapter yet, so a
+7,000-frame node-1 recording was transcoded to .rvcsi via the new
+scripts/esp32_jsonl_to_rvcsi.py (stand-in for `record --source esp32-jsonl`)
+and run through `rvcsi inspect`/`replay`/`calibrate`/`events` end-to-end.
+
+ADR-095 D13 and ADR-096 sections 2.1/5 updated; CHANGELOG entry added;
+rvcsi-adapter-esp32 (live serial/UDP source) noted as a follow-up.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- feat(rvcsi): Raspberry Pi 5 (BCM43455c0) + Nexmon chip registry
+
+Adds first-class support for the Raspberry Pi 5&#39;s WiFi chip (CYW43455 /
+BCM43455c0 — the same 802.11ac wireless as the Pi 4 / Pi 3B+ / Pi 400, and the
+chip with the most mature nexmon_csi support), plus a registry of the other
+Nexmon-supported Broadcom/Cypress chips.
+
+rvcsi-adapter-nexmon — new `chips.rs`:
+- `NexmonChip` (Bcm43455c0, Bcm43436b0, Bcm4366c0, Bcm4375b1, Bcm4358, Bcm4339,
+  Unknown{chip_ver}) + `RaspberryPiModel` (Pi5/Pi4/Pi400/Pi3BPlus/PiZero2W/
+  PiZeroW) — Pi5/Pi4/Pi400/Pi3B+ → Bcm43455c0; PiZero2W → Bcm43436b0.
+- `nexmon_adapter_profile(chip)` / `raspberry_pi_profile(model)` build the
+  per-device `AdapterProfile` (channels: 2.4 GHz 1-13 + 5 GHz UNII for dual-band;
+  bandwidths 20/40/80[/160]; expected subcarrier counts 64/128/256[/512]) that
+  `validate_frame` bounds CSI frames against.
+- `NexmonChip::from_chip_ver` (0x4345 → Bcm43455c0, 0x4339, 0x4358, 0x4366,
+  0x4375 — best-effort; the raw `chip_ver` is always preserved) and `from_slug`
+  / `RaspberryPiModel::from_slug` (&#34;pi5&#34;, &#34;raspberry pi 4&#34;, &#34;bcm43455c0&#34;, ...).
+- `NexmonCsiHeader::chip()`; `NexmonPcapAdapter` auto-detects the chip from the
+  packets&#39; `chip_ver` and uses the matching profile, overridable via
+  `.with_chip(NexmonChip)` / `.with_pi_model(RaspberryPiModel)`; `.detected_chip()`.
+
+rvcsi-runtime: `decode_nexmon_pcap_for(.., chip_spec)` (validate against a chip /
+Pi model, drop non-conforming) + `nexmon_profile_for(spec)`; `NexmonPcapSummary`
+gains `chip_names` + `detected_chip`; `CaptureSummary` gains `chip`.
+
+rvcsi-cli: `record --source nexmon-pcap --chip pi5`; new `nexmon-chips`
+subcommand (lists chips + Pi models, human or `--json`); `inspect-nexmon` and
+`inspect` now print the resolved chip.
+
+rvcsi-node (napi-rs): `nexmonDecodePcap` gains an optional `chip` arg;
+`nexmonChipName(chipVer)`, `nexmonProfile(spec)`, `nexmonChips()`. @ruv/rvcsi
+SDK + `.d.ts` updated (AdapterProfile / NexmonChipsListing interfaces, the new
+fns, `chip` on CaptureSummary, `chip_names`/`detected_chip` on NexmonPcapSummary).
+
+168 rvcsi tests pass (adapter-nexmon 22→28, cli 9→10), 0 failures, clippy-clean.
+The synthetic test captures now stamp chip_ver = 0x4345 (the BCM4345 family chip
+ID), so the chip-detection happy path is exercised end to end.
+ADR-096, CHANGELOG, README, CLAUDE.md updated.
+
+https://claude.ai/code/session_01CdYAPvRTjcch6YrYf42n1z
+
+- feat(rvcsi): real nexmon_csi UDP/PCAP fidelity — chanspec decode, libpcap reader, NexmonPcapAdapter
+
+Raises the Nexmon path from a normalized record format to parsing what the
+patched Broadcom firmware actually emits, end to end.
+
+napi-c shim (ABI 1.0 -&gt; 1.1, additive):
+- rvcsi_nx_csi_udp_header / rvcsi_nx_csi_udp_decode — parse the real nexmon_csi
+  UDP payload: the 18-byte header (magic 0x1111, rssi int8, fctl, src_mac[6],
+  seq_cnt, core/spatial-stream, Broadcom chanspec, chip_ver) + nsub complex CSI
+  samples (modern int16 LE I/Q export — what CSIKit/csireader.py read for the
+  BCM43455c0 / 4358 / 4366c0; nsub = (len-18)/4). rvcsi_nx_csi_udp_write to
+  synthesize payloads for tests. rvcsi_nx_decode_chanspec — d11ac chanspec -&gt;
+  channel (chanspec &amp; 0xff) / bandwidth (bits [13:11], cross-checked against the
+  FFT size) / band (bits [15:14], cross-checked against the channel number).
+  Still allocation-free, bounds-checked, structured errors, never panics.
+- ffi.rs wraps it: decode_chanspec / parse_nexmon_udp_header / decode_nexmon_udp
+  / encode_nexmon_udp + DecodedChanspec / NexmonCsiHeader; every unsafe block
+  documented; the ABI guard now expects 1.1.
+
+rvcsi-adapter-nexmon:
+- pcap.rs — a dependency-free classic-libpcap reader (all four byte-order /
+  timestamp-resolution magics; Ethernet / raw-IPv4 / Linux-SLL link types;
+  tolerates a truncated final record; pcapng is a follow-up) + extract_udp_payload
+  + a synthetic_udp_pcap / synthetic_nexmon_pcap test/example generator.
+- NexmonPcapAdapter (a CsiSource) — reads the CSI UDP packets out of a
+  `tcpdump -i wlan0 dst port 5500 -w csi.pcap` capture, decodes each via the C
+  shim, stamps the frame timestamp from the pcap packet time; non-CSI packets
+  counted as &#34;skipped&#34; in health.
+
+rvcsi-runtime: decode_nexmon_pcap, summarize_nexmon_pcap (+ NexmonPcapSummary:
+link type, CSI frame count, channels, bandwidths, subcarrier counts, chip
+versions, RSSI range, time span), CaptureRuntime::open_nexmon_pcap[_bytes].
+
+rvcsi-node (napi-rs): nexmonDecodePcap, inspectNexmonPcap, decodeChanspec,
+RvcsiRuntime.openNexmonPcap. @ruv/rvcsi SDK + .d.ts updated (NexmonPcapSummary,
+DecodedChanspec). rvcsi-cli: `record --source nexmon-pcap`, `inspect-nexmon`,
+`decode-chanspec`.
+
+161 rvcsi tests pass (adapter-nexmon 9-&gt;22), 0 failures, clippy-clean.
+ADR-096 §2.2/§2.3/§5, CHANGELOG, CLAUDE.md updated.
+
+https://claude.ai/code/session_01CdYAPvRTjcch6YrYf42n1z
+
+- docs(rvcsi): update CHANGELOG, CLAUDE.md crate table, README docs index
+
+- CHANGELOG: expand the rvCSI entry to cover all 9 crates (incl. rvcsi-runtime
+  and the @ruv/rvcsi npm SDK), the napi-c / napi-rs seams, and the 142-test /
+  clippy-clean status; note the daemon + MCP server are follow-ups.
+- CLAUDE.md: add the 9 `rvcsi-*` crates to the Key Rust Crates table.
+- README: add an rvCSI row to the docs index; bump the ADR count (79→96) and
+  DDD-model count (7→8).
+
+https://claude.ai/code/session_01CdYAPvRTjcch6YrYf42n1z
+
+- feat(rvcsi): rvcsi-runtime composition + rvcsi-node (napi-rs) + rvcsi-cli + @ruv/rvcsi TS SDK
+
+- rvcsi-runtime — the composition layer (no FFI): CaptureRuntime (CsiSource +
+  validate_frame + SignalPipeline + EventPipeline, with next_validated_frame /
+  next_clean_frame / drain_events / health) plus one-shot helpers
+  (summarize_capture → CaptureSummary, decode_nexmon_records, events_from_capture,
+  export_capture_to_rf_memory, rf_memory_self_check). 10 tests.
+- rvcsi-node — the napi-rs seam (cdylib+rlib, build.rs runs napi_build::setup):
+  thin #[napi] wrappers over rvcsi-runtime — rvcsiVersion / nexmonShimAbiVersion /
+  nexmonDecodeRecords / inspectCaptureFile / eventsFromCaptureFile /
+  exportCaptureToRfMemory + an RvcsiRuntime streaming class. Everything that
+  crosses the boundary is a validated/normalized rvCSI struct serialized to JSON
+  (D6). deny(clippy::all).
+- @ruv/rvcsi npm package (package.json + index.js + index.d.ts + README +
+  __test__/api.test.cjs) — curated JS surface that JSON-parses the addon&#39;s
+  output into plain CsiFrame/CsiWindow/CsiEvent/SourceHealth/CaptureSummary
+  objects; lazy native-addon load with a helpful &#34;not built&#34; error.
+- rvcsi-cli — the `rvcsi` binary: record (Nexmon dump → .rvcsi, validating),
+  inspect, replay, stream, events, health, calibrate (v0 baseline), export
+  ruvector. 7 tests exercising every subcommand against in-memory captures.
+- rvcsi-cli no longer depends on rvcsi-node (a binary can&#39;t link the napi addon);
+  the shared logic moved to rvcsi-runtime. .gitignore: ignore the generated
+  *.node / binding.js / binding.d.ts / npm/ under rvcsi-node.
+
+All rvcsi crates: build together OK, clippy-clean, 140 unit/integration tests +
+2 doctests, 0 failures (core 29, dsp 28, events 18, adapter-file 20+1,
+adapter-nexmon 9, ruvector 20+1, runtime 10, cli 7).
+
+https://claude.ai/code/session_01CdYAPvRTjcch6YrYf42n1z
+
+- feat(rvcsi): rvcsi-adapter-file (.rvcsi capture/replay) + rvcsi-ruvector (RF memory)
+
+- rvcsi-adapter-file (ADR-095 FR1/FR10, D9): the `.rvcsi` JSONL capture format
+  (CaptureHeader line + one CsiFrame per line), FileRecorder, FileReplayAdapter
+  (a CsiSource — deterministic replay, preserves timestamps/ordering/validation
+  verbatim, carries an unenforced replay_speed for the daemon/CLI), read_all().
+  20 unit tests + 1 doctest.
+- rvcsi-ruvector (ADR-095 FR8, D8) — standin for the production RuVector binding:
+  deterministic embeddings (window_embedding = 32 resampled mean_amplitude bins +
+  32 resampled phase_variance bins + [motion_energy, presence_score, quality_score,
+  ln1p(frame_count)], L2-normalized, dim 68; event_embedding = 10-wide kind
+  one-hot + confidence + ln1p(evidence count), dim 12), cosine_similarity, the
+  RfMemoryStore trait + value objects (EmbeddingId/RecordKind/SimilarHit/
+  DriftReport), and InMemoryRfMemory + JsonlRfMemory (file-backed append log,
+  identical query semantics, latest-baseline-per-room-wins on reopen).
+  20 unit tests + 1 doctest.
+
+All rvcsi crates build and test together: core 29, dsp 28, events 18,
+adapter-file 20(+1), adapter-nexmon 9, ruvector 20(+1) — 124 unit + 2 doc tests,
+0 failures. forbid(unsafe_code) everywhere except rvcsi-adapter-nexmon (FFI).
+
+https://claude.ai/code/session_01CdYAPvRTjcch6YrYf42n1z
+
+- feat(rvcsi): rvcsi-events — window aggregation + event detectors (ADR-095 FR5)
+
+- WindowBuffer: buffers exposable CsiFrames from one (session,source), emits a
+  CsiWindow on a frame-count or duration threshold; computes per-subcarrier
+  mean_amplitude / phase_variance and scalar motion_energy / presence_score /
+  quality_score; skips mixed source/session and mismatched-subcarrier frames.
+- EventDetector trait + 4 state machines: PresenceDetector (hysteresis on
+  presence_score), MotionDetector (debounced rising/falling edges on
+  motion_energy), QualityDetector (SignalQualityDropped + once-per-stretch
+  CalibrationRequired), BaselineDriftDetector (EWMA baseline → BaselineChanged /
+  AnomalyDetected). Each with new()/with_config() + a public config struct.
+- EventPipeline: owns a WindowBuffer + Vec&lt;Box&lt;dyn EventDetector&gt;&gt; + IdGenerator;
+  process_frame / flush / add_detector / recent_windows (32-window ring) /
+  with_defaults.
+- 18 tests (incl. a 150-frame quiet/active/quiet end-to-end run via a seeded LCG
+  + a determinism check). clippy-clean, forbid(unsafe_code), no heavy deps.
+
+https://claude.ai/code/session_01CdYAPvRTjcch6YrYf42n1z
+
+- feat(rvcsi): rvcsi-dsp (DSP stages + SignalPipeline) + ADR-096 (FFI/crate layout)
+
+- rvcsi-dsp — reusable signal-processing stages (ADR-095 FR4): mean/variance/
+  std_dev/median, remove_dc_offset, unwrap_phase, moving_average, ewma,
+  hampel_filter(_count), short_window_variance, subtract_baseline + DspError;
+  scalar features motion_energy(_series), presence_score (logistic, ≈0.5 at
+  threshold), confidence_score, breathing_band_estimate (heuristic, FFT-free);
+  SignalPipeline (hampel → smooth → DC-remove → baseline-subtract → unwrap,
+  non-destructive of validation state) + learn_baseline. 28 tests, clippy-clean,
+  forbid(unsafe_code), no heavy deps.
+- docs/adr/ADR-096-rvcsi-ffi-crate-layout.md — the implementation ADR: 8-crate
+  topology, the napi-c shim record format + contract, the napi-rs Node surface,
+  build/test invariants, alternatives. Indexed in docs/adr/README.md.
+- CHANGELOG: rvCSI entry updated to cover the implementation crates.
+
+https://claude.ai/code/session_01CdYAPvRTjcch6YrYf42n1z
+
+- feat(rvcsi): rvcsi-core + napi-c Nexmon shim + crate skeletons (ADR-095/096)
+
+First implementation milestone for the rvCSI edge RF sensing runtime:
+
+- rvcsi-core — the foundation: CsiFrame/CsiWindow/CsiEvent normalized schema,
+  ValidationStatus, AdapterProfile, CsiSource plugin trait, id newtypes +
+  IdGenerator, RvcsiError, and the validate_frame pipeline (length/finiteness/
+  subcarrier/RSSI/monotonicity hard checks + multiplicative quality scoring →
+  Accepted/Degraded/Recovered/Rejected). 29 unit tests, forbid(unsafe_code).
+- rvcsi-adapter-nexmon — the napi-c boundary: native/rvcsi_nexmon_shim.{c,h}
+  (the only C in the runtime, allocation-free, bounds-checked, parses/writes a
+  byte-defined &#34;rvCSI Nexmon record&#34; — a normalized superset of the nexmon_csi
+  UDP payload), compiled via build.rs + cc, wrapped by a documented ffi module
+  and a NexmonAdapter implementing CsiSource. 9 tests round-tripping through C.
+- Workspace registration in v2/Cargo.toml (8 new members + napi/cc workspace
+  deps) and compiling skeletons for rvcsi-dsp, rvcsi-events, rvcsi-adapter-file,
+  rvcsi-ruvector, rvcsi-node (napi-rs cdylib + build.rs napi_build::setup) and
+  rvcsi-cli (`rvcsi` binary) — to be filled in by the implementation swarm.
+
+cargo build -p rvcsi-core -p rvcsi-adapter-nexmon -p rvcsi-node -p rvcsi-cli: OK
+cargo test  -p rvcsi-core -p rvcsi-adapter-nexmon: 38 passed, 0 failed
+
+https://claude.ai/code/session_01CdYAPvRTjcch6YrYf42n1z
+
+- docs: rvCSI edge RF sensing platform — PRD, ADR-095, DDD domain model
+
+Adds design documentation for rvCSI, a Rust-first / TypeScript-accessible /
+hardware-abstracted edge RF sensing runtime that normalizes WiFi CSI from
+Nexmon, ESP32, Intel, Atheros, file and replay sources into one validated
+CsiFrame schema, runs reusable DSP, emits typed confidence-scored events,
+and bridges to RuVector RF memory, an MCP tool server and a TS SDK.
+
+- docs/prd/rvcsi-platform-prd.md — purpose, users, success criteria,
+  FR1-FR10, NFRs (safety/perf/reliability/privacy/security/portability),
+  system architecture, runtime components, reference layout, data model
+- docs/adr/ADR-095-rvcsi-edge-rf-sensing-platform.md — the 15 architectural
+  decisions (Rust core, C-at-the-boundary, TS SDK via napi-rs, normalized
+  schema, validate-before-FFI, CSI-as-temporal-delta, RuVector as RF memory,
+  replayability, detection != decision, local-first, read-first/write-gated
+  MCP, mandatory quality scoring, versioned calibration, plugin adapters)
+- docs/ddd/rvcsi-domain-model.md — 7 bounded contexts (Capture, Validation,
+  Signal, Calibration, Event, Memory, Agent) with aggregates, invariants,
+  context map, data model and domain services
+- indexed in docs/adr/README.md and docs/ddd/README.md; CHANGELOG entry
+
+Design-only; no code or crates added yet.
+
+https://claude.ai/code/session_01CdYAPvRTjcch6YrYf42n1z
+
+- chore(release): wifi-densepose-train 0.3.0 -&gt; 0.3.1
+
+Publishing the additive changes from PRs #536/#537 to crates.io:
+- `signal_features` module — wires `wifi-densepose-signal` into the pipeline
+  (audit #1/#2)
+- `TrainingConfig::for_subcarriers` / `ht40_192()` / `multiband_168()` presets
+  + the real `MmFiDataset` loader integration test (audit #4/#6/#7)
+
+No public API removals or changes — additive only, so 0.3.0 -&gt; 0.3.1 is
+semver-correct. No other workspace crate depends on `wifi-densepose-train`,
+so this is a standalone bump.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- feat(train): TrainingConfig subcarrier-layout presets + real MmFiDataset loader test (#537)
+
+Closes the remaining doable items from the 2026-05-11 training-pipeline audit:
+
+#6 (CSI format default = 56-sc / 1 NIC) + #7 (multi-band 168-sc mesh not in
+config): new `TrainingConfig::for_subcarriers(native, target)` plus named
+presets `mmfi()` (114→56), `ht40_192()` (≈192-sc ESP32 HT40 → 56) and
+`multiband_168()` (168-sc ADR-078 multi-band mesh → 56). Non-MM-Fi CSI shapes
+are now first-class instead of requiring manual `native_subcarriers` /
+`num_subcarriers` overrides; the field docs list the supported source counts
+and the multi-NIC mapping (a 2–3-node mesh currently rides on `n_rx` until a
+dedicated node dimension lands). Model input width stays `num_subcarriers`; the
+presets only vary the resampling input.
+
+#4 (proof.rs uses synthetic data): reframed — a deterministic proof *must* use
+a reproducible source, so `verify-training` correctly stays on
+`SyntheticCsiDataset`. The real gap was that nothing exercised the on-disk
+`MmFiDataset` path. New `tests/test_real_loader.rs` writes synthetic CSI to
+`.npy` files in the `MmFiDataset::discover` layout, loads it back, and checks
+the resulting `CsiSample` — covering the no-interp case, the
+subcarrier-interpolation branch, and the empty-root case. Adds `ndarray` /
+`ndarray-npy` as dev-deps for the fixture writing.
+
+cargo check + cargo test -p wifi-densepose-train --no-default-features: clean,
+all existing tests green, 3 new loader tests + the updated config doctest pass.
+Purely additive — no model-shape change, no tch-module change.
+
+- fix(train): wire wifi-densepose-signal into the pipeline; correct MODEL_CARD env-sensor claim (#536)
+
+Addresses three findings from the 2026-05-11 training-pipeline audit:
+
+#1/#2 — `wifi-densepose-signal` was a phantom dependency of `wifi-densepose-train`
+(listed in Cargo.toml, never imported), and vitals/CSI signal features were
+absent from the pipeline. New module `wifi_densepose_train::signal_features`:
+`extract_signal_features(&amp;Array4&lt;f32&gt;, &amp;Array4&lt;f32&gt;) -&gt; Array1&lt;f32&gt;` (and the
+convenience method `CsiSample::signal_features()`) runs a windowed observation&#39;s
+centre frame through `wifi_densepose_signal::features::FeatureExtractor`,
+producing a fixed-length (FEATURE_LEN=12) amplitude / phase-coherence / PSD
+feature vector — the hook for a future vitals / multi-task supervision head
+(breathing- and heart-rate-band power are read off the PSD summary). The vector
+is produced on demand and is not yet fed back into the loss; wiring it as a
+training target is the documented follow-up. `wifi-densepose-signal` is now an
+actually-used dependency. 5 new tests (2 unit in signal_features.rs, 3
+integration in tests/test_dataset.rs); existing wifi-densepose-train tests
+unchanged and green.
+
+#3 — `docs/huggingface/MODEL_CARD.md` presented PIR/BME280 environmental-sensor
+weak-label fine-tuning as a current capability; there is no env-sensor
+ingestion in the training pipeline. Marked that path as planned/not-implemented
+in the training-steps list and the data-provenance section.
+
+(#5 — README&#39;s &#34;92.9% PCK@20&#34; overclaim — fixed separately in PR #535.)
+
+CHANGELOG updated.
+
+- fix(docs): correct unsubstantiated 92.9% PCK@20 camera-supervised claim (#535)
+
+The README claimed &#34;92.9% PCK@20&#34; for camera-supervised pose training. That
+figure appears nowhere in ADR-079 (the source ADR) and is ~2.6x the ADR&#39;s own
+success target (&#34;&gt;35% PCK@20&#34;). ADR-079 phases P7 (data collection), P8
+(training + evaluation on real paired data) and P9 (cross-room LoRA) are all
+still `Pending`, so no measured camera-supervised PCK@20 has been published.
+
+- README: replace the two &#34;92.9% PCK@20&#34; claims with the proxy-supervised
+  baseline (~2.5%) and the ADR-079 target (35%+), noting the eval phases are
+  pending.
+- CHANGELOG: add an Unreleased entry.
+
+Surfaced by the PowerPlatePulse training-pipeline audit (2026-05-11). Six other
+audit findings (vitals features absent from training; wifi-densepose-signal
+ghost dep; PIR/BME280 in MODEL_CARD unimplemented; proof.rs uses
+SyntheticCsiDataset only; 56-subcarrier/1-NIC default; multi-band 168-subcarrier
+mesh not in training config) are listed in the PR body for follow-up.
+
+- fix(plugins): move marketplace manifest to repo root for `/plugin marketplace add ruvnet/RuView`
+
+Claude Code looks for `.claude-plugin/marketplace.json` at the cloned repo&#39;s
+ROOT — not in a subdirectory — so `/plugin marketplace add ruvnet/RuView`
+(and `claude plugin marketplace add ruvnet/RuView`) was failing with
+&#34;Marketplace file not found&#34;.
+
+- Move `plugins/.claude-plugin/marketplace.json` → `.claude-plugin/marketplace.json`
+  (repo root); the `ruview` plugin&#39;s `source` is now `./plugins/ruview`.
+- README.md / plugins/ruview/README.md: install instructions now use
+  `/plugin marketplace add ruvnet/RuView` + `/plugin install ruview@ruview`
+  (with `claude --plugin-dir ./plugins/ruview` as the no-install fallback);
+  manifest path references updated.
+- plugins/ruview/scripts/smoke.sh: resolve the manifest at the repo root;
+  also assert the plugin `source` is `./plugins/ruview`.
+- ADR-0001 updated (scope, directory contract, smoke contract, consequences).
+
+Verified: `claude plugin validate .` + `./plugins/ruview` pass; smoke 13/13;
+`claude plugin marketplace add ./` → `claude plugin install ruview@ruview` →
+`claude plugin details ruview` works end-to-end (16 skill-entries + 3 agents).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(readme): add Claude Code / Codex plugin + marketplace install instructions
+
+New &#34;🧩 Claude Code &amp; Codex Plugin&#34; section in README.md covering
+`claude --plugin-dir`, `claude plugin marketplace add` / `install`, the seven
+/ruview-* commands, the Codex prompt mirror, and the smoke check; plus a
+Documentation-table row linking to plugins/ruview/README.md.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- feat(plugins): RuView Claude Code + Codex marketplace plugin
+
+Add `plugins/ruview` — an end-to-end toolkit for working with RuView
+(WiFi-DensePose) from Claude Code, mirrored as Codex prompts.
+
+Marketplace: `plugins/.claude-plugin/marketplace.json` (one plugin, `ruview`).
+
+Skills (9): ruview-quickstart, ruview-hardware-setup, ruview-configure,
+ruview-applications, ruview-model-training, ruview-advanced-sensing,
+ruview-cli-api, ruview-mmwave, ruview-verify — shell-first (cargo / python /
+idf.py / docker / node), no claude-flow MCP dependency.
+
+Commands (7): /ruview-start, /ruview-flash, /ruview-provision, /ruview-app,
+/ruview-train, /ruview-advanced, /ruview-verify.
+
+Agents (3): ruview-onboarding-guide, ruview-config-engineer,
+ruview-training-engineer.
+
+Codex mirror: codex/AGENTS.md + codex/README.md + codex/prompts/*.md (full
+command parity, enforced by scripts/smoke.sh).
+
+Docs: docs/adrs/0001-ruview-plugin-contract.md (Proposed). Verification:
+scripts/smoke.sh (13 structural checks). Provisioning docs reflect the full
+`provision.py` flag set (TDM mesh, edge tiers, vitals, hop channels, Cognitum
+Seed, swarm intervals) and the issue #391 NVS-namespace-replace gotcha.
+
+Verified: `claude plugin validate` (plugin + marketplace), loads via
+`claude --plugin-dir`, smoke 13/13, and confirmed against an attached ESP32-S3
+on COM8 running the RuView CSI firmware (live adaptive_ctrl + csi_collector
+serial output).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- Merge pull request #528 from ruvnet/fix/update-submodules-workflow
+
+ci: fix &#34;Update vendor submodules&#34; workflow (git identity + drop --merge)
+
+- ci: fix &#34;Update vendor submodules&#34; workflow (identity + drop --merge)
+
+The scheduled job has been failing on every run with:
+
+    fatal: empty ident name (...) not allowed
+    fatal: Unable to merge &#39;...&#39; in submodule path &#39;vendor/ruvector&#39;
+
+Two bugs:
+1. `git config user.name/email` was only set inside the &#34;Create PR&#34; step,
+   but `git submodule update --remote --merge` runs first and the merge
+   inside vendor/ruvector needs a committer when the pinned commit isn&#39;t a
+   fast-forward of upstream `main` → &#34;Committer identity unknown&#34;.
+2. `--merge` is the wrong operation here. We only want to bump the
+   superproject&#39;s gitlink to the latest upstream commit on each submodule&#39;s
+   tracked branch — there&#39;s no reason to create merge commits inside the
+   vendored repos, and `--merge` breaks whenever the current pin has diverged.
+
+Fix:
+- Add a &#34;Configure git identity&#34; step before any commit-creating operation.
+- Replace `git submodule update --remote --merge` with
+  `git submodule sync --recursive &amp;&amp; git submodule update --remote --recursive`
+  (detached checkout at each `.gitmodules` branch tip).
+- Log the pointer diff in the &#34;Check for changes&#34; step for reviewability.
+- Tidy the PR-creation step (identity now set globally; clearer commit/PR text).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- Merge pull request #526 from ruvnet/fix/esp32-issues-505-517-521
+
+fix: ESP32 CSI 0pps (#521), aggregator sibling magics (#517), version.txt (#505) + fix-marker CI guard
+
+- ci: fix-marker regression guard (witness-style)
+
+Adds a fast per-PR gate that asserts previously-shipped fixes are still
+present in the tree — the CI analogue of the ruflo witness fix-marker
+system, but self-contained (no plugin dependency, reviewable as plain
+JSON). Complements the heavier checks (firmware build, deterministic
+pipeline proof, release witness bundle) by catching the silent-revert
+class of regression that build+test wouldn&#39;t.
+
+  - scripts/fix-markers.json   manifest: 11 markers (RuView#396, #521,
+    #517, #505, #354, #263, #266/#321, #265, #232/#375/#385/#386/#390,
+    ADR-028 proof + witness bundle). Each has files / require (literal
+    substring or /regex/) / optional forbid / rationale / ref.
+  - scripts/check_fix_markers.py  stdlib-only checker. Exit 0 clean /
+    1 regression / 2 bad manifest. Modes: --list, --json, --only ID.
+  - .github/workflows/fix-regression-guard.yml  runs on PR + push to
+    main/master; gates on the checker and writes the result table into
+    the run summary + an artifact.
+
+If a fix is intentionally removed, update scripts/fix-markers.json in the
+same PR with a rationale — the diff becomes the audit trail.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix(firmware): bump version.txt to 0.6.4 + CI guard for tag/version match (#505)
+
+version.txt on main was still 0.6.2. CMake reads PROJECT_VER from it, so
+esp_app_get_description()-&gt;version (and the boot log line) reported 0.6.2
+for any source build — and v0.6.3-esp32 shipped a release binary that
+internally identified as 0.6.2 because the bump never landed on main.
+
+  - version.txt: 0.6.2 -&gt; 0.6.4 (matches the latest release tag)
+  - firmware-ci.yml: new `version-guard` job that runs on v*-esp32 tag
+    pushes and fails the run if the tag&#39;s X.Y.Z != version.txt, so a
+    future release can&#39;t ship a mislabeled binary.
+
+Closes #505
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix(hardware): aggregator tolerates sibling RuView UDP packet magics (#517)
+
+The ESP32 firmware multiplexes several wire packet types onto the same
+UDP port as ADR-018 raw CSI frames (magic 0xC5110001):
+
+  0xC5110002  ADR-039 edge vitals (32 B)
+  0xC5110003  ADR-069 feature vector
+  0xC5110004  ADR-063 fused vitals
+  0xC5110005  ADR-039 compressed CSI
+  0xC5110006  ADR-081 feature state
+  0xC5110007  ADR-095/#513 temporal classification
+
+Esp32CsiParser only knew 0xC5110001, so the standalone `aggregator`
+binary printed &#34;parse error: Invalid magic: expected 0xc5110001, got
+0xc5110002&#34; for every vitals packet. No CSI data was lost — just noise.
+
+Add the sibling-magic constants + ruview_sibling_packet_name(), classify
+recognized siblings before the CSI-frame length gate, and return a new
+ParseError::NonCsiPacket { magic, kind } instead of InvalidMagic. The
+`aggregator` CLI now skips them quietly (logs &#34;[skipped ADR-039 edge
+vitals packet — not a CSI frame]&#34; only with --verbose); the library-level
+CsiAggregator already dropped them silently. New regression tests cover
+all seven magics.
+
+Closes #517
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix(esp32): disable WiFi modem sleep so CSI capture isn&#39;t starved (#521)
+
+csi_collector_init() never called esp_wifi_set_ps(), leaving the radio on
+the ESP-IDF STA default WIFI_PS_MIN_MODEM. The modem then sleeps between
+DTIM beacons; combined with the MGMT-only promiscuous filter (#396) the
+CSI callback is starved and the per-second yield collapses toward 0 pps,
+which is what users on a clean multi-node setup were seeing
+(motion=0.00 presence=0.00 yield=0pps).
+
+Force WIFI_PS_NONE before enabling promiscuous mode — the textbook
+requirement for reliable CSI capture (every ESP-IDF CSI example does it).
+New boot line: &#34;csi_collector: WiFi modem sleep disabled (WIFI_PS_NONE)
+for CSI capture&#34;. Battery duty-cycling is unaffected: power_mgmt_init()
+runs after this and re-enables modem sleep when provision.py is given
+--duty-cycle &lt;100.
+
+Builds clean for esp32s3 (idf.py build, 48% flash free).
+
+Closes #521
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;</div>
+</div>
+
+<a href="../project/ruvnet_RuView.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

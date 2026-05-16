@@ -1,0 +1,1470 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in master (54 commits) - milvus-io/milvus - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in master (54 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/milvus-io_milvus.html">milvus-io/milvus</a> /
+    Updates in master (54 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/milvus-io_milvus.html">milvus-io/milvus</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-16 00:36 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/milvus-io/milvus/commits/master" target="_blank">https://github.com/milvus-io/milvus/commits/master</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This update encompasses numerous fixes for stability and correctness, prominently addressing a use-after-free bug and enhancing nullable vector handling across search, projection, and RESTful APIs. Key new features include comprehensive `StructArray` support for nullability, hybrid search, and filtering, alongside the introduction of regex filter expressions. Significant storage and indexing improvements are delivered through a new collection-rooted index file layout and configurable primary key index warmup. The release further boosts system performance and stability with optimized partition creation, QueryCoord readiness checks, and expanded chaos testing, complemented by an upgrade to Python 3.12 for the testing environment.
+
+## Russian Translation
+
+Это обновление включает многочисленные исправления для повышения стабильности и корректности, в частности, устранение ошибки use-after-free и улучшение обработки векторов с поддержкой null во всех операциях поиска, проекции и RESTful API. Среди ключевых новых функций — полная поддержка `StructArray` для null-значений, гибридного поиска и фильтрации, а также введение выражений с регулярными выражениями для фильтрации. Значительные улучшения в хранении и индексировании реализованы благодаря новой схеме хранения файлов индексов с привязкой к коллекции и настраиваемому разогреву индексов первичных ключей. Релиз также повышает производительность и стабильность системы за счет оптимизации создания разделов, проверок готовности QueryCoord и расширенного хаос-тестирования, а также обновляет тестовую среду до Python 3.12.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix: prevent use-after-free in TantivyIndexWrapper::finish() (#49845)
+
+## Summary
+
+Fix a use-after-free bug in `TantivyIndexWrapper::finish()` that causes
+intermittent SEGFAULT (signal 139) in `json_stats_test` CI builds.
+
+**Root cause**: The Rust FFI function `tantivy_finish_index` always
+consumes and frees the `IndexWriterWrapper` via `Box::from_raw`,
+regardless of success or failure. But the C++ side only set `writer_ =
+nullptr` **after** the `AssertInfo` check:
+
+```cpp
+auto res = RustResultWrapper(tantivy_finish_index(writer_)); // Rust frees writer_
+AssertInfo(res.result_-&gt;success, ...);  // throws on error
+writer_ = nullptr;   // never reached if AssertInfo throws
+```
+
+When `finish()` returned an error (e.g., I/O issues during commit),
+`AssertInfo` threw an exception while `writer_` still pointed to
+already-freed Rust memory. The destructor chain then called
+`tantivy_free_index_writer(writer_)` on the dangling pointer →
+**use-after-free → SEGFAULT**.
+
+**Fix**: Null `writer_` before the FFI call so the destructor safely
+skips `free()` even when `finish()` throws.
+
+**Observed in CI**: ciloop #6762 (SIGSEGV, rc=139) and #6684 (assertion
+failure), both in `json_stats_test`. Intermittent (~1.8% failure rate).
+
+issue: https://github.com/milvus-io/milvus/issues/49135
+
+## Test plan
+
+- [ ] `json_stats_test` no longer crashes with SIGSEGV in CI
+- [ ] Existing C++ unit tests pass
+
+Signed-off-by: Li Liu &lt;li.liu@zilliz.com&gt;
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+Signed-off-by: Li Liu &lt;li.liu@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- enhance: revert index_store_path full-path plumbing to montage assembly (#49805)
+
+## Summary
+
+PR #49325 introduced collection-rooted index storage and also added a
+precomputed `index_store_path` string flowing through the build path.
+This PR scopes that back down: the collection-rooted layout stays, but
+the precomputed `index_store_path` string is removed from the
+write/build path.
+
+Build/write path:
+- DataCoord sends `IndexStorePathVersion` with the build job.
+- DataNode forwards the version to C++ indexbuilder.
+- C++ `FileManager` assembles the index object prefix locally from
+`(path_version, collID, partID, segID, buildID, indexVersion)`.
+
+Read/load path:
+- Go keeps passing full `IndexFilePaths` through DataCoord -&gt; QueryCoord
+-&gt; QueryNode -&gt; cgo/segcore.
+- Load-side protos stay on full paths; no `index_file_keys` /
+`index_store_path_version` split is added there.
+- C++ load keeps PR #49325&#39;s direct full-path open behavior for
+`index_files/...` and `index_v1/...` paths.
+
+The v1 root is intentionally named `index_v1` before release. v0 remains
+`index_files`.
+
+issue: #49086
+
+## Compatibility note
+
+This PR is wire-incompatible with the short-lived #49325-era internal
+schema that carried `index_store_path`.
+
+That is intentional and acceptable because no release has shipped
+between the merge of #49325 and this rework. In other words, there are
+no released binaries or released persisted wire data that rely on the
+#49325-era `index_store_path` field semantics. This PR treats the proto
+changes as a pre-release schema correction rather than a compatibility
+migration.
+
+Because of that:
+- `BuildIndexInfo.index_store_path = 18` is replaced by
+`index_store_path_version = 18`.
+- `CreateJobRequest.index_store_path = 21` is removed.
+- `CreateJobRequest.index_store_path_version = 36` is kept.
+- We do not reserve the removed field numbers/names in this PR; if this
+schema had crossed a release boundary, we would reserve them and use
+fresh field numbers instead.
+
+## What changes
+
+**Protos**
+- `worker.proto`: drop `CreateJobRequest.index_store_path`; keep
+`CreateJobRequest.index_store_path_version`.
+- `index_cgo_msg.proto`: replace `BuildIndexInfo.index_store_path` with
+`BuildIndexInfo.index_store_path_version`.
+- Read/load-side protos keep their full-path shape: no `IndexFilePaths
+-&gt; IndexFileKeys` rename and no load-side `index_store_path_version`
+propagation.
+
+**C++**
+- `storage::IndexMeta`: replace `std::string index_store_path` with
+`IndexStorePathVersion index_store_path_version`.
+- `FileManager::GetRemoteIndexObjectPrefix()`: assemble v0/v1 prefixes
+from path version and IDs.
+- `FileManager::OpenInputStream()`: keep direct full-path open support
+for read/load paths.
+- `indexbuilder/index_c.cpp`: pass `index_store_path_version` into
+`IndexMeta`.
+- `DiskFileManagerTest`: cover v0 and v1 prefix assembly.
+
+**Go**
+- DataCoord `task_index.go`: stop building/sending `IndexStorePath`;
+continue sending `IndexStorePathVersion`.
+- DataNode `index/task_index.go`: forward `IndexStorePathVersion` to C++
+build info.
+- DataNode `index_services.go`: drop logs for the removed
+`index_store_path` field.
+- DataCoord FinishTask validation and
+`SegmentIndex.IndexStorePathVersion` metadata remain unchanged.
+- GC/copy/import/snapshot/read path keep full-path behavior; only
+expected v1 root strings are updated from `index_files_v1` to
+`index_v1`.
+
+## Notes for reviewers
+
+- The read/load path intentionally remains full-path based. QueryNode
+should not convert full paths to basenames or parse path version for
+load.
+- `IndexFilePathInfo.IndexStorePathVersion` remains as DataCoord
+metadata, but QueryCoord does not forward it for loading.
+- `metautil.IndexPathBuilder` remains needed for Go-side object storage
+operations such as GC, snapshot, copy-segment, and DataCoord
+`GetIndexInfos` path construction.
+- Mixed-version concerns are limited to unreleased #49325-era binaries,
+which is why this PR can remove/retype `index_store_path` without
+compatibility scaffolding.
+
+## Test plan
+
+- [x] C++ build: `ninja milvus_core` clean.
+- [x]
+`DiskAnnFileManagerTest.GetRemoteIndexObjectPrefix_{V0BuildRooted,V1CollectionRooted}`
+covers v0/v1 prefix assembly.
+- [x] Updated Go/C++ tests for the `index_v1` root rename.
+- [ ] CI on this PR: code-check, UT, E2E.
+
+Signed-off-by: bigsheeper &lt;yihao.dai@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- doc: add design docs directory (#49829)
+
+issue: #49831
+
+## What changed
+
+Vendor Milvus design documents into this repository under
+`docs/design-docs` as regular tracked files.
+
+- Keep only the design document content and assets under
+`docs/design-docs/design_docs/` and `docs/design-docs/assets/`.
+- Remove standalone repository metadata from the vendored directory,
+such as `README.md`, `CONTRIBUTING.md`, `MEP-TEMPLATE.md`, `COMMITTERS`,
+`MAINTAINERS`, `OWNERS`, `OWNERS_ALIASES`, and `.gitignore`.
+- Document the Milvus design document process in the main
+`CONTRIBUTING.md`.
+- Update Mergify and `tools/mgit.py` so feature PRs must provide an
+in-repo design document path under `docs/design-docs/design_docs/`.
+
+## Why
+
+Milvus feature work should have an associated design document. Keeping
+design docs directly in this repository makes them available from a
+normal Milvus checkout and lets feature implementations include or link
+the related design document in the same repository.
+
+## Verification
+
+- `git diff --check`
+- `python3 -m unittest tools/test_mgit_design_doc.py`
+- `python3 -m py_compile tools/mgit.py tools/test_mgit_design_doc.py`
+- Parsed `.github/mergify.yml` with Python `yaml.safe_load`
+- Confirmed `docs/design-docs` only contains `assets/` and
+`design_docs/` at the top level
+
+---------
+
+Signed-off-by: xiaofanluan &lt;xiaofan.luan@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+- test: align snapshot client tests with latest pymilvus (#49762)
+
+## Summary
+- Align snapshot wrapper and test call signatures with the latest
+PyMilvus snapshot API.
+- Update Python client test dependency to `pymilvus==3.1.0rc5`.
+- Make snapshot test cleanup safe under `pytest -n 6` by isolating
+cleanup lists and tracking RBAC users/roles per test.
+- Skip the `CreateSnapshot`/`DropCollection` race case and link it to
+#49761.
+- Remove stale xfail marks for snapshot RBAC privilege group cases now
+covered by the fixed server behavior.
+
+## Test plan
+- `.venv/bin/python -m py_compile base/client_base.py
+base/client_v2_base.py milvus_client/test_milvus_client_snapshot.py`
+- `git diff --check`
+- `.venv/bin/python -m pytest -q
+milvus_client/test_milvus_client_snapshot.py --dist loadgroup -n 6
+--host 10.100.36.198 --port 19530 --tb=short`
+  - `119 passed, 1 skipped in 293.48s`
+- Cleanup audit after the full run:
+  - `collections []`
+  - `users [&#39;root&#39;]`
+  - `roles [&#39;admin&#39;, &#39;public&#39;]`
+  - `databases [&#39;default&#39;]`
+
+---------
+
+Signed-off-by: zhuwenxing &lt;wenxing.zhu@zilliz.com&gt;
+
+- test: add search aggregation e2e coverage(#49046) (#49795)
+
+Add MilvusClient E2E coverage for basic search aggregation buckets,
+metrics, ordering, top_hits, nested aggregation, and filters.
+related: #49046
+
+Signed-off-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+Co-authored-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- enhance: Reuse storage FFI property keys in Milvus (#49788)
+
+issue: #49789
+
+Milvus and milvus-storage were both defining the same property keys,
+which made it easy for the two sides to drift apart. This changes Milvus
+to read those keys directly from the const char* values exported by
+milvus-storage, so the Go side stays aligned with the storage FFI
+contract.
+
+These values need to be Go vars instead of consts because C.GoString
+reads from cgo-exported C symbols at init time. Go consts must be
+compile-time constants, and a C const char* symbol is not a Go
+compile-time string.
+
+Signed-off-by: jiaqizho &lt;jiaqi.zhou@zilliz.com&gt;
+
+- test: add sealed segment path tests for ARRAY_APPEND/ARRAY_REMOVE (#49770)
+
+## Summary
+- Add 3 test cases (Module 4) to verify ARRAY_APPEND/ARRAY_REMOVE work
+correctly on sealed segments after flush + release + load
+- Validate via both `output_fields` query and `array_contains` predicate
+expressions
+- Covers Int64 append/remove sealed path and VarChar append+remove
+sealed path
+- This addresses the review feedback from @yanliang567 on #49689 about
+missing sealed/index path coverage
+
+## Test plan
+- [x] `test_array_partial_op_append_sealed_path` — append → flush →
+release → load → array_contains verify
+- [x] `test_array_partial_op_remove_sealed_path` — remove → flush →
+release → load → array_contains verify (removed values not found)
+- [x] `test_array_partial_op_append_remove_varchar_sealed_path` — append
+→ flush/reload → remove → flush/reload → array_contains verify (VarChar
+type)
+- [x] Verified on master, 2.6, and 3.0 environments — all 3 passed
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: lyyyuna &lt;yiyang.li@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+- enhance: remove schema version consistency gate (#49733)
+
+## Summary
+- Remove proxy-side schema version consistency gate for schema-change
+DDLs.
+- Allow mix and clustering compaction to process mixed schema-version
+segments.
+
+issue: #49475
+
+## Test plan
+- [x] git diff --check
+- [ ] go test -tags dynamic,test -gcflags=\&#34;all=-N -l\&#34; -count=1
+./internal/proxy -run
+&#39;TestProxy_AddCollectionField_DoesNotBlockOnSchemaVersion|TestProxy_AlterCollectionSchema&#39;
+- [ ] go test -tags dynamic,test -gcflags=\&#34;all=-N -l\&#34; -count=1
+./internal/datacoord -run
+&#39;TestCompactionTriggerKeepsMixedSchemaVersionSegments|TestClusteringCompactionPolicySuite/TestTriggerOneCollectionAllowsMixedSchemaVersionGroup|TestMetaBasicSuite/TestCompleteCompactionMutation/(mixed
+schema version mix compaction uses task schema version|mixed schema
+version clustering compaction uses task schema version)&#39;
+
+Note: Go test commands were blocked locally because pkg-config could not
+find milvus_core / milvus-storage.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+Co-authored-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- test: stabilize WAL flusher parameter capture (#49792)
+
+issue: #49634
+
+This fixes a flaky WAL adaptor unit test introduced by #49696.
+
+The test mocks RecoverWALFlusher and stores the parameter for assertions
+after handleAlterWALFlushingStage returns. The real call passes a
+non-escaping RecoverWALFlusherParam composite literal, so keeping the
+pointer in the mock can read unstable stack data. Copy the parameter
+value inside the mock callback before asserting on it.
+
+Validation:
+- go test -v -count=1 -tags dynamic,test -gcflags=&#34;all=-N -l&#34;
+-ldflags=&#34;-r &lt;artifact&gt;/cmake_build/lib -r
+&lt;artifact&gt;/internal/core/output/lib&#34;
+./internal/streamingnode/server/wal/adaptor -run
+^TestHandleAlterWALFlushingStagePassesRateLimitComponent$ -timeout 300s
+- go test -v -count=1 -tags dynamic,test -gcflags=&#34;all=-N -l&#34;
+-ldflags=&#34;-r &lt;artifact&gt;/cmake_build/lib -r
+&lt;artifact&gt;/internal/core/output/lib&#34;
+./internal/streamingnode/server/wal/adaptor -timeout 300s
+- gofumpt -l internal/streamingnode/server/wal/adaptor/opener_test.go
+- git diff --check
+
+Signed-off-by: sijie-ni-0214 &lt;sijie.ni@zilliz.com&gt;
+
+- feat: impl StructArray -- support hybrid search for element-level search (#49799)
+
+issue: https://github.com/milvus-io/milvus/issues/42148
+design doc:
+https://github.com/milvus-io/milvus-design-docs/blob/main/design_docs/20260306-struct.md
+
+For hybrid search, we now support:
+- plain topk emblist search
+- plain topk element-level search where the search results will dedup
+with row id and rerank with others
+
+Not yet support:
+- range search
+- iterator search
+- group by
+
+Signed-off-by: SpadeA &lt;tangchenjie1210@gmail.com&gt;
+
+- fix: Allow MinIO external source without region (#49787)
+
+## Issue
+
+issue: https://github.com/milvus-io/milvus/issues/45881
+
+## What changed
+
+This PR makes the MinIO external-table configuration use one explicit
+URI form:
+
+- Allows `minio://&lt;endpoint&gt;/&lt;bucket&gt;/&lt;key&gt;` with minimal
+`external_spec.extfs` credentials.
+- Lets `minio://` select MinIO validation semantics without requiring
+`extfs.cloud_provider` or `extfs.region`.
+- Keeps `s3://`/`s3a://`/`aws://` conservative: AWS-family schemes still
+require explicit `cloud_provider` and `region`.
+- Updates Go client external-table E2E examples to use `minio://` and
+credential-only extfs.
+- Adds Go validator coverage for `minio://` classification and provider
+mismatch.
+- Adds C++ injection-layer coverage proving
+`minio://localhost:9000/bucket/key` injects MinIO defaults without
+forwarding `cloud_provider` or `region` to milvus-storage.
+
+## Why
+
+For MinIO external sources, the endpoint and bucket are already encoded
+in `minio://&lt;endpoint&gt;/&lt;bucket&gt;/&lt;key&gt;`. Requiring AWS-family provider
+and region fields for that URI form adds noise and can imply AWS
+endpoint derivation where none is needed.
+
+This PR intentionally does not infer MinIO semantics from `s3://... +
+cloud_provider=minio`; that path remains explicit and region-checked to
+avoid changing the AWS-family URI contract in the same patch.
+
+## Validation
+
+- Reset local dependencies with
+`/Users/wei.liu/docker-compose-apple-silicon.yml` before Go validation;
+standalone was not started because this worktree has no `bin/milvus`.
+- `gofmt` on changed Go files
+- `clang-format-12` on changed C++ test file
+- `git diff --check`
+- `go test -tags dynamic,test
+github.com/milvus-io/milvus/pkg/v3/util/externalspec -count=1 -v`
+- `go test -c -tags dynamic,test -o /tmp/milvus-go-client-testcases.test
+./testcases`
+
+Live standalone/E2E validation was not run locally because this worktree
+does not have a built `bin/milvus`.
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- fix: clamp scalar target index version by old QN current (#49801)
+
+issue: #47417
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- fix: Forward GetReplicateConfiguration in proxy service (#49809)
+
+## Summary
+
+Forward the public GetReplicateConfiguration RPC from the distributed
+proxy service to the proxy implementation, matching the existing
+UpdateReplicateConfiguration and GetReplicateInfo forwarding paths.
+
+Fixes #47392
+
+## What changed
+
+- Add Server.GetReplicateConfiguration in
+internal/distributed/proxy/service.go.
+- Add a regression test to ensure the distributed proxy delegates the
+request instead of using UnimplementedMilvusServiceServer.
+
+## Test plan
+
+- [x] go test -tags test -gcflags=&#39;all=-N -l&#39;
+./internal/distributed/proxy -run
+&#39;^TestServer_GetReplicateConfiguration$&#39; -count=1
+- [x] make static-check
+
+Signed-off-by: Yihao Dai &lt;yihao.dai@zilliz.com&gt;
+
+- fix: make packed writer close idempotent (#49813)
+
+Related to #49790
+
+Packed writer close transfers ownership of the C++ wrapper to C, which
+deletes the wrapper before returning. Clear the Go-side C pointer before
+calling Close/CloseAndTell so cleanup paths cannot pass a freed pointer
+back into C.
+
+Also clear MultiSegmentWriter state after a successful close, preserve
+the original merge-sort error when cleanup close fails, and add
+regression coverage for repeated close and rotate allocation failure
+cleanup.
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- fix: keep replica meta until release completes (#49729)
+
+issue: #49695
+
+- QueryCoord release: wait for physical distribution cleanup before
+removing replica metadata
+- release retry: allow cleanup to finish when collection metadata is
+already removed but replicas remain
+- release tests: cover delayed physical release and retry finalization
+
+---------
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+
+- test: add container-kill chaos coverage (#49800)
+
+## What changed
+
+- Add Chaos Mesh `container-kill` schedules for Milvus components and
+dependencies.
+- Add container-kill coverage for etcd, MinIO, Pulsar, and Kafka targets
+to match pod-kill coverage.
+- Resolve real pod container names before creating container-kill
+resources, which is required for release-prefixed Pulsar containers.
+- Add selected-pod container-kill support for etcd leader/follower chaos
+scenarios.
+
+## Validation
+
+- `python3 -m py_compile tests/python_client/chaos/test_chaos_apply.py
+tests/python_client/chaos/test_chaos_apply_to_determined_pod.py
+tests/python_client/utils/util_k8s.py`
+- Parsed 17 container-kill YAML/template files with PyYAML.
+- `git diff --check`
+- Verified 4am Chaos Mesh v2.8.0 CRD supports `container-kill` and
+`containerNames`.
+- Server-side dry-run passed for static container-kill manifests against
+4am Chaos Mesh, excluding Pulsar static YAML because Pulsar container
+names are filled dynamically at runtime.
+- Server-side dry-run passed for a Pulsar container-kill Schedule after
+filling real containerNames.
+- Server-side dry-run passed for etcd selected-pod PodChaos after
+filling real containerNames.
+
+Fixes #49798
+
+Signed-off-by: yanliang567 &lt;yanliang.qiao@zilliz.com&gt;
+
+- enhance: make PK index warmup configurable (#49664)
+
+## Summary
+Make the StorageV2 system PK index use the configurable scalar index
+warmup policy instead of a hardcoded sync policy. The default remains
+sync, while deployments can set
+`queryNode.segcore.tieredStorage.warmup.scalarIndex` to disable or async
+for the PK index as well.
+
+## Issue
+issue: #49665
+
+---------
+
+Signed-off-by: sunby &lt;sunbingyi1992@gmail.com&gt;
+
+- enhance: bump storage to 0b35d53 (#49615)
+
+issue: #49616 #49523
+
+Signed-off-by: jiaqizho &lt;jiaqi.zhou@zilliz.com&gt;
+
+- fix: keep nullable vector bitsets alive (#49771)
+
+## Summary
+- Keep transformed nullable-vector bitsets pinned for the lifetime of
+search results so vector iterators do not hold dangling bitset views.
+- Add regression coverage for indexed nullable vector group-by search
+while preserving the existing non-nullable group-by test fixture.
+
+issue: #49660
+
+## Test plan
+- [x] `make cppcheck`
+- [x] `ruff check
+tests/python_client/milvus_client/test_milvus_client_search_group_by.py`
+- [x] `ruff format --check --diff
+tests/python_client/milvus_client/test_milvus_client_search_group_by.py`
+- [x] `git diff --check HEAD~1..HEAD`
+- [x] `python3 -m py_compile
+tests/python_client/milvus_client/test_milvus_client_search_group_by.py`
+- [x] `python3 -m pytest
+milvus_client/test_milvus_client_search_group_by.py::TestSearchGroupByIndependent::test_search_group_by_nullable_vector
+milvus_client/test_milvus_client_search_group_by.py::TestGroupSearch::test_search_group_by_supported_scalars
+--collect-only -q -o addopts=&#39;-p no:locust -v&#39;`
+
+Signed-off-by: marcelo-cjl &lt;marcelo.chen@zilliz.com&gt;
+
+- feat: add regex filter expression support (=~ and !~ operators) (#48952)
+
+issue: #48951 
+design doc:
+https://github.com/milvus-io/milvus-design-docs/blob/main/design_docs/20260409-regex_filter.md
+
+---------
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- fix: handle nullable vector projection on sealed segments (#49756)
+
+issue: #49749
+
+This PR fixes nullable vector projection on sealed segments when the
+requested offsets are all null, or when a loaded vector index does not
+carry valid-data offset mapping.
+
+What changed:
+- fall back to the sealed column offset mapping if the loaded vector
+index has no valid-data mapping
+- return the empty nullable vector result directly when filtering leaves
+zero valid vectors
+- add a regression test covering all-null and mixed nullable vector
+projections
+
+Tests:
+- cmake --build cmake_build --target all_tests -j 8
+- env LD_LIBRARY_PATH=cmake_build:internal/core/output/lib
+cmake_build/unittest/all_tests
+--gtest_filter=&#39;test_chunk_segment.NullableVectorProjectionFallsBackWhenLoadedIndexHasNoValidData&#39;
+- git diff --check
+
+Signed-off-by: marcelo-cjl &lt;marcelo.chen@zilliz.com&gt;
+
+- fix: Apply external refresh segments at job level (#49534)
+
+issue: #49478
+issue: #45881
+
+### What changed
+- Persist each external refresh task&#39;s kept and updated segment result
+in task meta.
+- Merge all finished task results once at job level before persisting
+the refresh job as Finished.
+- Keep progress from exposing Finished until segment apply and job
+Finished persistence are complete.
+- Clear task result payloads after a successful job commit.
+- Reject duplicate updated segment IDs during job-level merge.
+
+### Why
+A multi-task external table refresh previously applied each task
+response as if it were the collection-global segment set. Later task
+completions could drop sibling task segments, so the API returned
+RefreshCompleted with only partial row_count.
+
+### Verification
+- git diff --check
+
+---------
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- fix: support nullable vectors in RESTful API (#49751)
+
+## Summary
+- Support JSON null values for nullable vector fields in RESTful
+insert/upsert conversion.
+- Preserve nullable field ValidData when RESTful partial updates
+explicitly set nullable fields to null, while omitted fields remain
+no-op partial updates.
+- Build RESTful query/get/search/hybrid-search responses from nullable
+compact FieldData.ValidData so null vector rows are returned as JSON
+null.
+
+issue: #49747
+
+## Test plan
+- [x] `env TMPDIR=/home/ubuntu/data/tmp
+GOCACHE=/home/ubuntu/data/go-build-cache
+LD_LIBRARY_PATH=/home/ubuntu/skills/issue_review/milvus_issue_49747/milvus/internal/core/output/lib:/home/ubuntu/skills/issue_review/milvus_issue_49747/milvus/cmake_build/lib
+PKG_CONFIG_PATH=/home/ubuntu/skills/issue_review/milvus_issue_49747/milvus/internal/core/output/lib/pkgconfig:/home/ubuntu/skills/issue_review/milvus_issue_49747/milvus/cmake_build/src:/home/ubuntu/skills/issue_review/milvus_issue_49747/milvus/cmake_build/thirdparty/rdkafka:/home/ubuntu/skills/issue_review/milvus_issue_49747/milvus/cmake_build/thirdparty/rocksdb
+CGO_LDFLAGS=&#34;-Wl,-rpath-link,/home/ubuntu/skills/issue_review/milvus_issue_49747/milvus/internal/core/output/lib
+-Wl,-rpath-link,/home/ubuntu/skills/issue_review/milvus_issue_49747/milvus/cmake_build/lib&#34;
+go test -tags dynamic,test -gcflags=&#34;all=-N -l&#34;
+./internal/distributed/proxy/httpserver -run
+&#39;TestInsertWithNullableVectorFields|TestPartialUpdateWithNullableExplicitNull|TestBuildQueryRespWithNullableCompactFields&#39;
+-count=1`
+- [x] `env TMPDIR=/home/ubuntu/data/tmp
+GOCACHE=/home/ubuntu/data/go-build-cache
+LD_LIBRARY_PATH=/home/ubuntu/skills/issue_review/milvus_issue_49747/milvus/internal/core/output/lib:/home/ubuntu/skills/issue_review/milvus_issue_49747/milvus/cmake_build/lib
+PKG_CONFIG_PATH=/home/ubuntu/skills/issue_review/milvus_issue_49747/milvus/internal/core/output/lib/pkgconfig:/home/ubuntu/skills/issue_review/milvus_issue_49747/milvus/cmake_build/src:/home/ubuntu/skills/issue_review/milvus_issue_49747/milvus/cmake_build/thirdparty/rdkafka:/home/ubuntu/skills/issue_review/milvus_issue_49747/milvus/cmake_build/thirdparty/rocksdb
+CGO_LDFLAGS=&#34;-Wl,-rpath-link,/home/ubuntu/skills/issue_review/milvus_issue_49747/milvus/internal/core/output/lib
+-Wl,-rpath-link,/home/ubuntu/skills/issue_review/milvus_issue_49747/milvus/cmake_build/lib&#34;
+go test -tags dynamic,test -gcflags=&#34;all=-N -l&#34;
+./internal/distributed/proxy/httpserver -count=1`
+
+Signed-off-by: marcelo-cjl &lt;marcelo.chen@zilliz.com&gt;
+
+- enhance: [loaddiff] use schema as source of truth for segment load (#49750)
+
+Related to #46358 #48983
+
+Make sealed segment loading compute load diffs against the latest schema
+as the single source of truth. New-side stale metadata for dropped
+fields is ignored for loading, while existing field data and indexes for
+fields removed from schema are scheduled for drop.
+
+Update ChunkedSegmentSealedImpl to assert if schema-absent fields reach
+load paths, and make drop cleanup tolerate schema-shrunk bitsets. Add
+SegmentLoadInfo coverage for stale binlog, manifest, and index metadata
+after drop-field schema evolution.
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- fix: tighten two-stage search thresholds (#49772)
+
+issue: https://github.com/milvus-io/milvus/issues/47218
+
+## What changed
+- Require both effective segment count and topk to meet their two-stage
+search thresholds before enabling two-stage search.
+- Add table-driven coverage for ShouldUseTwoStageSearch threshold
+behavior.
+- Update delegator two-stage search expectations for the stricter
+threshold logic.
+
+Signed-off-by: chasingegg &lt;chao.gao@zilliz.com&gt;
+
+- fix: avoid distribution update after close (#49725)
+
+issue: #49694
+
+- delegator distribution: stop closing the snapshot notifier channel and
+use a dedicated close signal for the snapshot loop
+- stale distribution updates: ignore updates after close and refund
+incoming sealed candidates
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+
+- enhance: support field ops in REST upsert (#49722)
+
+issue: #49241
+
+This PR exposes partial update field operations through REST upsert so
+ARRAY_APPEND and ARRAY_REMOVE requests can reach proxy validation.
+
+Changes:
+- Accept fieldOps in v1 and v2 REST upsert request payloads.
+- Convert REST op strings into FieldPartialUpdateOp on UpsertRequest.
+- Add request helper coverage for supported and unsupported ops.
+
+Validation:
+- make milvus
+- Manual REST validation on standalone:
+  - v2 ARRAY_APPEND updated tags from [1,2] to [1,2,3,4]
+  - v2 ARRAY_REMOVE updated tags to [1,3]
+  - v1 ARRAY_APPEND updated tags to [1,3,8]
+  - unsupported op ARRAY_EXTEND returned parameter error
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- enhance: support user dictionary file for lindera tokenizer (#49124)
+
+relate: #40168
+
+## Summary
+Add `user_dict` param to the lindera tokenizer, aligned with other
+tokenizers&#39; file resource config — supports both `type: local` (local
+path) and `type: remote` (file resource from object storage). Dispatches
+by file extension: `.csv` via `load_user_dictionary_from_csv` with the
+configured `DictionaryKind`, `.bin` via `load_user_dictionary_from_bin`.
+
+Signed-off-by: aoiasd &lt;zhicheng.yue@zilliz.com&gt;
+
+- fix: retry retriable shard errors without blacklisting replicas (#49740)
+
+Related to #49435
+
+Use request-scoped replica exclusion for retriable shard execution
+errors, while keeping non-retriable failures on the channel blacklist.
+Add a retriable tSafe-stalled channel error so waitTSafe stalls can fail
+over through the generic retry path.
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- test: fix CI flaky TestPartitionsNumExceedsMax and stale sparse index assertion (#49599)
+
+## Summary
+
+- **TestPartitionsNumExceedsMax**: Use management API (`POST
+:9091/management/config/alter`) to temporarily lower
+`rootCoord.maxPartitionNum` to 10 during the test, reducing 1023 serial
+`CreatePartition` RPCs to 9. This eliminates the ~50% timeout failure
+rate on branch triggers. Falls back to original behavior with 600s
+timeout if management API is unavailable.
+- **test_invalid_sparse_inverted_index_algo**: Update expected error
+code from 999 to 1100 (`ErrParameterInvalid`) and add three new sparse
+index algorithms (`BLOCK_MAX_MAXSCORE`, `BLOCK_MAX_WAND`, `SINDI`) added
+in #49041 but never reflected in the test assertion. This test is L2
+(nightly-only) and has been 100% failing since Apr 20.
+- **common_type.py**: Sync `inverted_index_algo` list to match
+server-side `SparseInvertedIndexAlgos`.
+
+issue: https://github.com/milvus-io/milvus/issues/49135
+
+## Test plan
+
+- [ ] `go test -tags dynamic,test -gcflags=&#34;all=-N -l&#34;
+./tests/go_client/testcases/... -run TestPartitionsNumExceedsMax` passes
+consistently
+- [ ] CI go-sdk pipeline passes without flaky timeout
+- [ ] Python test_invalid_sparse_inverted_index_algo assertion matches
+server response
+
+Signed-off-by: Li Liu &lt;li.liu@zilliz.com&gt;
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Signed-off-by: Li Liu &lt;li.liu@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix: harden scalar v3 index load paths (#49652)
+
+## What
+
+Fix several scalar index V3 load-path issues found during the 2.6
+backport review:
+
+- pass collection id when loading V3 text indexes so encrypted entries
+use the correct decryptor key
+- propagate `CurrentScalarIndexVersion` through text index stats
+conversion
+- clean up encrypted V3 writer temp files and upload read fds on
+exception paths
+- close the Marisa trie temp fd on exception paths
+- validate string sort V3 valid-bitset entry size before reading
+- capture encrypted entry slices by value in async reads
+
+## Validation
+
+- `git diff --check`
+- `make fmt`
+
+Local `go test ./internal/util/segcore -count=1` did not reach tests
+because the local cgo environment could not resolve `C.executor_set_*`
+symbols. Local C++ configure for `cmake --build cmake_build --target
+milvus_core -j96` was blocked by missing local Azure CMake package
+(`AzureConfig.cmake`).
+
+issue: https://github.com/milvus-io/milvus/issues/47417
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- feat: impl StructArray --- support null for struct array and vector array (#48553)
+
+issue: https://github.com/milvus-io/milvus/issues/42148
+design doc:
+https://github.com/milvus-io/milvus-design-docs/blob/main/design_docs/20260306-struct.md
+
+---------
+
+Signed-off-by: SpadeA &lt;tangchenjie1210@gmail.com&gt;
+
+- test: add struct array filter correctness tests for query and search (index access, array_contains, array_length) (#49178)
+
+## Summary
+
+End-to-end correctness tests for struct array filter expressions in both
+`query()` and `search()`, covering:
+
+- **Index access** `structA[i][sub_field]` — newly introduced by PR
+#48987
+- **`array_contains` / `array_contains_all` / `array_contains_any`** —
+exact
+  ground-truth `==` assertions to detect false negatives (the existing
+  Test Case 1 only checks no-false-positives via per-hit walking)
+- **`array_length(structA[sub_field])`** — positive cases plus rejection
+  of `array_length(structA[i][sub_field])` (grammar disallowed)
+
+## Why
+
+Every case asserts **exact ID sets** (no false negatives AND no false
+positives) instead of subset / per-hit checks, so any drop in recall or
+spurious match fails the test. Coverage spans:
+
+- All comparison operators (`==`, `!=`, `&gt;`, `&gt;=`, `&lt;`, `&lt;=`)
+- `IN` / `NOT IN`
+- Forward / reverse range syntax (`a &lt; x &lt; b` and `b &gt; x &gt; a`)
+- String sub-field
+- Compound predicates across positions (`structA[0]... &amp;&amp;
+structA[1]...`)
+- Doc-level filter combination
+- Out-of-bounds index (rows shorter than the requested index)
+- Parser-error negative cases (missing field, swapped form, indexed-form
+  passed to `array_length`)
+- **Per-segment consistency**: mirrored controlled rows in sealed vs
+  growing produce mirrored result sets
+- **After `delete`** and **after `upsert`** (both matching and
+  non-matching rows, cross-segment)
+
+## Layout
+
+- query: `TestMilvusClientStructArrayIndexAccess` (19 cases) in
+  `test_milvus_client_struct_array_element_query.py`
+- search: `TestMilvusClientStructArrayIndexAccessSearch` (12 cases) in
+  `test_milvus_client_struct_array_element_search.py`
+  - uses FLAT index + controlled vector layout (controlled rows share
+    the query vector at COSINE=1.0) so search recall is 1.0 and exact
+    ID set assertions are valid
+
+Each case uses **&gt;= 3500 rows** (3000 sealed + 500 growing inert
+background plus controlled rows split across both segments).
+
+## Test plan
+
+- [x] verified locally on a Milvus standalone instance built from PR
+  #48987 (commit `0c5a964ea0`): **31 / 31 passed in 387.54s**
+- [x] each case scoped to `id &lt; 100` so inert background rows cannot
+  contaminate strict-equality assertions
+
+issue: #42148
+
+---------
+
+Signed-off-by: zhuwenxing &lt;wenxing.zhu@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+- fix: stabilize wal recovery alter wal path (#49696)
+
+issue: #49634
+
+Fix WAL recovery fast-fail follow-up issues and stabilize related WAL
+tests.
+
+Validation:
+- go test -tags test -gcflags=&#34;all=-N -l&#34;
+./internal/streamingnode/server/wal/adaptor -count=1
+
+---------
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+
+- test: add partial update array ops tests for field_ops (ARRAY_APPEND/ARRAY_REMOVE) (#49689)
+
+## Summary
+- Add comprehensive test cases for partial update array ops
+(ARRAY_APPEND / ARRAY_REMOVE) via `field_ops` parameter in MilvusClient
+upsert API
+- Cover all supported element types (BOOL, INT8/16/32/64, FLOAT, DOUBLE,
+VARCHAR) for both append and remove operations
+- Include error scenarios: non-array field, PK field, unknown field,
+type mismatch, missing field data, capacity exceeded, max_length
+exceeded
+- Add atomicity tests: parse-stage (mixed valid + invalid field type)
+and execution-stage (capacity exceeded, max_length exceeded) rollback
+verification
+- Cover boundary scenarios: empty array append, remove
+all/single/duplicate/non-existent elements, nullable fields, null
+payload rows, exact capacity fill
+
+issue: #49241
+
+## Test Plan
+- 36 test cases total, all verified locally with 8-worker parallel
+execution (56s, 36 passed)
+- Module 1 (14 cases): typed append/remove parameterized + multi-field
+- Module 2 (9 cases): error handling + atomicity
+- Module 3 (14 cases): boundary scenarios
+
+---------
+
+Signed-off-by: lyyyuna &lt;yiyang.li@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix: avoid parsing external manifest columns on reopen (#49709)
+
+## What
+
+- Avoid field-id based column group diff for external collection
+manifests during reopen.
+- Reload external manifests by manifest path changes instead of parsing
+parquet column names.
+- Add regression tests for external manifest reopen with a new index and
+manifest update.
+
+Fixes https://github.com/milvus-io/milvus/issues/49663
+
+## Root Cause
+
+External collection manifests store parquet column names, such as `id`,
+`vector`, and `tenant`, in column groups. The previous reopen diff path
+treated manifest columns as Milvus field ids and called
+`std::stoll(column)`, which throws when the column is not numeric.
+
+This caused reopen to fail repeatedly after QueryCoord generated a valid
+`Reopen` action for a missing index, eventually surfacing as `channel
+distribution is not serviceable` in
+https://github.com/milvus-io/milvus/issues/49663.
+
+## Validation
+
+- `git diff --check`
+- In the investigation worktree with the same patch:
+- `GOTOOLCHAIN=go1.25.9 CONAN_CMD=/tmp/conan-no-remote make
+build-cpp-with-unittest`
+  - `cmake --build cmake_build --target all_tests`
+- `./cmake_build/unittest/all_tests
+--gtest_filter=&#39;SegmentLoadInfoTest.*&#39;` passed 80 tests
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- enhance: optimize querycoord target readiness check (#49662)
+
+## Summary
+Optimize QueryCoord target readiness checks so segment data readiness is
+evaluated only after target sync succeeds and all target channels are
+synced. This avoids advancing current target readiness based on
+incomplete channel or segment distribution during target
+update/rebalance.
+
+## Issue
+issue: #49666
+
+Signed-off-by: sunby &lt;sunbingyi1992@gmail.com&gt;
+
+- enhance: improve the preformance of create partitions  (#47486)
+
+issue: https://github.com/milvus-io/milvus/issues/47403
+this pr contains performance optimization for concurrent
+CreatePartition:
+1. add a version cache on proxy for partition level cache
+2. avoid repeated updates of target when there&#39;re many CreatePartition
+requests.
+3. avoid unnecessary copy of meta data.
+
+---------
+
+Signed-off-by: sunby &lt;sunbingyi1992@gmail.com&gt;
+
+- fix: seal growing segments on blocking l0 pressure (#49653)
+
+## Summary
+
+This PR adds a StreamingNode-local blocking-L0 seal policy so delete
+pressure can seal growing L1 segments before `dataCoord.segment.maxLife`
+expires.
+
+The existing blocking-L0 policy only runs in the DataCoord
+SegmentManager seal path. When StreamingNode owns the flush/seal path,
+configured values such as
+`dataCoord.sealPolicy.channel.blockingL0EntryNum` and
+`dataCoord.sealPolicy.channel.blockingL0SizeInMB` could not trigger
+sealing for local growing segments blocked by L0 deletes.
+
+issue: #49647
+
+## Solution
+
+- Record local delete pressure in StreamingNode through
+`ShardManager.ApplyDelete`.
+- Keep delete pressure aggregated per eligible growing L1 segment
+instead of storing one entry per delete message.
+- Scope delete accounting by `pchannel/vchannel` and index growing L1
+segments by channel, so `RecordDelete` only scans affected segments.
+- Select the earliest growing L1 segment per `pchannel/vchannel` when
+its delete pressure reaches either existing blocking-L0 threshold:
+  - `dataCoord.sealPolicy.channel.blockingL0EntryNum`
+  - `dataCoord.sealPolicy.channel.blockingL0SizeInMB`
+- Preserve existing disable semantics: the policy is disabled only when
+both thresholds are negative.
+- Keep the stats local and best-effort; they are used only as
+StreamingNode seal hints.
+
+## Tests
+
+- [x] `conda run -n milvus2 go test -tags test
+./internal/streamingnode/server/wal/interceptors/shard/stats -count=1`
+- [x] affected shard packages with shared C++ artifacts
+- [x] `git diff --check`
+- [ ] `make static-check` fails locally because this worktree lacks
+ignored generated file
+`cmd/tools/migration/legacy/legacypb/legacy.pb.go`; the main checkout
+has it generated.
+
+---------
+
+Signed-off-by: Yihao Dai &lt;yihao.dai@zilliz.com&gt;
+
+- fix: preserve filter bitset when MVCC is disabled (#49736)
+
+issue: #49735
+
+- Preserve upstream scalar filter bitsets when
+`common.visibilityFilterEnabled=false`.
+- Only mark all rows visible in the disabled visibility-filter path when
+`MvccNode` has no upstream filter input.
+- Add C++ and Go regression coverage for preserving predicates/filter
+bitsets in this path.
+
+Signed-off-by: Shawn Wang &lt;shawn.wang@zilliz.com&gt;
+
+- fix: use default filesystem for JSON stats load (#49721)
+
+Related to #49592 #49521
+
+Branching introduced by those two PRs.
+
+Resolve the Arrow filesystem for JSON stats loading through the shared
+segcore default filesystem helper, matching the rest of sealed segment
+load paths and avoiding reliance on the legacy ArrowFileSystemSingleton.
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- test: add e2e tests for FileResource feature (#47628)
+
+## Summary
+- Add 40 E2E tests for FileResource CRUD APIs and analyzer integration
+(jieba, synonym, stop words, decompounder)
+- Verify tokenization correctness with baseline comparison (with vs
+without file resources)
+- Test data generated at runtime, no static files committed
+
+/kind improvement
+
+---------
+
+Signed-off-by: zhuwenxing &lt;wenxing.zhu@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix: wrong inner length for ColumnVector(#49340) (#49576)
+
+related: #49340
+
+Signed-off-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+Co-authored-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+
+- enhance: integrate JSON stats into LoadDiff segment loading (#49592)
+
+Related to #46358
+
+Route sealed segment JSON key stats loading through the LoadDiff-based
+load/reopen path so initial loads and stats updates share the same
+self-managed segment workflow.
+
+Add segcore diff support for JSON stats load, replace, and drop
+operations, including conversion to LoadJsonKeyIndexInfo, mmap
+configuration, feature flag checks, and LoadDiff application in
+ChunkedSegmentSealedImpl. Update QueryCoord/QueryNode to trigger reopen
+for JSON stats updates and keep LocalSegment JSON stats metadata
+synchronized after load/reopen.
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- enhance: support collection-rooted index file storage layout (#49325)
+
+Replaces #49087.
+
+## Summary
+
+This PR introduces a collection-rooted storage layout for vector/scalar
+index files while keeping the legacy layout readable.
+
+Legacy v0 layout:
+
+
+`index_files/{buildID}/{indexVersion}/{partitionID}/{segmentID}/{fileKey}`
+
+New v1 layout:
+
+
+`index_files_v1/{collectionID}/{partitionID}/{segmentID}/{buildID}/{indexVersion}/{fileKey}`
+
+Main changes:
+
+- Add `IndexStorePathVersion` metadata to record which path layout each
+segment index uses.
+- Add `IndexPathBuilder` to centralize v0/v1 index path construction.
+- Gate v1 index path rollout by the cluster minimum node version, so
+mixed-version clusters continue writing v0 paths.
+- Propagate the path version through index build metadata, worker
+results, segment index metadata, and copy segment metadata.
+- Update GC to handle both legacy `index_files` paths and new
+`index_files_v1` paths safely.
+- Update copy/restore path mapping to resolve vector/scalar index paths
+according to their recorded path version.
+
+issue: #49086
+
+## Compatibility
+
+Existing v0 index files remain readable and continue to use the legacy
+layout.
+
+New v1 index files are only written when the cluster supports the new
+path layout. After v1 index files exist, rolling DataCoord back to a
+binary that does not understand `index_files_v1` is unsafe because older
+GC logic may not preserve those files correctly.
+
+Rolling DataNode or QueryNode back independently is expected to keep
+writing and using v0 paths because DataCoord gates the selected layout
+by reported node versions.
+
+## Test Plan
+
+- [ ] Index path builder tests for v0 and v1 layouts.
+- [ ] SegmentIndex marshal/unmarshal tests for `IndexStorePathVersion`.
+- [ ] DataCoord tests for selecting v0/v1 based on cluster node
+versions.
+- [ ] GC tests for both `index_files` and `index_files_v1`.
+- [ ] Copy/restore tests for v0 and v1 index paths.
+- [ ] Recovery/snapshot index metadata tests for preserving
+`index_store_path_version`.
+
+---------
+
+Signed-off-by: Yihao Dai &lt;yihao.dai@zilliz.com&gt;
+
+- test: Add nullable vector coverage for bulk insert (#49685)
+
+issue: #49678
+
+## What this PR does
+
+Adds Python E2E coverage for nullable vector fields in bulk
+insert/import paths:
+
+- JSON import with nullable dense vector, nullable sparse vector,
+nullable scalar fields, explicit `null`, and omitted vector fields.
+- Parquet import with nullable scalar and nullable float vector columns
+using Arrow null validity.
+- RemoteBulkWriter JSON/CSV/Parquet output with nullable float vectors,
+including generated multi-batch Parquet import coverage.
+- Negative coverage that non-nullable float vector import rejects
+`null`, with `failed_reason` assertions.
+- JSON import coverage for nullable values across FLOAT, BINARY,
+FLOAT16, BFLOAT16, SPARSE, and INT8 vector types.
+
+CSV BulkWriter import currently passes `nullkey=&#34;null&#34;` to match the
+existing writer output behavior tracked in #49678.
+
+## Verification
+
+```bash
+.venv-python-client/bin/ruff check tests/python_client/testcases/test_bulk_insert.py
+# All checks passed!
+```
+
+```bash
+.venv-python-client/bin/ruff format --check tests/python_client/testcases/test_bulk_insert.py
+# 1 file already formatted
+```
+
+```bash
+python3 -m py_compile tests/python_client/testcases/test_bulk_insert.py
+```
+
+```bash
+PYTHONPATH=tests/python_client .venv-python-client/bin/python -m pytest \
+  -o addopts=&#39;&#39; --collect-only -q \
+  tests/python_client/testcases/test_bulk_insert.py::TestBulkInsertNullableVector
+# 12 tests collected
+```
+
+```bash
+PYTHONPATH=tests/python_client .venv-python-client/bin/python -m pytest \
+  -o addopts=&#39;&#39; -q \
+  tests/python_client/testcases/test_bulk_insert.py::TestBulkInsertNullableVector \
+  --host 10.100.36.172 --port 19530 \
+  --minio_host 10.104.18.236 --minio_bucket yanl-master \
+  --tb=short --disable-warnings
+# 12 passed in 273.69s (0:04:33)
+```
+
+Signed-off-by: yanliang567 &lt;82361606+yanliang567@users.noreply.github.com&gt;
+
+- fix: support filter template for string predicates (#49594)
+
+issue: #49593
+
+---------
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- test: Update Python client test expectations for server behavior changes (#49672)
+
+## Summary
+
+Update Python client test assertions to align with recent server-side
+behavior changes observed in nightly CI.
+
+**Related issue**: #49671
+
+### Changes
+
+**`tests/python_client/milvus_client/test_milvus_client_collection.py`**
+- `test_milvus_client_collection_describe`: Add
+`&#34;consistency_level_name&#34;: &#34;Strong&#34;` to the expected
+`describe_collection` response dict, as the server now returns this
+additional field.
+
+**`tests/python_client/milvus_client/test_milvus_client_search.py`**
+- `test_search_with_expression_invalid_bool`:
+- `&#34;true&#34;` and `&#34;false&#34;` are now treated as valid boolean literal
+expressions by the server. Updated assertions to verify their correct
+behavior:
+    - `&#34;true&#34;` returns `limit` results (tautology)
+    - `&#34;false&#34;` returns `0` results (contradiction)
+- Removed the assertion for `{int64} &gt; 0 or false`, as `false` being a
+valid boolean literal makes this entire expression valid.
+
+### Test Plan
+
+- [x] `test_milvus_client_collection_describe` passes locally
+- [x] `test_search_with_expression_invalid_bool` passes locally
+
+Signed-off-by: nico &lt;cheng.yuan@zilliz.com&gt;
+
+- [automated] Bump milvus version to v3.0-beta (#49681)
+
+Bump milvus version to v3.0-beta
+Signed-off-by: sre-ci-robot sre-ci-robot@users.noreply.github.com
+
+Co-authored-by: github-actions[bot] &lt;41898282+github-actions[bot]@users.noreply.github.com&gt;
+
+- test: multi replica chaos test enhancement (#49563)
+
+- Add mixed chaos type with random action selection and network chaos
+- Support multi-select chaos types via comma-separated string
+
+---------
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+
+- test: update Python client nightly expectations (#49642)
+
+## Summary
+- Align Python client negative test expectations with updated server
+error messages for hybrid search, search filter, sparse index
+validation, query_mode validation, and TEI function alteration.
+- Avoid the known duplicate-PK growing-segment issue in the
+dynamic-field insert test while preserving coverage for inserting
+different dynamic fields.
+
+## Related issues
+- #49341
+- #49190
+- #48916
+- #48666
+- #48725
+- #49191
+
+## Test plan
+- [x]
+`test_milvus_client_hybrid_search.py::TestMilvusClientHybridSearch::test_hybrid_search_RRFRanker_k_out_of_range`
+against `--host 10.104.22.80`: 2 passed
+- [x]
+`test_milvus_client_search.py::TestSearchInvalidShared::test_search_param_invalid_expr_type`
+against `--host 10.104.22.80`: 2 passed
+- [x]
+`test_milvus_client_insert.py::TestMilvusClientInsertValid::test_milvus_client_insert_different_fields`
+against `--host 10.104.22.80`: 1 passed
+- [x]
+`test_text_embedding_function_e2e.py::TestTextEmbeddingFunctionCURDNegative::test_alter_collection_function_invalid_new_endpoint`
+against `--host 10.104.17.21`: 1 passed
+- [x]
+`test_index.py::TestIndexInvalid::test_invalid_sparse_inverted_index_algo
+--collect-only`: 2 tests collected
+- [x]
+`test_large_topk.py::TestLargeTopkIndependent::{test_query_mode_value_case_insensitive,test_query_mode_key_case_sensitive}
+--collect-only`: 6 tests collected
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: nico &lt;cheng.yuan@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- enhance: upgrade test Python runtime to 3.12 (#49622)
+
+issue: #49516
+
+### What changed
+
+- Upgrade test runtime pins and Docker base images to Python 3.12.
+- Update tests ruff target and Python-version docs to 3.12.
+- Refresh Python client dependency pins that block Python 3.12
+installation.
+- Scope TestPyPI lookup to pymilvus via find-links so uv does not
+require unsafe-best-match.
+- Suppress third-party invalid escape sequence SyntaxWarning noise seen
+during Python 3.12 pytest collection.
+
+### Verification
+
+- git diff --check
+- uv pip install --python /tmp/milvus-tests-py312-uv-default/bin/python
+--dry-run -r tests/python_client/requirements.txt
+- python3.12 -m venv /tmp/milvus-tests-py312-pip-requirements &amp;&amp; pip
+install -r tests/python_client/requirements.txt --timeout 30 --retries 6
+- pip check
+- python -c &#39;import pymilvus, ujson; print(pymilvus.__version__,
+ujson.__version__)&#39;
+- python -m pytest --collect-only -q
+milvus_client/test_milvus_client_collection.py
+
+Signed-off-by: zhuwenxing &lt;wenxing.zhu@zilliz.com&gt;
+
+- fix: fast fail wal recovery timetick append (#49635)
+
+issue: #49634
+
+---------
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+
+- fix: gate load-config query visibility for streaming resource group (#49628)
+
+issue: #47314
+
+Gate newly spawned load-config replicas from Proxy shard leader
+discovery until their shard leaders are serviceable.
+
+This keeps replica query visibility as an in-memory QueryCoord state,
+defaults recovered/existing replicas to query-visible for compatibility,
+checks query-invisible replicas in load-config compliance, and keeps the
+query-invisible fast index as replica IDs rather than replica pointers.
+
+Validation:
+- `go test -tags test -run
+&#39;TestReplicaQueryVisibility|TestReplicaManagerQueryVisibility&#39; -count=1
+./internal/querycoordv2/meta`
+- `go test -tags test -run
+&#39;TestCheckAllReplicasServiceable|TestApplyLoadConfigChanges|Test.*GetShardLeaders&#39;
+-count=1 ./internal/querycoordv2`
+- `go test -tags test -gcflags=&#34;all=-N -l&#34; -run
+&#39;TestHandleReplicaLoadConfigCompliance|TestValidateRGDistribution&#39;
+-count=1 ./internal/coordinator`
+
+---------
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;</div>
+</div>
+
+<a href="../project/milvus-io_milvus.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

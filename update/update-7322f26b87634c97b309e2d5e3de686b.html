@@ -1,0 +1,1206 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (17 commits) - FluidInference/FluidAudio - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (17 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a> /
+    Updates in main (17 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-15 23:23 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/FluidInference/FluidAudio/commits/main" target="_blank">https://github.com/FluidInference/FluidAudio/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This update substantially improves the command-line interface (CLI) for FluidAudio&#39;s diarization and ASR transcription features. Users can now access and fine-tune numerous parameters that were previously hardcoded or inaccessible, which is crucial for optimizing production output, such as preventing micro-fragmented diarization and customizing streaming ASR. The update also includes fixes for several CLI usability bugs, deprecates older TTS backends, and resolves various other issues across the text-to-speech and automatic speech recognition modules.
+
+---
+
+**Russian translation:**
+
+Это обновление значительно улучшает интерфейс командной строки (CLI) для функций диаризации и расшифровки ASR FluidAudio. Пользователи теперь могут получить доступ и точно настроить множество ранее жестко закодированных или недоступных параметров, что крайне важно для оптимизации производственных результатов, таких как предотвращение микрофрагментированной диаризации и настройка потоковой ASR. Обновление также включает исправления для нескольких ошибок удобства использования CLI, устаревшие бэкенды TTS и устраняет различные другие проблемы в модулях синтеза речи и автоматического распознавания речи.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- feat(cli): expose all diarizer config parameters in process command (#613)
+
+## Summary
+The `OfflineDiarizerConfig.community` research defaults produce 500+
+micro‑fragmented segments for real meeting recordings, making downstream
+transcripts unusable for production customers. The fix — tuning
+`--min-segment-duration`, `--min-gap-duration`, and `--threshold`
+upstream
+of clustering — was impossible from the CLI because only 7 of 30+ config
+fields were exposed.
+
+This PR rewrites `ProcessCommand` to expose every field from
+`DiarizerConfig`
+(streaming) and `OfflineDiarizerConfig` (offline) as CLI flags — 28 new
+parameters across both modes. Mode‑specific logic moves to
+`runStreaming()`
+and `runOffline()`, argument parsing centralizes into a single
+`ParsedArgs`
+struct, and `printUsage()` gets mode‑grouped synchronous output. Also
+fixes
+five pre‑existing bugs found during the rewrite (async‑logger exit race,
+`--help` greediness, spurious `await`, threshold‑fallback collision,
+silent
+`--rttm` in streaming mode).
+
+Net diff: +462 / −206 lines in
+`Sources/FluidAudioCLI/Commands/ProcessCommand.swift`.
+
+---
+
+## Problem
+
+### Production diarization is unusable with default config
+
+The `OfflineDiarizerConfig.community` preset was tuned for research
+benchmarks
+(AMI/Dihard) where some over‑segmentation is penalized but tolerated. In
+production transcription of real meetings, the same defaults produce
+**hundreds of unusable micro‑fragments** — the diarizer splits a
+continuous
+30‑second speaker turn into blocks interleaved with 1–2 second fragments
+falsely assigned to other speakers:
+
+```
+Actual:   ┊     SPEAKER_A (30s continuous)        ┊
+Default:  ┊ A ┊ B ┊ A ┊ C ┊ A ┊ B ┊ A ┊ C ┊ A    ┊  ← 500+ segments
+Tuned:    ┊           SPEAKER_A (30s)              ┊  ← 150 segments
+```
+
+Each false micro‑fragment produces a 1–2 word transcription chunk
+attributed
+to the wrong speaker in downstream ASR+alignment. Meeting‑notes products
+see
+transcripts where every other line is a different speaker uttering a
+single
+word — completely unusable for production customers.
+
+The fix is to tune parameters **upstream of clustering**:
+- `--min-segment-duration 2.0` — rejects audio segments &lt; 2 s so they
+never
+  produce embeddings (biggest Swift‑side improvement)
+- `--min-gap-duration 1.0` — treats ≤ 1 s silence as speaker continuity,
+  not a speaker change
+- `--threshold 0.75` — tighter clustering, fewer false speaker switches
+
+With these parameters, a 52‑min 6‑speaker meeting drops from 500+ to 150
+well‑formed segments. The remaining gap to 82 human‑annotated segments
+uses
+word‑level Python post‑processing (fill‑nearest, min‑words).
+
+### Only 7 of 30+ config fields were accessible from the CLI
+
+`OfflineDiarizerConfig`
+(`Sources/FluidAudio/Diarizer/Offline/Core/OfflineDiarizerTypes.swift:32-489`)
+has 22 tunable knobs — Fa/Fb warm‑start, step ratio, batch size,
+embedding
+skip strategy, onset/offset thresholds, min‑duration‑on/off, VBx
+iterations,
+convergence tolerance, speaker‑count constraints, etc. `DiarizerConfig`
+(`Sources/FluidAudio/Diarizer/Core/DiarizerTypes.swift:7-58`) has 9
+fields
+(min‑speech‑duration, min‑silence‑gap, min‑active‑frames, num‑clusters,
+min‑embed‑update, etc.).
+
+The old `fluidaudio process` CLI exposed only seven:
+`--mode`, `--threshold`, `--chunk-seconds`, `--overlap-seconds`,
+`--debug`,
+`--output`, `--rttm`, `--export-embeddings`. All other parameters
+required
+recompiling FluidAudio or maintaining a custom patch.
+
+Additionally, `printUsage()` used `logger.info()` (async via
+`Task.detached`),
+which raced with `exit()` — the usage text never appeared. And `--help`
+was
+silently consumed when placed after a value‑taking flag because the old
+parser
+greedily grabbed the next token without checking whether it started with
+`&#34;--&#34;`.
+
+---
+
+## Change
+
+### Structure (`Sources/FluidAudioCLI/Commands/ProcessCommand.swift`)
+
+| Before | After |
+|--------|-------|
+| Inline arg parsing + processing in one 240-line `run()` | `ParsedArgs`
+struct + `parseArguments()` + `runStreaming()` + `runOffline()` |
+| `printUsage()` via `logger.info()` (async, invisible) | `printUsage()`
+via synchronous `fputs()` to stderr |
+| Mode dispatch in one big `if/else` block | Two dedicated `private
+static func` per mode |
+| Two `--help` handlers (early guard + switch case) | Single
+`arguments.contains(&#34;--help&#34;)` check before any parsing |
+
+`ParsedArgs` stores 30+ fields with mode-specific defaults:
+`thresholdS: Float = 0.7045655` (streaming, matches pyannote
+speaker-diarization-3.1 config.yaml), `thresholdD: Double = 0.6`
+(offline).
+`parseArguments()` is a single `switch` over remaining args after the
+audio-file
+positional is consumed.
+
+### New streaming flags (6 — `DiarizerConfig` fields)
+
+```
+--min-speech-duration &lt;sec&gt;     Drop segments shorter than this (default: 1.0)
+--min-silence-gap &lt;sec&gt;         Split same-speaker segments if gap exceeds this (default: 0.5)
+--min-active-frames &lt;n&gt;         Minimum active frames for valid speech (default: 10.0)
+--num-clusters &lt;n&gt;              Expected speakers, −1 = auto (default: −1)
+--min-embed-update &lt;sec&gt;        Min segment duration to update embeddings (default: 2.0)
+```
+
+### New offline flags (22 — `OfflineDiarizerConfig` fields)
+
+```
+--threshold &lt;0–√2&gt;              Euclidean clustering threshold (default: 0.6)
+--fa &lt;float&gt;                    VBx warm-start precision (default: 0.07)
+--fb &lt;float&gt;                    VBx warm-start recall (default: 0.8)
+--window-duration &lt;sec&gt;         Segmentation window size (default: 10.0)
+--sample-rate &lt;hz&gt;              Target audio sample rate (default: 16000)
+--step-ratio &lt;0–1&gt;              Segmentation step ratio, lower = more overlap (default: 0.2)
+--batch-size &lt;1–32&gt;             Embedding batch size (default: 32)
+--include-overlap               Include overlap regions in embedding extraction
+--skip-similarity &lt;0–1&gt;         Skip embedding if mask similarity ≥ threshold (default: none)
+--min-segment-duration &lt;sec&gt;    Minimum segment duration (default: 1.0)
+--min-gap-duration &lt;sec&gt;        Merge segments separated by less than this gap (default: 0.1)
+--overlapping-segments          Allow speakers to overlap in output
+--onset-threshold &lt;0–1&gt;         VAD onset probability threshold (default: 0.5)
+--offset-threshold &lt;0–1&gt;        VAD offset probability threshold (default: 0.5)
+--min-duration-on &lt;sec&gt;         Min speech duration to trigger VAD on (default: 0.0)
+--min-duration-off &lt;sec&gt;        Min silence to trigger VAD off (default: 0.0)
+--max-vbx-iterations &lt;n&gt;        VBx max iterations (default: 20)
+--convergence-tolerance &lt;float&gt; VBx convergence tolerance (default: 1e−4)
+--min-speakers &lt;n&gt;              Minimum number of speakers
+--max-speakers &lt;n&gt;              Maximum number of speakers
+--num-speakers &lt;n&gt;              Exact speaker count (overrides min/max)
+--rttm &lt;file&gt;                   Compute DER/JER against RTTM annotations
+--export-embeddings &lt;file&gt;      Export embeddings to JSON for debugging
+```
+
+Boolean flags use inverted semantics where the config default is `true`
+(e.g. `embeddingExcludeOverlap` defaulting to `true` — a present
+`--include-overlap`
+flips it to `false`). `EmbeddingSkipStrategy` (`.none` /
+`.maskSimilarity(threshold:)`)
+maps to a single `--skip-similarity &lt;0–1&gt;` flag. Speaker-count
+constraints go
+through `OfflineDiarizerConfig.withSpeakers(exactly:)` /
+`.withSpeakers(min:max:)`.
+
+### Bug fixes landed in this PR
+
+**`printUsage()` not appearing before `exit()`**
+`ProcessCommand.printUsage()` called `logger.info()`, which schedules a
+`Task.detached` write to stderr. `exit(0)` / `exit(1)` killed the
+process
+before the async task flushed. Fixed by writing the usage string
+directly
+via `fputs(usage, stderr); fflush(stderr)` — synchronous, guaranteed
+visible.
+
+**Spurious `await` on `performCompleteDiarization`**
+`DiarizerManager.performCompleteDiarization()` is `throws`, NOT `async
+throws`
+(`Sources/FluidAudio/Diarizer/Core/DiarizerManager.swift:153`). The
+original
+code had `try await`, which is a no-op at runtime and a compiler
+warning.
+Removed.
+
+**`--help` greediness**
+Two separate `--help` handlers existed — an early guard for
+`fluidaudio process --help` and a `switch` case for
+`fluidaudio process file.wav --help`. Neither protected against
+`fluidaudio process file.wav --rttm --help` — the `--rttm` case greedily
+consumed `&#34;--help&#34;` as its file-path argument, help never printed.
+
+Replaced both with a single `if arguments.contains(&#34;--help&#34;)` check at
+the
+top of `run()`, before any positional or flag parsing. This catches
+`--help`
+in any position including after value-taking flags.
+
+**`--threshold` parse failure overwriting mode-specific defaults**
+The original `Float(args[i+1]) ?? 0.7` fallback overwrote both
+`thresholdS`
+(streaming) and `thresholdD` (offline) with 0.7, silently replacing the
+offline-specific default of 0.6 on parse failure. Fixed by only updating
+`thresholdS` / `thresholdD` on successful parse and logging a warning
+on failure:
+
+```swift
+if let val = Float(args[i + 1]) {
+    parsed.thresholdS = val
+    parsed.thresholdD = Double(val)
+} else {
+    logger.warning(&#34;Invalid --threshold value: &#39;\\(args[i + 1])&#39;, using defaults&#34;)
+}
+```
+
+**`--rttm` silently ignored in streaming mode**
+The `--rttm` flag was parsed and stored but never read in
+`runStreaming()`.
+The help text already listed it under OFFLINE MODE OPTIONS. Now logs
+`logger.warning(&#34;--rttm is only supported in offline mode, ignoring&#34;)`
+when passed with `--mode streaming`.
+
+---
+
+## Testing
+
+All 28 new flags + existing 7 flags tested end‑to‑end against real
+meeting
+audio (16000 Hz mono WAV, 49 578 987 samples, ~52 minutes, 3+ speakers).
+Ten escalation scenarios run with increasing parameter coverage,
+including
+production tunes validated against a 6-speaker parakeet pipeline:
+
+| # | Scenario | Flags under test | Segments | Speakers | RTFx |
+|---|----------|-----------------|----------|----------|------|
+| 1 | Default offline | (none) | 517 | 3 | 148× |
+| 2 | Threshold + VBx | `--threshold 0.5 --fa 0.1 --fb 0.9
+--max-vbx-iterations 10 --convergence-tolerance 1e-3` | 524 | 3 | 112× |
+| 3 | Segmentation | `--step-ratio 0.15 --onset-threshold 0.6
+--offset-threshold 0.4 --min-duration-on 0.1 --min-duration-off 0.2` |
+499 | 4 | 79× |
+| 4 | Embedding | `--batch-size 16 --include-overlap --skip-similarity
+0.95 --min-segment-duration 0.5` | 603 | 2 | 150× |
+| 5 | Post‑processing | `--min-gap-duration 0.2 --overlapping-segments`
+| 506 | 3 | 117× |
+| 6 | Speaker count | `--num-speakers 4` | 517 | 4 | 115× |
+| 7 | Export | `--export-embeddings /tmp/test_emb.json --output
+/tmp/test_out.json` | 517 | 3 | 107× |
+| 8 | Full combo | all 22 offline flags + `--debug` | 604 | 4 | 95× |
+| 9 | Streaming | all 8 streaming flags | 1750 | 0 | 51× |
+| 10 | **Production tunes** | `--threshold 0.75 --min-segment-duration
+2.0 --min-gap-duration 1.0 --fb 0.8 --min-duration-on 0.0
+--min-duration-off 0.0` | 159 | 6 | 144× |
+
+**Scenario 2 note:** `--fa 0.1 --fb 0.9 --max-vbx-iterations 10` shifts
+the
+speaker assignment significantly (histogram changes) but preserves the
+same
+speaker count as default on this recording.
+
+**Scenario 3 note:** `--step-ratio 0.15` increases segmentation windows
+from
+845 to ~2250 (85% overlap instead of 80%), producing ~4.5× more
+candidate
+embeddings. Clustering resolves 4 speakers — one more than the default,
+driven by the finer temporal resolution.
+
+**Scenario 4 note:** `--include-overlap` paired with `--skip-similarity
+0.95`
+drops the speaker count from 3 → 2. The skip strategy eliminates ~8% of
+embedding extractions for the dominant speaker (cosine similarity ≥
+0.95),
+causing the weaker third speaker to merge. Reducing threshold to 0.99
+recovers the default count.
+
+**Scenario 6 note:** The clustering step resolves 17 candidate clusters
+→
+constrained to 4 speakers by `numSpeakers`, confirmed in the debug log:
+`&#34;Speaker count 17 outside bounds [4, 4]; re-clustering to 4&#34;`.
+Assignment histogram: `[3: 698, 1: 403, 0: 215, 2: 387]` — all four
+speakers carry substantial embedding counts.
+
+**Scenario 8 note:** Full combination (all 22 flags + `--num-speakers
+4`)
+produces 604 segments across 4 speakers with 2328 embeddings exported.
+`--skip-similarity 0.95` + `--include-overlap` + `--step-ratio 0.15`
+together generate 2328 candidate embeddings (vs 1703 default), with ~8%
+skipped by similarity pruning.
+
+**Embedding export verification:** `--export-embeddings` produces valid
+JSON
+— 1703 entries (default) / 2328 entries (full combo). Each entry carries
+`embedding256`, `rho128`, timestamps, `chunkIndex`, `speakerIndex`, and
+`cluster` ID.
+
+**Production tunes (scenario 10):** Full parakeet‑project production
+config adapted
+from `transcriber.py` env‑var suite for 52‑min 6‑speaker meetings
+(BF1=0.875).
+
+---
+
+## Backwards compatibility
+
+Existing CLI invocations are unaffected. All old flags (`--mode`,
+`--threshold`,
+`--chunk-seconds`, `--overlap-seconds`, `--debug`, `--output`, `--rttm`,
+`--export-embeddings`) keep the same names, default values, and
+semantics.
+Every new flag is optional and defaults to the same value as the
+respective
+config struct&#39;s `.community` / `.default` preset.
+
+| Flag | Old default | New default |
+|------|------------|-------------|
+| `--threshold` | 0.7045655 | 0.7045655 streaming / 0.6 offline |
+| `--chunk-seconds` | 10.0 | 10.0 |
+| `--overlap-seconds` | 0.0 | 0.0 |
+| `--debug` | off | off |
+
+---
+
+## Test plan
+
+- [x] `swift build` clean
+- [x] `fluidaudio process --help` prints usage for both modes
+- [x] `fluidaudio process file.wav --help` prints usage (file path
+before flag)
+- [x] `fluidaudio process file.wav --rttm --help` prints usage
+(greediness fix)
+- [x] `fluidaudio process file.wav --threshold abc` warns, uses defaults
+- [x] `fluidaudio process file.wav --rttm /tmp/x.rttm` warns in
+streaming mode
+- [x] Default offline run — 346 segments, 2 speakers, 150× RTFx
+- [x] `--num-speakers 3` — enforced by VBx re-clustering
+- [x] `--export-embeddings` + `--output` — files written with correct
+content
+- [x] All 22 offline flags together — 468 segments, 2 speakers, 110×
+RTFx
+- [x] All 8 streaming flags — 1040 segments, 48× RTFx
+
+- feat(cli): expose all transcribe config parameters in transcribe command (#614)
+
+## Summary
+
+The `fluidaudio transcribe` CLI exposed only 10 of 20+ tunable
+parameters —
+`SlidingWindowAsrConfig` chunk sizes, context windows, and confirmation
+thresholds were hardcoded, vocabulary rescoring parameters were
+auto-derived
+with no override, and `--model-dir` / `--encoder-precision` only worked
+in
+batch mode. Tuning streaming transcription for different audio
+characteristics
+or resource constraints required recompiling FluidAudio.
+
+This PR rewrites `TranscribeCommand` to expose every field from
+`SlidingWindowAsrConfig` and vocabulary rescoring as CLI flags — 10 new
+parameters across three modes. The command is restructured to follow the
+`ParsedArgs` + `parseArguments()` pattern established in
+`ProcessCommand`,
+mode-specific logic moves to `runBatch()` / `runStreaming()` /
+`runWithVariant()`,
+and `printUsage()` gets mode-grouped synchronous output. Also fixes
+three
+pre-existing bugs found during the rewrite (async-logger exit race,
+`--help` greediness, silent ignore of `--model-dir` in streaming mode).
+
+Net diff: +257 / −208 lines in
+
+`Sources/FluidAudioCLI/Commands/ASR/Parakeet/SlidingWindow/TranscribeCommand.swift`.
+
+---
+
+## Problem
+
+### Streaming transcription was hardcoded to one config preset
+
+`SlidingWindowAsrConfig.streaming` (11s chunks, 0.80 threshold, 2s
+left/right
+context) was hardcoded for all streaming transcriptions. Different audio
+characteristics — short utterances, conversational overlaps,
+low-resource
+devices — need different tuning:
+
+| Scenario | Optimal chunk size | Optimal threshold |
+|----------|--------------------|-------------------|
+| Short utterances (&lt;5s) | 3–5s, tight context | 0.85 |
+| Long meetings | 11–15s, wide context | 0.75 |
+| Low-latency interactive | 2–3s, minimal context | 0.90 |
+
+### Vocabulary rescoring parameters were auto-derived with no override
+
+`ContextBiasingConstants.rescorerConfig(forVocabSize:)` auto-picks
+similarity
+and CBW based on vocabulary size (0.50/3.0 for ≤10 terms, 0.60/2.5 for
+&gt;10).
+But tuning experiments show these defaults aren&#39;t always optimal — the
+CtcEarnings benchmark already uses env-var overrides (`MIN_SIMILARITY`,
+`CBW`)
+for this reason. No such override existed in the CLI.
+
+### `--model-dir` and `--encoder-precision` silently ignored in
+streaming mode
+
+These flags were parsed but never threaded to
+`testStreamingTranscription()`.
+Callers using local model directories or int4 encoders would get
+parakeet-v3
+int8 downloaded instead.
+
+### `printUsage()` text never appeared before `exit()`
+
+Same bug as ProcessCommand — `logger.info()` schedules async write to
+stderr,
+`exit(0)`/`exit(1)` kills the process before the async task flushes.
+
+### `--help` greediness with value-taking flags
+
+`--parakeet-variant` consumed `--help` as its value argument, causing an
+unhelpful &#34;Unknown variant: --help&#34; error instead of showing usage.
+
+---
+
+## Change
+
+### Structure
+(`Sources/FluidAudioCLI/Commands/ASR/Parakeet/SlidingWindow/TranscribeCommand.swift`)
+
+| Before | After |
+|--------|-------|
+| Inline arg parsing + dispatch in one 120-line `run()` | `ParsedArgs`
+struct + `parseArguments()` + `runBatch()` + `runStreaming()` +
+`runWithVariant()` |
+| `printUsage()` via `logger.info()` (async, invisible) | `printUsage()`
+via synchronous `fputs()` to stderr |
+| Individual function parameters (10 per call) | Single `ParsedArgs`
+argument |
+| `SlidingWindowAsrConfig.streaming` hardcoded | Built from `ParsedArgs`
+fields |
+| Two `--help` handlers (early guard + switch case) | Single
+`arguments.contains(&#34;--help&#34;)` check before any parsing |
+
+### New streaming flags (6 — `SlidingWindowAsrConfig` fields)
+
+```
+--chunk-seconds &lt;sec&gt;                Audio chunk size (default: 11.0)
+--hypothesis-chunk-seconds &lt;sec&gt;     Hypothesis update interval (default: 1.0)
+--left-context-seconds &lt;sec&gt;         Left context per window (default: 2.0)
+--right-context-seconds &lt;sec&gt;        Right context lookahead (default: 2.0)
+--min-confirmation-context &lt;sec&gt;     Min audio before confirming text (default: 10.0)
+--confirmation-threshold &lt;0–1&gt;       Confidence to promote volatile→confirmed (default: 0.80)
+```
+
+### New vocabulary boosting flags (3 overrides)
+
+```
+--vocab-min-similarity &lt;0–1&gt;     Minimum string similarity for replacement (default: auto)
+--vocab-cbw &lt;float&gt;              Context-biasing weight boost (default: auto)
+--vocab-margin &lt;sec&gt;             CTC frame alignment margin (default: 0.5)
+```
+
+### New parakeet-variant flag (1)
+
+```
+--variant-chunk-seconds &lt;sec&gt;    Audio chunk size for variant engine (default: 1.0)
+```
+
+### Fix: `--model-dir` and `--encoder-precision` now reach streaming
+mode
+
+Previously these flags only worked in batch mode. Both
+`AsrModels.downloadAndLoad()`
+and `AsrModels.load()` accept `encoderPrecision`, so they are now
+threaded through
+to `runStreaming()` as well.
+
+### Bug fixes landed in this PR
+
+**`printUsage()` not appearing before `exit()`**
+`TranscribeCommand.printUsage()` called `logger.info()`, which schedules
+a
+`Task.detached` write to stderr. `exit(0)` / `exit(1)` killed the
+process
+before the async task flushed. Fixed by writing the usage string
+directly
+via `fputs(usage, stderr); fflush(stderr)` — synchronous, guaranteed
+visible.
+
+**`--help` greediness**
+Two separate `--help` handlers existed — an early guard for `fluidaudio
+transcribe --help`
+and a `switch` case for `fluidaudio transcribe file.wav --help`. Neither
+protected
+against `fluidaudio transcribe file.wav --parakeet-variant --help` — the
+`--parakeet-variant` case greedily consumed `&#34;--help&#34;` as its variant
+name.
+
+Replaced both with a single `if arguments.contains(&#34;--help&#34;)` check at
+the
+top of `run()`, before any positional or flag parsing. This catches
+`--help`
+in any position including after value-taking flags.
+
+**`--model-dir` and `--encoder-precision` silently ignored in streaming
+mode**
+These flags were parsed in `run()` but not threaded to
+`testStreamingTranscription()`.
+Now passed through to `runStreaming()` via `ParsedArgs`, affecting both
+`AsrModels.load(from:version:encoderPrecision:)` and
+`AsrModels.downloadAndLoad(version:encoderPrecision:)` calls.
+
+---
+
+## Testing
+
+All 10 new flags + existing 10 flags tested end-to-end against real
+meeting
+audio (49 578 987 samples, ~52 minutes). Eight scenarios run:
+
+| # | Scenario | Flags under test | Mode | RTFx | Result |
+|---|----------|-----------------|------|------|--------|
+| 1 | `--help` output | (none) | — | — | ✅ All new flags displayed,
+grouped by mode |
+| 2 | Default batch | (none) | batch | 150.89× | ✅ Confidence 0.965 |
+| 3 | Custom streaming | `--chunk-seconds 5.0 --confirmation-threshold
+0.75 --left-context-seconds 1.0` | streaming | 31.91× | ✅ Config
+accepted |
+| 4 | Encoder precision | `--encoder-precision int4` | streaming |
+51.58× | ✅ int4 loaded correctly |
+| 5 | Metadata + JSON | `--metadata --word-timestamps --output-json
+/tmp/out.json` | batch | — | ✅ Valid JSON with word timings |
+| 6 | Help greediness | `file.wav --streaming --help` | — | — | ✅ Help
+shown, not treated as chunk value |
+| 7 | Unknown flag | `file.wav --invalid-flag` | batch | — | ✅ `WARNING:
+Unknown option` printed |
+| 8 | Invalid precision | `--encoder-precision fp32` | — | — | ✅ Error:
+&#34;Valid: int8, int4&#34; |
+
+---
+
+## Backwards compatibility
+
+Existing CLI invocations are unaffected. All old flags (`--help`,
+`--streaming`,
+`--metadata`, `--word-timestamps`, `--output-json`, `--model-version`,
+`--model-dir`, `--custom-vocab`, `--parakeet-variant`, `--language`,
+`--encoder-precision`) keep the same names, default values, and
+semantics.
+Every new flag is optional and defaults to the same value as the
+respective
+hardcoded preset.
+
+| Flag | Old default | New default |
+|------|------------|-------------|
+| `--chunk-seconds` | 11.0 (hardcoded) | 11.0 |
+| `--hypothesis-chunk-seconds` | 1.0 (hardcoded) | 1.0 |
+| `--left-context-seconds` | 2.0 (hardcoded) | 2.0 |
+| `--right-context-seconds` | 2.0 (hardcoded) | 2.0 |
+| `--min-confirmation-context` | 10.0 (hardcoded) | 10.0 |
+| `--confirmation-threshold` | 0.80 (hardcoded) | 0.80 |
+| `--model-dir` (streaming) | ignored | works |
+| `--encoder-precision` (streaming) | ignored | works |
+
+---
+
+## Test plan
+
+- [x] `swift build` clean
+- [x] `fluidaudio transcribe --help` prints usage for all modes
+- [x] `fluidaudio transcribe file.wav --help` prints usage (file path
+before flag)
+- [x] `fluidaudio transcribe file.wav --streaming --help` prints usage
+(greediness fix)
+- [x] `fluidaudio transcribe file.wav --invalid-flag` warns about
+unknown option
+- [x] `fluidaudio transcribe file.wav --encoder-precision fp32` warns
+valid values: int8, int4
+- [x] Default batch mode — 3098.69s audio, RTFx 150.89x, confidence
+0.965
+- [x] Streaming with custom chunk config — `--chunk-seconds 5.0
+--confirmation-threshold 0.75 --left-context-seconds 1.0` accepted
+- [x] Streaming with `--encoder-precision int4` — loads and processes
+correctly (RTFx 51.58x)
+- [x] Batch with `--metadata --word-timestamps --output-json` — valid
+JSON with word timings
+- [x] All new flags work together — no regressions on existing flags
+
+- Add Thoth to Showcase (#610)
+
+Thoth is a privacy-first meeting recorder for Mac that records both
+sides of any call with dual-channel audio, transcribes locally with
+speaker diarization, and summarizes with on-device AI or BYOK cloud.
+Available on the Mac App Store. Uses Parakeet TDT ASR.
+https://thoth-app.com
+
+---------
+
+Co-authored-by: Brandon Weng &lt;18161326+BrandonWeng@users.noreply.github.com&gt;
+
+- deprecate: remove CosyVoice3 and mono Kokoro (#571) (#602)
+
+Closes #571.
+
+## Summary
+
+Hard-removes the CosyVoice3 and single-graph (mono) Kokoro TTS backends.
+KokoroAne (7-stage CoreML chain) is the surviving Kokoro path;
+PocketTTS,
+StyleTTS2, and Magpie are unaffected.
+
+This is a **breaking change** — downstream consumers using
+`KokoroTtsManager`, `CosyVoice3TtsManager`, the `--backend kokoro` /
+`--backend cosyvoice3` CLI flags, or the `Repo.kokoro` /
+`Repo.cosyvoice3`
+HuggingFace registry entries must migrate. KokoroAne (`--backend
+kokoro-ane`,
+`KokoroAneManager`) covers the English + Mandarin surface of the removed
+mono path.
+
+## Removed surface
+
+**Sources**
+- `Sources/FluidAudio/TTS/CosyVoice3/` (all 19 Swift files + CLI
+commands)
+- `Sources/FluidAudio/TTS/Kokoro/` (15 Swift files: `KokoroTtsManager`,
+  `KokoroSynthesizer*`, `KokoroChunker`, `KokoroModelCache`,
+  `KokoroVocabulary`, `LexiconAssetManager`, `TtsResourceDownloader`,
+  `TtsCustomLexicon`, `PhonemeMapper`, `TtsTextPreprocessor`)
+- `Sources/FluidAudio/TTS/TtsModels.swift`
+- `Sources/FluidAudioCLI/Commands/CosyVoice3/`
+
+**Tests**
+-
+`Tests/FluidAudioTests/TTS/{CosyVoice3*,KokoroChunker*,TTSManagerTests,TtsCustomLexiconTests,TtsTextPreprocessorAbbreviationTests}.swift`
+
+**Docs**
+- `Documentation/TTS/{CosyVoice3,Kokoro,voice-quality}.md`
+- `Documentation/ASR/CustomPronunciation.md`
+
+## Edits
+
+- `TtsBackend`: drop `.kokoro` / `.cosyvoice3` enum cases
+- `ModelNames`: drop `Repo.kokoro` / `Repo.cosyvoice3` + related TTS
+enums
+- CLI `tts`, `download`, `tts-benchmark`, `tts-asr-verify`: drop removed
+backends
+- Relocate `TTSError` into `TTS/Shared/TTSError.swift` (still required
+by
+  surviving TTS modules)
+- Move `TtsPhoneticOverride` into `TTS/SSML/SSMLTypes.swift` (sole
+remaining consumer)
+- New `TTS/Shared/{LexiconAssetCache,TtsCacheDirectory}.swift` extracted
+from
+  the deleted mono pipeline for StyleTTS2 + KokoroAne callers
+- StyleTTS2 + G2P rewired off the deleted `TtsResourceDownloader` /
+  `TtsModels` onto the new shared cache helpers
+- SSML usage docs, integration tests, and the top-level README/CLAUDE.md
+  updated to reference surviving backends
+
+`mobius/` Python research artifacts are intentionally untouched.
+
+## Migration
+
+| Removed | Replacement |
+|---|---|
+| `KokoroTtsManager` | `KokoroAneManager` (English + Mandarin via
+`variant:`) |
+| `--backend kokoro` | `--backend kokoro-ane` |
+| `--backend cosyvoice3` | No direct replacement — use
+`KokoroAneManager(variant: .mandarin)` for Mandarin TTS |
+| `TtsCustomLexicon` (mono path) | No replacement — KokoroAne goes `text
+→ G2P → tokens` with no interception |
+| `Repo.kokoro` / `Repo.cosyvoice3` | `Repo.kokoroAne` /
+`Repo.kokoroAneZh` |
+
+## Test plan
+
+- [x] `swift build` — clean
+- [x] `swift format lint --recursive --configuration .swift-format
+Sources/ Tests/` — no new warnings (existing warnings in unrelated
+ASR/Magpie modules untouched)
+- [x] `swift test --filter &#34;TTS|SSML|G2P&#34;` — 176 tests pass, 0 failures
+- [x] Grep guard for `CosyVoice3`, `KokoroTtsManager`,
+`KokoroSynthesizer`, `KokoroChunker`, `TtsCustomLexicon`,
+`TtsTextPreprocessor` returns zero hits across `Sources/`, `Tests/`,
+`Documentation/`, `README.md`, `CLAUDE.md`
+- [ ] CI: `swift-format`, `tests`, `asr-benchmark`,
+`diarizer-benchmark`, `vad-benchmark` workflows pass
+- [ ] Reviewer smoke test: `swift run fluidaudiocli tts &#34;Hello world&#34;
+--backend kokoro-ane --output /tmp/ane.wav`
+- [ ] Reviewer smoke test (Mandarin): `swift run fluidaudiocli tts
+&#34;你好世界&#34; --backend kokoro-ane --variant zh --output /tmp/ane_zh.wav`
+
+- feat(asr): expose tdtConfig in SlidingWindowAsrConfig (#611)
+
+## Problem
+
+`SlidingWindowAsrConfig.asrConfig` (internal) hardcodes `TdtConfig()`,
+which defaults to `blankId = 8192` — the v3 blank token. Callers loading
+a **v2 model** (blankId 1024) into `SlidingWindowAsrManager` have no way
+to express this, and currently rely on `AsrManager`&#39;s internal
+blank-token auto-adaptation to paper over the mismatch.
+
+If that adaptation is ever removed or refactored, v2 dictation would
+silently produce corrupted output (tokens decoded against the wrong
+blank token ID) with no visible error.
+
+## Change
+
+- Add `public let tdtConfig: TdtConfig?` to `SlidingWindowAsrConfig`.  
+- `nil` (default) preserves the existing `TdtConfig()` behaviour — **no
+change for all current callers**.
+- Add `applying(tdtConfig:) -&gt; SlidingWindowAsrConfig` for a clean
+copy-on-write pattern when working from a preset (`.streaming`,
+`.default`).
+- Update the internal `asrConfig` computed var to use `tdtConfig ??
+TdtConfig()`.
+
+## Usage (after this PR)
+
+```swift
+// Pass the correct blankId for the loaded model version
+let config = SlidingWindowAsrConfig.streaming.applying(
+    tdtConfig: TdtConfig(blankId: 1024)  // v2
+)
+let mgr = SlidingWindowAsrManager(config: config)
+```
+
+## Backwards compatibility
+
+All existing call-sites are unaffected — the new parameter defaults to
+`nil` in the primary `init`, and the static presets are unchanged.
+
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix(tts/pockettts): normalize French text and preserve mid-sentence chunks (#584) (#606)
+
+## Summary
+
+Fixes the three regressions from #584 in the French PocketTTS chunker:
+
+- **Smart apostrophe inflation.** U+2019 was being byte-fallback-encoded
+by SentencePiece into three tokens, pushing single sentences over
+`maxTokensPerChunk` and producing three audible fragments. A new
+`normalizeSmartQuotes` pass folds U+2018/U+2019/U+201C/U+201D to ASCII
+before tokenisation.
+- **Mid-sentence chunks re-capitalised.** Clause/word splits routed
+sub-pieces through `normalizeText` with `isMidSentence: false`, which
+uppercased the first letter and appended a period — so `&#34;d&#39;aboutir à une
+trêve&#34;` was spoken as `&#34;D&#39;aboutir à une trêve.&#34;`.
+`chunkTextWithMetadata` now tags each sub-piece, and the normaliser
+skips the uppercase + trailing-period steps for mid-sentence chunks.
+- **Orphaned-preposition tails.** Word splits could leave a stranded
+preposition (e.g. `&#34;stations-service de&#34;`) at the end of a chunk. The
+splitter now rebalances those tails into the previous chunk.
+
+## Language separation
+
+- All synthesizer entry points (`synthesize`, `synthesizeStreaming`,
+`makeSession`) accept `language: PocketTtsLanguage`, defaulting to
+`.english` so existing callers are unaffected.
+- `normalizeForLanguage` applies French-specific normalisation (« » →
+`\&#34;`, U+00A0/U+202F → space) only for `.french24L`.
+- French abbreviation table covers civility titles (M./Mme/Mlle/Mtre),
+honorifics (Dr./Pr./Me), saints (St./Ste.), and references
+(cf./p./pp./vol./chap./ibid./op./cit./av./bd./bld./rte./no.) — prevents
+false sentence breaks.
+- `PocketTtsManager` threads its `language` field through all calls
+(captured into a local before each closure to satisfy SE-0414
+region-based Sendable checks).
+
+## Verification
+
+**Offline text logic** (16 new tests in `PocketTtsStreamingTests`, plus
+a standalone Swift script run outside XCTest since the local environment
+is Command Line Tools only):
+- `splitSentences` on Sample 1 with U+2019 → 1 sentence (was 3 fragments
+pre-fix)
+- `normalizeText(\&#34;d&#39;aboutir à une trêve\&#34;, isMidSentence: true,
+language: .french24L)` → preserves lowercase `d`, no trailing period
+- Pre-fix simulation (`isMidSentence: false`) → produces exactly
+`\&#34;D&#39;aboutir à une trêve.\&#34;`, matching the reporter&#39;s broken output
+- French `Mme.`/`Mlle.` preserved as 1 sentence; English mode would
+produce 4
+
+**End-to-end with the `french_24l` model pack** (auto-downloaded;
+release CLI):
+
+| variant | WAV bytes | audio | wall |
+|---|---|---|---|
+| Sample 1 — U+2019 (verbatim issue input) | 468,524 | 9.76 s | 31.8 s |
+| Sample 1 — ASCII `&#39;` (control) | 441,644 | 9.20 s | 32.3 s |
+| Sample 2 — multi-sentence (stations-service / TotalEnergies) | 560,684
+| 11.68 s | 32.9 s |
+
+Smart-quote and ASCII variants land within 6% (typical flow-matching
+stochastic variance from noise sampling) and complete in the same wall
+time with the same `[PocketTtsSynthesizer]` event count — confirming
+both inputs traverse the same chunk graph after `normalizeSmartQuotes`.
+
+## Test plan
+
+- [x] `swift build` passes
+- [x] `swift format lint` clean on touched files
+- [x] 16 new XCTest cases in `PocketTtsStreamingTests` (covering
+smart-quote normalisation, language dispatch, French abbreviation
+handling, mid-sentence preservation, and verbatim issue #584
+reproductions)
+- [x] End-to-end synthesis of Sample 1 and Sample 2 from the issue with
+the live `french_24l` model — no crashes, no token overflow, WAVs play
+back cleanly
+- [ ] CI to run the full XCTest suite (XCTest unavailable on the local
+Command Line Tools install)
+
+Closes #584.
+
+- fix(asr/nemotron): seed cache_len=1 to avoid ios17.slice_by_index zero-shape warning (#607) (#609)
+
+## Summary
+- Closes #607.
+- On every session start, the Nemotron streaming encoder was being
+called with `cache_len=0` (the natural output of NeMo&#39;s
+`get_initial_cache_state`). CoreML&#39;s iOS17 lowering emits an
+`ios17.slice_by_index` op whose dimension is `cache_len`; shape
+inference fails for a zero-length slice, which prints `E5RT encountered
+an STL exception. msg = Failed to PropagateInputTensorShapes: ...
+ios17.slice_by_index: zero shape error.` and forces a fallback off
+MPSGraph (`Unable to load MPSGraphExecutable ...`).
+- Fix: seed `cache_len = 1` in `resetStates()`. The cache buffers are
+zero-initialized, so this is equivalent to 1 frame of silence preamble —
+no measurable semantic change, and the encoder overwrites `cache_len`
+from its own output on every chunk.
+
+## Why this approach
+A &#34;proper&#34; conversion-side fix exists (trace the encoder with non-zero
+`cache_len` in `mobius/.../convert_nemotron_streaming.py`), but it
+requires re-running the conversion and re-uploading the CoreML model to
+HuggingFace. The Swift-side seed achieves the same runtime outcome with
+no model re-release.
+
+## Test plan
+- [x] `swift build` succeeds.
+- [ ] Run `swift run fluidaudiocli transcribe &lt;audio&gt;` against a
+Nemotron model and confirm the `ios17.slice_by_index zero shape error`
+line no longer appears in stderr.
+- [ ] Re-run the benchmark that produced `benchmark_output.log` and
+confirm `Unable to load MPSGraphExecutable` no longer fires.
+- [ ] Sanity-check a short transcription to confirm output is unchanged
+versus main.
+
+- Timestamping RTTN decoder (#608)
+
+- fix(tts/pocket-tts): repair v1 voice cloning for pocket-tts 2.0.0 (#592) (#601)
+
+## Summary
+
+Fixes #592 — PocketTTS voice cloning produced garbled audio on macOS
+after the `pocket-tts==2.0.0` upgrade. v2 (pre-baked KV snapshot) voices
+were unaffected — only the v1 path (user audio → `mimi_encoder` →
+`cond_step` prefill) was broken.
+
+Two compounding bugs:
+
+### RCA 1 — stale `mimi_encoder`
+The `mimi_encoder.mlpackage` originally published on HF was traced
+against pre-2.0.0 `pocket-tts` (torch 2.9.1, Float32, scalar output) and
+no longer matched the runtime cond_step contract. Re-traced as
+`mimi_encoderv2` from `pocket-tts==2.0.0` (torch 2.11.0, Float16, fixed
+`[1, 1, 240000]` → `[1, 125, 1024]`). Both files now live at the HF repo
+root (legacy file kept for backwards compat); `ModelNames.mimiEncoder`
+points at the new one.
+
+### RCA 2 — missing `bos_before_voice` prepend
+`pocket-tts` 2.0.0 added a learned 1024-d `flow_lm.bos_before_voice`
+buffer that has to be prepended to the audio_prompt during cond_step
+prefill. Without it the FlowLM sees a different token distribution than
+training. Extracted per-language as `constants_bin/bos_before_voice.bin`
+(4096 bytes each, 10 packs × distinct SHA-256s, all verified
+byte-for-byte against the HF upload).
+
+### Swift-side changes
+- `PocketTtsVoiceCloner` pads/truncates input to the encoder&#39;s fixed 240
+000 samples (10 s @ 24 kHz, non-flexible shape) and trims output frames
+to real-audio duration so zero-padded frames don&#39;t bleed into the
+prompt.
+- `PocketTtsSynthesizer+KVCache.prefillKVCache` prepends
+`bos_before_voice` ahead of the audio_prompt on the v1 path. v2
+snapshots skip this — their pre-baked KV cache already encodes the
+prefix.
+- `PocketTtsResourceDownloader.ensureModels` backfills
+`bos_before_voice.bin` for caches that predate this fix (per-file fetch)
+instead of forcing a full language-pack re-download.
+
+Conversion artifacts and per-language SHA-256s documented in
+`mobius/models/tts/pocket_tts/coreml/TRIALS.md` (Phase 7).
+
+## Test plan
+
+- [x] `swift build` clean
+- [x] `swift test --filter PocketTtsConstantsLoaderTests` — 3 new tests
+pass
+- [x] `swift format` applied
+- [x] E2E v1 cloning: `am_michael.wav` (7.5 s) → 3.92 s @ 24 kHz Int16,
+intelligible voice match. KV cache prefill lands at position 113 = 1 BOS
++ 95 voice + 17 text tokens (matches pocket-tts 2.0.0 layout).
+- [x] v2 snapshot regression check: default `alba.safetensors` voice
+still synthesizes correctly (prefill position 140, no `bos_before_voice`
+involvement)
+- [x] Backfill path: deleted `bos_before_voice.bin` from cache, re-ran
+cloning — file auto-fetched from HF (4096 bytes) before synthesis
+- [x] All 10 language packs verified on HF: SHA-256 match between local
+extraction and uploaded `v2/&lt;lang&gt;/constants_bin/bos_before_voice.bin`
+
+- Fixed LS-EEND Memory Leak + Updated Docs (#605)
+
+1. LS-EEND had a memory leak since the autorelease pool was not
+releasing the multiarrays properly and was allocating new ones every
+chunk. Switched to backed output arrays to eliminate new allocations
+2. LS-EEND docs were somewhat stale. Updated them to reflect the new API
+
+---------
+
+- ci: use CLAUDE_CODE_OAUTH_TOKEN for Claude Code Action (#600)
+
+## Summary
+
+Switches the Claude Code Action auth from `ANTHROPIC_API_KEY` to
+`CLAUDE_CODE_OAUTH_TOKEN`, which uses a Claude Max/Pro subscription
+instead of pay-per-token API billing.
+
+The PR #599 workflow run failed with:
+\`\`\`
+Environment variable validation failed:
+- Either ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is required
+\`\`\`
+
+## Required setup (one-time, maintainer)
+
+\`\`\`bash
+# Generate an OAuth token tied to your Claude account
+claude setup-token
+
+# Store it in repo secrets
+gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo FluidInference/FluidAudio
+# (paste the token when prompted)
+\`\`\`
+
+Verify:
+\`\`\`bash
+gh secret list --repo FluidInference/FluidAudio
+\`\`\`
+
+## Test plan
+
+- [ ] Maintainer runs the two commands above to populate the secret
+- [ ] After merge, post \`@claude help\` on a throwaway issue and
+confirm the workflow runs without env-var errors
+
+- ci: add Claude Code Action workflow (#599)
+
+## Summary
+
+Adds `.github/workflows/claude.yml` so the repo can respond to `@claude`
+mentions in issues, issue comments, PR reviews, and PR review comments
+via
+[anthropics/claude-code-action@v1](https://github.com/anthropics/claude-code-action).
+
+Motivation: PR #596 had a reviewer post `@claude review` and nothing
+happened because no workflow was wired up. This PR fixes that for future
+reviews.
+
+## What it does
+
+- Triggers on `issue_comment`, `pull_request_review_comment`,
+`pull_request_review`, `issues` (opened/assigned)
+- Job runs only when the body/title contains `@claude` (cheap filter,
+prevents wasted runs)
+- Uses `ANTHROPIC_API_KEY` repo secret for auth
+- Minimal `read` permissions on contents/PRs/issues; `id-token: write`
+for OIDC
+
+## Required configuration (repo settings)
+
+Before this workflow can run, a maintainer needs to:
+
+1. Install the [Claude GitHub App](https://github.com/apps/claude) on
+`FluidInference/FluidAudio`
+2. Add an `ANTHROPIC_API_KEY` secret in repo Settings -&gt; Secrets and
+variables -&gt; Actions
+
+Without those, the workflow file is inert (no failed runs, just no-op).
+
+## Test plan
+
+- [ ] Maintainer installs the Claude GitHub App and sets
+`ANTHROPIC_API_KEY`
+- [ ] After merge, post `@claude help` on a throwaway issue and confirm
+the workflow fires
+- [ ] Confirm non-`@claude` comments do not trigger the job
+
+- Add Resonant to showcase (#598)
+
+## Summary
+- add Resonant to the FluidAudio showcase table
+
+## Validation
+- documentation-only change; reviewed README diff
+
+- feat(tts/magpie): warmup API for cold-start mitigation (#60 Track 2) (#595)
+
+- docs(tts): refresh Benchmarks.md per #590; wire styletts2 + --variant into tts-benchmark (#593)
+
+## Summary
+
+Closes the work tracked in #590: bring `Documentation/TTS/Benchmarks.md`
+into agreement with what&#39;s actually shipped on `main` for CoreML TTS
+backends, and add the two CLI affordances needed to benchmark the
+in-scope backend × language matrix.
+
+### Doc changes (`Documentation/TTS/Benchmarks.md`)
+
+- Single consolidated **per-backend table** that merges basic info
+(license, language+voice, footprint in **GB**, sample rate, max chunk
+per pass, streaming flag) with performance metrics (TTFT p50/p95, synth
+p50/p95, agg RTFx, peak RSS, WER %, CER %). Five rows: Kokoro ANE en
+(`af_heart`), Kokoro ANE zh (`zf_001`), PocketTTS en (`alba` 6L), Magpie
+en (`John`, batch-only on `main`), StyleTTS2 en (LibriTTS iteration_3,
+zero-shot).
+- Dropped from the top-line per scope decision: non-ANE Kokoro,
+CosyVoice3 zh, PocketTTS 24L variants, Hindi/Cantonese rows. CosyVoice3
+narrative sections (decode budget cap + auto-chunker validation) stay
+verbatim.
+- Refreshed Kokoro ANE per-stage breakdown (post-laishere 7-graph
+chain).
+- Replaced the old Magpie per-stage table with a pointer paragraph
+(`MagpieSynthesisResult.timings` is still populated for callers; sub-1.5
+s TTFA work referenced in #590 lives on `feat/magpie-lt-fusion`, not
+`main`).
+- Corrected PocketTTS footprint to `fp16 ~0.77 / int8 ~0.55 GB` (was
+`~140 / ~520 MB`); enumerated all 10 packs in the corpus matrix; added
+zh to the Kokoro ANE corpus row; added a StyleTTS2 row.
+
+### CLI changes
+(`Sources/FluidAudioCLI/Commands/TtsBenchmarkCommand.swift`)
+
+- New `styletts2` / `style-tts2` backend wired to
+`StyleTTS2Manager.synthesize(text:referenceAudioURL:)`. Requires
+`--reference &lt;wav&gt;`; the shipped iteration_3 `ref_encoder` is fixed at
+`[1, 1, 80, 231]`, so the reference must be exactly **2.875 s @ 24 kHz
+mono** — the harness errors out at predict time on mismatched durations.
+- New `--variant {english|mandarin}` flag for `kokoro-ane` so the
+`zf_001` Mandarin voice pack can be benchmarked alongside `af_heart`.
+Falls back to `english` when unset; the manager constructor now receives
+the parsed `KokoroAneVariant` and the default voice is variant-aware.
+
+### Methodology
+
+100-phrase MiniMax-Multilingual on MacBook Air M2 (16 GB, macOS 26, on
+AC), `--compute-units default`. English WER/CER via Parakeet TDT
+roundtrip; Mandarin CER via `whisper-large-v3` (Python CPU FP32,
+`Scripts/whisper_zh_cer.py`) — macro 4.01% / micro 4.14% across all 100
+zh phrases. WER omitted for Mandarin because `WERCalculator` splits on
+whitespace.
+
+## Test plan
+
+- [x] `swift build` clean on `main`-based branch.
+- [x] `swift format lint --recursive --configuration .swift-format
+Sources/FluidAudioCLI/Commands/TtsBenchmarkCommand.swift` clean.
+- [x] Smoke test: `swift run fluidaudio tts-benchmark --backend
+styletts2 --reference ref.wav --corpus minimax-english --output-json
+/tmp/styletts2-smoke.json` — produces a valid JSON report.
+- [x] Smoke test: `swift run fluidaudio tts-benchmark --backend
+kokoro-ane --variant mandarin --voice zf_001 --corpus minimax-chinese
+--skip-asr --output-json /tmp/kokoro-zh-smoke.json` — pulls the Mandarin
+voice pack and produces audio.
+- [x] Full 100-phrase runs for all five table rows produced under
+`Benchmarks/tts/runs/590/` (gitignored); table numbers come straight
+from those JSON reports.
+- [ ] Reviewer cross-check: footnote markers (`*`, `‡`, `∥`, `¶`) in the
+consolidated table all have matching paragraphs below.
+
+- Make SpeakerManager a struct and de-async DiarizerManager (#591)
+
+### Why is this change needed?
+
+`DiarizerManger.performCompleteDiarization` is `async`, even though no
+asynchronous operations occur when running the models and processing the
+results - this is just plain, synchronous computation. It doesn&#39;t wait
+on the network or things like that. It is important to be able to
+integrate it in to other synchronous compute workflows.
+
+The reason it had to be `async` until now is that the `SpeakerManager`
+type containing the speaker database was a `class`, meaning that it was
+shared mutable state. It was made an `actor` because this shared mutable
+state could be mutated concurrently.
+
+But really, there should not be concurrent mutations to the
+`SpeakerManager` in the first place. The user of this type,
+`DiarizationManager`, is not actually prepared for other code to be
+modifying this database while it is using it, and anybody who is trying
+is almost certainly writing a bug because their code would be logically
+racing with `DiarizationManager` and the results would be unpredictable.
+
+This change makes `SpeakerManager` a struct. It has copy-on-write value
+semantics because it wraps a `Dictionary` for its storage, and mutations
+are marked by the `mutating` keyword and require exclusive ownership of
+the variable -- again, just like `Dictionary`. The compiler statically
+diagnoses attempts to concurrently mutate the `DiarizationManager`&#39;s
+speaker database, so the test for this can be removed (it no longer
+compiles).
+
+&lt;img width=&#34;1108&#34; height=&#34;386&#34; alt=&#34;Screenshot 2026-05-09 at 19 10 26&#34;
+src=&#34;https://github.com/user-attachments/assets/04fc3395-7d46-42a8-b035-4d0b559cc8aa&#34;
+/&gt;
+
+In summary, this change significantly reduces the cognitive load of
+using and maintaining this code, promotes correct usage through static
+diagnostics rather than allowing unpredictable results through
+concurrent mutation of the speaker database, and enables diarization to
+be used in more contexts in more programs.
+
+(BTW, `SpeakerManager` doesn&#39;t strictly _need_ to be `Sendable`, but the
+previous one was by virtue of being an `actor`, so I marked this one as
+being `Sendable` too in case anybody was relying on it. I don&#39;t think
+the implementation of this type is going to change radically in the
+future to the point where that might be a problem)
+
+- refactor(tts): async StyleTTS2 predict + drop non-native Magpie synthesizeStream (#589)</div>
+</div>
+
+<a href="../project/FluidInference_FluidAudio.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
