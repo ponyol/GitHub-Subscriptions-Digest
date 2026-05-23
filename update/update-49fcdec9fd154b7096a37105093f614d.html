@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (31 commits) - firecracker-microvm/firecracker - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (31 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/firecracker-microvm_firecracker.html">firecracker-microvm/firecracker</a> /
+    Updates in main (31 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/firecracker-microvm_firecracker.html">firecracker-microvm/firecracker</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-22 11:16 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/firecracker-microvm/firecracker/commits/main" target="_blank">https://github.com/firecracker-microvm/firecracker/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This update introduces several new features, including an initial RNG seed for AArch64 guests via FDT, MTU advertisement for virtio-net, and VIRTIO_RING_F_EVENT_IDX support for virtio-vsock. The sandbox tool now allows custom kernel boot arguments and supports diverse root filesystems. Key improvements include fixing interrupt ID leaks on device hot-unplug, enhancing FDT validation, and switching the default guest kernel to version 6.1.
+
+Это обновление представляет несколько новых функций, включая начальное зерно RNG для гостей AArch64 через FDT, объявление MTU для virtio-net и поддержку VIRTIO_RING_F_EVENT_IDX для virtio-vsock. Инструмент sandbox теперь позволяет передавать пользовательские аргументы загрузки ядра и поддерживает различные корневые файловые системы. Среди ключевых улучшений — исправление утечек ID прерываний при горячем отключении устройств, улучшение проверки FDT и переключение ядра гостевой системы по умолчанию на версию 6.1.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- changelog: add note about `rng-seed` FDT node
+
+Mention addition of new FDT node with initial random seed for the guest.
+
+Signed-off-by: Egor Lazarchuk &lt;yegorlz@amazon.co.uk&gt;
+
+- vmm: aarch64: provide initial RNG seed via FDT
+
+Older aarch64 machines may not have hardware random generators. Because
+of this it takes a lot of time for the entropy to built up naturally in
+VMs booted on such hosts.
+
+To mitigate this add `rng-seed` FDT node which will contain 64 bytes of
+the initial seed guest can use.
+
+Note about x86_64: Since we only support FDT on aarch64, this is aarch64
+only solution. On x86_64 the only option we have is to use
+`SETUP_RNG_SEED` setup_data section in the Linux boot protocol. The
+problem with it is that it only works with Linux boot which is less
+preferable than PVH boot (which does not support setup_data and thus
+`SETUP_RNG_SEED`). Additionally there is no ACPI support for providing
+initial seed as well. The only proper way to do this on x86_64 is to use
+EFI, which we don&#39;t do right now.
+
+Signed-off-by: Egor Lazarchuk &lt;yegorlz@amazon.co.uk&gt;
+
+- refactor: fdt: add simple smoke test for FDT validity
+
+Add a test to validate that the FDT we build at least syntactically
+correct. Also validate that the top level root nodes are present as
+expected. Doing more involved checking in unit test is not really
+necessary since the only way to know if Linux is satisfied with our FDT
+is to boot a VM and check corresponding properties. This is already done
+in our CI.
+
+Signed-off-by: Egor Lazarchuk &lt;yegorlz@amazon.co.uk&gt;
+
+- refactor: fdt: remove redundant FDT blob tests
+
+These tests were only for changes in the FDT layout by comparing old
+binary blobs with new ones. This is quite pointless since after any
+failures there we just regenerate these blobs again and make them match.
+Additionally this does not prevent bad but technically valid FDT
+configurations.
+
+The remaining `test_create_fdt_with_devices` is also removed since it
+does not provide any value as well.
+
+Signed-off-by: Egor Lazarchuk &lt;yegorlz@amazon.co.uk&gt;
+
+- virtio/net: advertise MTU to the guest via VIRTIO_NET_F_MTU
+
+Add an optional `mtu` field to the `NetworkInterface` API (both the
+REST API and JSON config file). When set, the virtio-net device
+advertises VIRTIO_NET_F_MTU and places the value in config space at
+offset 10 (matching the virtio_net_config layout), allowing the guest
+driver to configure the interface MTU automatically.
+
+When `mtu` is absent (the default), VIRTIO_NET_F_MTU is not advertised
+and the guest uses its own default MTU — preserving existing behaviour.
+
+Implementation details:
+- Extend `ConfigSpace` with padding fields `_status` and
+  `_max_virtqueue_pairs` at offsets 6 and 8 to correctly place `mtu`
+  at offset 10 per the virtio spec (#[repr(C)], ByteValued safe)
+- `Net::new()` and `new_with_tap()` accept `mtu: Option&lt;u16&gt;`; the
+  feature bit is set only when `Some`
+- `Net::mtu()` accessor reflects the advertised value for use in
+  snapshot save and API GET responses
+- `NetConfigSpaceState` gains `mtu: Option&lt;u16&gt;` with
+  `#[serde(default)]` for backward-compatible snapshot restore
+- validate MTU range [68, 65535] in new_with_tap()
+- add unit tests for VIRTIO_NET_F_MTU feature bit and mtu()
+- Swagger, docs/device-api.md, and CHANGELOG updated accordingly
+
+Signed-off-by: Anastassios Nanos &lt;ananos@nubificus.co.uk&gt;
+
+- refactor(tests): use uvm_plain instead of uvm_plain_6_1
+
+As now uvm_plain is 6.1, drop uvm_plain_6_1 and use uvm_plain directly
+in those tests.
+No changes to the tests.
+
+Signed-off-by: Riccardo Mancini &lt;mancio@amazon.com&gt;
+
+- tests: switch default guest kernel version to 6.1
+
+We expect most customers to use 6.1 rather than 5.10 nowadays.
+
+Signed-off-by: Riccardo Mancini &lt;mancio@amazon.com&gt;
+
+- refactor(tests): introduce guest_kernel_default_debug fixture
+
+Alias guest_kernel_6_1_debug as guest_kernel_default_debug and update
+uvm_plain_debug and test_gdb to use it.
+
+Signed-off-by: Riccardo Mancini &lt;mancio@amazon.com&gt;
+
+- refactor(tests): introduce guest_kernel_default fixture
+
+Introduce a new fixture used by tests that don&#39;t care about the kernel
+version.
+This will make it easier to switch the default version in the next
+commits.
+
+Signed-off-by: Riccardo Mancini &lt;mancio@amazon.com&gt;
+
+- refactor(tests): use guest_kernel_6_1_debug fixture in test_gdb
+
+Use the existing guest_kernel_6_1_debug fixture instead of manually
+constructing the debug kernel path from the kernel fixture.
+
+Signed-off-by: Riccardo Mancini &lt;mancio@amazon.com&gt;
+
+- resources: Install dwarves for CONFIG_DEBUG_INFO_BTF support
+
+The debug kernel config enables CONFIG_DEBUG_INFO_BTF which requires
+pahole (provided by the dwarves package) to generate BTF information.
+Without it, the kernel build fails.
+
+Fixes: d15b66deda (&#34;chore: enable BTF debug info in guest debug config&#34;)
+Signed-off-by: Ilias Stamatis &lt;ilstam@amazon.com&gt;
+
+- refactor: vmm: remove save_restore test in ResourceAllocator
+
+This test does not provide any value since it does not verify any of our
+custom logic (except one line `Persist` impl). Remaining logic in the
+test belongs to the `bincode`/`vm_allocator` crates and it should be
+tested in those crates.
+
+Signed-off-by: Egor Lazarchuk &lt;yegorlz@amazon.co.uk&gt;
+
+- refactor: vmm: remove redundant allocate_system_memory wrapper
+
+Following same logic from previous commit, remove this wrapper as well.
+
+Signed-off-by: Egor Lazarchuk &lt;yegorlz@amazon.co.uk&gt;
+
+- refactor: vmm: remove redundant allocate_64bit_mmio_memory wrapper
+
+Following same logic from previous commit, remove this wrapper as well.
+
+Signed-off-by: Egor Lazarchuk &lt;yegorlz@amazon.co.uk&gt;
+
+- refactor: vmm: remove redundant allocate_32bit_mmio_memory wrapper
+
+This wrapper was used only once in the code and it generally does not
+follow the patter of using underlying allocators directly like the rest
+of the code does.
+
+The alternative to removing this is to do a exact opposite and find all
+places where allocators are used directly and make them use wrappers.
+This will not provide any benefits since wrappers have no logic in them
+and will only increase the line count and indirection overhead.
+
+Signed-off-by: Egor Lazarchuk &lt;yegorlz@amazon.co.uk&gt;
+
+- chore(deps): Bump the firecracker group with 2 updates
+
+Bumps the firecracker group with 2 updates: [aws-lc-rs](https://github.com/aws/aws-lc-rs) and [aws-lc-sys](https://github.com/aws/aws-lc-rs).
+
+
+Updates `aws-lc-rs` from 1.16.3 to 1.17.0
+- [Release notes](https://github.com/aws/aws-lc-rs/releases)
+- [Commits](https://github.com/aws/aws-lc-rs/compare/v1.16.3...v1.17.0)
+
+Updates `aws-lc-sys` from 0.40.0 to 0.41.0
+- [Release notes](https://github.com/aws/aws-lc-rs/releases)
+- [Commits](https://github.com/aws/aws-lc-rs/compare/aws-lc-sys/v0.40.0...aws-lc-sys/v0.41.0)
+
+---
+updated-dependencies:
+- dependency-name: aws-lc-rs
+  dependency-version: 1.17.0
+  dependency-type: direct:production
+  update-type: version-update:semver-minor
+  dependency-group: firecracker
+- dependency-name: aws-lc-sys
+  dependency-version: 0.41.0
+  dependency-type: indirect
+  update-type: version-update:semver-minor
+  dependency-group: firecracker
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+
+- doc(tests): document FC_TEST_DUMP_ON_FAILURE env var
+
+Add an &#34;Environment variables&#34; subsection to tests/README.md covering
+the FC_TEST_* runtime toggles understood by the test framework. The
+new FC_TEST_DUMP_ON_FAILURE flag (introduced alongside the gating
+change in tests/conftest.py) is documented next to the existing
+FC_TEST_SKIP_ARTIFACT_COPY so users can discover it from the same
+place.
+
+Signed-off-by: Jack Thomson &lt;jackabt@amazon.com&gt;
+
+- ci(perf): enable FC_TEST_DUMP_ON_FAILURE for nightly perf pipeline
+
+The integration test framework now gates its heavy post-failure dump
+(full snapshot + chroot copy) behind FC_TEST_DUMP_ON_FAILURE=1. Set
+this for every step the perf pipeline generates so we still get the
+artifacts when triaging performance flakes.
+
+Signed-off-by: Jack Thomson &lt;jackabt@amazon.com&gt;
+
+- fix(tests): gate heavy post-failure dump behind FC_TEST_DUMP_ON_FAILURE
+
+The microvm_factory failure block previously took a full snapshot and
+copied every regular file at the uVM chroot root for every failed test,
+on every developer machine and PR run. This is wasteful: dmesg and the
+guest serial console triage most failures on their own.
+
+Cheap artifacts (host-dmesg.log, screen_log, flush_metrics) stay always
+on. Heavy artifacts (post_failure.mem, post_failure.vmstate, id_rsa,
+chroot file copy) now run only when FC_TEST_DUMP_ON_FAILURE=1.
+
+Signed-off-by: Jack Thomson &lt;jackabt@amazon.com&gt;
+
+- feat(sandbox): Add --boot-args option for custom kernel boot arguments
+
+Allow passing custom kernel boot arguments to the microVM via the
+sandbox tool. Arguments are joined with spaces and forwarded to
+basic_config.
+
+Signed-off-by: Remo Andreoli &lt;andrremo@amazon.com&gt;
+
+- docs: update MAINTAINERS.md with jaehoc
+
+Add Jay Chung as a maintainer as part of team.
+
+Signed-off-by: Jay Chung &lt;jaehoc@amazon.com&gt;
+
+- refactor: vmm: remove `create_msix_group` helper
+
+Create MsixVectorGroup types directly with explicit number of vectors
+instead of using `create_msix_group` since it makes it more explicit to
+the test reader how much vectors are in the group.
+
+Signed-off-by: Egor Lazarchuk &lt;yegorlz@amazon.co.uk&gt;
+
+- seccomp: add KVM_IRQFD to vmm filter
+
+During VM shutdown we drop MsixVectorGroup which calls into `KVM_IRQFD`.
+This requires us to add `KVM_IRQFD` to VMM thread filter.
+
+Additionally this fixes a potential seccomp failure where we would try
+to unplug a device with still active MSIx irqs. Currently thid does not
+happen in CI because we ask the guest to disabled the device before
+unplugging it. This action disables device interrupts and so the VMM
+thread never calls `KVM_IRQFD` on device detach. If we were to detach
+the device from the guest without asking it first, we would have hit the
+seccomp failure.
+
+Signed-off-by: Egor Lazarchuk &lt;yegorlz@amazon.co.uk&gt;
+
+- vmm: interrupts: fix: add Drop for MsixVectorGroup
+
+Currently without Drop on MsixVectorGroup destroying devices during
+hot-unplug leaks interrupt ids because there is no code to clean them
+up. Implementing Drop on MsixVectorGroup is the simplest way to fix this
+issue.
+
+Signed-off-by: Egor Lazarchuk &lt;yegorlz@amazon.co.uk&gt;
+
+- devtool: Remove AVIC enablement on AMD
+
+Revert the AVIC enablement introduced in 3968ac4a0e1f (&#34;Enable AVIC on
+AMD&#34;). Enabling AVIC required unloading and reloading the kvm_amd module
+which was fragile: during the reload window /dev/kvm disappears, causing
+concurrent unit tests to fail with &#34;Cannot create Kvm&#34;. No measurable
+performance improvement was observed with AVIC enabled.
+
+Signed-off-by: Ilias Stamatis &lt;ilstam@amazon.com&gt;
+
+- fix(tests): clear test artifacts dir before test runs
+
+Before each test run, we copy artifacts from the build/artifacts/ path
+to /srv/test_artifacts. This directory was not cleared up though, which
+led to issues with artifact A/B testing, where A&#39;s artifacts persisted
+and were selected by pytest over B&#39;s artifacts.
+
+To prevent this, clear the test artifacts dir at the beginning of each
+run.
+
+Signed-off-by: James Curtis &lt;jxcurtis@amazon.co.uk&gt;
+
+- fix(tests): don&#39;t perform crypto self-tests on boot
+
+With the Kconfig update in commit 8a7e8a0,
+CONFIG_CRYPTO_MANAGER_DISABLE_TESTS was changed from `y` to `not set`.
+Crypto self-tests are required as part of the FIPS-enabled boot tests
+and we will use the same Kconfig for testing FIPS-enabled VMs, so
+instead of disabling tests at config level again, we set
+`cryptomgr.notests` kernel boot arg to skip them.
+
+To validate the fix, A/B tests were run:
+- Firstly with the Kconfig option set to `y` vs `not set` to validate
+  the regression
+- Then with the boot arg set, to validate that the regression
+  disappears
+
+Signed-off-by: James Curtis &lt;jxcurtis@amazon.co.uk&gt;
+
+- fix(sandbox): permit non-Ubuntu rootfs and fix path resolution
+
+Previously, only Ubuntu rootfs were allowed to be used. Now, it allows
+any file ending in .ext4, with the defaults being AL2023 or Ubuntu in
+it&#39;s absence.
+
+Also allow host paths to be resolved. The sandbox tool is run from
+inside the container, so it expected artifact paths to have /firecracker
+to be prepended. Now, it can accept host paths within the Firecracker
+workspace and convert them to container paths.
+
+Signed-off-by: James Curtis &lt;jxcurtis@amazon.co.uk&gt;
+
+- doc(changelog): add entry for EVENT_IDX support in vsock device
+
+Add a CHANGELOG.md entry documenting the new notification suppression
+support in the virtio-vsock device via the EVENT_IDX virtio feature.
+
+Signed-off-by: Riccardo Mancini &lt;mancio@amazon.com&gt;
+
+- feat(vsock): Add VIRTIO_RING_F_EVENT_IDX support
+
+Enables notification suppression in vsock device through EVENT_IDX
+feature:
+
+- Advertise VIRTIO_RING_F_EVENT_IDX in AVAIL_FEATURES
+- Call enable_notif_suppression() on activate when EVENT_IDX is
+  negotiated
+- Use pop_or_enable_notification() in process_rx/process_tx
+- Gate return value with prepare_kick() so signal_used_queues is only
+  called for queues that actually need a kick, preserving the existing
+  trigger_queues coalescing optimization
+
+Signed-off-by: Riccardo Mancini &lt;mancio@amazon.com&gt;
+
+- chore(vsock): remove dead code
+
+Remove commented-out code and unused VSOCK_NUM_QUEUES import.
+
+Signed-off-by: Riccardo Mancini &lt;mancio@amazon.com&gt;</div>
+</div>
+
+<a href="../project/firecracker-microvm_firecracker.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

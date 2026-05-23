@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in develop (4 commits) - timeplus-io/proton - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in develop (4 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/timeplus-io_proton.html">timeplus-io/proton</a> /
+    Updates in develop (4 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/timeplus-io_proton.html">timeplus-io/proton</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-22 14:15 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/timeplus-io/proton/commits/develop" target="_blank">https://github.com/timeplus-io/proton/commits/develop</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>The update significantly enhances shard pruning by enabling it for `IN-subqueries` and `literal tuple-IN` conditions, using early materialization and rewriting via the new `optimize_skip_unused_shards_with_subqueries` setting. Key improvements include robust handling of `NULL` values, strict conjunctive position requirements for empty `IN` conditions, and on-demand subquery materialization to optimize query execution. The changes also introduce comprehensive hardening, such as enforcing subquery depth limits, capping materialized set sizes, and deduping tuple-IN values, alongside extensive testing and improved error handling for greater stability.
+
+---
+
+**Russian translation:**
+
+Обновление значительно улучшает обрезку шардов, позволяя применять ее к `IN-subquery` и `literal tuple-IN` условиям с помощью ранней материализации и переписывания через новую настройку `optimize_skip_unused_shards_with_subqueries`. Ключевые улучшения включают надежную обработку значений `NULL`, строгие требования к конъюнктивной позиции для пустых условий `IN`, а также материализацию подзапросов по требованию для оптимизации выполнения запросов. Изменения также вводят комплексные усиления, такие как контроль глубины подзапросов, ограничение размеров материализуемых наборов и дедупликация значений в `tuple-IN`, наряду с обширным тестированием и улучшенной обработкой ошибок для повышения стабильности.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Auto version update to [3.0.23] [158]
+
+- port: digit-group highlighting + obfuscator/lexer fixes (#1180)
+
+- Auto version update to [3.0.22] [157]
+
+- Enable shard pruning for IN-subquery and literal tuple-IN (#1175)
+
+* Add optimize_skip_unused_shards_with_subqueries setting
+
+When enabled, IN-subqueries are materialized early via PreparedSets
+and rewritten as literal IN for shard pruning. Off by default for
+back-compat.
+
+Tests: 03000_subquery_in_shard_pruning.sql
+
+* test: fix 03000_subquery_in_shard_pruning for local Stream engine
+
+For local Stream engine, force_optimize_skip_unused_shards/error 507
+is Distributed-only — we cannot use it to assert &#34;pruning happened.&#34;
+
+Switch the test to verify correctness across both setting states,
+add a sleep(3) to wait for async ingest, cast NULL → nullable(int32)
+to avoid pre-existing type-inference issues, and use table()
+for bounded historical reads.
+
+* Push literal tuple-IN to shard pruning
+
+Decompose `(c1, c2, ...) IN ((v11, v12, ...), (v21, v22, ...), ...)`
+into a disjunction of conjunctions inside analyzeFunction&#39;s &#34;in&#34; branch.
+Previously only single-identifier LHS was recognized, so any tuple-IN
+silently skipped shard pruning and fanned out to every shard.
+
+Handles both AST shapes:
+- RHS as a single ASTLiteral with Field type Tuple (parser auto-types).
+- RHS as `tuple_cast(tuple_cast(...), tuple_cast(...))` (explicit casts).
+
+For the cast form, the inner value can be either ASTLiteral or
+`cast(literal, type)` — analyzeEquals retypes via convertFieldToType.
+
+* Bail out of subquery shard rewrite on any NULL element
+
+Previously, NULL elements in the subquery result were silently dropped
+while building the rewritten literal tuple. That is unsafe when the
+sharding key is nullable or when transform_null_in=1: rows with a NULL
+sharding key would be pruned even though IN semantics still match them.
+
+Detect NULL early and fall back to the original subquery so shard
+pruning gives up (reads every shard) instead of mis-pruning. Update the
+03000 test comment to reflect the new conservative semantics and add a
+non-literal-value tuple-IN case to 03001 to lock in the fallback path.
+
+* Use shared isFunctionCast helper for tuple-IN value unwrap
+
+Replace the open-coded cast-name list with isFunctionCast from
+Parsers/ASTHelpers.h, which is the canonical check used elsewhere
+in the tree (FunctionParameterValuesVisitor, OptimizeIfWithConstantConditionVisitor).
+
+The hard-coded &#34;CAST&#34; branch was dead code anyway: CAST is registered
+as case-insensitive against the canonical lowercase &#34;cast&#34;, and
+FunctionNameNormalizer runs before this analyzer sees the AST.
+
+* Require pure conjunctive position for empty-IN shard skip
+
+The previous check fired whenever the rewrite saw an empty IN-subquery
+and no `or`/`not`/`not_in` anywhere in the WHERE tree. That misclassified
+predicates like `if(flag, id IN (SELECT 1 WHERE 0), 1)`: with `flag = 0`
+the `if` branch returns `1`, so the row should pass, but the rewrite
+returned zero shards and the query produced an empty result.
+
+Switch to a positive invariant: an empty IN only short-circuits shard
+selection when every ancestor up to the root is `and(...)`. `ASTExpressionList`
+(the wrapper around a function&#39;s arguments) is transparent so position
+still propagates through. Every other operator -- `or`, `not`, `not_in`,
+`if`, `multi_if`, `coalesce`, `tuple`, comparisons, arbitrary user
+functions -- breaks conjunctive position.
+
+Move the rewrite helper out of the anonymous namespace into
+`DB::Internal` and declare it in `PruneShardsInternal.h` so a focused
+gtest can exercise the traversal directly without the heavy
+`prepared_sets` setup. 12 cases cover the conjunctive vs.
+non-conjunctive shapes.
+
+Add SQL regressions for `if(...)`, `multi_if(...)`, `tuple_element(...)`,
+a historical IN-subquery, and a streaming IN-subquery (which must
+surface the existing NOT_IMPLEMENTED error rather than misbehave).
+
+* Tolerate zero-shard pruning result in stream read path
+
+Shard pruning can now legitimately yield zero shards when
+`optimize_skip_unused_shards_with_subqueries` proves the WHERE
+predicate is unsatisfiable (for example, an empty IN-subquery in pure
+conjunctive position). Two code paths in `StorageStream` assumed at
+least one shard would survive and trapped on the empty case:
+
+- `getQueryProcessingStage` dereferenced `shards_to_read.shards.back()`
+  on an empty vector to delegate to the underlying shard&#39;s stage.
+- `doRead` divided the thread budget by `shards_to_read.shards.size()`,
+  triggering a division-by-zero trap in debug builds.
+
+Return `FetchColumns` from `getQueryProcessingStage` and an
+uninitialized `query_plan` from `doRead` when there are no shards to
+read. `InterpreterSelectQuery` already detects an uninitialized plan
+and attaches a `NullSource` via `addEmptySourceToQueryPlan`, so the
+rest of the pipeline runs unchanged on an empty source.
+
+* Materialize IN-subqueries on demand during shard pruning
+
+`pruneShards` looked up each IN-subquery in `query_info.prepared_sets`,
+but that map is empty at this point in the pipeline:
+`InterpreterSelectQuery::getSampleBlockImpl` calls
+`storage-&gt;getQueryProcessingStage` (and therefore shard pruning) before
+`ExpressionAnalysisResult` runs `ActionsVisitor` over WHERE/PREWHERE
+and registers the subqueries. The lookup always missed and the
+`optimize_skip_unused_shards_with_subqueries` rewrite was effectively
+a no-op for every IN-subquery in this path.
+
+When the lookup misses for an `ASTSubquery` operand, build the
+subquery&#39;s query plan via `interpretSubquery` and register it via
+`addFromSubquery` against the same tree-hash so the existing
+`buildOrderedSetInplace` consumes it as usual. `ActionsVisitor`&#39;s
+later visit reuses our entry through the same hash, so no duplicate
+work happens.
+
+Two safety nets keep this from regressing existing queries:
+- Streaming subqueries cannot be materialized into a fixed set
+  (`buildOrderedSetInplace` would throw `NOT_IMPLEMENTED`); detect them
+  via `subquery_plan-&gt;isStreaming()` and bail out so the original AST
+  reaches the normal execution path.
+- Any other failure during the subquery build (parse/resolve errors,
+  unsupported shapes, etc.) is swallowed by a broad catch, again
+  leaving the AST unchanged.
+
+* Harden early IN-subquery shard pruning for nested and streaming queries
+
+Two correctness issues surfaced once the on-demand materialization path
+started actually firing.
+
+1. max_subquery_depth was being bypassed.
+
+   The rewrite was calling `interpretSubquery(right, context, 1, {})` with a
+   hardcoded depth, so a deeply-nested query whose normal expression analysis
+   would have thrown TOO_DEEP_SUBQUERIES could materialize successfully here
+   and the result would be cached in `prepared_sets`. `ActionsVisitor`&#39;s later
+   visit would then find the cached set by hash and skip the interpreter call
+   entirely, silently swallowing the user&#39;s depth limit.
+
+   Plumb `query_info.subquery_depth` through `SelectQueryInfo` (populated by
+   `InterpreterSelectQuery` from `options.subquery_depth`), pass it into the
+   rewrite helper, and forward it to `interpretSubquery`. The depth check at
+   `InterpreterSelectQuery.cpp:394` now fires consistently regardless of which
+   path materializes the subquery first.
+
+2. Streaming queries could be terminated by zero-shard pruning.
+
+   A `SELECT FROM stream WHERE id IN (SELECT 1 WHERE 0)` is provably
+   unsatisfiable right now, but the query must remain continuous -- it should
+   keep waiting for matching events, not finish immediately with an empty
+   result. Both zero-shard exits in `skipUnusedShards` now fall back to
+   `all_shards` for streaming queries:
+   - the empty-IN-in-conjunctive-position short-circuit
+   - the post-`evaluateExpressionOverConstantCondition` empty-result branch
+
+   Historical queries are unchanged -- they still get the finite empty source
+   via `addEmptySourceToQueryPlan`.
+
+Tests:
+- 03000_subquery_in_shard_pruning.sql: nested `max_subquery_depth = 2` case
+  asserts serverError 162; streaming empty-IN case asserts serverError 159
+  (TIMEOUT_EXCEEDED) under `max_execution_time = 3`, proving the query stays
+  continuous instead of finishing on an empty source.
+- gtest call site updated for the new helper signature.
+
+* Add EXPLAIN coverage for shard pruning tests
+
+* Tighten on-demand IN-subquery materialization per Timeplus review
+
+A handful of small, targeted hardening passes on the early shard-pruning
+rewrite, each with a corresponding gtest or SQL guard so future regressions
+fail loudly rather than silently degrade.
+
+* Narrow the broad `catch (...)` around `interpretSubquery` /
+  `addFromSubquery` to `catch (const DB::Exception &amp;)`. Streaming-source
+  NOT_IMPLEMENTED and analyzer resolve failures are DB::Exception; anything
+  outside that hierarchy (std::bad_alloc, std::logic_error from broken AST
+  invariants) is a real bug and should propagate instead of silently turning
+  into &#34;no shard pruning&#34;.
+
+* Cap the materialized explicit-set size before `buildOrderedSetInplace`.
+  Previously a subquery returning a million rows would allocate a million
+  Field copies only to be rejected as too large for shard pruning a few
+  lines later. `Internal::addSubqueryPlanForShardPruning` clamps
+  `use_index_for_in_with_subqueries_max_values` to `limit + 1` (the `+1`
+  preserves the existing total_rows &gt; limit detection) before registering
+  the future set.
+
+* Extract `Internal::buildSubqueryPlanForShardPruning` so the
+  `subquery_depth` forwarding is a named, single-purpose function rather
+  than an inline statement. Paired with a focused gtest
+  (`BuildSubqueryPlanForwardsSubqueryDepth`) that constructs the helper
+  with `subquery_depth = max_subquery_depth = 50` and asserts
+  TOO_DEEP_SUBQUERIES fires -- a regression to a hardcoded small depth
+  inside the body would no longer trigger the depth check and the test
+  would fail with `Expected TOO_DEEP_SUBQUERIES`.
+
+* Move `subquery_depth` off `SelectQueryInfo` and onto `TreeRewriterResult`.
+  Storage-level optimizations that materialize subqueries early need to
+  preserve the same `max_subquery_depth` semantics as the normal expression
+  analysis path; the depth belongs to the analyzer result, not the storage
+  query info. `InterpreterSelectQuery` no longer needs to copy it onto
+  query_info in two places; `TreeRewriter::analyzeSelect` sets it once.
+
+* Tighten StorageStream&#39;s empty-shard branch. Pruning to zero shards is
+  only meaningful for historical reads (downstream `addEmptySourceToQueryPlan`
+  wires up a `NullSource`). Any other mode reaching that branch is a logic
+  bug, so throw LOGICAL_ERROR there as defense-in-depth -- complements the
+  existing fallback-to-all-shards in `skipUnusedShards` for streaming.
+
+* Move Field from non-const accessor into the literal-tuple in the rewrite
+  hot path. Negligible for scalar fields, real for heap-typed sharding keys
+  (string, array).
+
+* Expand gtest coverage:
+   - SubqueryPlanMaterializesExplicitSetForShardPruning: full
+     ReadFromPreparedSource + addFromSubquery round-trip.
+   - AstSubqueryDbExceptionFallsBackWithoutRewrite: analyzer failure
+     produces DB::Exception that the rewrite catches; AST stays unchanged.
+   - BuildSubqueryPlanForwardsSubqueryDepth: regression guard for the
+     depth-forwarding contract described above.
+   - StreamingPlanCannotBeMaterializedForShardPruning: explicit assertion
+     on `canMaterializeSubqueryForShardPruning`.
+
+* Rework 03000_subquery_in_shard_pruning.sql max_subquery_depth coverage:
+  drop the non-isolating success case (both fix and the previous hardcoded
+  depth=1 path returned the same row count, so it didn&#39;t guard anything),
+  keep the serverError 162 case as user-visible behavior coverage. The
+  actual depth-forwarding regression guard now lives in the gtest where
+  the parameter can be set directly without hunting for a query shape that
+  exposes the difference indirectly.
+
+* Apply post-review style alignment and broaden gtest coverage
+
+Three focused cleanups picked up from the second pass of inline review
+comments. No semantic change to the rewrite or the rest of the pipeline.
+
+* Drop the unreachable `if (tuple.empty())` block after the literal-tuple
+  loop in `rewriteInSubqueriesForShardPruning`. The upstream
+  `values-&gt;size() == 0` check guarantees the loop body runs at least once,
+  and the only way to skip a `tuple.push_back` is the NULL early-return
+  -- so the post-loop empty branch can never fire. Replace with a
+  `chassert(!tuple.empty())` to document the invariant and catch a
+  future regression that breaks one of those two preconditions.
+
+* Rename `DB::Internal` -&gt; `DB::detail`, and `PruneShardsInternal.h` -&gt;
+  `PruneShardsDetail.h`. The codebase already uses lowercase `detail` for
+  per-translation-unit helpers (V8/PkuSupport.h, several
+  AggregateFunctions/*.h); the original `Internal` name was unique to
+  this PR. Inside the gtest, qualify references as `DB::detail::...` to
+  disambiguate from the unrelated `::detail` namespace exposed by
+  `base/find_symbols.h` once `using namespace DB;` is in scope.
+
+* Drop the `namespace DB::tests { ... }` wrapper in the gtest. Existing
+  Storages gtests (`gtest_columns_description_normalize.cpp`,
+  `gtest_transform_query_for_external_database.cpp`,
+  `gtest_SplitTokenExtractor.cpp`) use `using namespace DB;` at file
+  scope with anonymous-namespace helpers and file-scope `TEST()` macros.
+  Align with that.
+
+* Tidy the PruneShards.cpp includes (alphabetize the Parsers/AST*.h
+  block, move `Common/Exception.h` next to the rest of the `Common/*`
+  group) and add the missing `extern const int ARGUMENT_OUT_OF_BOUND`
+  declaration alongside the other ErrorCodes used in the TU.
+
+* Add three gtest cases that target the rewrite&#39;s AST-mutation path,
+  which previous coverage only exercised end-to-end via the SQL tests:
+   - NonEmptyInRewritesToLiteralTuple: a bounded 2-element set must
+     replace the `ASTTableIdentifier` RHS with an `ASTLiteral` of
+     `Tuple{1, 2}`.
+   - NullElementLeavesRhsUnchanged: a Nullable(Int32) set containing
+     NULL (transform_null_in=true) must bail out without mutating the
+     RHS, since the literal-tuple rewrite cannot reproduce the NULL
+     semantics of the original IN.
+   - BoundedNonEmptyInExceedingLimitDoesNotRewrite: `total_rows &gt; limit`
+     must short-circuit without mutating the AST, so the safety valve
+     on `optimize_skip_unused_shards_limit` keeps the IN intact.
+
+The new `PreparedFixture` + `makeIntInFixture` / `makeNullableIntInFixture`
+helpers populate the Set directly via `insertFromBlock` so the cases
+inspect the AST mutation without spinning up a real subquery. The
+existing `EmptyInFixture` stays untouched to avoid churn in the
+empty-IN assertions.
+
+* Dedup duplicated inner tuples in literal tuple-IN expansion
+
+`analyzeFunction` for tuple-IN expanded each inner RHS tuple into its own
+Conjunction in the resulting DNF. With duplicated tuples on the right --
+e.g. `(c1, c2) IN ((v1, v2), (v1, v2), …)` -- the expansion produced
+identical Conjunctions that would:
+
+1. consume the `optimize_skip_unused_shards_limit` budget twice for the
+   same value combination, potentially tripping the limit and silently
+   falling back to scanning every shard, and
+2. feed redundant rows into the Block that downstream
+   `evaluateExpressionOverConstantCondition` materializes (`shard_ids` is
+   a `std::set` so the final shard list stays correct, but the limit-budget
+   effect is observable end-to-end).
+
+Track seen rows in a `std::set&lt;std::vector&lt;Field&gt;&gt;` inside the
+`add_tuple_row` lambda and silently skip duplicates. The dedup runs at the
+DNF-construction site, so both the literal-tuple-of-tuples RHS shape and
+the `tuple_cast(tuple_cast(...), ...)` RHS shape are covered.
+
+Regression coverage in 03001_tuple_in_shard_pruning.sql:
+
+- A 3-tuple IN where two of the rows are identical and
+  `optimize_skip_unused_shards_limit = 2`: without the dedup the 3 raw
+  conjunctions exceed the limit and EXPLAIN PIPELINE shows 8
+  MergeTreeSelect steps (one per shard); with the dedup it shows the
+  expected 2 (only the shards holding addr_42 and addr_88).
+- A simple `IN ((1, &#39;addr_42&#39;), (1, &#39;addr_42&#39;))` to assert that the row
+  count is unchanged by duplication on the RHS.
+
+Verified by reverting just the `seen_rows.insert(...)` guard, rebuilding,
+and re-running: the EXPLAIN PIPELINE case flips from 2 to 8, confirming
+the test isolates the regression.</div>
+</div>
+
+<a href="../project/timeplus-io_proton.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

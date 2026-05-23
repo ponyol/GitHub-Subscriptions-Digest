@@ -1,0 +1,2977 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in master (36 commits) - paperclipai/paperclip - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in master (36 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/paperclipai_paperclip.html">paperclipai/paperclip</a> /
+    Updates in master (36 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/paperclipai_paperclip.html">paperclipai/paperclip</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-22 20:34 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/paperclipai/paperclip/commits/master" target="_blank">https://github.com/paperclipai/paperclip/commits/master</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обширное обновление платформы Paperclip сосредоточено на повышении надежности системы и улучшении пользовательского опыта в целом. Ключевые улучшения включают исправление критических сбоев в песочницах и при импорте данных, доработку элементов пользовательского интерфейса для мобильных устройств и управления секретами, а также внедрение новых функций, таких как синхронизация данных между локальной и облачной средами, усиление безопасности плагинов и нативная поддержка адаптеров Modal и Grok.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix(sandbox): prevent E2B workspace upload + lease idle failures (PAPA-382) (#6560)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents for zero-human companies
+&gt; - Heartbeats run inside managed sandboxes (E2B, Cloudflare Sandbox),
+and each run begins by uploading the agent&#39;s workspace as a tar archive
+&gt; - PAPA-381&#39;s E2B runs were failing at 5 and 11 minutes — two distinct
+failure modes were entangled: workspace tar extraction errors on Linux,
+and sandbox idle/lease timeouts during normal heartbeat gaps
+&gt; - Workspace tar extraction failed because macOS bsdtar embeds
+`LIBARCHIVE.xattr.*` PAX headers that GNU tar on Linux rejects with
+&#34;This does not look like a tar archive&#34;; the existing
+`COPYFILE_DISABLE=1` only suppresses AppleDouble `._*` sidecars, not
+inline PAX xattr entries
+&gt; - E2B sandboxes also expired between heartbeats because `timeoutMs`
+defaulted to a short window and was never refreshed per execute, and
+Cloudflare sandboxes idled out because `sleepAfter` defaulted to 10
+minutes
+&gt; - This pull request adds `--no-xattrs` to the workspace tar
+invocation, refreshes the E2B sandbox lifetime on each execute and bumps
+the default `timeoutMs` to 1h, and raises the Cloudflare `sleepAfter`
+default to 1h
+&gt; - The benefit is that long-running heartbeat-driven runs (Claude,
+Codex, etc.) survive across both their initial workspace upload and the
+natural idle gaps between executes on both E2B and Cloudflare
+
+## What Changed
+
+- `packages/adapter-utils/src/sandbox-managed-runtime.ts`: added
+`--no-xattrs` to `createTarballFromDirectory` so macOS bsdtar produces a
+clean POSIX tar that GNU tar on Linux can extract, with an inline
+comment explaining why `COPYFILE_DISABLE=1` alone is insufficient.
+- `packages/plugins/sandbox-providers/e2b/src/plugin.ts`: refresh the
+sandbox lifetime on every execute (so long runs don&#39;t expire mid-job)
+and raised the default `timeoutMs` to 1h.
+- `packages/plugins/sandbox-providers/e2b/src/manifest.ts` and
+`plugin.test.ts`: updated manifest defaults and added regression
+coverage for the new behavior.
+- `packages/plugins/sandbox-providers/cloudflare/src/config.ts`,
+`manifest.ts`, `plugin.test.ts`: raised default `sleepAfter` from 10m to
+1h, mirroring the E2B 1h default, and added a regression test asserting
+the acquire-lease request body sends `sleepAfter: &#34;1h&#34;` when not
+overridden.
+
+## Verification
+
+- `pnpm --filter @paperclipai/plugin-e2b test`
+- `pnpm --filter @paperclipai/plugin-cloudflare-sandbox test`
+- Locally cherry-picked the `--no-xattrs` fix onto master and confirmed
+end-to-end via a real PAPA-381-style heartbeat-driven E2B run that the
+workspace upload now extracts cleanly on Linux. The user (board
+operator) tested this on master and reported &#34;Ok, that worked.&#34;
+- Manual reviewer steps: trigger an E2B heartbeat from a macOS host
+(this is where the bsdtar xattr headers come from), confirm the
+workspace tar extracts on the Linux sandbox side; run a long (&gt;15 min)
+Cloudflare sandbox flow and confirm no lost-lease/idle errors between
+executes.
+
+## Risks
+
+- Low risk overall.
+- `--no-xattrs` is widely supported by both macOS bsdtar and GNU tar
+(Linux). Worst case it silently no-ops on a future host that doesn&#39;t
+support it; in that case the existing failure mode reappears, it doesn&#39;t
+introduce a new one.
+- Raising default `timeoutMs` (E2B) and `sleepAfter` (Cloudflare) from
+short values to 1h means sandboxes stay alive longer between executes by
+default. This is the intended behavior — operators that want a tighter
+idle window can still override via plugin config.
+- E2B per-execute sandbox lifetime refresh adds a small API call per
+execute; it is bounded by the same client that already handles execute
+traffic, so no new dependencies or retry semantics.
+
+## Model Used
+
+- Claude (Anthropic), `claude-opus-4-7`, extended thinking enabled, tool
+use enabled (file/grep/git tools and Paperclip control-plane API). Used
+to diagnose the dual failure mode (workspace tar PAX xattr headers +
+sandbox lifetime), write the fixes and tests, and drive the verification
+loop with the board operator.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [ ] If this change affects the UI, I have included before/after
+screenshots (N/A — no UI changes)
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+---------
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- fix(ui): invite page goes blank from companies query-key collision (#6433)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents for zero-human companies; humans
+operate the board through the React UI.
+&gt; - The board gates company access via `CompanyProvider`
+(CompanyContext) and onboards new humans through the invite landing page
+at `/invite/:token`.
+&gt; - Reported symptom: opening an invite link and signing in works, but
+the page then renders completely blank (black in dark mode).
+&gt; - End-to-end browser testing reproduced a client-side crash:
+`companiesQuery.data?.some is not a function` and `Cannot read
+properties of undefined (reading &#39;filter&#39;)`.
+&gt; - Root cause: `CompanyProvider` and `InviteLandingPage` both use the
+React Query key `[&#34;companies&#34;]` but return **different shapes** — `{
+companies, unauthorized }` vs a bare `Company[]` — so they silently
+corrupt the shared cache entry; whichever component reads the other&#39;s
+shape calls `.some()`/`.filter()` on the wrong type and throws,
+unmounting the tree.
+&gt; - Owners never hit it (they never mount the invite page); only
+invitees landing on `/invite/:token` crash.
+&gt; - This PR unifies the `[&#34;companies&#34;]` query into a single shared
+definition so the cache entry always has one shape and the two consumers
+can&#39;t drift apart again.
+&gt; - The benefit is a working invite/onboarding flow and removal of a
+whole class of cache-shape bugs on this key.
+
+## What Changed
+
+- Add `ui/src/api/companies-query.ts` exporting a single shared
+`companiesListQueryOptions` (and `CompanyListResult`) — one `queryKey` +
+one `queryFn` that always returns the wrapped `{ companies, unauthorized
+}` shape, documented with the shared-cache contract.
+- `ui/src/context/CompanyContext.tsx` now uses
+`useQuery(companiesListQueryOptions)` instead of an inline copy of that
+query.
+- `ui/src/pages/InviteLanding.tsx` uses the same
+`companiesListQueryOptions` (with its own `enabled` gate), reads
+`companiesQuery.data?.companies` for the membership checks, and uses
+`queryClient.fetchQuery(companiesListQueryOptions)` in the post-auth
+path — so it reads and writes the identical shape.
+
+## Verification
+
+- `pnpm --filter @paperclipai/ui typecheck` — clean.
+- `vitest run src/pages/InviteLanding.test.tsx
+src/context/CompanyContext.test.tsx` — 17/17 pass, unchanged.
+- Manual end-to-end via a real browser against a LAN-exposed
+authenticated instance:
+  - Owner creates an Owner-role invite.
+- New user opens the link and registers — **the &#34;awaiting approval&#34;
+screen renders** (previously blank), `POST /api/invites/:token/accept`
+returns `202`, no console errors.
+- Owner approves at Company Settings → Access (`200`); invitee becomes
+an active member.
+- Invitee signs in — full board loads; smoke test of dashboard / issues
+/ inbox / routines / goals / company settings — all render, zero
+`pageerror`s.
+- Before: invite page `#root` empty after sign-in (blank/black). After:
+awaiting-approval panel renders. (Screenshots available on request.)
+
+## Risks
+
+- Low. `CompanyProvider`&#39;s query behavior is unchanged (same `queryFn`
+logic, just extracted into a shared module). `InviteLandingPage` now
+reads the same shape it writes. No API, schema, or migration changes.
+Existing tests pass unchanged.
+
+## Model Used
+
+- Claude (Anthropic), model ID `claude-opus-4-7` (Opus 4.7), 1M-context,
+extended thinking + tool use; driving Claude Code with browser
+automation for end-to-end reproduction and verification.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [ ] I have added or updated tests where applicable (existing
+InviteLanding/CompanyContext tests cover the touched code and pass; a
+cross-provider regression test that mounts both consumers is a sensible
+follow-up)
+- [ ] If this change affects the UI, I have included before/after
+screenshots (described textually above; this is a crash/blank-page fix,
+screenshots available on request)
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Fix wrapped company issue prefix conflicts (#6423)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents for zero-human companies.
+&gt; - Company creation is the first control-plane object operators create,
+and the generated issue prefix becomes part of task identity.
+&gt; - The company service already retries when a generated issue prefix
+collides with the `companies_issue_prefix_idx` unique constraint.
+&gt; - Drizzle 0.45.x wraps PostgreSQL errors in `DrizzleQueryError`,
+leaving the real `23505` constraint error on the `.cause` chain.
+&gt; - The existing retry detector only inspected the top-level error, so
+wrapped prefix collisions surfaced as 500s instead of retrying.
+&gt; - This pull request walks the error cause chain for the exact prefix
+constraint and verifies the retry path against embedded Postgres.
+&gt; - The benefit is company creation no longer fails when generated
+prefixes collide under Drizzle 0.45.x wrappers.
+
+## What Changed
+
+- Walk the error `.cause` chain when detecting
+`companies_issue_prefix_idx` unique violations, with a cycle guard and
+support for `constraint` / `constraint_name` fields.
+- Added an embedded Postgres regression test that seeds `ARO`, creates
+`Aron &amp; Sharon`, and verifies the retry produces `AROA`.
+- Stabilized existing async tests touched by full verification: instance
+sidebar plugin rendering now waits for React Query results, and
+Tailscale-unavailable CLI tests explicitly hide host `tailscale`
+detection.
+
+## Verification
+
+- `pnpm --filter @paperclipai/server exec vitest run
+src/__tests__/companies-service.test.ts`
+- `pnpm --filter @paperclipai/server exec vitest run
+src/__tests__/heartbeat-stale-queue-invalidation.test.ts`
+- `pnpm --filter @paperclipai/ui exec vitest run
+src/components/InstanceSidebar.test.tsx`
+- `pnpm --filter paperclipai exec vitest run
+src/__tests__/network-bind.test.ts src/__tests__/onboard.test.ts`
+- `pnpm test:run`
+- `pnpm -r typecheck`
+- `pnpm build`
+
+## Risks
+
+- Low runtime risk: the retry behavior only expands detection for the
+existing exact company issue-prefix unique constraint.
+- The cause-chain walk is bounded by visited objects to avoid cycles.
+- The sidebar and CLI changes are test-only stabilization and do not
+change production behavior.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI Codex, GPT-5 coding agent in Codex desktop, with local
+shell/tool execution.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots (N/A: no UI behavior change)
+- [x] I have updated relevant documentation to reflect my changes (N/A:
+bug fix with no user-facing docs change)
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+Closes #6350
+
+- [codex] Polish board UI mobile flows (#6550)
+
+## Thinking Path
+
+&gt; - Paperclip is the board UI and control plane for supervising AI-agent
+companies.
+&gt; - Operators repeatedly use mobile navigation, issue creation, inbox
+scanning, and markdown reading surfaces.
+&gt; - Small layout and interaction rough edges add friction to those
+high-frequency workflows.
+&gt; - The branch included a set of related board UI polish changes that
+were too small to review as many separate PRs.
+&gt; - This pull request groups the remaining mobile/navigation/markdown
+polish into one standalone branch.
+&gt; - The benefit is smoother board operation without mixing in unrelated
+backend feature work.
+
+## What Changed
+
+- Tightened company settings navigation behavior on mobile.
+- Fixed mobile new issue dialog height and moved issue priority into the
+overflow controls on small screens.
+- Restored browser controls for home-screen app mode.
+- Fixed plugin-route sidebar selection on nested page loads.
+- Added markdown preformatted-block wrapping controls and coverage.
+- Kept updated issue list pages sorted by updated time in the board UI.
+
+## Verification
+
+- `pnpm --filter @paperclipai/plugin-sdk build`
+- `NODE_ENV=test pnpm exec vitest run ui/src/components/Layout.test.tsx
+ui/src/components/MarkdownBody.test.tsx
+ui/src/components/MarkdownBody.wrap.test.tsx
+ui/src/components/NewIssueDialog.test.tsx
+ui/src/components/access/CompanySettingsNav.test.tsx
+ui/src/lib/pwa-install-mode.test.ts ui/src/pages/Inbox.test.tsx`
+
+The targeted UI tests passed. React emitted existing act-wrapping
+warnings in a few test files, but there were no test failures.
+
+## Risks
+
+- Medium-low: changes span several UI surfaces, but they are mostly
+layout/interaction polish with targeted component tests.
+- Visual screenshots are not newly captured in this split PR; follow-up
+review should include browser/visual QA before marking ready.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI GPT-5 Codex via `codex_local`, tool-enabled coding session;
+exact context window not exposed by this runtime.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+---------
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- [codex] Improve runtime and import reliability (#6549)
+
+## Thinking Path
+
+&gt; - Paperclip coordinates autonomous company work through local and
+hosted runtime surfaces.
+&gt; - Local embedded Postgres and tenant import/export paths are
+foundational reliability pieces.
+&gt; - A runtime failure in either path can stop agents or imports before
+useful work begins.
+&gt; - The branch included remaining fixes for embedded native library
+bootstrap and async tenant import handling.
+&gt; - This pull request groups those runtime/import reliability changes
+into one standalone PR.
+&gt; - The benefit is a more robust local runtime and safer cloud tenant
+import behavior.
+
+## What Changed
+
+- Prepared embedded Postgres native runtime before startup in
+CLI/server/test entrypoints.
+- Added embedded Postgres native bootstrap coverage.
+- Added async tenant import job handling and deferred validation
+coverage.
+- Kept the runtime/import changes based directly on current
+`origin/master` after related upstream PRs had already merged.
+
+## Verification
+
+- `pnpm --filter @paperclipai/plugin-sdk build`
+- `NODE_ENV=test pnpm exec vitest run
+packages/db/src/embedded-postgres-native.test.ts
+server/src/__tests__/company-portability-routes.test.ts`
+
+## Risks
+
+- Medium-low: this touches startup/import paths, but the branch is small
+and covered by targeted tests.
+- The embedded Postgres change depends on platform-specific
+native-library behavior, so CI and follow-up checks should still verify
+supported runners.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI GPT-5 Codex via `codex_local`, tool-enabled coding session;
+exact context window not exposed by this runtime.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+- [codex] Add local Cloud Upstream sync (#6548)
+
+## Thinking Path
+
+&gt; - Paperclip is the control plane for AI-agent companies.
+&gt; - Operators need a path to move local company state toward Paperclip
+Cloud without losing local-first control.
+&gt; - The Cloud Upstream flow needs API, persistence, CLI, and board UI
+surfaces that agree on the same manifest/run model.
+&gt; - The existing branch had the feature work plus UX and error-handling
+follow-ups.
+&gt; - This pull request packages the remaining Cloud Upstream sync work
+into one standalone branch.
+&gt; - The benefit is an inspectable local-to-cloud sync workflow with
+preview, conflicts, activation, and captured UX review states.
+
+## What Changed
+
+- Added Cloud Upstream shared types, server routes/services, and
+persisted run schema/migration.
+- Added Paperclip Cloud CLI sync helpers and local connection storage.
+- Added the Cloud Upstream board UI, settings entry points, query keys,
+and UX lab page.
+- Added preview/activation checklist behavior, redirect handling,
+manifest-only preview support, friendly errors, in-flight hints, and
+entity count summaries.
+
+## Verification
+
+- `pnpm --filter @paperclipai/plugin-sdk build`
+- `NODE_ENV=test pnpm exec vitest run cli/src/__tests__/cloud.test.ts
+server/src/__tests__/instance-settings-routes.test.ts
+server/src/__tests__/instance-settings-service.test.ts
+ui/src/pages/CloudUpstream.test.tsx
+ui/src/components/CompanySettingsSidebar.test.tsx`
+- `NODE_ENV=test pnpm exec vitest run
+server/src/__tests__/cloud-upstreams.test.ts`
+
+Worktree setup note: the isolated worktree install skipped native sqlite
+build scripts, so I copied the already-built local sqlite binding from
+the main checkout before running
+`server/src/__tests__/cloud-upstreams.test.ts`. The test then passed.
+
+## Risks
+
+- Medium: this adds a database migration and a broad feature path across
+CLI/server/UI.
+- Merge order: this is the only PR in this split with a DB migration;
+merge it before any future Cloud Upstream migration follow-up.
+- Mitigation: the PR is based directly on current `origin/master`, has
+targeted route/service/UI tests, and keeps the feature behind existing
+experimental Cloud Sync settings.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI GPT-5 Codex via `codex_local`, tool-enabled coding session;
+exact context window not exposed by this runtime.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, screenshot artifacts are
+intentionally omitted per reviewer request
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+- [codex] Harden plugin runtime invocation scope (#6547)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI-agent companies through a company-scoped
+control plane.
+&gt; - Plugins extend that control plane, but plugin workers still call
+back into host APIs.
+&gt; - Those worker-to-host calls need the same company boundary guarantees
+as normal API routes.
+&gt; - Plugin action handlers also need authenticated actor context from
+the host instead of trusting caller-supplied params.
+&gt; - This pull request hardens plugin bridge/action scope and keeps
+plugin operation issues out of normal issue surfaces.
+&gt; - The benefit is safer plugin execution with clearer authorization
+boundaries and better test coverage.
+
+## What Changed
+
+- Added host-owned invocation context plumbing for nested plugin worker
+calls.
+- Added actor context to plugin `performAction` calls and test harness
+helpers.
+- Enforced company invocation scope on worker-to-host calls and filtered
+company lists to the active invocation scope.
+- Extended plugin action route tests for board and agent actor context,
+spoofed company params, and cross-company rejection.
+- Extended plugin worker manager coverage for invocation-scope
+propagation.
+- Filtered typed and legacy plugin operation issue origins from default
+issue/inbox lists.
+
+## Verification
+
+- `pnpm --filter @paperclipai/plugin-sdk build`
+- `NODE_ENV=test pnpm exec vitest run
+packages/plugins/sdk/tests/host-client-factory.test.ts
+packages/plugins/sdk/tests/testing-actions.test.ts
+server/src/__tests__/plugin-routes-authz.test.ts
+server/src/__tests__/plugin-worker-manager.test.ts
+server/src/__tests__/issues-service.test.ts`
+
+Note: embedded Postgres issue-service tests reported host-level Postgres
+init skip for 47 tests; the non-embedded targeted tests passed.
+
+## Risks
+
+- Medium: plugin host authorization paths are sensitive, and external
+plugins may rely on previously loose company params.
+- Mitigation: the change only tightens calls when the host attached a
+company invocation scope and includes explicit tests for board, agent,
+and nested worker calls.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI GPT-5 Codex via `codex_local`, tool-enabled coding session;
+exact context window not exposed by this runtime.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+- [codex] Add agent permissions and controls plan (#6386)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents for zero-human companies by keeping
+task ownership, approvals, and operator control inside one control
+plane.
+&gt; - Agent permissions and plugin-hosted company settings sit on the
+boundary between autonomy and governance.
+&gt; - V1 needs scoped task assignment rules, plugin extension points, and
+clearer company access surfaces without weakening company boundaries.
+&gt; - The branch builds the core authorization service, plugin SDK/host
+APIs, and UI simplifications needed to support those controls.
+&gt; - Paperclip EE plugin surfaces were intentionally moved out of this
+core PR per review direction, so this PR now carries only the public
+core/plugin infrastructure work.
+&gt; - The latest updates preserve the PAP-9937 branch changes that belong
+in this PR, remove the `design/` artifacts, and exclude the experimental
+`plugin-briefs` package.
+&gt; - Greptile feedback was applied through the authorization/audit paths
+and the final cleanup commit was re-reviewed at 5/5 with no unresolved
+Greptile threads.
+&gt; - The benefit is safer assignment control with extension hooks for
+richer permission products while preserving simple defaults for normal
+operators.
+
+## What Changed
+
+- Added scoped task-assignment authorization decisions and routed
+issue/agent assignment mutations through the authorization service.
+- Added plugin SDK and host APIs for company settings slots,
+authorization policy/grant management, assignment previews, and bridge
+invocation scope propagation.
+- Simplified core company access UI and moved advanced controls behind
+plugin-provided settings surfaces.
+- Added retry-now affordances for blocked issue next-step notices.
+- Added protected-assignment enforcement for persisted
+agent/project/issue policies, including explicit-grant fallback
+behavior.
+- Added incremental principal-access compatibility backfill for active
+agent memberships and role-default human permission grants.
+- Added the Markdown code block wrap action fix from the latest branch
+changes.
+- Removed `design/` artifacts from the PR and removed
+`packages/plugins/plugin-briefs` from the final diff.
+- Addressed Greptile feedback for plugin actor sanitization, legacy
+membership handling, audit pagination, unknown grant-scope metadata, and
+startup test mocks.
+
+## Verification
+
+- `pnpm exec vitest run server/src/__tests__/access-service.test.ts
+server/src/__tests__/company-portability.test.ts` -&gt; 2 files passed, 54
+tests passed.
+- `pnpm exec vitest run
+server/src/__tests__/server-startup-feedback-export.test.ts
+server/src/__tests__/access-service.test.ts
+server/src/__tests__/company-portability.test.ts` -&gt; 3 files passed, 62
+tests passed.
+- `pnpm exec vitest run
+server/src/__tests__/authorization-service.test.ts
+server/src/__tests__/plugin-access-authorization-host-services.test.ts
+server/src/__tests__/server-startup-feedback-export.test.ts` -&gt; 3 files
+passed, 28 tests passed.
+- `pnpm --filter @paperclipai/server typecheck` -&gt; passed.
+- `git diff --check` -&gt; passed.
+- `node ./scripts/check-docker-deps-stage.mjs` -&gt; passed.
+- `CI=true pnpm install --frozen-lockfile --ignore-scripts` -&gt; passed
+with no lockfile update.
+- `pnpm exec vitest run
+ui/src/components/MarkdownBody.interaction.test.tsx` -&gt; 1 test passed.
+- `git ls-files design packages/plugins/plugin-briefs | wc -l` -&gt; 0.
+- GitHub CI on `40cd83b53` -&gt; all checks passed, merge state `CLEAN`.
+- Greptile on `40cd83b53` -&gt; 5/5, 102 files reviewed, 0
+comments/annotations added, 0 unresolved review threads.
+- Confirmed the PR diff contains no `design/`,
+`packages/plugins/plugin-briefs`, `pnpm-lock.yaml`, or
+`.github/workflows` changes.
+
+## Risks
+
+- Medium: task assignment authorization paths are behaviorally stricter
+for protected/private policy data, so existing plugin-authored policies
+may block assignment until explicit grants or approval flows are
+configured.
+- Medium: plugin-host authorization APIs expand the surface area
+available to trusted plugins and need careful review for company
+scoping.
+- Low: startup now performs a principal-access compatibility backfill,
+but the migration and runtime backfill use conflict-tolerant inserts.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI Codex, GPT-5 coding agent, tool-enabled workflow with shell,
+git, and GitHub CLI access.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+---------
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- [codex] Runtime control-plane fixes (#6380)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents through a server-side control plane
+&gt; - That control plane depends on reliable issue state transitions,
+plugin lifecycle behavior, import limits, and startup/shutdown handling
+&gt; - Several small runtime fixes had accumulated on the working branch
+and were mixed with larger feature work
+&gt; - Keeping them separate makes the correctness fixes reviewable and
+mergeable without waiting for cloud-sync UI work
+&gt; - This pull request groups the server/runtime control-plane fixes into
+one standalone branch
+&gt; - The benefit is a tighter, safer runtime baseline for retries,
+imports, plugin migrations, feedback flushing, and trusted cloud import
+handling
+
+## What Changed
+
+- Fixed updated issue list pagination sorting and scheduled retry
+comment handling.
+- Re-applied pending plugin migrations during hot reload and fixed
+plugin-schema worktree seed restore.
+- Hardened public tenant DB startup, portable import body limits,
+trusted cloud import errors, and trusted cloud tenant import mutation
+access.
+- Expired stale request confirmations after user comments.
+- Added feedback export shutdown hardening so database-unavailable flush
+loops stop cleanly.
+- Guarded plugin worker `error` event emission when no listener is
+registered.
+
+## Verification
+
+- `pnpm install --frozen-lockfile --ignore-scripts`
+- `pnpm --filter @paperclipai/plugin-sdk build`
+- `npm run install --prefix
+node_modules/.pnpm/sqlite3@5.1.7/node_modules/sqlite3`
+- `pnpm exec vitest run server/src/__tests__/issues-service.test.ts
+server/src/__tests__/plugin-lifecycle-restart.test.ts
+server/src/__tests__/server-startup-feedback-export.test.ts
+server/src/__tests__/issue-comment-reopen-routes.test.ts
+server/src/__tests__/issue-thread-interactions-service.test.ts
+server/src/__tests__/issue-thread-interaction-routes.test.ts
+server/src/__tests__/body-limits.test.ts
+server/src/__tests__/feedback-flush-controller.test.ts
+server/src/__tests__/error-handler.test.ts
+server/src/__tests__/board-mutation-guard.test.ts
+packages/db/src/backup-lib.test.ts` initially exposed local setup issues
+and two 5s test timeouts.
+- Rerun after local prereq build: `pnpm exec vitest run --testTimeout
+15000 server/src/__tests__/issue-comment-reopen-routes.test.ts
+server/src/__tests__/issue-thread-interaction-routes.test.ts
+server/src/__tests__/feedback-flush-controller.test.ts
+server/src/__tests__/server-startup-feedback-export.test.ts` passed.
+- Some embedded Postgres-backed tests skipped on this host because local
+Postgres init was unavailable.
+
+## Risks
+
+- Runtime-touching branch: startup/shutdown and issue interaction
+behavior should be reviewed carefully.
+- The feedback export change disables repeated flush attempts only for
+database connection-refused failures; other upload failures still log
+normally.
+- The plugin worker error guard avoids process crashes from unhandled
+EventEmitter errors but may hide errors from code paths that expected an
+emitted listener.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI Codex, GPT-5-based coding agent with local shell/git/tool use.
+Exact hosted model ID and context-window size are not exposed by the
+local Paperclip adapter runtime.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+---------
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- [codex] UI and dev ops quality-of-life (#6384)
+
+## Thinking Path
+
+&gt; - Paperclip operators spend most of their time scanning the board,
+inbox, sidebar, and local dev status surfaces
+&gt; - Small UI and dev-ops frictions make repeated operator workflows feel
+slower than they need to be
+&gt; - The working branch contained several independent quality-of-life
+improvements mixed with larger cloud work
+&gt; - Grouping these smaller UI/dev-ops changes together keeps review
+overhead reasonable without merging them into feature PRs
+&gt; - This pull request collects the operator-facing QoL polish into one
+standalone branch
+&gt; - The benefit is a cleaner board navigation and local dev recovery
+experience without depending on cloud upstream sync
+
+## What Changed
+
+- Relaxed forced 44px touch targets for small inline widgets.
+- Fixed mobile mention menu scrolling and sidebar spacing on
+touch/mobile layouts.
+- Synced inbox hover state with j/k selection.
+- Moved plugin sidebar entries into the Work section.
+- Added manual dev-server restart action/banner behavior.
+- Logged plugin bridge 502 causes for better diagnosis.
+
+## Verification
+
+- `pnpm install --frozen-lockfile --ignore-scripts`
+- `pnpm --filter @paperclipai/plugin-sdk build`
+- `pnpm exec vitest run ui/src/components/MarkdownEditor.test.tsx
+ui/src/components/Sidebar.test.tsx
+ui/src/components/SidebarProjects.test.tsx ui/src/pages/Inbox.test.tsx
+ui/src/components/DevRestartBanner.test.tsx
+server/src/__tests__/dev-server-status.test.ts
+server/src/__tests__/health-dev-server-token.test.ts
+server/src/__tests__/plugin-routes-authz.test.ts` initially failed only
+because plugin SDK `dist` was not built in the fresh worktree.
+- Rerun after build: `pnpm exec vitest run
+server/src/__tests__/plugin-routes-authz.test.ts` passed.
+- The remaining targeted UI/dev-server tests passed on the first
+post-install run.
+
+## Visual Evidence
+
+- Sidebar layout and plugin Work section: ![Sidebar
+desktop](https://raw.githubusercontent.com/paperclipai/paperclip/pap-9861-ui-dev-qol/docs/pr-screenshots/pr-6384/sidebar-desktop.png)
+- Inbox/task row selection and hover-state surface: ![Inbox rows
+desktop](https://raw.githubusercontent.com/paperclipai/paperclip/pap-9861-ui-dev-qol/docs/pr-screenshots/pr-6384/inbox-rows-desktop.png)
+- Dev restart banner desktop: ![Dev restart banner
+desktop](https://raw.githubusercontent.com/paperclipai/paperclip/pap-9861-ui-dev-qol/docs/pr-screenshots/pr-6384/dev-restart-banner-desktop.png)
+- Dev restart banner mobile: ![Dev restart banner
+mobile](https://raw.githubusercontent.com/paperclipai/paperclip/pap-9861-ui-dev-qol/docs/pr-screenshots/pr-6384/dev-restart-banner-mobile.png)
+
+## Risks
+
+- Mostly UI/dev ergonomics with low data risk.
+- Sidebar and inbox changes touch frequently used navigation surfaces,
+so visual review on desktop/mobile is still useful.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI Codex, GPT-5-based coding agent with local shell/git/tool use.
+Exact hosted model ID and context-window size are not exposed by the
+local Paperclip adapter runtime.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+---------
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- [codex] Workspace diff polish (#6383)
+
+## Thinking Path
+
+&gt; - Paperclip gives operators a workspace diff plugin so they can
+inspect agent changes before review
+&gt; - The diff view needs reliable base-ref defaults and controls that
+stay usable while scrolling large diffs
+&gt; - The working branch mixed those plugin improvements with unrelated
+server and cloud work
+&gt; - Keeping the workspace diff plugin changes isolated makes them easy
+to test and review
+&gt; - This pull request polishes the workspace diff plugin controls,
+base-ref behavior, and sticky headers
+&gt; - The benefit is a more predictable diff review surface for agent
+workspaces
+
+## What Changed
+
+- Fixed workspace diff default base-ref resolution.
+- Improved split/unified and working-tree/against-ref pane controls.
+- Made workspace diff headers stay sticky while scrolling.
+- Added a review screenshot at
+`screenshots/PAP-9841-workspace-diff.png`.
+
+## Verification
+
+- `pnpm install --frozen-lockfile --ignore-scripts`
+- `pnpm --filter @paperclipai/plugin-sdk build`
+- `pnpm --filter @paperclipai/plugin-workspace-diff exec vitest run
+tests/plugin.spec.ts`
+- Result: 9 tests passed.
+
+## Risks
+
+- UI-only plugin branch with low data risk.
+- The default base-ref inference should be reviewed against unusual
+worktree/upstream combinations.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI Codex, GPT-5-based coding agent with local shell/git/tool use.
+Exact hosted model ID and context-window size are not exposed by the
+local Paperclip adapter runtime.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+---------
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- [codex] Provider vault secrets UX (#6381)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents that need scoped, auditable access
+to secrets
+&gt; - Hosted and external deployments need provider vault configuration
+without exposing secret values in Paperclip metadata
+&gt; - AWS Secrets Manager vault setup previously required too much manual
+operator knowledge
+&gt; - Provider vault discovery and removal belong together as an
+independent secrets-management improvement
+&gt; - This pull request adds AWS provider vault discovery/prefill plus
+vault removal flows
+&gt; - The benefit is a safer operator path for configuring external secret
+storage before higher-level cloud workflows depend on it
+
+## What Changed
+
+- Added shared validators/types for AWS provider vault discovery
+payloads and safe provider metadata.
+- Implemented AWS provider vault discovery preview on the server.
+- Added provider vault removal service/route behavior.
+- Added Secrets page UI for discovery prefill, removal messaging, and
+related rendering coverage.
+- Added Storybook provider-vault fixtures and captured screenshots for
+the new UX states.
+
+## Verification
+
+- `pnpm install --frozen-lockfile --ignore-scripts`
+- `pnpm exec vitest run packages/shared/src/validators/secret.test.ts
+server/src/__tests__/aws-secrets-manager-provider.test.ts
+server/src/__tests__/secrets-routes.test.ts
+server/src/__tests__/secrets-service.test.ts
+ui/src/pages/Secrets.render.test.tsx`
+- Result: 4 files passed, 1 embedded Postgres-backed file skipped on
+this host because local Postgres init was unavailable.
+- `pnpm --filter @paperclipai/ui exec vitest run
+src/pages/Secrets.render.test.tsx`
+- `pnpm --filter @paperclipai/ui typecheck`
+- Storybook screenshot capture against `Product/Secrets` on
+`http://127.0.0.1:60381/iframe.html?id=product-secrets--secrets-inventory&amp;viewMode=story&amp;globals=theme:dark`
+
+## Screenshots
+
+Provider vaults tab after this change:
+
+![Provider vaults
+tab](https://raw.githubusercontent.com/paperclipai/paperclip/pap-9861-provider-vault-secrets/doc/screenshots/pr-6381/provider-vaults-tab.png)
+
+AWS discovery candidate flow:
+
+![AWS discovery candidate
+flow](https://raw.githubusercontent.com/paperclipai/paperclip/pap-9861-provider-vault-secrets/doc/screenshots/pr-6381/aws-discovery-candidates.png)
+
+Provider vault removal confirmation:
+
+![Provider vault removal
+confirmation](https://raw.githubusercontent.com/paperclipai/paperclip/pap-9861-provider-vault-secrets/doc/screenshots/pr-6381/remove-provider-vault-confirmation.png)
+
+## Risks
+
+- Secret provider metadata handling must remain non-sensitive;
+validators reject credential-bearing Vault URLs and sensitive AWS
+discovery keys.
+- AWS discovery depends on deployment credentials being configured
+correctly outside Paperclip-managed company secrets.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI Codex, GPT-5-based coding agent with local shell/git/tool use.
+Exact hosted model ID and context-window size are not exposed by the
+local Paperclip adapter runtime.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+---------
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- [codex] Allow cloud tenant import mutations without browser origin (#6378)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents for zero-human companies.
+&gt; - Paperclip Cloud imports local company data into tenant Paperclip
+stacks through trusted server-to-server calls.
+&gt; - Tenant imports authenticate as board actors with `source:
+&#34;cloud_tenant&#34;` because they act on behalf of an authorized stack user.
+&gt; - The board mutation guard correctly protects browser session
+mutations with trusted `Origin`/`Referer` checks.
+&gt; - But the guard treated trusted Cloud tenant calls like browser
+session mutations, so server-to-server imports without a browser origin
+failed with `403 Board mutation requires trusted browser origin`.
+&gt; - This pull request exempts trusted Cloud tenant actors from
+browser-origin enforcement while preserving the session-backed browser
+guard.
+&gt; - The benefit is that authorized Cloud imports can persist into tenant
+Paperclip storage without weakening browser CSRF protections.
+
+## What Changed
+
+- Allow `req.actor.source === &#34;cloud_tenant&#34;` through
+`boardMutationGuard` without requiring browser `Origin` or `Referer`
+headers.
+- Add a focused regression test for Cloud tenant POST mutations without
+an origin.
+- Preserve the existing session-backed rejection test for board
+mutations that lack a trusted browser origin.
+
+## Verification
+
+- `pnpm exec vitest run
+server/src/__tests__/board-mutation-guard.test.ts`
+- Result: 10 tests passed.
+
+## Risks
+
+- Low risk: this only expands the existing non-browser exemption list to
+trusted Cloud tenant actors that have already passed tenant-server-token
+authentication.
+- The browser-session path remains covered by the existing rejection
+test, so missing-origin browser mutations still fail.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI Codex, GPT-5 coding agent, tool-enabled local repository
+editing and shell verification.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+- Guard cheap recovery model usage (#6371)
+
+## Thinking Path
+
+&gt; - Paperclip is the control plane that coordinates AI-agent work
+through issues, heartbeats, comments, approvals, and auditable recovery
+paths.
+&gt; - The affected subsystem is heartbeat/recovery orchestration,
+especially the optional cheap model profile used for operational
+recovery overhead.
+&gt; - Cheap recovery should repair status and liveness, but it must not
+become the worker lane that writes deliverables, continues source work,
+or propagates cheap execution hints into downstream retries.
+&gt; - The gap was that cheap-profile hints could follow recovery wake
+contexts and assignment overrides farther than intended, making real
+work eligible to run on the cheap model.
+&gt; - This pull request separates status-only cheap recovery from normal
+source-work continuations, adds route guards for deliverable mutations
+during cheap status-only runs, and documents the invariant.
+&gt; - The benefit is safer retry/recovery behavior: cheap runs can clean
+up control-plane state, while any remaining source work resumes through
+a normal/original model path.
+
+## What Changed
+
+- Added recovery model-profile work classes so status-only recovery
+carries explicit guard context and normal-model continuations scrub
+cheap hints.
+- Updated heartbeat, productivity review, liveness continuation, and
+recovery service wakeups to request cheap only for bounded status-only
+recovery work.
+- Blocked cheap status-only recovery runs from writing issue documents,
+plans, attachments, work products, or assigning downstream work back to
+`modelProfile: &#34;cheap&#34;`.
+- Added/updated server tests for cheap profile propagation,
+artifact/document guards, route authorization, retry scheduling, and
+successful-run handoff behavior.
+- Documented the recovery model-profile lane in
+`doc/SPEC-implementation.md` and `doc/execution-semantics.md`.
+- After rebasing onto current `public-gh/master`, stabilized the new
+`InstanceSidebar` plugin-filter tests so the PR check lane stays green.
+
+## Verification
+
+- Local: `pnpm exec vitest run --config vitest.config.ts
+src/services/recovery/model-profile-hint.test.ts
+src/__tests__/issue-agent-mutation-ownership-routes.test.ts
+src/__tests__/issue-document-restore-routes.test.ts` from `server/` - 3
+files, 37 tests passed after final edits.
+- Local: `pnpm exec vitest run --config vitest.config.ts
+src/__tests__/heartbeat-process-recovery.test.ts` from `server/` - 44
+tests passed after rerunning the cleanup-sensitive file alone.
+- Local: `pnpm --filter @paperclipai/ui exec vitest run
+src/components/InstanceSidebar.test.tsx` - 4 tests passed.
+- Local: `pnpm --filter @paperclipai/server typecheck` - passed.
+- Local: `pnpm --filter @paperclipai/ui typecheck` - passed.
+- PR checks on latest head `6f8c3b1380f5bd872c6f49f6f7188ecf3bb6d263` -
+all green, including `verify`, build, typecheck,
+server/general/serialized tests, e2e, Snyk, and policy.
+- Greptile: pass 3 returned Confidence Score 5/5 with zero unresolved
+Greptile review threads.
+
+## Risks
+
+- Medium risk: recovery behavior is intentionally stricter, so any path
+that incorrectly relies on cheap recovery to keep doing source work will
+now need to hand back to a normal-model run.
+- Low migration risk: no schema changes.
+- No product UI changes; the UI file touched is a test-only
+stabilization after rebasing onto current `master`.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI Codex coding agent, GPT-5 model family (`gpt-5`), tool use and
+local code execution enabled; context window not exposed in this
+environment.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots (N/A: no product UI changes)
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+- fix(ui): hide sandbox-provider plugins from Instance Settings sidebar (#6341)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents for zero-human companies
+&gt; - Plugins extend Paperclip with new capabilities; the Instance
+Settings sidebar exposes per-plugin settings pages under a &#34;Plugins&#34;
+group
+&gt; - Some plugins contribute only sandbox-provider drivers (E2B, exe.dev,
+Modal). They have no per-plugin settings UI — `PluginSettings` already
+redirects sandbox-provider-only plugins to the Environments page
+&gt; - As a result, listing them as their own sidebar rows produced
+confusing entries that visually nested below the &#34;Adapters&#34; group and
+only lead to a stub redirect — there was no value to the user
+&gt; - This pull request hides sandbox-provider-only plugins from the
+Instance Settings sidebar, and reorders the indented plugin list so it
+sits directly under the &#34;Plugins&#34; group it actually belongs to
+&gt; - The benefit is a cleaner sidebar that only surfaces plugins with
+real per-plugin settings, and removes the visual mis-nesting under
+Adapters
+
+## What Changed
+
+- `ui/src/components/InstanceSidebar.tsx`: filter out plugins whose only
+contribution is `sandboxProviders` (hybrid plugins that contribute
+sandbox providers *plus* something else still get a sidebar entry). Move
+the indented plugin list so it renders between the &#34;Plugins&#34; row and the
+&#34;Adapters&#34; row instead of after Adapters.
+- `ui/src/components/InstanceSidebar.test.tsx`: new test file with 4
+cases — sandbox-only plugins hidden, hybrid plugins shown, ordering
+(plugin list appears under Plugins and before Adapters), and the
+existing non-plugin sidebar items still render.
+
+## Verification
+
+- `pnpm -C ui vitest run src/components/InstanceSidebar.test.tsx` → 4/4
+pass.
+- `pnpm typecheck` clean on the changed files.
+- Manual: visit `/instance/settings/plugins` — &#34;E2B Sandbox Provider&#34;
+and &#34;exe.dev Sandbox Provider&#34; rows no longer appear in the sidebar;
+remaining plugins are listed directly under the &#34;Plugins&#34; group, not
+below Adapters.
+
+**Before:** see the screenshot embedded in the linked issue (`PAPA-375`)
+— sandbox-provider plugins show as sidebar rows visually nested under
+&#34;Adapters&#34;.
+
+**After:** sandbox-provider-only rows are gone; plugin list sits
+directly under the &#34;Plugins&#34; group. (A live runtime screenshot was not
+captured for this PR because the local server requires an authenticated
+browser session not currently available to the agent — happy to add one
+on request.)
+
+## Risks
+
+- Low risk. Pure UI filter + reorder, scoped to `InstanceSidebar.tsx`.
+No backend or plugin-loader changes. Hybrid plugins that legitimately
+need a settings entry are explicitly preserved by the filter. Covered by
+4 new unit tests.
+
+## Model Used
+
+- Claude Opus 4.7 (`claude-opus-4-7`), Anthropic, via Claude Code in a
+Paperclip heartbeat. Standard tool-use mode (no extended thinking). 200K
+context.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [ ] If this change affects the UI, I have included before/after
+screenshots — before is in the linked issue; after pending live capture
+(see Verification)
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+Closes PAPA-375.
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- feat(ui): wire SecretBindingPicker into JsonSchemaForm secret-ref fields (#6339)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents for zero-human companies
+&gt; - Plugin authors expose configuration via JSON schemas, including
+secret fields marked `format: &#34;secret-ref&#34;`
+&gt; - At the same time, Paperclip already has a first-class secrets store,
+and `SecretBindingPicker` is the canonical UI for binding to one of
+those stored secrets
+&gt; - But `JsonSchemaForm`&#39;s `SecretField` rendered only a plain password
+input, so configuring an E2B (or Modal / Cloudflare / Daytona) sandbox
+required leaving the form, copying a secret UUID, and pasting it back
+&gt; - This pull request wires `SecretBindingPicker` into `SecretField` so
+every plugin secret-ref field gets the picker plus an optional raw-value
+fallback
+&gt; - The benefit is that secret reuse becomes one click instead of a tab
+switch, and the raw-paste path still works for one-off keys or long
+SSH-style secrets
+
+## What Changed
+
+- `ui/src/components/JsonSchemaForm.tsx` `SecretField` now renders
+`SecretBindingPicker` above the existing password/textarea input.
+UUID-shaped values are treated as bound refs (no raw input shown).
+Non-UUID values keep the password/textarea visible (auto-opened) for SSH
+keys and other long secrets. Empty fields show the picker plus a small
+&#34;Or paste a raw value&#34; toggle.
+- Selecting a secret writes the secret UUID to the form value — the
+server-side resolution in `server/src/services/environment-config.ts`
+(`resolveConfigSecretRefsForRuntime` / `collectEnvironmentSecretRefs`)
+is unchanged. The version selector on the picker is suppressed
+(`allowVersionSelector={false}`) because plugin secret refs always
+resolve at `&#34;latest&#34;`.
+- `ui/src/components/JsonSchemaForm.test.tsx` mocks the picker (which
+requires `CompanyContext` + `QueryClient` providers) and adds coverage
+for: picker render, UUID-bound state hides the raw input, picker
+selection writes the UUID through `onChange`, raw text keeps the
+password fallback. The original multiline (SSH key) case still asserts a
+textarea + no password input.
+
+## Verification
+
+- `pnpm --filter @paperclipai/ui test
+src/components/JsonSchemaForm.test.tsx` → 4/4 passing
+- `pnpm --filter @paperclipai/ui test src/pages/PluginSettings.test.tsx`
+→ 5/5 passing (existing consumer of `JsonSchemaForm`)
+- `pnpm --filter @paperclipai/ui exec tsc --noEmit` → clean
+- Manual: in the company Environments page, edit an environment with a
+sandbox driver that exposes a `secret-ref` field (e.g., E2B `apiKey`).
+The field should render the secret dropdown above the raw-value toggle;
+selecting an active secret persists its UUID, and saving the form
+continues to resolve the secret at runtime.
+
+Before/after screenshots: deferred — change was validated by
+[@devinfoley](https://github.com/devinfoley) on the main Paperclip
+instance before this PR was opened. Happy to add screenshots if a
+reviewer wants them.
+
+## Risks
+
+- Low risk. The change is additive in the SecretField: the raw-value
+password/textarea path is preserved and auto-opens whenever the stored
+value is not a UUID, so existing SSH-key entries and unsaved raw values
+are untouched.
+- The new heuristic is &#34;if `value` is a UUID, treat it as a bound
+secret&#34;. A user who somehow pasted a UUID as a literal value (not as a
+secret ref) would now see it rendered as a bound (possibly missing)
+secret in the picker. The previous UI already treated UUID values as
+opaque secret refs at save time (server converts UUIDs straight
+through), so the runtime behavior is unchanged.
+- Picker pulls company secrets via the existing `secretsApi.list` query.
+No new endpoints, no migrations.
+
+## Model Used
+
+- Provider: Anthropic
+- Model: Claude Opus 4.7 (`claude-opus-4-7`)
+- Capabilities: tool use, extended reasoning
+- Surfaced through: Claude Code via Paperclip heartbeat (issue PAPA-377)
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [ ] If this change affects the UI, I have included before/after
+screenshots — deferred; user validated locally before opening the PR.
+Will add if requested.
+- [x] I have updated relevant documentation to reflect my changes (no
+docs needed — internal behavior of an existing form field)
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+---------
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- fix(ci): copy link-plugin-dev-sdk.mjs into Docker deps stage (#6338)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents for zero-human companies
+&gt; - Releases ship via a Docker image built in the `build-and-push` CI
+workflow
+&gt; - A recent change added `plugin-workspace-diff` to the pnpm workspace;
+its `postinstall` hook calls `scripts/link-plugin-dev-sdk.mjs`
+&gt; - The Dockerfile&#39;s `deps` stage runs `pnpm install` before the full
+repo is copied, so the script was missing and `pnpm install` failed with
+`Cannot find module`
+&gt; - Sandbox-provider plugins have the same hook but are excluded from
+the pnpm workspace, so they were unaffected — this was specific to
+`plugin-workspace-diff`
+&gt; - This pull request copies `scripts/link-plugin-dev-sdk.mjs` into the
+`deps` stage alongside the package.json files
+&gt; - The benefit is restoring the `build-and-push` CI workflow with a
+minimal one-line change
+
+## What Changed
+
+- Add `COPY scripts/link-plugin-dev-sdk.mjs scripts/` to the
+Dockerfile&#39;s `deps` stage so the `plugin-workspace-diff` postinstall
+hook succeeds during `pnpm install`.
+
+## Verification
+
+- Reproduces the original failure on `master` by running `docker build
+--target deps .` — fails at `pnpm install` with `Cannot find module
+&#39;/app/scripts/link-plugin-dev-sdk.mjs&#39;`.
+- With this patch, `docker build --target deps .` completes successfully
+through the `deps` stage.
+- CI `build-and-push` job (previously failing on
+https://github.com/paperclipai/paperclip/actions/runs/26055610103/job/76602841176)
+should now pass.
+
+## Risks
+
+- Low risk. One-line addition that copies a single script earlier in the
+Docker build. No runtime behavior changes, no app code changes, no
+schema changes.
+
+## Model Used
+
+- Claude (Anthropic), model ID `claude-opus-4-7`, extended thinking
+enabled, 200K context. Used via Claude Code CLI with tool use (Bash,
+Read, Edit, Grep) running inside the Paperclip agent harness.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- [codex] Fix new issue autocomplete pointer selection (#6311)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents for zero-human companies.
+&gt; - Human operators create and edit issues through modal-heavy board UI
+workflows.
+&gt; - The new-issue dialog embeds markdown editors that render
+autocomplete menus through body-level portals.
+&gt; - Radix Dialog treats those portal clicks as outside-dialog pointer
+events and prevents their default behavior.
+&gt; - That prevention made completion items hard or impossible to select
+from inside the new-issue dialog.
+&gt; - This pull request marks the markdown editor floating autocomplete
+menu as allowed dialog-external UI and extends the dialog
+outside-pointer handler to preserve those interactions.
+&gt; - The benefit is that users can click/tap autocomplete completions
+while keeping the existing modal behavior intact.
+
+## What Changed
+
+- Added a stable `data-paperclip-floating-ui` marker and explicit
+pointer event handling to the markdown editor mention/autocomplete
+portal.
+- Updated the new issue dialog outside-pointer guard so editor
+autocomplete portals are handled like Radix popover portals.
+- Added regression coverage for markdown editor portal markup and new
+issue dialog completion selection behavior.
+
+## Verification
+
+- `pnpm exec vitest run ui/src/components/MarkdownEditor.test.tsx
+ui/src/components/NewIssueDialog.test.tsx` passed: 2 files, 38 tests.
+- Confirmed the branch is rebased onto current `public-gh/master` before
+opening this PR.
+- Confirmed the diff does not include `pnpm-lock.yaml` or
+`.github/workflows` changes.
+
+## Risks
+
+- Low risk. The change is scoped to allowing pointer events from known
+body-level UI portals while keeping other outside-dialog pointer events
+under Radix Dialog control.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI Codex, GPT-5 coding agent with repository tool use and local
+command execution. Exact hosted context window is not surfaced in this
+runtime.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+Screenshot note: this is an interaction/event-handling fix with no
+visible UI change; verification is covered by the focused regression
+tests above.
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- fix(release): publish modal plugin from ci (#6290)
+
+## Thinking Path
+
+&gt; - Paperclip keeps its core release process declarative through
+`scripts/release-package-manifest.json`, which decides which packages CI
+is allowed to publish.
+&gt; - The Modal sandbox provider now exists as a first-party plugin
+package under `packages/plugins/sandbox-providers/modal`.
+&gt; - The original Modal PR intentionally left `publishFromCi` disabled
+until the package had been published and the registry bootstrap concern
+was cleared.
+&gt; - The latest reviewer comment confirms that bootstrap step is
+complete, so the remaining gap is only release automation configuration.
+&gt; - This pull request flips the Modal manifest entry to `publishFromCi:
+true` so future CI-driven releases can publish
+`@paperclipai/plugin-modal` the same way the other releasable packages
+do.
+&gt; - The benefit is that Modal releases no longer require a manual
+exception in the release pipeline.
+
+## What Changed
+
+- Updated the `@paperclipai/plugin-modal` entry in
+`scripts/release-package-manifest.json` to set `publishFromCi` to
+`true`.
+
+## Verification
+
+- Ran `node -e &#39;const
+m=require(&#34;./scripts/release-package-manifest.json&#34;); const
+e=m.find(x=&gt;x.name===&#34;@paperclipai/plugin-modal&#34;);
+if(!e||e.publishFromCi!==true){throw new Error(&#34;modal publishFromCi not
+true&#34;)}; console.log(JSON.stringify(e))&#39;`
+
+## Risks
+
+- Low risk. This only changes release-manifest metadata; the main
+failure mode is CI attempting to publish the Modal package before
+registry credentials or release conditions are ready.
+
+## Model Used
+
+- OpenAI Codex local agent, GPT-5-based coding model in the Codex
+runtime (exact deployment model ID not exposed in this workspace), with
+tool use and shell execution.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [ ] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+- fix(plugin): raise environmentProbe RPC timeout to 120s for cold-start sandboxes (#6289)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents for zero-human companies
+&gt; - Companies provision execution environments via sandbox provider
+plugins (Modal, Daytona, E2B, etc.)
+&gt; - At provision time, the server probes each plugin&#39;s environment /
+sandbox-provider driver over a worker RPC to validate config
+&gt; - `workerManager.call()` defaults to a 30s timeout, but cold-start
+sandboxes — Modal in particular — take ~31s to boot
+&gt; - Result: every fresh Modal environment probe fails with a worker RPC
+timeout, blocking environment provisioning end-to-end
+&gt; - This PR passes `timeoutMs=120_000` to the two probe call sites
+(`probePluginEnvironmentDriver`, `probePluginSandboxProviderDriver`)
+&gt; - The benefit is Modal — and any future provider with similar
+cold-start latency — can be successfully probed without false-negative
+timeout failures
+
+## What Changed
+
+- Pass `timeoutMs=120_000` to `workerManager.call()` in
+`probePluginEnvironmentDriver`
+(`server/src/services/plugin-environment-driver.ts`)
+- Pass `timeoutMs=120_000` to `workerManager.call()` in
+`probePluginSandboxProviderDriver` (same file)
+
+## Verification
+
+- Targeted unit tests:
+  ```
+  pnpm --filter @paperclipai/server exec vitest run \
+    src/__tests__/plugin-environment-driver-seam.test.ts \
+    src/__tests__/heartbeat-plugin-environment.test.ts
+  ```
+  5/5 tests pass.
+- Manual: provision a fresh Modal sandbox environment from the UI.
+Previously failed with a worker RPC timeout at ~30s; now succeeds.
+
+## Risks
+
+- Low risk. The change only raises a per-call timeout (default 30s →
+explicit 120s) on two probe call sites. Fast providers are unaffected
+since probe completes well below either bound. Worst case: a genuinely
+hung worker now blocks the probe for 120s instead of 30s before giving
+up — still bounded, and only on the provision-time probe path (not the
+heartbeat/run path).
+
+## Model Used
+
+- Provider: Anthropic
+- Model: `claude-opus-4-7` (Claude Opus 4.7, 1M context window)
+- Capabilities: extended thinking, tool use, code execution
+- Scope of AI assistance: the underlying 4-line code change was
+human-authored by the committer; this PR (verification commands, message
+structuring, and submission) was prepared with Claude per the
+`paperclip-dev` skill.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [ ] I have added or updated tests where applicable — n/a, this is a
+per-call timeout configuration bump; existing tests cover the probe call
+path
+- [x] If this change affects the UI, I have included before/after
+screenshots — n/a, no UI change
+- [ ] I have updated relevant documentation to reflect my changes — n/a,
+the timeout is an internal worker-RPC tuning value with no documented
+contract
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- feat(plugins): add Modal sandbox provider plugin (#6245)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents through company-scoped
+control-plane workflows and extensible runtime integrations.
+&gt; - Sandbox providers are part of that extension surface because they
+let agents execute isolated work without baking each provider into the
+core server.
+&gt; - Modal already offers managed sandboxes with filesystem, process,
+timeout, and networking controls that map onto Paperclip&#39;s sandbox
+provider contract.
+&gt; - The repo did not have a Modal provider plugin, so teams wanting
+Modal-backed sandboxes had no first-party integration path.
+&gt; - This pull request adds a standalone
+`packages/plugins/sandbox-providers/modal` plugin that implements the
+provider contract, worker entrypoint, docs, and tests.
+&gt; - The benefit is that Modal can now be installed as a provider plugin
+without expanding the core control-plane surface area.
+
+## What Changed
+
+- Added a new `packages/plugins/sandbox-providers/modal` package with
+the plugin manifest, worker entrypoint, and exported plugin surface.
+- Implemented Modal-backed sandbox lifecycle support for creation,
+command execution, file operations, networking options, termination, and
+metadata translation.
+- Added focused Vitest coverage for config validation, env handling,
+lifecycle flows, networking behavior, and error mapping.
+- Documented installation, configuration, and usage requirements in the
+plugin README.
+- Removed misleading `MODAL_TOKEN_*` fallback behavior so authentication
+relies on supported Modal credentials only.
+
+## Verification
+
+- `pnpm -r typecheck`
+- `pnpm test:run`
+- `pnpm build`
+- `cd packages/plugins/sandbox-providers/modal &amp;&amp; pnpm test`
+
+## Risks
+
+- Low to medium risk: this is isolated to a new plugin package, but
+runtime behavior still depends on live Modal account credentials and
+service-side sandbox semantics.
+- Modal&#39;s current docs target a newer Node baseline than the repo
+default, so the first live install should confirm credential loading and
+sandbox startup behavior in a real Modal workspace.
+- No UI or schema changes are included in this PR.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI Codex via Paperclip `codex_local` agent (GPT-5-class Codex
+coding model; exact backend model ID is not exposed by the runtime),
+with tool use, shell execution, and code-editing capabilities enabled.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+---------
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- docs: update plugin authoring guide for managed resources (#6261)
+
+## Thinking Path
+
+&lt;!--
+Required. Trace your reasoning from the top of the project down to this
+  specific change. Start with what Paperclip is, then narrow through the
+  subsystem, the problem, and why this PR exists. Use blockquote style.
+  Aim for 5-8 steps. See CONTRIBUTING.md for full examples.
+--&gt;
+
+&gt; - Paperclip orchestrates AI agents for zero-human companies.
+&gt; - The plugin system is how optional capabilities extend the control
+plane without adding hidden core behavior.
+&gt; - Plugin authors need accurate guidance for the current managed
+capabilities model.
+&gt; - The existing docs under-described managed skills and the
+routine-first pattern for durable plugin automation.
+&gt; - Content-oriented plugins such as LLM Wiki should model recurring
+work with visible managed agents, projects, routines, and skills.
+&gt; - This pull request aligns the authoring guide, local development
+guide, and longer plugin spec with that model.
+&gt; - The benefit is clearer plugin guidance that preserves Paperclip
+visibility, budgets, pause controls, and audit trails.
+
+## What Changed
+
+&lt;!-- Bullet list of concrete changes. One bullet per logical unit. --&gt;
+
+- Documented plugin-managed skills alongside managed agents, projects,
+and routines.
+- Added guidance for content-oriented plugins to use managed projects,
+agents, skills, and routines instead of private daemon-like state.
+- Updated the manifest/spec examples and capability lists for current
+plugin-managed surfaces.
+- Clarified when to use managed routines instead of plugin runtime jobs
+for board-visible recurring work.
+- Added a short local plugin development note pointing authors toward
+routine-first automation.
+- Addressed Greptile docs feedback by marking top-level `launchers` as
+legacy and removing a redundant `slug` from the managed skill example.
+
+## Verification
+
+&lt;!--
+  How can a reviewer confirm this works? Include test commands, manual
+  steps, or both. For UI changes, include before/after screenshots.
+--&gt;
+
+- `git diff --check public-gh/master...HEAD`
+- Reviewed `ROADMAP.md`; this is docs alignment for the completed plugin
+system milestone and does not add roadmap-level core feature work.
+- Greptile Review: success on the latest head; `3 files reviewed, 0
+comments added` after follow-up fixes.
+- GitHub PR checks are green on the latest head, including Build,
+Typecheck + Release Registry, General tests, serialized server suites,
+e2e, Canary Dry Run, policy, Snyk, and aggregate `verify`.
+
+## Risks
+
+&lt;!--
+  What could go wrong? Mention migration safety, breaking changes,
+  behavioral shifts, or &#34;Low risk&#34; if genuinely minor.
+--&gt;
+
+- Low risk: documentation-only changes.
+- Main risk is documentation drift if the plugin API changes again
+before these docs are reviewed.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected - check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+&lt;!--
+  Required. Specify which AI model was used to produce or assist with
+  this change. Be as descriptive as possible - include:
+    • Provider and model name (e.g., Claude, GPT, Gemini, Codex)
+• Exact model ID or version (e.g., claude-opus-4-6,
+gpt-4-turbo-2024-04-09)
+    • Context window size if relevant (e.g., 1M context)
+• Reasoning/thinking mode if applicable (e.g., extended thinking,
+chain-of-thought)
+• Any other relevant capability details (e.g., tool use, code execution)
+  If no AI model was used, write &#34;None — human-authored&#34;.
+--&gt;
+
+- OpenAI Codex, GPT-5 coding agent with shell and GitHub connector tool
+use.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+---------
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- Remove planning badge from inbox issue rows (PAP-9691) (#6269)
+
+## Summary
+
+- Removes the amber &#34;Planning&#34; pill from inbox / issue-list rows in
+`IssueRow`
+- Updates the focused IssueRow test to assert the badge is no longer
+rendered
+- Per [PAP-9691](https://paperclip.ing/PAP/issues/PAP-9691): user just
+doesn&#39;t want to see the badge in list rows
+
+The underlying `issue.workMode === &#34;planning&#34;` data, the issue detail
+composer toggle, and the server/plugin/heartbeat work-mode contract
+introduced in #5353 are all untouched. Planning mode still functions;
+the list-row indicator is just gone.
+
+## Test plan
+
+- [x] `pnpm exec vitest run --project @paperclipai/ui
+ui/src/components/IssueRow.test.tsx` (11 passed)
+- [ ] Visual: open `/PAP/inbox` with a planning-mode issue assigned and
+confirm no amber Planning pill on the row
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+Co-authored-by: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+- chore(lockfile): refresh pnpm-lock.yaml (#6263)
+
+Auto-generated lockfile refresh after dependencies changed on master.
+This PR only updates pnpm-lock.yaml.
+
+Co-authored-by: lockfile-bot &lt;lockfile-bot@users.noreply.github.com&gt;
+
+- [codex] Add workspace diff viewer plugin (#6071)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents for zero-human companies.
+&gt; - Operators need to inspect what agents changed inside execution and
+project workspaces.
+&gt; - The existing workspace detail views did not provide a first-party
+rich diff surface for staged, unstaged, head, renamed, binary,
+oversized, and untracked changes.
+&gt; - The plugin system is the intended extension point for optional rich
+UI surfaces.
+&gt; - This pull request adds a workspace diff plugin plus host services
+and shared contracts so Changes tabs can render workspace diffs through
+plugin slots.
+&gt; - The diff-renderer dependency should stay owned by the plugin package
+rather than the core UI app.
+&gt; - The dependency surface must stay aligned with repository PR policy,
+including intentionally omitting `pnpm-lock.yaml` from the PR.
+&gt; - The benefit is a more reviewable workspace surface without
+hard-coding the renderer into every page.
+
+## What Changed
+
+- Added `@paperclipai/plugin-workspace-diff`, including diff
+normalization, plugin manifest/worker/UI entrypoints, and focused plugin
+tests.
+- Kept `@pierre/diffs` scoped to `@paperclipai/plugin-workspace-diff`;
+removed the core UI lab diff-renderer surface and direct UI package
+dependency.
+- Added shared workspace diff types and validators, plus plugin SDK
+surface for workspace diff host services.
+- Added server workspace diff service support and route coverage for
+execution/project workspace diff flows.
+- Wired Execution Workspace and Project Workspace Changes tabs to load
+the diff plugin, including loading/error fallback behavior.
+- Added UI tests and fixtures for the Changes tabs and plugin bridge
+behavior.
+- Added the new plugin package manifest to the Docker deps stage so PR
+policy can validate dependency coverage.
+- Addressed review hardening around empty untracked patches, workspace
+path exposure, project workspace read capability checks, and default
+base refs.
+
+## Verification
+
+- `pnpm --filter @paperclipai/plugin-workspace-diff test`
+- `pnpm exec vitest run
+packages/shared/src/validators/workspace-diff.test.ts
+server/src/__tests__/workspace-diff-service.test.ts
+ui/src/pages/ProjectWorkspaceDetail.test.tsx
+ui/src/pages/ExecutionWorkspaceDetail.test.tsx`
+- `pnpm exec vitest run ui/src/plugins/bridge.test.ts
+server/src/__tests__/workspace-runtime-routes-authz.test.ts`
+- `pnpm --filter @paperclipai/shared typecheck`
+- `pnpm --filter @paperclipai/plugin-workspace-diff typecheck`
+- `pnpm --filter @paperclipai/server typecheck`
+- `pnpm --filter @paperclipai/ui typecheck`
+- `node ./scripts/check-docker-deps-stage.mjs`
+- Browser screenshot captured from the local worktree dev server:
+https://files.catbox.moe/ofdpsp.png
+- Confirmed branch is rebased onto `public-gh/master`,
+`.github/workflows/pr.yml` is not included in the PR diff,
+`ui/package.json` is not included in the PR diff, and `pnpm-lock.yaml`
+is not included in the PR diff.
+
+## Risks
+
+- Medium UI integration risk: the Changes tab depends on the plugin slot
+and host diff service path.
+- Medium dependency risk: this adds `@pierre/diffs` in the plugin
+package, but `pnpm-lock.yaml` is intentionally omitted per packaging
+instructions because repository automation manages lockfile updates.
+- Current CI blocker: downstream frozen installs fail until the
+repository policy path for new plugin package dependencies is chosen.
+- Diff rendering edge cases are covered for common working-tree and head
+diff states, but very large repositories may still expose performance
+limits.
+- No migrations are included.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI Codex, GPT-5 class coding model, tool-enabled local execution
+environment. Exact context window was not exposed by the runtime.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+---------
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- fix(cli): stop worktree init --force from wiping repo worktrees/ (#6240)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents for zero-human companies
+&gt; - Each working tree gets an isolated Paperclip instance; the CLI&#39;s
+`paperclip worktree init` is what bootstraps that instance and writes
+`&lt;repo&gt;/.paperclip/config.json` + `.env`
+&gt; - When `--force` was passed, the init path tried to &#34;start clean&#34; by
+recursively removing the entire `&lt;repo&gt;/.paperclip/` directory before
+rewriting those two files
+&gt; - But `&lt;repo&gt;/.paperclip/` also holds `worktrees/`, which contains
+every repo-managed worktree checkout (70+ on this machine). The
+recursive rm silently nuked all of them.
+&gt; - This PR narrows the `--force` reset so it only deletes the two files
+it&#39;s about to rewrite (`config.json`, `.env`), instead of wiping the
+whole `repoConfigDir`
+&gt; - It also adds a regression test that drops a sentinel file into
+`&lt;repoConfigDir&gt;/worktrees/` and asserts it survives a `--force` init
+&gt; - The benefit is that `worktree init --force` becomes safe to run from
+inside the main repo without destroying every sibling worktree checkout
+
+## What Changed
+
+- `cli/src/commands/worktree.ts`: in the `--force` branch of
+`runWorktreeInit`, replace `rmSync(paths.repoConfigDir, { recursive:
+true, force: true })` with targeted removals of `paths.configPath` and
+`paths.envPath`. `paths.instanceRoot` removal is unchanged — that path
+is per-instance and safe to wipe.
+- `cli/src/__tests__/worktree.test.ts`: new regression test that seeds a
+fake `worktrees/&lt;name&gt;/` checkout inside the repo&#39;s `.paperclip/` and
+verifies `runWorktreeInit({ force: true, ... })` does not delete it.
+
+## Verification
+
+- `pnpm --filter @paperclip/cli test -- worktree` — the new regression
+test fails on the old code and passes on the fix
+- Manual: from a repo checkout, `npx paperclipai worktree init --force
+…` no longer removes `&lt;repo&gt;/.paperclip/worktrees/`; only `config.json`
+and `.env` are rewritten
+
+## Risks
+
+- Low. The change strictly narrows what `--force` removes. Any caller
+that depended on `--force` also wiping unrelated files under
+`&lt;repo&gt;/.paperclip/` (there shouldn&#39;t be any — it&#39;s documented as just
+config + env) would see those files persist. `instanceRoot` cleanup is
+unchanged.
+
+## Model Used
+
+- Claude (Anthropic), model `claude-opus-4-7`, ~200K context,
+extended-thinking + tool-use enabled, run via the Paperclip
+`claude_local` adapter.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [ ] If this change affects the UI, I have included before/after
+screenshots (N/A — CLI-only fix)
+- [x] I have updated relevant documentation to reflect my changes (no
+doc surface affected)
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- Fix new secret form textarea overflow (PAPA-348) (#6222)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents for zero-human companies
+&gt; - Operators manage per-company secrets through the Secrets page in the
+web UI
+&gt; - A long secret value pasted into the &#34;New secret&#34; textarea blew out
+the form&#39;s width, which pushed the Create/Cancel buttons off-screen and
+made the form unusable
+&gt; - Root cause: the shadcn `Textarea` primitive sets `w-full` but does
+not constrain `min-width`, so a flex parent honors the textarea&#39;s
+intrinsic content width when a long unbreakable string is present
+&gt; - This pull request adds `min-w-0 max-w-full` to the shared `Textarea`
+primitive and `min-w-0 overflow-x-hidden break-all` on the secret-value
+usage so a long token wraps inside the form bounds
+&gt; - The benefit is the Create/Cancel buttons stay reachable regardless
+of pasted token length, and every other `Textarea` consumer also gets
+the flexbox-friendly width constraint
+
+## What Changed
+
+- `ui/src/components/ui/textarea.tsx`: added `min-w-0 max-w-full` to the
+base shadcn `Textarea` so it cannot exceed its flex parent
+- `ui/src/pages/Secrets.tsx`: added `min-w-0 overflow-x-hidden
+break-all` on the new-secret value `Textarea` so long opaque tokens wrap
+instead of pushing the form
+- `ui/src/pages/Secrets.render.test.tsx`: new regression test that opens
+the New Secret dialog and asserts the value textarea carries the
+width-constraint classes
+
+## Verification
+
+- `cd ui &amp;&amp; npx vitest run src/pages/Secrets.render.test.tsx` — 3/3 pass
+- Manual: open the Secrets page, click &#34;New secret&#34;, paste a long
+unbroken string (e.g. a 500-char token) into the value field. The form
+stays within its dialog and the Create/Cancel buttons remain in view.
+
+Before:
+
+&lt;img width=&#34;1772&#34; height=&#34;1432&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/cb31a290-f82a-41dc-9346-91d18cbb5911&#34;
+/&gt;
+
+After:
+
+&lt;img width=&#34;672&#34; height=&#34;734&#34; alt=&#34;Screenshot 2026-05-17 at 5 39 38 PM&#34;
+src=&#34;https://github.com/user-attachments/assets/a08800c2-b09b-43be-b0e8-114d9149b8f5&#34;
+/&gt;
+
+After: the value field wraps with `break-all` inside the dialog;
+Create/Cancel stay clickable. Covered by the new render test which
+asserts `min-w-0`, `overflow-x-hidden`, and `break-all` are present on
+`#new-secret-value`.
+
+## Risks
+
+- Low risk. The base `Textarea` change adds `min-w-0 max-w-full`, which
+only affects layouts where a textarea was previously allowed to grow
+past its parent — those cases were already buggy. `break-all` on the
+secret-value textarea is the right behavior for opaque tokens; it would
+be wrong for prose, but this field is explicitly a secret token.
+
+## Model Used
+
+- Provider: Anthropic Claude
+- Model: claude-opus-4-7 (Opus 4.7)
+- Mode: standard Claude Code agent, tool use enabled
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [ ] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+- [codex] Roll up May 17 branch changes (#6210)
+
+## Thinking Path
+
+&gt; - Paperclip is the control plane for autonomous AI companies, so agent
+work needs visible ownership, recovery, and operator controls.
+&gt; - This local branch had accumulated several related control-plane
+reliability and operator-experience fixes across recovery actions,
+watchdog folding, model-profile defaults, mentions, markdown editing,
+plugin launchers, and small UI polish.
+&gt; - The branch needed to be converted into a PR against the current
+`origin/master` without losing dirty work or including lockfile/workflow
+churn.
+&gt; - The safest standalone shape is a single rollup PR because the
+recovery/server/UI files overlap heavily across the local commits and
+splitting would create avoidable conflicts.
+&gt; - This pull request replays the local branch onto latest
+`origin/master`, preserves the uncommitted work as logical commits, and
+adds a Zod 4 validator compatibility fix found during verification.
+&gt; - The benefit is that the May 17 local branch can be reviewed and
+merged as one coherent, conflict-free branch under the 100-file Greptile
+limit.
+
+## What Changed
+
+- Rebased the local May 17 branch work onto current `origin/master` in a
+dedicated worktree.
+- Preserved and committed previously dirty changes for recovery retry
+handling, plugin/sidebar launcher polish, and `.herenow` ignores.
+- Added recovery-action behavior for returning source issues to `todo`
+when retrying source-scoped recovery.
+- Included the existing local recovery/liveness/watchdog fold, Codex
+cheap-profile, markdown/mention, duplicate-agent, and UI polish commits
+from the branch.
+- Normalized shared validator `z.record(...)` schemas to explicit
+string-key records for Zod 4 compatibility.
+- Confirmed the PR has no `pnpm-lock.yaml` or `.github/workflows/*`
+changes and stays below the 100-file Greptile limit.
+
+## Verification
+
+- `pnpm install --frozen-lockfile --ignore-scripts`
+- `npm run install` in
+`node_modules/.pnpm/sqlite3@5.1.7/node_modules/sqlite3` to build the
+local native sqlite3 binding after installing with scripts disabled
+- `pnpm exec vitest run packages/shared/src/validators/issue.test.ts
+packages/shared/src/project-mentions.test.ts
+packages/adapter-utils/src/server-utils.test.ts
+server/src/__tests__/heartbeat-model-profile.test.ts
+server/src/__tests__/issue-recovery-actions.test.ts
+server/src/__tests__/issue-agent-mutation-ownership-routes.test.ts
+server/src/__tests__/heartbeat-active-run-output-watchdog.test.ts
+server/src/__tests__/plugin-local-folders.test.ts
+ui/src/components/IssueRecoveryActionCard.test.tsx
+ui/src/components/Sidebar.test.tsx
+ui/src/components/SidebarAccountMenu.test.tsx
+ui/src/components/IssueProperties.test.tsx
+ui/src/components/MarkdownEditor.test.tsx
+ui/src/components/MarkdownBody.test.tsx
+ui/src/lib/duplicate-agent-payload.test.ts
+ui/src/pages/Routines.test.tsx`
+- First pass: 13 files passed with 201 passing tests; 3 server files
+failed before sqlite3 native binding was built.
+- After rebuilding sqlite3:
+`server/src/__tests__/heartbeat-model-profile.test.ts`,
+`server/src/__tests__/issue-recovery-actions.test.ts`, and
+`server/src/__tests__/heartbeat-active-run-output-watchdog.test.ts`
+passed/loaded; embedded Postgres tests were skipped by the local host
+guard.
+- `pnpm --filter @paperclipai/shared typecheck`
+- `pnpm --filter @paperclipai/adapter-utils typecheck`
+- `pnpm --filter @paperclipai/server typecheck`
+- `pnpm --filter @paperclipai/ui typecheck`
+
+## Risks
+
+- Medium risk: this is a broad rollup PR across recovery semantics,
+server tests, shared validators, and UI surfaces.
+- Some embedded Postgres tests skipped locally due the host guard, so CI
+should provide the stronger database-backed signal.
+- UI changes were covered by component tests, but no browser screenshot
+was captured in this PR creation pass.
+- This branch may overlap with existing recovery/liveness PR work; merge
+this PR independently or restack/close overlapping branches rather than
+merging duplicate implementations together.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI Codex, GPT-5-based coding agent, tool-enabled local repository
+and GitHub workflow, medium reasoning effort.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [ ] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+---------
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- [codex] Add routine env secrets support (#6212)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents for zero-human companies.
+&gt; - Scheduled routines are the control-plane path for recurring agent
+work.
+&gt; - Routines already had dispatch/history, but their runtime environment
+did not carry routine-owned secret bindings through execution.
+&gt; - Operators need routine-specific secrets that can override
+project/agent env without exposing secret values in history, logs, or
+access events.
+&gt; - This pull request adds the routine env runtime contract, wires it
+into execution, and makes the routine UI/history surfaces show safe
+secret metadata.
+&gt; - The benefit is that routine executions can use scoped secret refs
+predictably while preserving company boundaries and auditability.
+
+## What Changed
+
+- Added routine env persistence/runtime support, including
+`routines.env`, `routine_runs.routine_revision_id`, revision snapshots,
+and idempotent migration `0086_routine_env_runtime_contract`.
+- Resolved routine env during heartbeat adapter config assembly with
+precedence `agent &lt; project &lt; routine` and secret access events recorded
+against the routine consumer.
+- Added secret binding synchronization for routine create/update/restore
+flows and guarded cross-company, missing, disabled, and deleted secret
+cases.
+- Added a Secrets tab to routine detail, env/secret history diff
+rendering, and Storybook coverage for the new UI states.
+- Added server/UI regression tests, including an embedded-Postgres QA
+path for routine secret execution and restore behavior.
+- Updated implementation/database docs for routine env and
+secret-binding behavior.
+
+## Verification
+
+- `pnpm install --frozen-lockfile` after rebasing onto
+`public-gh/master` to refresh workspace links for the newly-added
+upstream Grok adapter package.
+- `pnpm exec vitest run
+server/src/__tests__/heartbeat-project-env.test.ts
+server/src/__tests__/routines-service.test.ts
+server/src/__tests__/secrets-service.test.ts
+server/src/__tests__/qa-routine-secrets-e2e.test.ts
+ui/src/components/RoutineHistoryTab.test.tsx` passed: 5 files, 92 tests.
+- `pnpm -r typecheck` passed across the workspace.
+- `pnpm build` passed. Vite emitted the existing
+large-chunk/dynamic-import warnings.
+- UI screenshots were captured locally during QA in
+`artifacts/pap-9521/` and `artifacts/pap-9522/`; generated screenshots
+are not committed to avoid adding binary artifacts to the repo.
+
+## Risks
+
+- Migration risk is limited by `IF NOT EXISTS` guards for the new
+columns, FK, and index, and the migration is ordered as `0086`
+immediately after upstream `0085`.
+- Runtime behavior changes env precedence for routine executions by
+adding routine env as the highest-precedence layer; tests cover
+agent/project/routine precedence.
+- Secret handling is security-sensitive; tests cover value-free
+manifests/events/errors, disabled/missing/deleted secrets, and
+cross-company rejection.
+- UI history now renders routine env/secret diffs; tests and Storybook
+stories cover the main rendering paths.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI Codex coding agent based on GPT-5, with shell/tool use and
+medium reasoning effort.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+---------
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- docs(skills): add release-changelog-discord-message skill (#6152)
+
+## Summary
+
+Adds `.agents/skills/release-changelog-discord-message/SKILL.md` — the
+companion to `.agents/skills/release-changelog/`. The changelog skill
+produces `releases/vYYYY.MDD.P.md`; this one turns that into the single
+copy-pasteable Discord post in dotta&#39;s voice and attaches it as the
+`discord_announcement` document on the release issue.
+
+Includes:
+
+- dotta&#39;s instructions near-verbatim from PAP-3687 (&#34;This is for discord
+— try to follow my format. If I have a section where I think about the
+future, pull from recent issues we&#39;re working on etc.&#34;)
+- The three previous Discord announcements (v2026.403.0, v2026.416.0,
+v2026.427.0) **verbatim** as canonical voice references
+- Format template + language tips (ALL CAPS for excitement,
+emoji-shortcode-per-highlight, first-person voice, opener/closer brand
+bookends)
+- Workflow tied to the existing release issue + `discord_announcement`
+document
+- Review checklist (version match, contributor list dedup, real &#34;what&#39;s
+next&#34; themes, no invented work)
+
+Resolves PAP-9524.
+
+## Test plan
+
+- [ ] dotta eyeballs voice + structure against the three prior posts
+- [ ] On the next release, run this skill end-to-end and confirm the
+`discord_announcement` document on the release issue matches the format
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- [codex] Enable Grok adapter canary publishing (#6154)
+
+## Thinking Path
+
+&gt; - Paperclip publishes its CLI, server, UI, and adapter packages
+through the shared release workflow.
+&gt; - Canary releases are driven by the GitHub release workflow on pushes
+to `master`.
+&gt; - The release workflow does not publish every public package
+automatically; it uses `scripts/release-package-manifest.json` as the CI
+enrollment source of truth.
+&gt; - The Grok adapter is public and already present in the manifest, but
+its `publishFromCi` flag was still disabled.
+&gt; - Because of that flag, normal canary publishes skipped
+`@paperclipai/adapter-grok-local` even when the main package received a
+canary.
+&gt; - This pull request enables Grok in the release manifest so future
+canary runs include it.
+&gt; - The benefit is that Grok adapter canaries stay aligned with the rest
+of the package release set.
+
+## What Changed
+
+- Set `packages/adapters/grok-local` / `@paperclipai/adapter-grok-local`
+to `publishFromCi: true` in `scripts/release-package-manifest.json`.
+
+## Verification
+
+- `node ./scripts/release-package-map.mjs check`
+- `node ./scripts/release-package-map.mjs list | grep
+&#39;@paperclipai/adapter-grok-local&#39;`
+- `pnpm test:release-registry`
+
+## Risks
+
+- Low risk: this is a release manifest-only change.
+- Future canary releases will attempt to publish
+`@paperclipai/adapter-grok-local`; this assumes the package remains
+publishable and trusted publishing/package access are correctly
+configured for the existing npm package.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI Codex, GPT-5-based coding agent with shell, git, and GitHub
+tool use.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- docs: add v2026.517.0 release changelog (#6150)
+
+## Thinking Path
+
+&gt; - Paperclip is the control plane for autonomous AI companies.
+&gt; - Stable releases need a reviewer-readable changelog artifact that
+summarizes what changed for operators and contributors.
+&gt; - The last stable release tag is `v2026.513.0`, and the requested
+release date is 2026-05-17.
+&gt; - The release changelog skill maps that date to stable version
+`2026.517.0` and requires the range `v2026.513.0..origin/master`.
+&gt; - I reviewed the commits, PR metadata, migration/API surfaces, and
+contributor attribution in that range.
+&gt; - This pull request adds the `releases/v2026.517.0.md` changelog for
+human release sign-off.
+&gt; - The benefit is a stable release note artifact that is ready to
+review before publishing the release.
+
+## What Changed
+
+- Added `releases/v2026.517.0.md` for the 2026-05-17 stable release.
+- Summarized user-facing highlights, improvements, fixes, and
+contributor attribution from `v2026.513.0..origin/master`.
+- Omitted Breaking Changes and Upgrade Guide sections after checking for
+destructive migrations, removed API surfaces, and breaking-change commit
+signals.
+
+## Verification
+
+- `./scripts/release.sh stable --date 2026-05-17 --print-version` -&gt;
+`2026.517.0`.
+- `git tag --list &#39;v*&#39; --sort=-version:refname | head -10` confirmed
+`v2026.513.0` is the latest stable tag.
+- `git log v2026.513.0..origin/master --oneline --no-merges` reviewed
+the 16 release-range commits.
+- `git diff --name-only v2026.513.0..origin/master -- .changeset`
+returned no changeset files.
+- `git log v2026.513.0..origin/master --format=&#39;%s&#39; | rg -n &#39;BREAKING
+CHANGE|BREAKING:|^[a-z]+!:&#39; || true` returned no breaking-change
+signals.
+- `git diff --name-only v2026.513.0..origin/master --
+packages/db/src/migrations packages/db/src/schema server/src/routes
+server/src/api server/src` reviewed the DB/API/server touchpoints; only
+an additive document-lock migration appeared in the DB schema/migration
+path.
+- `test -f releases/v2026.517.0.md` passed.
+- `rg -n -- &#39;-canary|canary/&#39; releases/v2026.517.0.md || true` returned
+no canary filename/title language.
+- `git diff --cached --check` passed before commit.
+
+## Risks
+
+- Low risk: docs-only release changelog addition.
+- Changelog grouping is editorial; reviewers may want wording or
+prioritization changes before release publication.
+- Contributor attribution intentionally excludes bot accounts and
+Paperclip founders from the Contributors section per the release
+changelog skill.
+
+&gt; Checked [`ROADMAP.md`](ROADMAP.md); this is release documentation, not
+new roadmap-level core feature work.
+
+## Model Used
+
+- OpenAI Codex, GPT-5 coding agent via Paperclip `codex_local`, with
+shell, git, GitHub CLI, and repository file editing enabled. Exact
+backend sub-version and context window were not surfaced by the
+Paperclip runtime.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [x] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+- fix(grok-local): restore turn boundaries in streaming reasoning text (#6142)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents for zero-human companies
+&gt; - The `grok-local` adapter streams reasoning text to the issue
+&#34;Working...&#34; panel as the grok CLI runs
+&gt; - The `grok` CLI&#39;s `--output-format streaming-json` mode silently
+drops the `\n` separator between reasoning turns around tool calls
+&gt; - Consecutive `thought` chunks (e.g. `` &#34;`&#34; `` followed by `&#34;The&#34;`)
+arrive with no intervening whitespace event, so the UI&#39;s `delta: true`
+concatenator merged them into run-on text like `&#34;…planningGreat, now I
+have the issue descriptionThe only co&#34;`
+&gt; - This PR adds a small turn-boundary helper that detects sentence
+boundaries in the upstream `thought` stream and inserts a single `\n`
+only when the previous chunk ended with sentence punctuation (or a
+balanced closing backtick) AND the next chunk begins a new uppercase
+sentence
+&gt; - The benefit is readable streaming reasoning in the UI without
+changing how completed messages are stored
+
+## What Changed
+
+- Added `packages/adapters/grok-local/src/shared/turn-boundary.ts` with
+per-stream state (last chunk + backtick parity) and a
+`restoreTurnBoundary()` helper that inserts `\n` only between balanced,
+sentence-terminated `thought` chunks
+- Wired the helper into `parseGrokJsonl` (server) and added a new
+`createGrokStdoutParser` factory used by `grokLocalUIAdapter` for the
+live &#34;Working...&#34; panel
+- Added focused tests in `shared/turn-boundary.test.ts`, plus regression
+assertions in `server/parse.test.ts` and `ui/parse-stdout.test.ts`
+
+## Verification
+
+- `pnpm --filter @paperclip/grok-local test` — 23/23 adapter tests pass
+- `pnpm --filter @paperclip/grok-local typecheck` and UI typecheck —
+clean
+- Replayed an actual broken `grok 0.1.210` stream from the report;
+previously-merged boundaries (`` `ls`The ``, `returned:Confirmed`) now
+render with a separating newline; chunks inside un-closed backtick spans
+are left alone
+
+## Risks
+
+- Low risk. Boundary insertion only fires when prev ends with
+`.`/`!`/`?`/balanced `` ` `` and next begins with an uppercase ≥2-char
+word, with no whitespace on either side. Worst case: a rare missed split
+or a misplaced newline inside reasoning — both purely cosmetic and
+confined to the live streaming panel.
+
+## Model Used
+
+- Claude Opus 4.7 (claude-opus-4-7), Anthropic, extended thinking + tool
+use via Claude Code
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [ ] If this change affects the UI, I have included before/after
+screenshots
+- [x] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+---------
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- ci: speed up PR verify workflow (#6137)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents through a control-plane repo that
+relies on GitHub Actions as part of its release and verification safety
+net.
+&gt; - The PR workflow in `.github/workflows/pr.yml` is the core CI path
+protecting pull requests before merge.
+&gt; - Baseline measurement work in [PAPA-335](/PAPA/issues/PAPA-335)
+showed the old single `verify` job was the critical-path bottleneck,
+with general tests and build serialized together.
+&gt; - Follow-up implementation in [PAPA-338](/PAPA/issues/PAPA-338) and
+[PAPA-339](/PAPA/issues/PAPA-339) split that work into parallel lanes
+and removed redundant clean-runner prebuild work.
+&gt; - [PAPA-340](/PAPA/issues/PAPA-340) now needs real post-change PR
+workflow evidence, not local inference, to compare against the May 15,
+2026 baseline and decide whether phase-2 work is still justified.
+&gt; - This pull request publishes the already-implemented CI speedup
+branch so GitHub can run the actual `PR` workflow against it.
+&gt; - The benefit is that CI timing decisions are based on measured runs
+from the exact workflow shape we intend to ship.
+
+## What Changed
+
+- Split the PR workflow so `policy` fans out into separate `Typecheck +
+Release Registry`, grouped `General tests`, and `Build` jobs.
+- Kept the serialized server matrix, canary dry run, and e2e jobs intact
+while removing the old monolithic `verify` bottleneck.
+- Reworked grouped general-test execution in
+`scripts/run-vitest-stable.mjs` so the workflow can run balanced
+non-serialized lanes.
+- Replaced redundant clean-runner prebuild gates with the idempotent
+`ensure-build-deps` path used by the relevant CI entrypoints.
+
+## Verification
+
+- `ruby -e &#34;require &#39;yaml&#39;; YAML.load_file(&#39;.github/workflows/pr.yml&#39;);
+puts &#39;yaml-ok&#39;&#34;`
+- `node scripts/run-vitest-stable.mjs --mode general --dry-run`
+- `node scripts/run-vitest-stable.mjs --mode general --group
+general-server --dry-run`
+- `node scripts/run-vitest-stable.mjs --mode general --group
+general-workspaces-a --dry-run`
+- `node scripts/run-vitest-stable.mjs --mode general --group
+general-workspaces-b --dry-run`
+- `pnpm test:run:general -- --group general-workspaces-b`
+- `pnpm test:run:general -- --group general-workspaces-a`
+- `pnpm test:run:general -- --group general-server`
+- `pnpm run typecheck:build-gaps`
+- `pnpm --filter @paperclipai/plugin-hello-world-example typecheck`
+
+## Risks
+
+- Required-check and branch-protection settings may still reference the
+old single `verify` job name.
+- Parallel CI lanes can expose hidden ordering assumptions or
+clean-runner bootstrap gaps that local grouped dry-runs did not surface.
+- Because the branch is behind current `master`, merge conflicts or
+unrelated upstream drift could affect the measured runtime until the
+branch is rebased.
+
+&gt; Checked `ROADMAP.md`; this work is CI throughput maintenance for the
+existing PR verification path, not duplicate feature work.
+
+## Model Used
+
+- OpenAI Codex via Paperclip `codex_local`, GPT-5-class coding agent
+with repository read/write, shell execution, and GitHub CLI/tool use.
+The runtime does not expose a more specific backend model ID in-session.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [ ] If this change affects the UI, I have included before/after
+screenshots
+- [ ] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge
+
+---------
+
+Co-authored-by: Paperclip &lt;noreply@paperclip.ing&gt;
+
+- chore(lockfile): refresh pnpm-lock.yaml (#6136)
+
+Auto-generated lockfile refresh after dependencies changed on master.
+This PR only updates pnpm-lock.yaml.
+
+Co-authored-by: lockfile-bot &lt;lockfile-bot@users.noreply.github.com&gt;
+
+- Add built-in grok_local adapter (#6087)
+
+## Thinking Path
+
+&gt; - Paperclip orchestrates AI agents for zero-human companies, so
+adapter quality directly affects what runtimes the control plane can
+supervise.
+&gt; - Local CLI adapters are one of the core execution surfaces because
+they turn real coding tools into Paperclip-managed employees with
+heartbeats, transcripts, and reviewability.
+&gt; - Grok Build was installed on the Paperclip host, but Paperclip had no
+built-in `grok_local` adapter, so the runtime could not be configured
+through the normal server/UI/CLI adapter path.
+&gt; - That gap needed to be closed with the same built-in registry,
+environment diagnostics, transcript parsing, and skill/instructions
+behavior that the other local adapters already rely on.
+&gt; - After the initial adapter landed, a real follow-up run showed that
+Grok streaming text was being rendered one fragment per line, which made
+transcripts harder to read even though the runtime itself was working.
+&gt; - This pull request adds the built-in `grok_local` adapter end-to-end
+and then fixes the transcript parser so streamed Grok output is
+coalesced into readable assistant/thinking blocks.
+&gt; - The benefit is that Grok Build becomes a first-class Paperclip
+runtime with a usable operator experience instead of a partially wired
+runtime with noisy transcript output.
+
+## What Changed
+
+- Added a new built-in `@paperclipai/adapter-grok-local` package with
+server, UI, and CLI entrypoints.
+- Implemented Grok execution, session handling, environment diagnostics,
+config building, skill syncing, and parser coverage inside the new
+adapter package.
+- Registered `grok_local` across the built-in adapter inventories and
+capability/display metadata in server, UI, CLI, and shared constants.
+- Added adapter route coverage for the new built-in type.
+- Fixed Grok transcript readability by emitting streamed `text` and
+`thought` fragments as deltas so the shared transcript builder coalesces
+them into readable message blocks.
+- Added regression tests for the Grok parser and transcript coalescing
+behavior.
+
+## Verification
+
+- `pnpm vitest run
+packages/adapters/grok-local/src/ui/parse-stdout.test.ts
+ui/src/adapters/transcript.test.ts`
+- `pnpm --filter @paperclipai/adapter-grok-local build`
+- Manual runtime verification on the Paperclip host during
+implementation and follow-up review:
+  - confirmed the Grok CLI was installed and authenticated
+- confirmed the worktree dev server could be restarted cleanly and
+health-checked after the parser follow-up
+- No screenshots attached. This change is primarily adapter plumbing
+plus transcript formatting behavior; reviewers can verify via the
+Grok-backed run surfaces directly.
+
+## Risks
+
+- This adds a new built-in adapter, so any missed registration surface
+could create inconsistencies between server, UI, and CLI behavior.
+- The adapter depends on Grok Build&#39;s current event/output shape; if
+upstream Grok streaming JSON changes, transcript parsing or session
+extraction may need follow-up updates.
+- The transcript readability fix intentionally changes how Grok
+fragments are grouped, so any downstream code that implicitly expected
+one entry per fragment would behave differently.
+
+&gt; For core feature work, check [`ROADMAP.md`](ROADMAP.md) first and
+discuss it in `#dev` before opening the PR. Feature PRs that overlap
+with planned core work may need to be redirected — check the roadmap
+first. See `CONTRIBUTING.md`.
+
+## Model Used
+
+- OpenAI Codex via Paperclip `codex_local` agent runtime.
+- GPT-5-class coding model with tool use, shell execution, file editing,
+and repo inspection enabled.
+- Exact backend model ID/context window were not surfaced to the agent
+in this Paperclip session.
+
+## Checklist
+
+- [x] I have included a thinking path that traces from project context
+to this change
+- [x] I have specified the model used (with version and capability
+details)
+- [x] I have checked ROADMAP.md and confirmed this PR does not duplicate
+planned core work
+- [x] I have run tests locally and they pass
+- [x] I have added or updated tests where applicable
+- [ ] If this change affects the UI, I have included before/after
+screenshots
+- [ ] I have updated relevant documentation to reflect my changes
+- [x] I have considered and documented any risks above
+- [x] I will address all Greptile and reviewer comments before
+requesting merge</div>
+</div>
+
+<a href="../project/paperclipai_paperclip.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

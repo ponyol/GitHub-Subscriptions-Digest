@@ -1,0 +1,1062 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (30 commits) - microsoft/onnxruntime-genai - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (30 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/microsoft_onnxruntime-genai.html">microsoft/onnxruntime-genai</a> /
+    Updates in main (30 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/microsoft_onnxruntime-genai.html">microsoft/onnxruntime-genai</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-23 06:13 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/microsoft/onnxruntime-genai/commits/main" target="_blank">https://github.com/microsoft/onnxruntime-genai/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление добавляет поддержку нескольких новых моделей, таких как Qwen3.5 (с режимами TRT-RTX и только текст), VideoChat-Flash, NVIDIA Parakeet TDT ASR и HunYuan Dense V1. Оно также включает оптимизации производительности для моделей Qwen3/3.5 и критические исправления для утечек памяти, загрузки внешних весов и сбоев вывода на WebGPU. Кроме того, обновление расширяет поддержку платформ до Linux ARM64 и Visual Studio 2026, одновременно повышая валидацию моделей и надежность сборки.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Enable Qwen3.5 TRT-RTX EP path with CUDA graph (#2139)
+
+This PR enables Qwen3.5 text-only INT4 QDQ export and TRT-RTX EP
+inference with CUDA graph/shared past-present buffers.
+
+## Structure
+
+The branch is rebased on latest `main` and intentionally split into two
+commits:
+
+1. `Add Qwen3.5 text-only export support`
+- Mirrors the overlapping Qwen3.5 text-only builder/model-type work from
+PR #2157.
+- Keeps Qwen3.5 text-only ONNX input `position_ids` as `[B, S]` and
+expands inside the graph to `[3, B, S]` for mRoPE.
+2. `Enable Qwen3.5 TRT-RTX shared-buffer inference`
+- Shares Qwen3.5 recurrent/conv state buffers when
+`past_present_share_buffer` is enabled, preserving stable input/output
+addresses for TRT-RTX graph replay.
+   - Fixes QDQ SkipLayerNorm `output_3` producer wiring.
+- Keeps mixed-precision quantization logic in the shared base
+`k_quant_linear` path rather than Qwen-local code.
+   - Adds the canonical `NvTensorRtRtx` name to the example EP choices.
+
+## PR #2157 compatibility
+
+This branch was compared against microsoft/onnxruntime-genai#2157 using
+`git merge-tree`. The same Qwen files are touched, but Git auto-merges
+them cleanly and the simulation produced no conflict markers.
+
+If #2157 merges first, the first commit in this branch is the overlap
+and can be dropped/rebased away; the second commit contains the
+TRT-RTX-specific delta.
+
+## Validation
+
+- Rebased onto latest upstream `main` (`bf6cf3fe`).
+- Built CUDA Release wheel with CUDA 13.2:
+`python build.py --use_cuda --cuda_home=&#34;C:\Program Files\NVIDIA GPU
+Computing Toolkit\CUDA\v13.2&#34; --config Release --update --build
+--parallel --skip_tests --skip_examples`
+- Installed the rebuilt wheel in the minimal TRT-RTX package
+environment.
+- Exported and ran Qwen3.5 0.8B and 9B text-only INT4 QDQ models with
+TRT-RTX EP + CUDA graph enabled.
+- 0.8B: TTFT 1.18s, decode 64.44 tok/s, answer starts: &#34;The history of
+artificial intelligence...&#34;
+- 9B: TTFT 1.47s, decode 48.00 tok/s, answer is a coherent
+reasoning-style response.
+
+- Fix external weights loading for in-memory models without changing cwd (#2180)
+
+This replaces the previous `chdir` workaround used when loading an ONNX
+model from memory while its external weight files remain on disk.
+
+Instead of temporarily changing the process working directory (which has
+security issues and is not thread-safe), we now set ONNX Runtime&#39;s
+session option:
+
+```cpp
+session.model_external_initializers_file_folder_path
+```
+
+to the model config directory before creating the session from the
+in-memory model buffer. This lets ORT resolve external initializer files
+correctly without mutating global process state.
+
+This makes the model-from-memory path thread-safe and keeps file-based
+model loading behavior unchanged.
+
+- Validate sliding window size before creating KV cache (#2181)
+
+Adds a guard in `WindowedKeyValueCache` to reject invalid sliding window
+configs before KV-cache tensors are created.
+
+The constructor now checks that `context_length` is positive and large
+enough for the sliding window logic:
+
+```text
+context_length &gt;= 2 * sliding_window.window_size
+```
+
+This prevents an underflow in `SlideLayer` when computing copy sizes
+from malformed `genai_config.json` values.
+
+- Update Nemotron ASR docs (#2178)
+
+Update Docs for Nemotron model
+
+- Add VideoChat-Flash (OpenGVLab) language model support (#2147)
+
+## Summary
+
+Adds support for
+[OpenGVLab/VideoChat-Flash-Qwen2_5-7B_InternVideo2-1B](https://huggingface.co/OpenGVLab/VideoChat-Flash-Qwen2_5-7B_InternVideo2-1B),
+a video-language model whose architecture is
+`VideoChatFlashQwenForCausalLM`. The language backbone is standard
+Qwen2.5-7B (flat config, standard weight keys, 2D RoPE,
+`rope_theta=1e6`, 28 layers / 28 heads / 4 KV heads / hidden=3584).
+Because it does **not** use MRoPE, the new builder inherits from
+`QwenModel` directly rather than `Qwen25VLTextModel`.
+
+
+## Changes
+
+### Python builder (`src/python/py/models/`)
+- **`builders/qwen.py`** — New `VideoChatFlashQwenModel` subclass of
+`QwenModel`.
+- Overrides `make_genai_config()` to bypass the model&#39;s custom remote
+code (which imports `av`, `cv2`, `decord`, `imageio` even for
+config-only loads) by writing a temporary `Qwen2Config`-based
+`config.json` and patching `genai_config.json[&#34;model&#34;][&#34;type&#34;]` back to
+`videochat_flash_qwen`.
+- Overrides `load_weights()` to load the LM backbone directly via
+`Qwen2ForCausalLM.from_pretrained()`, avoiding video deps.
+  - Sets `model_type = &#34;videochat_flash_qwen&#34;` and `hf_remote = False`.
+- **`builders/__init__.py`** — Exports `VideoChatFlashQwenModel`.
+- **`builder.py`** —
+- Detects `VideoChatFlashQwenForCausalLM` by peeking at raw
+`config.json` (local dir or via `hf_hub_download`) before calling
+`AutoConfig`, then loads as `Qwen2Config` to avoid pulling in video
+libraries.
+- Routes `VideoChatFlashQwenForCausalLM` → `VideoChatFlashQwenModel` and
+defaults `exclude_embeds=True` (the text decoder receives
+`inputs_embeds` from the embedding merger). `exclude_embeds` is now
+opt-in (guarded with `not in extra_options`) so standalone `input_ids`
+export still works.
+
+### C++ runtime (`src/`)
+- **`models/videochat_flash_processor.{h,cpp}`** *(new)* —
+`VideoChatFlashProcessor` runs ORT-Extensions image preprocessing,
+transposes HWC→CHW, reshapes to `[1, num_frames, C, H, W]`, casts pixel
+values to the session input dtype, builds `input_ids` by replacing each
+`&lt;|vision_start|&gt;…&lt;|vision_end|&gt;` block with a fixed number of
+`&lt;|image_pad|&gt;` tokens, and emits `image_grid_thw` so
+`GetImageFeatureBatchSize` can determine `num_images` after the
+`pixel_values` name remap.
+- **`models/model.cpp`** — Registers `&#34;videochat_flash_qwen&#34; →
+VideoChatFlashProcessor` in `MultiModalProcessor`.
+- **`models/model_type.h`** — Adds `&#34;videochat_flash_qwen&#34;` to the
+`IsVLM()` list (size 6 → 7).
+- **`config.{h,cpp}`** — Adds `Vision::num_visual_tokens` (default `0`)
+— fixed visual tokens per image; `0` falls back to computing from
+`image_grid_thw`. Required (`&gt;0`) by the new processor.
+
+## Files changed
+
+| File | Change |
+| --- | --- |
+| `src/config.cpp` | Parse `num_visual_tokens` from vision config |
+| `src/config.h` | Add `num_visual_tokens` field on `Vision` |
+| `src/models/model.cpp` | Register `VideoChatFlashProcessor` |
+| `src/models/model.h` | Header / license update |
+| `src/models/model_type.h` | Add `videochat_flash_qwen` to VLM list |
+| `src/models/videochat_flash_processor.cpp` | **New** — image processor
+|
+| `src/models/videochat_flash_processor.h` | **New** — header |
+| `src/python/py/models/builder.py` | Detect VCF arch, bypass
+remote-code video deps, route to new builder |
+| `src/python/py/models/builders/__init__.py` | Export
+`VideoChatFlashQwenModel` |
+| `src/python/py/models/builders/qwen.py` | Add
+`VideoChatFlashQwenModel` |
+
+## Validation
+
+- Text-only export of the Qwen2.5-7B backbone via `python -m
+onnxruntime_genai.models.builder -m
+OpenGVLab/VideoChat-Flash-Qwen2_5-7B_InternVideo2-1B -o &lt;dir&gt; -p fp32 -e
+cpu --extra_options exclude_embeds=false` succeeds **without**
+`av`/`cv2`/`decord`/`imageio` installed.
+- Standalone inference on the exported `vcf-oga-fp32-standalone` model
+produces correct answers across 4 batched QA prompts (e.g. *Paris*,
+*56*, ONNX Runtime description) using `generator.append_tokens()` on the
+Qwen2.5-7B backbone.
+
+## Test plan
+
+- [ ] Build OGA with the new processor compiled in and confirm
+`IsVLM(&#34;videochat_flash_qwen&#34;)` returns `true`.
+- [ ] Export the text decoder with `exclude_embeds=false` and run
+text-only inference end-to-end.
+- [ ] Confirm `genai_config.json` contains `&#34;type&#34;:
+&#34;videochat_flash_qwen&#34;` (full VLM) or `&#34;type&#34;: &#34;qwen2&#34;` (text-only
+standalone).
+- [ ] Image-input smoke test once `vision.onnx` and `embedding.onnx`
+land.
+
+---------
+
+Co-authored-by: Rajeev Patwari &lt;rajeevp@amd.com&gt;
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+Co-authored-by: Anil Kumar Martha &lt;anilm@amd.com&gt;
+Co-authored-by: Jain, Vishal &lt;vishal.jain@amd.com&gt;
+Co-authored-by: Copilot Autofix powered by AI &lt;175728472+Copilot@users.noreply.github.com&gt;
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- Add Csharp binding for Multi-lingual ASR (#2176)
+
+Add the C# Binding for `Nemotron ASR`
+
+- This is essential for Core and FL.
+
+---------
+
+Co-authored-by: Nenad Banfic &lt;nebanfic@microsoft.com&gt;
+Co-authored-by: Baiju Meswani &lt;bmeswani@microsoft.com&gt;
+
+- Multilingual Streaming Nemotron ASR + CUDA support (#2171)
+
+Adds support for NVIDIA&#39;s multilingual streaming Nemotron ASR model
+(nemotron_speech) with both CPU and CUDA execution providers.
+
+CUDA support is functional and validated end-to-end, but might not yet
+be fully optimized.
+
+E.g. run of the new model
+```
+
+python /home/nebanfic/onnxruntime-genai/examples/python/nemotron_speech.py   
+--model_path /datadisks/disk2/nebanfic/multilingual_onnx_fp32   --audio_file /home/nebanfic/data_german/audio_test/test_000282.wav   --language de   -e cuda
+Setting model to cuda
+  Language: de (lang_id=9)
+  Use VAD: false
+------------------------------------------------------------
+ Genau wieder munte er der anzieht und die gezeichneten Verursacht, übt auch die Milchstraße Anziehungskräfte auf die Sagittariusgalaxie aus
+============================================================
+  Genau wieder munte er der anzieht und die gezeichneten Verursacht, übt auch die Milchstraße Anziehungskräfte auf die Sagittariusgalaxie aus
+```
+
+- Nvidia Parakeet Tdt ASR support (#2150)
+
+Add Parakeet TDT speech recognition model support
+Adds end-to-end support for **NVIDIA&#39;s Parakeet TDT ASR** model in
+onnxruntime-genai.
+
+Code here will support both v2 (English-only) and v3 (multilingual)
+model - both CPU and CUDA.
+
+Note: Only for batch inference - can support any length of the audio.
+
+
+**What&#39;s included**
+New model type parakeet_tdt with encoder / decoder / joint ONNX
+subgraphs wired through Model::Create.
+
+TDT decoding loop in src/models/parakeet.cpp: joint network emits
+[token_logits | duration_logits]; per-frame argmax over tokens and
+durations with the standard TDT constraints:
+Blank + duration 0 is forbidden (prevents single-frame loop-hang).
+max_symbols_per_frame cap forces a one-frame skip if the model wants to
+stay on a frame indefinitely.
+Processor (src/models/parakeet_processor.cpp / .h): full-audio log-mel
+computed up front via the audio extension op; encoder consumes the mel
+in chunked fashion.
+Config plumbing (src/config.h, src/config.cpp): adds tdt_durations,
+blank_id, max_symbols_per_frame, etc., matching the genai_config.json
+
+Sample: examples/python/parakeet.py - minimal CLI to transcribe an audio
+file.
+Tests:
+C++: test/c_api_tests.cpp - model creation + decode smoke test.
+Python: test/python/test_parakeet_tdt.py - end-to-end transcription on
+jfk.flac (short) and tedlium_long_120s.flac fixture (~2 MB) for
+long-audio coverage.
+
+Long-audio handling: encoder is **run on overlapping up to 10 s chunks
+with both left and right context** (configurable via chunk_samples /
+left_context_samples / right_context_samples in genai_config.json.
+Only the chunk-proper region is decoded; context frames just provide
+receptive field at boundaries. This keeps per-step latency bounded while
+supporting arbitrary-length audio alongside with much higher RTFx than
+for native true streaming models.
+
+The model is multilingual at just 0.6B. 
+The original model link:
+https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
+
+---------
+
+Co-authored-by: copilot-swe-agent[bot] &lt;198982749+Copilot@users.noreply.github.com&gt;
+
+- Add HunYuan Dense V1 (hunyuan_v1_dense) model support (#2144)
+
+## Summary
+
+Adds model-builder and runtime support for Tencent&#39;s HY-MT series
+(architecture class: `HunYuanDenseV1ForCausalLM`), covering both the
+1.8B and 7B parameter variants.
+
+## Changes
+
+**`src/python/py/models/builders/hunyuan.py`** — New
+`HunyuanDenseV1Model` builder subclassing `Model` (base). Key overrides:
+- Overrides `make_attention_qk_subgraph` to apply QK norms (query/key
+LayerNorm) **after** RoPE — the correct order for this architecture
+(base class applies them before).
+- Bakes Hunyuan&#39;s Dynamic NTK-alpha RoPE scaling into a static
+`rope_theta` at export time:
+  - `effective_theta = rope_theta × α^(head_dim / (head_dim − 2))`
+  - then clears `rope_scaling` so the standard RoPE codepath is used.
+- Forces `disable_qkv_fusion=True` and `use_rope_in_attn=False` to
+create the separate Q/K paths required for post-RoPE QK norm insertion.
+
+**`src/models/model_type.h`** — Registers `&#34;hunyuan_v1_dense&#34;` in the
+LLM model-type array (21 → 22 entries).
+
+**`src/python/py/models/builder.py`** and
+**`src/python/py/models/builders/__init__.py`** — Wire
+`HunyuanDenseV1Model` under the `hunyuan_v1_dense` model-type key.
+
+**`examples/python/test_hy_mt.py`** — Example inference script using the
+HF tokenizer for correct special-token handling.
+
+## Architecture Notes
+
+HunYuan Dense V1 differs from Llama-style models in two ways:
+- **Post-RoPE QK norm:** Q and K tensors are normalized *after* rotary
+position embedding, not before.
+- **NTK-alpha RoPE scaling:** Uses a dynamic alpha-based formula
+resolved at export time to avoid runtime overhead.
+
+All weight names are standard (no custom mapping needed).
+
+**Requirement:** `transformers &gt;= 4.57` for `HunYuanDenseV1ForCausalLM`.
+
+---------
+
+Co-authored-by: Rajeev Patwari &lt;rajeevp@amd.com&gt;
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+Co-authored-by: Rajeev Patwari &lt;rajeev.patwari@amd.com&gt;
+Co-authored-by: Copilot &lt;175728472+Copilot@users.noreply.github.com&gt;
+Co-authored-by: Anil Kumar Martha &lt;anilm@amd.com&gt;
+Co-authored-by: Jain, Vishal &lt;vishal.jain@amd.com&gt;
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- [Benchmark] Add --use_random_tokens flag to C benchmark (#2170)
+
+## Summary
+
+Adds a `--use_random_tokens` flag to the C benchmark that feeds
+randomly.
+- Generated token IDs (uniform in [0, 99]) directly into the prompt
+sequences, bypassing tokenization entirely.
+- This is useful for isolating model/runtime performance from tokenizer
+overhead and for benchmarking without requiring
+a valid text prompt for the target model.
+- Similar to
+[benchmark_e2e.py](https://github.com/VishalX/onnxruntime-genai/blob/main/benchmark/python/benchmark_e2e.py#L578-L580)
+  ```py
+  parser.add_argument(
+&#34;--use_random_tokens&#34;, action=&#34;store_true&#34;, help=&#34;Use random tokens
+instead of generating a prompt&#34;
+    )
+  ```
+
+### Usage
+
+```powershell
+model_benchmark -i &lt;model-dir&gt; --use_random_tokens -l 512 -g 128 -r 2 -w 2
+```
+
+### Constraints
+
+- Requires `-l`/`--prompt_length` (token count must be known upfront)
+- Mutually exclusive with `--prompt` and `--prompt_file`
+
+---------
+
+Co-authored-by: Copilot Autofix powered by AI &lt;175728472+Copilot@users.noreply.github.com&gt;
+
+- Fix heap overflow issue (#2110)
+
+This pull request enhances the safety and robustness of the
+`QwenImageProcessor` by adding checks to prevent integer overflows when
+processing image dimensions and calculating buffer sizes. These changes
+help avoid potential runtime errors and security issues when handling
+large or malformed images.
+
+**Image dimension and overflow validation:**
+
+* Added validation to ensure `height_patches`, `width_patches`, and
+`channels` are positive before proceeding with patch calculations.
+* Introduced explicit checks to prevent integer overflow when computing
+`total_patches`, `patch_dim`, and the total buffer size for patched
+image data.
+* Included `&lt;limits&gt;` header to support overflow checks using
+`std::numeric_limits`.
+
+- Add text-only mode support for Qwen 3.5 model builder (#2157)
+
+## Description
+
+Adds support for running Qwen 3.5 as a standalone text-only LLM (without
+vision/embedding pipelines).
+
+### Changes
+
+- **2D position_ids support**: When `exclude_embeds=false`, the builder
+creates a 2D `[B, S]` position_ids graph input and internally expands it
+to 3D `[3, B, S]` for mRoPE compatibility. This allows the standard
+onnxruntime-genai runtime to provide position_ids without requiring the
+multimodal pipeline.
+- **Tokenizer regex fix**: Added `save_processing` override that patches
+unsupported `\p{M}` (Unicode Mark category) from tokenizer regex
+patterns after export. The C++ `std::regex` engine in
+onnxruntime-extensions does not support this Unicode property class.
+- **genai_config correctness**: The internal 3D expanded tensor name is
+stored in a separate `_pos_ids_3d` attribute so
+`self.input_names[&#34;position_ids&#34;]` remains as `&#34;position_ids&#34;` —
+ensuring genai_config.json references the actual graph input.
+
+### Usage
+
+```bash
+python3 -m onnxruntime_genai.models.builder \
+  --model_name Qwen/Qwen3.5-2B \
+  --precision int4 \
+  --execution_provider cuda \
+  --output /path/to/output \
+  --extra_options exclude_embeds=false prune_lm_head=true int4_algo_config=k_quant_last
+
+---------
+
+Co-authored-by: Copilot Autofix powered by AI &lt;62310815+github-advanced-security[bot]@users.noreply.github.com&gt;
+
+- Auto-detect fixed kv-cache shape in DefaultKeyValueCache (#2166)
+
+## Summary
+
+Some compiled backends (e.g. AMD RyzenAI, and likely future
+NPU/accelerator targets) emit decoder models where the
+`past_key_values.N.{key,value}` ONNX inputs declare a **static positive
+integer** in the `seq_len` dimension instead of the usual symbolic
+`past_sequence_length` parameter. Such models require the kv-cache
+tensor to be allocated to exactly that size and reused as a shared
+past/present buffer — ORT will reject any cache tensor whose shape
+doesn&#39;t match the model&#39;s static dim, and the runtime cannot pick a size
+from `search.max_length` after the fact.
+
+This PR makes OGA notice the static dim at cache construction and size
+the kv-cache accordingly, with no config schema change, no public API
+change, and no client cooperation required.
+
+  ## How it works
+
+In `DefaultKeyValueCache`&#39;s constructor, right after the existing
+per-layer `head_dim` auto-detection (which already reads
+`SessionInfo::GetInputShape`), walk each layer&#39;s `past_key.N` input and
+look at the second-to-last dim:
+
+- All layers report a **positive integer** for that dim and the values
+agree → treat the model as fixed-shape; let `fixed_kv_seq_len = that
+value`.
+- Any layer reports `&lt;= 0` (symbolic, typically `-1`) or values disagree
+→ leave detection off; behavior unchanged.
+
+  When detection fires:
+
+- `past_present_share_buffer_` is forced `true` (model demands it; the
+existing share-buffer code path already does the right thing for a
+pre-sized buffer reused as both past and present).
+- The cache is allocated to `fixed_kv_seq_len`, not `search.max_length`.
+A new local `cache_seq_len = fixed_kv_seq_len &gt; 0 ? fixed_kv_seq_len :
+search.max_length` replaces the direct read of `search.max_length` in
+the share-buffer branch, so dynamic-shape models are byte-equivalent to
+before.
+- Beam search (`num_beams != 1`) is rejected with a clear
+`std::runtime_error` — beam picking reshuffles past tensors, which is
+incompatible with a model-mandated fixed shape.
+- An `info` log records the detected size (gated by `g_log.enabled`,
+consistent with surrounding logs).
+- If `search.max_length &gt; fixed_kv_seq_len`, a `warning` is emitted once
+per process (`std::call_once`) noting the cache is sized to the model&#39;s
+limit. We **do not clamp** `search.max_length` because `state_.params_`
+is `std::shared_ptr&lt;const GeneratorParams&gt;` and is owned by the caller;
+clamping would require a public API change.
+
+  ## Files changed
+
+- `src/models/kv_cache.cpp` — `+67/-2`. One detection block in
+`DefaultKeyValueCache::DefaultKeyValueCache`, one `shape_[2]` source
+change in the share-buffer branch, and `#include &lt;mutex&gt;` for
+`std::call_once`.
+
+No header changes. No public API changes. No config schema changes. No
+changes to `Combined/Windowed/LFM2/Cross/ModelManaged` cache classes
+(out of scope for this PR — AMD RyzenAI decoder-only models route
+through `DefaultKeyValueCache`).
+
+  ## Reused infrastructure
+
+- `SessionInfo::GetInputShape(name)` — `src/models/model.cpp:533-538`.
+Same call already used at `kv_cache.cpp:217` for `head_dim`
+auto-detection. Returns the ONNX-declared shape with `&lt;= 0` for symbolic
+dims (confirmed by sibling checks in `src/models/multi_modal.cpp` and
+`src/models/recurrent_state.cpp`).
+- `Log(&#34;warning&#34;|&#34;info&#34;, ...)` — `src/logging.h:82`. Same pattern as the
+existing `Log` calls in `kv_cache.cpp` (lines 156, 201, 239).
+- The share-buffer data-path — `kv_cache.cpp:301-310` (shape),
+`:357-361` (Add: inputs = presents), `:366-367` (Update no-op),
+`:409-410` (RewindTo no-op). All already correctly handle a pre-sized
+buffer.
+
+  ## Verification
+
+Tested end-to-end on Windows x64, RelWithDebInfo, CPU EP, with
+`Llama-3.2-1B-Instruct` (Q4F16). Since no existing test model under
+`test/test_models/` declares a static kv-cache `seq_len`, I produced a
+patched copy of the Llama model whose past_key/value (and
+present.key/value) ONNX shapes were rewritten in place — only graph
+metadata, no weight reload — from symbolic `past_sequence_length` to a
+static `dim_value = 128`. With those static dims in place, ORT will
+reject any cache tensor that isn&#39;t exactly `[1, 8, 128, 64]`;
+bound-and-run success is therefore proof that the cache was sized
+correctly.
+
+  | # | Model | `-ml` flag | `search.max_length` | Detection | Outcome |
+  |---|---|---|---|---|---|
+| 1 | Fixed-shape (patched, static `[1,8,128,64]`) | `-1` (use config) |
+`4096` (JSON) | fires | ✅ warning printed, model bound + ran 32 tokens
+against the 128-slot cache. Without detection the cache would be
+`[1,8,4096,64]` → bind failure. |
+| 2 | Fixed-shape | `1024` (runtime override) | `1024` | fires | ✅
+warning printed, cache stayed at 128, ran 16 tokens. Confirms runtime
+`SetSearchOption` overrides of `max_length` are ignored for cache
+sizing. |
+| 3 | Original dynamic-shape Llama | `-1` → `131072` | `131072` | does
+not fire | ✅ no warning, no `info`, normal run. Regression preserved. |
+| 4 | Fixed-shape, multi-iter (`-w 1 -r 3` → 4 cache constructions) |
+`-1` | `4096` | fires once | ✅ exactly one warning across the run
+(`std::call_once`). |
+
+  Verbatim warning emitted in test 1:
+
+  ```
+[warning] Model has fixed kv-cache seq_len=128 but
+search.max_length=4096; cache is sized to the model&#39;s limit, so
+generation beyond it will fail.
+  ```
+
+  ## Backward compatibility
+
+For every model that ships today with symbolic kv-cache dims (i.e.
+essentially all decoder models built via the OGA model builder or the
+Microsoft ORT pipelines), `seq_dim &lt;= 0` at every layer → detection
+short-circuits → cache construction is byte-identical to `main`. No
+behavior change is exposed to existing users.
+
+---------
+
+Co-authored-by: Claude Opus 4 &lt;noreply@anthropic.com&gt;
+
+- Add gemma4 unit tests (#2151)
+
+This pull request adds a comprehensive test suite for the Gemma4
+multimodal model, covering model loading, text-only and vision (image)
+processing, and validation of ONNX model input/output interfaces. These
+tests ensure that the Gemma4 model and its components function as
+expected for both text and image modalities.
+
+The most important changes include:
+
+**New test coverage for Gemma4 multimodal model:**
+
+* Added unit tests for loading the Gemma4 model and verifying basic
+text-only and image processing functionality using the
+`onnxruntime_genai` library (`test_gemma4_models.py`).
+* Added parameterized tests for image input, including loading images
+from file paths and bytes, as well as handling multiple images in a
+single prompt.
+* Verified that the multimodal processor correctly generates required
+input fields such as `input_ids`, `pixel_values`, and `token_type_ids`.
+
+**ONNX model interface validation:**
+
+* Added tests to validate the required inputs and outputs for the
+vision, embedding, and text/decoder ONNX models, ensuring compatibility
+and correct wiring of model components.
+* Included checks for input/output names, data types, and dynamic
+shapes, particularly for the vision model’s `pixel_values` input.
+
+- Enable Linux ARM64 builds and packaging (#2107)
+
+This PR enables Linux ARM64 builds for the C API tarball, Python wheels,
+and NuGet packages.
+
+Addresses https://github.com/microsoft/Foundry-Local/issues/673 and
+other partner asks.
+
+- [Qwen3] Allow packed QKV MatMul under QK-Norm via post-MatMul Split (#2137)
+
+Previously `use_packed_matmul` was disabled whenever q_norm or k_norm
+was set, so Qwen3 (and any other QK-Norm architecture) emitted three
+separate q_proj / k_proj / v_proj MatMulNBits nodes per layer.
+
+This PR allows packed QKV MatMul for QK-Norm models by inserting a
+single ONNX `Split` after the packed projection so the existing per-head
+Q/K SimplifiedLayerNormalization path is unchanged. Math is equivalent;
+quantization is unchanged.
+
+### Graph change (per attention layer)
+
+Before:
+```
+root -&gt; q_proj/MatMul -&gt; Q
+root -&gt; k_proj/MatMul -&gt; K
+root -&gt; v_proj/MatMul -&gt; V
+```
+After (Split placed *after* the optional packed bias-Add so packed bias
+fusion is preserved):
+```
+root -&gt; qkv_proj/MatMul -&gt; [qkv_proj/Add] -&gt; Split -&gt; Q, K, V
+```
+
+Net per layer: **−2 MatMulNBits, +1 Split**. For Qwen3-4B (36 layers):
+−72 MatMulNBits, +36 Split, total ONNX nodes 700 → 665.
+
+### Why Split (not Slice)
+
+Single read of the packed tensor, single dispatch with 3 outputs —
+avoids re-reading the same packed Q/K/V tensor three times per decode
+step.
+
+### Verification — Qwen3-4B int4 (RelWithDebInfo build,
+accuracy_level=4)
+
+Compared two builds of the same source model:
+- **base** = pre-PR builder (reset to `664a61b1`, QK-Norm forces 3
+independent MatMuls)
+- **curr** = this PR
+
+Output token sequences are byte-identical on both GPUs (no accuracy
+drift).
+
+#### WebGPU GPU profile (aggregate: 1 prefill + 50 decode × 2 phases)
+
+| OpType | base ms | curr ms | Δ ms |
+|---|---:|---:|---:|
+| MatMulNBits | 932.6 | 876.9 | **−55.7** |
+| Split       | 0     | 10.8  | +10.8 |
+| GroupQueryAttention | 440.2 | 442.5 | +2.3 |
+| **TOTAL GPU** | **1509.0** | **1466.4** | **−42.6 (−2.8%)** |
+
+- Decode path (M=1): A 3× independent GEMV = 96.8 ms → B packed GEMV +
+Split = 64.5 ms → **decode net −32 ms**.
+- Prefill (M=1000): A 3× DP4A = 71.3 ms → B packed DP4A = 62.6 ms →
+prefill net −8.7 ms.
+
+#### End-to-end perf — Qwen3-4B prefill-1000, 5 runs
+
+| GPU | metric | base | curr | Δ |
+|---|---|---:|---:|---:|
+| NVIDIA RTX 5080 (steady P0) | gen tps | 105.4 | 108.5 | **+2.9%** |
+| Intel(R) Graphics iGPU | gen tps | 12.44 | 13.06 | **+5.0%** |
+
+(NV result matches the −2.8% GPU profile measurement; iGPU receives a
+similar relative gain. Prompt TPS and TTFT are unchanged on both
+vendors.)
+
+### Compatibility
+
+- Models without QK-Norm: behavior unchanged (the new Split block is
+gated on `q_norm &amp;&amp; k_norm`).
+- LoRA / packed-Attention path (`use_matmul_in_attn`): unchanged.
+- Packed bias fusion still applies for QK-Norm models when bias exists,
+because Split is placed after the packed Add.
+
+- Enable graph capture for WebGPU models and DML continuous decoding tests (#2099)
+
+- Add enable_graph_capture flag to model download config in
+_test_utils.py
+- When enable_graph_capture=True and device=webgpu, pass
+enable_webgpu_graph=true to the model builder so generated models have
+enableGraphCapture=1
+- Enable graph capture for qwen-2.5-0.5b model (used by guidance tests)
+- Remove #if !USE_DML guard from multi-turn guidance tests since PR
+#2083 fixed RewindTo for DML (DML always uses graph capture/static mask)
+
+- [RyzenAI] make speech sub-model optional in PhiMultiModalProcessor (#2167)
+
+## Summary
+
+Make the speech sub-model optional in `PhiMultiModalProcessor`,
+mirroring
+the pattern already used by `Gemma4MultiModalProcessor` (added in
+#2103).
+
+A `phi4mm` `genai_config.json` with the `speech` block cleared
+(`filename` and `config_filename` both empty / removed) can now load
+vision-only and skip the speech ONNX entirely, reducing peak
+memory usage for image-only use cases.
+
+## Problem
+
+PR #2103 added auto-detection of `speech.filename` in `model.cpp` and
+allocation of an empty `audio_features` tensor in `multi_modal.cpp`
+when the embedding ONNX requires it. However, `PhiMultiModalProcessor`
+itself was not gated and still unconditionally:
+
+1. Calls
+`session_info.GetInputDataType(config.model.speech.inputs.audio_embeds)`
+   (and `audio_sizes`) in the initializer list.
+   `SessionInfo` aggregates inputs only from sessions that were actually
+loaded — with no speech session, this throws: &#34;Model input was not
+found: audio_embeds&#34;
+2. Calls `OrtxCreateSpeechFeatureExtractor(audio_processor_, &#34;&#34;)` with
+an
+empty `speech.config_filename`, which fails to open the file.
+3. Registers `AudioEmbeds` / `AudioAttentionMask` / `AudioSizes`
+mappings against an unconfigured speech section.
+
+The net effect is that even though `model.cpp` correctly skips loading
+`speech.onnx`, the processor construction in `MultiModalProcessor`&#39;s
+factory still throws during `og.Model(...)`, blocking vision-only
+phi4mm loads.
+
+## Fix
+
+Apply the exact same gating pattern that `Gemma4MultiModalProcessor`
+already uses:
+
+- Add a `bool has_speech_{false}` member to `PhiMultiModalProcessor`.
+- Move all audio-related construction (audio dtype queries,
+`OrtxCreateSpeechFeatureExtractor`, three `AddMapping` calls) inside
+an `if (!speech.config_filename.empty() &amp;&amp; fs::exists(...))` block
+that sets `has_speech_ = true` on success.
+- Throw a precise error if `speech.filename` is set but the audio
+processor config file is missing on disk.
+- In `Process()`, throw a clear user-facing error if `payload.audios`
+is supplied while `has_speech_` is `false`.
+- Gate the audio feature extraction and the audio output emit block
+on `payload.audios &amp;&amp; has_speech_`.
+
+No changes to vision-only image processing or to the
+`ProcessImageAudioPrompt` helper — the existing `if (audio_sizes)`
+guards inside it correctly produce `num_audios == 0` on the
+vision-only path, so `audio_projection_mode` resolves to `1`
+(Vision, language) as expected.
+
+
+## Usage
+
+To run phi4mm vision-only:
+
+```json
+&#34;speech&#34;: { &#34;filename&#34;: &#34;&#34;, &#34;config_filename&#34;: &#34;&#34; }
+
+(or remove the speech block entirely from genai_config.json). The speech ONNX and audio_processor_config.json no longer need to be present on disk.
+
+---------
+
+Co-authored-by: Bollavaram &lt;manasab@amd.com&gt;
+
+- Fix nemotron leaks (#2169)
+
+Fix some leaks of the nemotron outputs.
+
+- Cleanup TensorObject created by OrtxTensorResultGetAt (#2168)
+
+OrtxTensorResultGetAt allocates a TensorObject that isn&#39;t freed.
+
+- Use windowsml package and make winml usage simpler (#2155)
+
+- Add QNN EP documentation to OGA including Genie note (#2158)
+
+- Support Visual Studio 18 2026 build (#2017)
+
+## Summary
+
+Adds support for building with **Visual Studio 18 2026** (CMake
+generator `&#34;Visual Studio 18 2026&#34;`). The default generator remains
+`&#34;Visual Studio 17 2022&#34;`.
+
+## Changes
+
+- **`build.py`**: Added `&#34;Visual Studio 18 2026&#34;` to the
+`--cmake_generator` argument choices list, alongside the existing
+`&#34;Visual Studio 17 2022&#34;` option. The default remains `&#34;Visual Studio 17
+2022&#34;`.
+
+## Usage
+
+Using the build script:
+```bash
+python build.py --cmake_generator &#34;Visual Studio 18 2026&#34;
+```
+
+&lt;!-- START COPILOT CODING AGENT TIPS --&gt;
+---
+
+💬 We&#39;d love your input! Share your thoughts on Copilot coding agent in
+our [2 minute survey](https://gh.io/copilot-coding-agent-survey).
+
+---------
+
+Co-authored-by: copilot-swe-agent[bot] &lt;198982749+Copilot@users.noreply.github.com&gt;
+Co-authored-by: xiaofeihan1 &lt;107654914+xiaofeihan1@users.noreply.github.com&gt;
+
+- Fix WebGPU inference crash in embedding and multi-modal feature allocation (#2163)
+
+## Summary
+
+- Fix heap corruption crash during WebGPU inference by using the correct
+allocator (`p_device_inputs_`) for tensors that serve as inputs to the
+embedding/decoder session
+- Previously, `embeddings.cpp` and `multi_modal_features.cpp` allocated
+these tensors on `p_device_` (WebGPU GPU memory), but the embedding
+session runs on CPU for WebGPU (without graph capture), causing the CPU
+session to write into GPU memory.
+- This is a pair change for this pr
+https://github.com/microsoft/onnxruntime/pull/28501.
+
+## Changes
+
+**`src/models/embeddings.cpp`** (lines 24, 52):
+- Changed `model_.p_device_-&gt;GetAllocator()` →
+`model_.p_device_inputs_-&gt;GetAllocator()` for embedding input tensor
+allocation and reallocation during sequence length updates
+
+**`src/models/multi_modal_features.cpp`** (lines 66, 85):
+- Changed `model_.p_device_-&gt;GetAllocator()` →
+`model_.p_device_inputs_-&gt;GetAllocator()` for empty feature tensors in
+`Update()` and `AllocateEmptyFeatures()` — these are inputs to the
+embedding session
+- Vision/speech model output allocations (lines 42, 98) correctly remain
+on `p_device_`
+
+## Impact
+
+- **WebGPU**: Fixes crash (heap corruption 0xc0000374) during inference
+- **CUDA/DML/RyzenAI**: No-op — `p_device_inputs_ == p_device_` on these
+providers
+- **CPU**: No-op — `p_device_inputs_ == p_device_` on CPU
+
+## Test plan
+
+- [x] End-to-end WebGPU inference with Gemma 4 E2B (109 tokens generated
+correctly)
+- [x] CPU inference still works after changes
+- [x] Output matches between CPU and WebGPU execution
+
+Co-authored-by: Claude Opus 4 &lt;noreply@anthropic.com&gt;
+
+-  Fix Quark/AWQ weight loading for Qwen3-VL-4B text model (#2143)
+
+## Summary
+Fixes Quark/AWQ weight loading for the Qwen3-VL-4B text model when
+building the ONNX model from a quantized Hugging Face checkpoint.
+Previously:
+- `Qwen3VLTextModel.load_weights` always went through
+`Qwen3VLForConditionalGeneration.from_pretrained`, which doesn&#39;t
+understand quantized checkpoints (Quark / AWQ / GPTQ) or `.gguf` files.
+- The shared `QuantizedModel` loader didn&#39;t handle VLM checkpoint
+conventions (vision-tower weights, `model.language_model.*` prefix) or
+Quark&#39;s `weight_quantizer.{scale,zero_point}` naming.
+## Changes
+**`src/python/py/models/builders/qwen.py`**
+- In `Qwen3VLTextModel.load_weights`, route quantized models
+(`self.quant_type is not None`) and `.gguf` inputs to the base class
+implementation, which loads weights via `QuantizedModel`. Plain HF FP
+checkpoints continue to use
+`Qwen3VLForConditionalGeneration.from_pretrained` as before.
+**`src/python/py/models/quantized_model.py`**
+- Skip vision-tower tensors (`model.visual.*`, `model.vision.*`,
+`visual.*`) so the LLM weight loader only consumes language-model
+weights.
+- Normalize the VLM prefix `model.language_model.*` to `model.*` so the
+existing LLM regex/tensor-parsing logic keeps working unchanged.
+- Normalize Quark naming:
+  - `*.weight_quantizer.scale` → `*.weight_scale`
+  - `*.weight_quantizer.zero_point` → `*.weight_zero_point`
+
+---------
+
+Co-authored-by: Anil Kumar Martha &lt;anilm@amd.com&gt;
+Co-authored-by: Claude Sonnet 4 &lt;noreply@anthropic.com&gt;
+
+- Apply linear rope_scaling in model builder for Neutts/nano (#2142)
+
+## Model builder support for TTS models from neuphonic
+
+This is used in NeuTTS model:
+[neuphonic/neutts-nano](https://huggingface.co/neuphonic/neutts-nano)
+
+Linear RoPE configs (rope_type/type &#34;linear&#34; with factor) were ignored
+in make_rope_init, so inv_freq matched unscaled RoPE and diverged from
+Transformers (_compute_linear_scaling_rope_parameters: inv_freq /=
+factor). Set rope_attrs[&#34;rescale_factors&#34;] to the config factor so
+make_rotary_embedding_caches_from_scratch matches HF (e.g. neutts-nano).
+Reject non-positive factors with a clear error.
+
+---------
+
+Co-authored-by: Copilot Autofix powered by AI &lt;175728472+Copilot@users.noreply.github.com&gt;
+Co-authored-by: kunal-vaishnavi &lt;115581922+kunal-vaishnavi@users.noreply.github.com&gt;
+
+- Fix CUDA build with MSVC by enabling /Zc:preprocessor for nvcc host compilation on VS 16.5 or greater (#2054)
+
+## Description
+Fixes CUDA builds on Windows when nvcc uses MSVC as the host compiler on
+Visual Studio 16.5 or greater
+
+## Problem
+Recent CUDA/CCCL headers require MSVC&#39;s conforming preprocessor. Without
+passing
+`/Zc:preprocessor` to the host compiler, CUDA compilation can fail with
+an error
+from `cuda/std/__cccl/preprocessor.h`.
+
+## Solution
+Pass `/Zc:preprocessor` to MSVC version check through nvcc for CUDA
+source compilation on
+Windows/MSVC builds.
+
+## Testing
+- Reproduced failure with CUDA + MSVC host compiler on Windows
+- Verified build succeeds after adding `-Xcompiler=/Zc:preprocessor`
+
+---------
+
+Co-authored-by: Natsuki Subaru &lt;Subaru@Lugunica.jp&gt;
+Co-authored-by: Copilot &lt;175728472+Copilot@users.noreply.github.com&gt;
+
+- Fix: Win32 build failure when paths contain spaces (#2053)
+
+## Description
+Fixes a Win32 build issue when project paths contain spaces (e.g.
+&#34;C:\Program Files&#34;).
+
+## Problem
+The build fails when the path to root of repo contain space, ir results
+in treating path to ${GENERATORS_ROOT}/cuda/symbols.def as two or more
+args when vcxproj file generate, in case when there is one space, second
+part treat as additional object file for linker (it&#39;s bad as linker
+fail) while first part ModuleDefinitionFile xml node (which is okay).
+
+## Solution
+Added proper quoting to affected paths in build scripts / command
+invocations.
+
+## Testing
+- Verified build succeeds with path containing spaces
+- Verified no regressions with standard paths
+
+## Notes
+This issue primarily affects Windows environments.
+
+Co-authored-by: Natsuki Subaru &lt;Subaru@Lugunica.jp&gt;
+
+- [Qwen3.5] Use LpNormalization for L2-norm in linear-attention Q/K (#2127)
+
+## Summary
+Qwen3.5&#39;s GatedDeltaNet linear-attention Q/K path uses an L2-normalize
+step. The current builder emits a 5-node subgraph per Q/K head per layer
+(`Square + ReduceSum + Add(eps) + Rsqrt + Mul`). Replace it with a
+single `LpNormalization(p=2, axis=-1)` — natively supported by all
+current EPs (CPU, CUDA, WebGPU, ...).
+
+## Op count delta (Qwen3.5-0.8B int4)
+| Op | before | after |
+|---|---|---|
+| Total nodes | 1130 | **949** (−181) |
+| Mul | 198 | 126 (−72) |
+| ReduceSum | 37 | 1 (−36) |
+| Add | 54 | 18 (−36) |
+| Rsqrt | 36 | 0 |
+| LpNormalization | 0 | 36 |
+
+## Perf (greedy, prefill-1000, max_tokens=100, 5-run avg)
+| GPU | Model | baseline gen tps | new gen tps | Δ |
+|---|---|---|---|---|
+| NVIDIA RTX 5080 | Qwen3.5-0.8B | 73.94 | **83.56** | **+13.0%** |
+| NVIDIA RTX 5080 | Qwen3.5-4B   | 55.24 | **62.14** | **+12.5%** |
+| Intel iGPU      | Qwen3.5-0.8B | 36.22 | **38.48** | **+6.2%**  |
+| Intel iGPU      | Qwen3.5-4B   | 12.26 | **12.68** | **+3.4%**  |
+
+Prompt TPS unchanged on all configurations.
+
+## Behavior change
+Drops the \`+eps\` fallback. q/k come from RMSNorm+Proj so vector
+magnitudes far exceed any sane epsilon; divergence stays within fp16
+noise.
+
+## Test plan
+- [x] Built Qwen3.5-0.8B and Qwen3.5-4B with int4 quant + WebGPU EP
+- [x] Verified output text quality on NV RTX 5080 and Intel iGPU —
+outputs are equivalent / nearly identical to baseline (no garbage, no
+degradation)
+- [x] Decode TPS measured 5×, all 4 configurations show net positive
+gains
+
+- Fix memory leaks (#2153)
+
+Memory leak showed up in FL testing.
+
+---------
+
+Co-authored-by: Baiju Meswani &lt;bmeswani@microsoft.com&gt;
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;</div>
+</div>
+
+<a href="../project/microsoft_onnxruntime-genai.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

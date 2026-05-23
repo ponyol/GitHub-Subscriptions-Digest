@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (60 commits) - jundot/omlx - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (60 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/jundot_omlx.html">jundot/omlx</a> /
+    Updates in main (60 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/jundot_omlx.html">jundot/omlx</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-22 10:25 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/jundot/omlx/commits/main" target="_blank">https://github.com/jundot/omlx/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This update focuses on enhancing platform stability and functionality through numerous bug fixes. Key improvements include strengthening Multi-Token Prediction (MTP) and Vision-Language Model (VLM) support, ensuring more reliable HuggingFace model downloads, and preventing request hangs from scheduler errors. Additionally, it introduces new cache observability features, a refined model browsing UI, and better management of system resources and tool-calling APIs.
+
+---
+
+**Russian Translation:**
+
+Это обновление направлено на повышение стабильности и функциональности платформы за счет многочисленных исправлений ошибок. Ключевые улучшения включают усиление поддержки предсказания нескольких токенов (MTP) и визуально-языковых моделей (VLM), обеспечение более надежной загрузки моделей с HuggingFace и предотвращение зависаний запросов из-за ошибок планировщика. Кроме того, оно вводит новые функции наблюдения за кэшем, улучшенный пользовательский интерфейс для просмотра моделей и лучшее управление системными ресурсами и API вызова инструментов.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix(integrations): scrub bundled-Python env vars for all launch targets (#1350)
+
+Centralize PYTHONHOME/PYTHONPATH/PYTHONDONTWRITEBYTECODE scrubbing in a
+base _scrubbed_env() helper. codex/opencode/openclaw/pi inherited the
+oMLX.app bundled Python env and broke tools that spawn their own Python
+subprocess. claude/copilot/hermes had the same scrub copy-pasted inline;
+they now share the helper so new integrations get it for free.
+
+- chore: bump Homebrew formula to 0.3.9
+
+- chore: bump version to 0.3.9
+
+- fix: reconcile MTP cache to standard state on batch reshape
+
+Native MTP never maintains mlx-lm&#39;s _next_tokens — it streams from the
+per-batch queue and advances the shared cache speculatively. When a second
+request joined mid-generation (extend), dropping MTP state left standard
+batched decode resuming from a stale _next_tokens against an MTP-advanced
+cache, corrupting one token on the surviving sequence.
+
+Reconcile the host to a standard-resumable state before the merge while it
+is still a singleton: re-prefill the already-streamed tokens into a fresh
+cache (rebuilds KV + GatedDeltaNet state deterministically) and set
+_next_tokens to the correct next-to-emit token (queue front, or sampled at
+a cycle boundary). Falls back to a plain drop when re-prefill is not safe.
+
+- fix: reset mtp state across batch reshapes
+
+Native MTP state was initialized on fresh singleton donor batches and then carried across GenerationBatch.extend/filter transitions. When continuous batching merged or shrank requests, the sidecar MTP cache could become detached from the uid/slot whose main cache was advanced by the standard decode path, then later resume from stale state.
+
+Activate MTP lazily only for the current singleton batch, stamp state with its owning uid, and drop it whenever a reshape or non-singleton fallback breaks that ownership.
+
+- fix(hf): follow cross-origin permanent redirects on configured endpoint (#1339)
+
+* fix(hf): follow cross-origin permanent redirects on configured endpoint
+
+Mirrors like hf-mirror.com 308-redirect to huggingface.co when accessed
+from IPs outside their target region. huggingface_hub does NOT follow
+cross-origin 308s during file HEAD probes, so every download from those
+mirrors failed with LocalEntryNotFoundError.
+
+_get_hf_api() now resolves the configured endpoint upfront by probing
+/api/models/gpt2 with httpx, walking up to 3 permanent (301/308) hops,
+and pinning HfApi to the final origin. Result cached per process so the
+probe runs at most once per endpoint.
+
+Also extended _get_hf_api() to honor HF_ENDPOINT from the environment
+when omlx settings is empty; previously the env var leaked through to
+HfApi&#39;s default constructor but never got resolved, so a shell with
+HF_ENDPOINT=https://hf-mirror.com set silently broke downloads.
+
+* test(hf): cover cross-origin redirect chain in _resolve_endpoint
+
+Adds a focused TestResolveEndpoint class to pin the redirect behavior:
+
+- No redirect returns the endpoint unchanged.
+- Cross-origin 308 (the canonical hf-mirror → huggingface.co case)
+  returns the redirected origin.
+- 301 gets the same treatment as 308.
+- Same-origin (relative Location) does not rewrite.
+- Up to 3 chained permanent hops are walked.
+- 302/307 (non-permanent) are not followed.
+- Network errors fall back to the original endpoint.
+- Results are cached per-endpoint (no re-probing).
+- Trailing slash is normalized.
+
+Verified RED by reverting hf_downloader.py to origin/main: all 9 tests
+fail with ImportError on `_resolve_endpoint` / `_endpoint_resolution_cache`.
+
+- fix(admin): invoke sysctl by absolute path in memory probe
+
+get_system_memory_info shelled out to sysctl by bare name with an inline
+import. same /usr/sbin PATH fragility as the chip-detection fix - use the
+absolute path and hoist the import to module top.
+
+- fix(hardware): invoke macOS system tools by absolute path
+
+chip detection shelled out to sysctl/system_profiler/ioreg by bare name.
+they live in /usr/sbin, which isn&#39;t on PATH in some headless launchd
+contexts (brew services), so the lookup raised FileNotFoundError and
+detection silently degraded - chip fell back to M1, gpu/uuid to None.
+invoke them by absolute path so detection is PATH-independent.
+
+- fix(hf_downloader): actually stop downloads on cancel via per-chunk callback
+
+cancel only cancelled the asyncio task, not the worker thread running
+snapshot_download, so a cancelled download kept running to completion in
+the background. Inject a tqdm subclass that raises from the per-chunk
+progress callback so the download thread unwinds within one chunk.
+shutdown() now flags active tasks too so in-flight threads abort.
+
+- Fix admin chat preserve_thinking history serialization (#1329)
+
+- fix(tests): classify dflash_ssd_cache_max_bytes in MODEL_SPECIFIC_PROFILE_FIELDS (#1338)
+
+- fix(tests): prevent engine loop from calling step() in abort/cancellation tests (#1324)
+
+MockModel lacks .layers attribute, causing scheduler.step() to fail
+with AttributeError from make_prompt_cache.  Adding
+engine.scheduler.has_requests = lambda: False prevents the engine
+loop from running step() in tests that test abort/cancellation
+logic without needing model inference.
+
+Fixes test_abort_request_wakes_blocked_stream_outputs and
+test_generate_cancel_aborts_request which were failing because the
+engine loop error handler interfered with expected error messages
+and collector cleanup.
+
+- test(load): cover VLM MTP sanitize patch wiring in pre-load dispatch
+
+- fix(load): wire MTP sanitize-preservation patch into VLM inference path (#1320)
+
+MTP heads loaded onto VLM-path checkpoints (any model with vision_config,
+e.g. all Qwen3.6 PARO models) were silently stripped at load, leaving the
+MTPModule at random init -&gt; 0% accept rate.
+
+Root cause: mlx-vlm&#39;s stock Model.sanitize() unconditionally drops every
+`mtp.*` key. The sanitize-preservation override (apply_mlx_vlm_mtp_patch
+in patches/mlx_vlm_mtp/qwen35_vlm_model.py) was only wired into the oQ
+quantization path, never the inference load path. maybe_apply_pre_load_patches
+called only apply_mlx_vlm_mtp_runtime_patch (attaches the MTPModule) but not
+the sanitize patch, so the runtime head was created then left unfilled.
+
+LLM-path checkpoints (no vision_config -&gt; BatchedEngine) were unaffected
+because the mlx-lm sanitize patch (qwen35_model.py) already preserves MTP.
+
+Fix: call apply_mlx_vlm_mtp_patch() alongside apply_mlx_vlm_mtp_runtime_patch()
+in the mtp_enabled VLM branch.
+
+Verified on z-lab/Qwen3.6-27B-PARO + an injected BF16 MTP head: weights-with-mtp
+in the load dict went 0 -&gt; 15, loaded params bit-match source (maxabsdiff=0.0),
+and accept rate went 0% -&gt; 68.8%.
+
+- fix(mtp): seed acceptance roll and document timing/limitation
+
+- Draw the stochastic acceptance roll from mx.random.uniform so it follows
+  mx.random.seed (stdlib random was never seeded, which broke temp&gt;0
+  reproducibility even with a fixed seed, #1330)
+- Refresh the stale single-eval comment now that PR 1337 forces
+  mx.eval(logits) and the backbone_ms / sample_ms split is accurate again
+- Document the compute-bound single-stream net-negative case in the module
+  docstring (#1097 / #1311)
+
+- fix(mtp): correct backbone and sampler time measurement (#1337)
+
+- fix(mtp): check real sampler temperature for greedy detection (#1336)
+
+- fix: bound dflash L2 SSD cache with a per-model size limit (#1326)
+
+The dflash L2 disk budget was hard-coded to a 1 TiB sentinel, so on disks
+smaller than that the dflash_l2/ directory filled up before dflash&#39;s own
+eviction kicked in. Add a per-model dflash_ssd_cache_max_bytes setting
+(default 20 GiB), surfaced as an SSD cache size field in the model settings
+modal, and pass it through to dflash so it evicts old entries once exceeded.
+
+- fix: preflight estimator must use full attention span for cached prefills
+
+The prefill admission guard sized the SDPA attention transient from
+new_tokens only, but the last prefill chunk attends over the full
+context (cached_tokens + new_tokens). With a large prefix-cache hit
+(small new suffix on a big cached prefix) this under-counted the
+transient by the cache-hit ratio, so a request that actually overflows
+the MetalAllocator slipped past the guard and aborted inside the chunk
+forward (SIGABRT, #1040). Worst on head_dim&gt;128 models like
+Qwen3.6-35B-A3B where MLX materializes the full attention matrix.
+
+estimate_prefill_peak_bytes now takes cached_tokens and uses
+(new_tokens + cached_tokens) for the SDPA kv_len span while keeping
+new_tokens for newly allocated KV.
+
+- fix: send chunked_prefill in dashboard save request
+
+The dashboard save function omitted chunked_prefill from the POST body,
+so the toggle value never reached the server and never persisted.
+Closes #1328
+
+- fix: release model alias on deletion (#1321)
+
+Delete the model&#39;s persisted settings (including its alias) when the
+model is deleted, so the alias can be reused by another model. Without
+this the stale settings entry kept the alias registered to the gone
+model and blocked reassignment with a 400 error.
+
+- fix(dflash): apply MTP pre-load patch and stop leaking n_confirmed into DFlash hook (#1318)
+
+DFlashEngine loaded the target without maybe_apply_pre_load_patches, so
+MTP-bearing Qwen3.6 targets missed the sanitize patch (norm double-shift,
+garbage output). When the MTP patch was present from a prior load, the
+patched DecoderLayer passed n_confirmed into linear_attn, which DFlash
+replaces with a hook that has no such kwarg, raising TypeError.
+
+- dflash.py: run maybe_apply_pre_load_patches before load_target_bundle
+- qwen35_model.py: forward n_confirmed only when non-zero (matches
+  batch_generator._call_backbone)
+
+- fix: clear stale uid mappings in fail_all_requests
+
+- Fix HTTP request hang when engine loop raises during scheduling (#1315)
+
+* fix(scheduler): fail_all_requests catches in-flight orphans
+
+When ``_do_external_prefill`` raises inside ``_schedule_waiting``, the
+request has already been popped from ``self.waiting`` (line 4296 in
+``_schedule_waiting``) but has not yet been inserted into ``self.running``
+(lines 4749 / 4790). It sits as a local variable during the prefill
+call. The exception propagates up through ``step()`` to
+``engine_core._engine_loop``, which catches it and calls
+``scheduler.fail_all_requests`` as a safety net.
+
+``fail_all_requests`` sweeps ``self.running``, ``self.prefilling``, and
+``self.waiting``. The orphan request is in none of these three queues,
+so it does not appear in ``failed_ids``. The engine_core then iterates
+``failed_ids`` to put error outputs on the per-request collectors and
+to ``event.set()`` the per-request finished events — but the orphan&#39;s
+collector and event are skipped. The HTTP handler awaiting that event
+hangs forever; subsequent requests to the same model also stall behind
+the wedged scheduler.
+
+Add a final orphan-cleanup pass that drains ``self.requests`` after the
+three queues are emptied. ``self.requests`` is the master registry —
+every request added via ``add_request`` lives there until success or
+explicit failure. Anything still in ``self.requests`` after the three
+queues are drained is an in-flight orphan and must be failed.
+
+Includes a regression test (``test_fail_all_requests_includes_in_flight_
+orphans``) that constructs the orphan state directly and asserts the id
+appears in the returned list. The test fails on unpatched scheduler and
+passes after the fix.
+
+* fix(scheduler): exclude finished requests in async cleanup from orphan sweep
+
+The previous commit&#39;s orphan sweep over ``self.requests`` was too broad.
+``_cleanup_finished`` keeps a finished request in ``self.requests`` and
+registers its store future in ``_inflight_store_futures`` until
+``_drain_pending_async_removes`` finalizes the cleanup. Finished requests
+in that window have already emitted ``finished=True`` to their collector.
+
+If ``fail_all_requests`` runs during that window, the prior sweep would
+include the finished request id in ``failed_ids``. The caller in
+``engine_core._engine_loop`` then appends an error ``RequestOutput`` to
+that request&#39;s collector. For non-streaming ``generate()``,
+``engine_core`` drains all queued outputs and returns the *last* one, so
+the appended error would override the success result that already shipped.
+
+Skip ids present in ``self._inflight_store_futures``. Their cleanup
+proceeds normally via ``_drain_pending_async_removes`` once the store
+future completes. In-flight orphans (popped from ``self.waiting``, never
+finished) never enter ``_inflight_store_futures``, so the original orphan
+case the previous commit fixed is unaffected.
+
+New regression test ``test_fail_all_requests_excludes_async_cleanup_in_flight``
+constructs the async-cleanup state directly and asserts the finished
+request id is absent from ``failed_ids`` and still present in
+``self.requests`` after the call.
+
+- refactor: hoist _has_vision_subconfig import to module top
+
+Move the _has_vision_subconfig import out of _measure_sensitivity (oq.py)
+and _scan (oq_manager.py) up to the module-level imports. model_discovery
+only pulls stdlib so there&#39;s no circular import risk.
+
+- fix(model_discovery, models/vlm): VLM classifier coverage + adapter layers fallback (#1312)
+
+* fix(models/vlm): VLMModelAdapter.layers — fall back to .blocks for Molmo/Moondream3
+
+The property was hardcoded to ``self._language_model.model.layers``. Four
+mlx-vlm language modules expose their decoder stack as ``self.blocks``
+instead of ``self.layers``: ``molmo``, ``molmo2``, ``molmo_point``,
+``moondream3``. On any of those, ``len(self.layers)`` in ``make_cache()``
+raises ``AttributeError`` inside the engine loop after the 200 OK header
+has already gone out — clients see a stalled stream, not an error.
+
+Walk four positions in the attribute tree (nested × flat) × (``.layers``
+× ``.blocks``); first hit wins. Existing ``.layers``-based models keep
+their fast path; ``.blocks``-based models work without per-model
+special-casing.
+
+Verified end-to-end on mlx-community/Molmo2-8B-mxfp8, Molmo2-8B-8bit,
+and Molmo2-8B-bf16 (text + image). Molmo, Molmo-Point, and Moondream3
+share the same code path.
+
+* fix(model_discovery): classify Molmo2 as VLM via arch + model_type + vit_config
+
+Three coordinated edits in ``omlx/model_discovery.py``:
+
+  - Add ``Molmo2ForConditionalGeneration`` to ``VLM_ARCHITECTURES``.
+  - Add ``molmo2`` to ``VLM_MODEL_TYPES``.
+  - Extend the text-only-quant guard to accept either ``vision_config``
+    or ``vit_config`` as evidence the model retains its vision tower.
+    The Molmo / Molmo2 family puts its vision sub-config under
+    ``vit_config`` rather than ``vision_config``.
+
+Pre-fix, the bf16 variant carries no top-level ``vision_config``
+placeholder (only the quantized variants do), so it fell through every
+check and classified as ``llm`` — a 500 with ``Model type molmo2 not
+supported`` on first request. Other Molmo2 quants squeaked through on
+the ``&#34;vision_config&#34; in config`` fallback because their configs ship
+the empty ``vision_config: {}`` placeholder.
+
+Verified: all three Molmo2 quants (bf16, 8bit, mxfp8) classify as
+``vlm`` after this fix.
+
+* fix(model_discovery): classify FastVLM (llava_qwen2) as VLM, accept mm_vision_tower
+
+Same shape as the Molmo2 commit, different evidence key:
+
+  - Add ``LlavaQwen2ForCausalLM`` to ``VLM_ARCHITECTURES``.
+  - Add ``llava_qwen2`` (underscore form, matching disk configs) to
+    ``VLM_MODEL_TYPES``. The existing entry ``&#34;llava-qwen2&#34;`` (hyphen)
+    never matched because the classifier normalizes the input model_type
+    to underscores but not the set entries.
+  - Extend the text-only-quant guard to also accept a non-empty
+    ``mm_vision_tower`` as evidence of VLM. FastVLM uses the older
+    LLaVA-style flat ``mm_*`` keys, not ``vision_config`` / ``vit_config``.
+    The non-empty check avoids relying on an empty ``vision_config`` and
+    does not regress the #483 case (Qwen3.5-122B-A10B-4bit empty-
+    ``vision_config`` misclassification) — Qwen3_5_MoE configs have
+    neither ``vit_config`` nor ``mm_vision_tower``.
+
+Pre-fix, ``llava_qwen2`` (underscore) failed to match the hyphenated
+set entry; bf16 FastVLM configs ship no ``vision_config`` placeholder,
+so they fell through to ``llm``. The 8bit/quantized variants happened
+to ship ``vision_config: {}`` and squeaked through the fallback.
+
+Verified: FastVLM-0.5B-bf16, FastVLM-1.5B-bf16, FastVLM-7B-bf16 all
+classify as ``vlm`` after this fix. Note: FastVLM-7B needs
+Blaizzy/mlx-vlm#1193 (open draft) for coherent output; this commit
+only fixes classification.
+
+* fix: extend vision sub-config check to oq.py + admin/oq_manager.py + model_discovery model_type-only path
+
+The original commits extended only the architecture-based VLM-classifier check
+in ``detect_model_type`` to accept three sub-config keys (``vision_config``,
+``vit_config``, ``mm_vision_tower``) as evidence the model retains its vision
+tower. Three other places in oMLX still hardcoded ``&#34;vision_config&#34; in config``:
+
+  - ``omlx/oq.py:3071`` — OQ&#39;s per-load ``is_vlm`` gate for MTP head
+    attachment. Without the broader predicate, Molmo2 (``vit_config``) and
+    FastVLM (``mm_vision_tower``) classify as text-only here and skip the
+    VLM-specific MTP load handling.
+  - ``omlx/admin/oq_manager.py:205`` — Admin API&#39;s per-model ``is_vlm``
+    field. Molmo2 / FastVLM were reported as non-VLM to the UI and any
+    Admin API consumer, even though the classifier elsewhere correctly
+    routes them through the VLM engine.
+  - ``omlx/model_discovery.py:495`` (model_type-only path) and
+    ``omlx/model_discovery.py:505`` (catch-all fallback) — still consulted
+    only ``vision_config``. A Molmo2 / FastVLM config that listed its
+    model_type but lacked ``architectures`` would have been misclassified.
+
+Extract ``_has_vision_subconfig(config: dict) -&gt; bool`` as the single
+source of truth, and have all four sites call it. The docstring at
+:func:`detect_model_type` now references the helper.
+
+Regression tests cover four new cases:
+
+  - Molmo2 via ``vit_config`` → ``vlm``.
+  - FastVLM via non-empty ``mm_vision_tower`` → ``vlm``.
+  - Empty ``mm_vision_tower`` string → ``llm`` (anti-regression for
+    config-stub text-only quants).
+  - VLM architecture without any vision sub-config evidence → ``llm``
+    (anti-regression for the existing unsloth/Qwen3.5-122B-A10B-MoE
+    text-only quant pattern at #483).
+
+- docs(oq): correct stale VLM MTP sanitize comment in sensitivity path
+
+- fix(oq): apply both mlx-vlm patches before measuring sensitivity (#1310)
+
+- fix(tests): capture expected RuntimeWarning in fallback tests (#1302)
+
+- chore: bump version to 0.3.9rc1
+
+- feat(dflash): expose draft_window_size / draft_sink_size / verify_mode in model settings (#1276)
+
+dflash-mlx already accepts these three as runtime_config_from_defaults kwargs, but
+DFlashEngine._build_runtime_context was only passing prefix-cache fields, so users
+were stuck on the 1024 / 64 / &#39;adaptive&#39; defaults. Wires them end-to-end through
+ModelSettings → admin routes → DFlashEngine → runtime config, with None meaning
+&#39;let dflash-mlx pick its own default&#39;. UI lands under &#39;Long-context tuning&#39; in the
+model settings modal.
+
+- fix(api): preserve role=tool for templates beyond mlx-lm marker set
+
+mlx-lm and mlx-vlm only set tokenizer.has_tool_calling when their
+marker-based _infer_tool_parser recognises the chat template
+(qwen3_coder, json_tools, gemma4, mistral, etc.). Templates that branch
+on role == &#34;tool&#34; and render tool_calls but don&#39;t match any known marker
+(Qwen3 VL variants, custom fine-tunes) get flattened to role=&#34;user&#34;,
+which makes the model treat tool output as user instructions and breaks
+multi-turn tool flows in OpenAI-style clients like goose (#1290).
+
+Adds _chat_template_supports_tool_role probe: strict superset of
+has_tool_calling that falls back to a static chat_template scan for
+role == &#34;tool&#34; + tool_calls. Applies uniformly across utils.py
+(text + multimodal, tool result + assistant tool_calls) and
+anthropic_utils.convert_anthropic_to_internal.
+
+Verified with Qwen3-4B-Instruct-2507-4bit multi-turn tool flow: tool
+result is now logged as role=tool and the model returns a normal
+summary instead of looping back into another tool_call.
+
+- cleanup(dashboard): drop dead actual-memory fields, i18n + tailwind for #1278
+
+- remove unrendered model_memory_used_actual / current_model_memory_actual
+- inline activeModelSizeLabel alias into modelSizeLabel
+- mark observed actual_size as rough (~obs / est) since phys_footprint
+  is process-wide and inference on neighbors runs during load
+- i18n key for &#34;Enforcer disabled&#34; + normalize_i18n sync (ko translated)
+- rebuild tailwind.css for new shrink-0 / inset-y-0 / w-36 classes
+- _status.html: inline style -&gt; w-36 h-2.5, indent fix
+
+- feat:(ui): Add observable memory bar to the dashboard. (#1278)
+
+- fix(admin): move Server Settings restart button next to Save (#1288)
+
+The Restart button sat right under host/port while Save was at the bottom of the page, so users hit Restart before saving and changes were silently discarded. Move it into the footer alongside Save (secondary outline style) and merge restart status into the shared message column. Status is now line-clamp-2 with a tooltip so the unsupported message no longer breaks the button row.
+
+- fix(oq): hoist loading progress callback outside sensitivity map cache branch
+
+PR #1295 moved cb(&#34;loading&#34;, 12.0) inside the else branch of the sensitivity
+map disk-cache check, so the cache-hit path skipped that progress marker and
+the UI jumped from 8 → 15. Hoist it above the if/else so both paths emit it.
+
+- feat(oq): load presaved oQ sensitivity map from the source model folder (#1295)
+
+- perf(cache): parallel SSD-to-hot-cache block preloading (#1301)
+
+- fix(hf_downloader): preserve finalized shards on cancel, only wipe ._____temp
+
+Cleanup-on-cancel from #1284 was wiping the entire target dir, which
+also takes out any shards that already finished downloading and forces
+a full re-download on retry. Hub stages in-progress shards inside the
+hidden ._____temp/ subdir and only renames a shard into the target on
+completion, so scoping the rmtree to that subdir plugs the disk leak
+from #1260 while keeping finalized shards on disk for snapshot_download
+to skip on resume. Hidden partials get auto-cleaned (users don&#39;t see
+them anyway); finalized shards remain visible for the user to keep or
+delete themselves.
+
+- fix: clean up partial HF download shards on cancel (#1284)
+
+When a HuggingFace model download is interrupted (Ctrl-C, network drop)
+omlx left behind partially-written shard files. The next attempt
+mistook them for complete files and produced corrupt loads. Catch
+the cancel/exception path, delete the in-progress shard, and bail
+cleanly.
+
+Fixes #1260
+
+Co-authored-by: Matt Van Horn &lt;455140+mvanhorn@users.noreply.github.com&gt;
+
+- feat(pi): respect PI_CODING_AGENT_DIR env var (#1282)
+
+- fix(tests): align two stale tests with current implementation (#1287)
+
+test_is_mtp_eligible_requires_mtp_forward_and_solo_batch was written
+against a pre-#1247 contract where head presence implied MTP active.
+Commit 23ca7dc decoupled head attachment from inference-time MTP for
+the VLM load path and added an is_mtp_active() gate. Set the flag
+around the True-expected assertion, restore in finally, and add a new
+&#34;head attached but flag off&#34; case to lock in the post-23ca7dc semantics.
+
+test_patch_wraps_target_processors stubbed the wrong module path and
+class name for dots_ocr (mlx_vlm.models.dots_ocr.processing /
+DotsOcrProcessor), but the patcher imports
+mlx_vlm.models.dots_ocr.processing_dots_ocr and looks up
+DotsVLProcessor (per commit a1987ed, where the test was added). The
+fake_import branch never matched, the dots branch silently fell
+through to the except clause, and the wrap-marker assertion failed.
+Align the test&#39;s stubs with the actual (module_path, cls_name) tuples
+in vlm.py.
+
+Both are test-only fixes. Refs #1259.
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- test(engine_pool): cover dual-failure fallback paths from PR #1283
+
+Add two regression tests in TestVLMFallback so the __cause__ chaining
+landed in PR #1283 doesn&#39;t silently regress:
+
+- VLM start fails AND LLM fallback also fails
+- force_lm LM start fails AND VLM fallback also fails
+
+Each test asserts both error messages land in the raised RuntimeError and
+that __cause__ preserves the original error. DFlash branch is not covered
+since exercising it needs settings + inline-import patching.
+
+- fix(tests): update Scheduler/Memory to_dict expectations for new fields (#1286)
+
+Test assertions for SchedulerSettings.to_dict and MemorySettings.to_dict
+omitted the chunked_prefill, soft_threshold, and hard_threshold fields
+that the to_dict implementations already emit. The tests would fail
+the moment anyone ran them locally with the current defaults. Update
+the expected dicts to match the current implementation.
+
+Fixes #1259
+
+Co-authored-by: Matt Van Horn &lt;455140+mvanhorn@users.noreply.github.com&gt;
+
+- fix(engine_pool): surface original load error when fallback also fails (#1283)
+
+When VLM/DFlash/force_lm engine.start() raises and the fallback engine
+also raises, the user-visible 500 currently carries only the fallback
+side error. Wrap each fallback&#39;s inner engine.start() in try/except and
+raise a RuntimeError chained via `raise ... from start_error` so the
+original load failure becomes the __cause__ and both messages survive
+in the catch-all&#39;s log line.
+
+- test(mcp): cover tool/tool_name alias precedence and missing-field paths
+
+Follow-up to #1285. Adds the three cases the PR body promised but did not
+land: tool_name happy path, tool_name precedence when both fields are
+present, and 422 when neither is supplied.
+
+- fix: accept both &#39;tool&#39; and &#39;tool_name&#39; on /v1/mcp/execute (#1285)
+
+Various MCP clients send either `tool` or `tool_name` to specify the
+tool to invoke. omlx accepted `tool_name` only and rejected `tool`,
+breaking parity with the spec drift seen across clients. Accept both
+field names with `tool_name` taking precedence when both are present.
+
+Fixes #1113
+
+Co-authored-by: Matt Van Horn &lt;455140+mvanhorn@users.noreply.github.com&gt;
+
+- refactor(admin/browse): drop quant filter and add mobile-friendly browse layout
+
+- Remove the Quantization filter and Quant column from Browse Models —
+  the detection heuristic was unreliable and the column added little
+  value next to params + size. All related code (_DTYPE_TO_QUANT,
+  _QUANT_ALIASES, _detect_quantization, quant query param, JS state,
+  i18n keys, tests) gone.
+- Replace the Action header text with an empty cell so the column does
+  not stand out vs. the other headers.
+- Add a # (rank) column on Trending/Popular that preserves the backend
+  ordering. JS attaches rank per row on fetch so column-header sorts
+  do not lose the original position. Default sort resets to rank on
+  tab/load.
+- Mobile responsive layout for both Trending/Popular and Search tables:
+  hide the rank/size/downloads/likes/action columns under max-md, render
+  an inline meta line (params, size, downloads, likes) under the model
+  name, and put the OOM badge + Download button on their own row inside
+  the name cell.
+- Stack search input full-width with sort+button on a separate row
+  under md. Desktop layout unchanged.
+- Tailwind link now uses static() so the file mtime is appended as a
+  cache buster, otherwise stale CSS hides updated responsive rules on
+  browsers that hold the old file.
+
+- fix(admin): wire quant detection in trending/popular and align sort dropdown
+
+Follow-up to #830.
+
+- get_recommended_models now populates quantization so the Quant column
+  renders on the trending/popular tabs
+- search dropdown syncs hfTableSort/hfTableSortDir before fetching so the
+  frontend re-sort no longer overrides largest/smallest/most_params choices
+- 4bit/8bit filter values normalized to int4/int8 to match detected labels
+- prefer Q* dtype over BF16 norms when picking the primary dtype
+- size filter input uses 1024^3 to match the binary GiB display formatter
+- routes.py search params now Optional[int] for mypy
+- regroup models.table.* keys next to models.search.* in en.json and
+  re-run normalize_i18n.py
+
+- feat(admin): add sortable table UI for Browse Models (#830)
+
+- Convert Browse Models list to sortable table with columns: Name, Quant,
+  Size, Downloads, Likes, Action
+- Add clickable column headers for sorting (name, size, downloads, likes)
+- Add sort direction toggle (asc/desc) with chevron indicators
+- Add largest/smallest size sort options + min/max size + min/max params +
+  quantization filter
+- Detect quantization label from safetensors dtype and model name
+- Fix _DTYPE_TO_QUANT bit-width mapping for Q6_K/Q5_K/Q3_K
+- Add translation keys for new table headers and filter labels
+- Include filtering and sorting parameters in HF model search API
+
+- fix(responses): preserve reasoning round-trip on tool-call turns
+
+Follow-up to #1245. Native reasoning items now survive the spec
+sequence reasoning -&gt; function_call -&gt; output by extending
+_flush_pending_tool_calls to accept pending reasoning text and
+attach it as reasoning_content on the synthesized assistant
+tool_calls message. Both directions (input conversion and stored
+response normalize) get the same fix.
+
+Also captures reasoning_output_index when the reasoning item
+opens instead of hardcoding 0 in the delta event, and drops the
+unused dataclass_fields import from admin/routes.py.
+
+Tests cover the new branches in extract_thinking,
+ThinkingParser(start_in_thinking=...), build_reasoning_output_item,
+and the reasoning -&gt; function_call round-trip in both
+convert_responses_input_to_messages and
+normalize_response_output_to_messages.
+
+- feat(responses): native reasoning support for Responses API (#1245)
+
+* fix(tests): repair pre-existing upstream test failures and import guards
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(responses): native reasoning support for Responses API
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(responses): correct usage reporting and model profile fields
+
+Fix positional arg bug where cached_tokens was passed as reasoning_tokens
+in build_response_usage. Wire up actual reasoning token counts by
+tokenizing extracted thinking content. Replace non-existent
+dflash_draft_quant_bits profile field with the four real ModelSettings
+fields.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- feat(cache): add per-model cache hit-rate observability (#1183)
+
+* feat(cache): add per-model cache hit-rate observability
+
+Server-side snapshot differencing via CacheRateTracker: stores the last
+90 snapshots of cumulative cache counters (10s intervals, 15 min window)
+and computes rates via start/end differencing. Zero hot-path changes —
+snapshots are lazy, driven by dashboard polling cadence.
+
+New metrics exposed in /api/stats under cache_observability:
+- prefix_hit_rate (cumulative + windowed)
+- eviction count, ssd_hot_rate
+- per-model and weighted aggregate across models
+
+Dashboard: new &#34;Cache Breakdown&#34; card below Average Speed showing hit
+rate, evictions, and hot cache hits. Session-only (hidden in All-Time
+view since counters reset on model reload).
+
+* fix(cache): configure disk-max mock in cache observability tests
+
+The new disk_max aggregation reads get_ssd_cache_max_size_bytes which
+the existing tests left unconfigured, producing a MagicMock that raises
+on max(MagicMock, int).  Also add the missing max_size_bytes key to the
+expected model payloads.
+
+- fix(cache): pending write buffer for hot cache eviction race (#1298)
+
+When hot cache is enabled, blocks evicted from hot cache become
+unreachable during the window between eviction and SSD write
+completion — load_block() returns None, forcing full reprefill.
+
+Add _pending_write_buffers dict populated before the SSD index and
+write queue (buffer → index → queue ordering), checked in both load
+paths, has_block(), and cleaned in delete_block(), writer finally,
+queue-full handler, and close().
+
+Pattern matches boundary_snapshot_store.py&#39;s _pending_writes dict.
+
+Closes #1232
+
+- fix(profiles): classify 9 new ModelSettings fields (#1268)
+
+Classify 9 new ModelSettings fields (preserve_thinking, dflash_max_ctx, dflash_in_memory_cache*, dflash_ssd_cache, vlm_mtp_*) into UNIVERSAL/MODEL_SPECIFIC buckets so the test_all_model_settings_fields_classified guardrail passes.
+
+Co-Authored-By: Rich &lt;61553221+richgoodson@users.noreply.github.com&gt;
+
+- fix(server): populate total_time in non-streaming usage responses (#1269)
+
+Non-streaming /v1/chat/completions and /v1/completions constructed Usage
+with only token counts, leaving total_time, model_load_duration, and the
+other timing fields as null in the serialized response. The elapsed value
+was already computed for logging; this passes it through to the response
+and switches serialization to exclude_none=True so genuinely-unmeasurable
+fields (TTFT, prompt_eval_duration, decode-only generation_duration) are
+omitted rather than serialized as null. Matches the streaming path&#39;s
+.model_dump(exclude_none=True) treatment.
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(chat): re-render streaming bubble when chat switches
+
+The stable/tail roots in updateStreamingDOM are a single shared DOM node.
+When switching between two actively-streaming chats, the previous chat&#39;s
+stable portion stayed in the DOM because the new chat&#39;s safeCutoff was
+not greater than its preserved stableIndex. Stamp the container with the
+active chatId and reset roots on change.
+
+- feat(chat): enable chat multi-tasking and fix chat response following bug (#1231)
+
+- fix(dflash): wire OutputParserSession for gemma4 channel markers
+
+DFlashEngine bypasses Scheduler so the per-token parser session that
+translates gemma4&#39;s &lt;|channel&gt;thought\n / &lt;channel|&gt; protocol markers
+into &lt;think&gt;\n / &lt;/think&gt;\n never ran. Raw markers leaked into chat
+responses for gemma-4-* models while the same model on BatchedEngine +
+Scheduler rendered cleanly.
+
+- detect_output_parser() is called once in start() and the factory is
+  cached on the engine.
+- Streaming path: per-request session, process_token per TokenEvent,
+  finalize on SummaryEvent flushes any unterminated thought block.
+- Non-streaming path: session accumulates visible_text from each token
+  and final flush; bypass tokenizer.decode + clean_special_tokens when
+  the session is active so markers don&#39;t reappear.
+- needs_think_prefix prepend is gated on factory absence — parsers emit
+  &lt;think&gt; tags themselves and would otherwise double the marker.
+- stop() / _evict_dflash_and_start_fallback() reset the factory.
+
+Qwen3 stays on the legacy detokenizer + think_prefix path
+(detect_output_parser returns None for non-gemma4/non-harmony models),
+so no regression on Qwen3 reasoning output.
+
+Note: enable_thinking=False is independently ignored by the gemma4 chat
+template (verified by A/B test against BatchedEngine on the same model
+and prompt — both produce identical 1234-char thought blocks). That is
+a separate template / model concern, not in this patch&#39;s scope.
+
+- chore: bump dflash-mlx pin to 1ba6713 (v0.1.7)
+
+- runtime_config_from_profile() removed → use runtime_config_from_defaults()
+- make_draft_backend() removed → instantiate EagerDraftBackend() directly
+- build_prefix_key() now requires model_provider.tokenizer and cli_args:
+  shim exposes both so prefix cache identity (template/policy hash) builds
+
+Brings in Qwen thinking + GDN exactness fix, GQA SDPA reshape, DDTree +
+CopySpec decode path, prefix cache key v3 (template/policy hash), and
+fp16 draft load on pre-M5 Apple chips.</div>
+</div>
+
+<a href="../project/jundot_omlx.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

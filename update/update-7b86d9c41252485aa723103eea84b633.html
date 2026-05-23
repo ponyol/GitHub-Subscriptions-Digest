@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (3 commits) - lem-project/lem - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (3 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/lem-project_lem.html">lem-project/lem</a> /
+    Updates in main (3 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/lem-project_lem.html">lem-project/lem</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-20 01:36 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/lem-project/lem/commits/main" target="_blank">https://github.com/lem-project/lem/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление устраняет несколько критических проблем в редакторе Lem, в основном связанные с зависаниями и сбоями nREPL-соединения в `clojure-mode`, а также взаимодействием `lsp-mode` с буферами без языковых спецификаций. Для `clojure-mode` исправления включают предотвращение взаимоблокировок при синхронных nREPL-запросах, обеспечение надежного запуска сессии и корректное соблюдение таймаутов для поддержания отзывчивости редактора. Кроме того, `lsp-mode` теперь корректно обрабатывает буферы без языковой спецификации, предотвращая сбои и запуск ненужных LSP-процессов в таких контекстах, как REPL-буферы. Улучшения стабильности также исправляют зависания и сбои в команде `describe-bindings`.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix(clojure-mode): deadlock in nrepl-send-sync hangs clojure-connect (#2191)
+
+* fix(clojure-mode): deadlock in nrepl-send-sync hangs clojure-connect
+
+clojure-connect and clojure-connect-to-localhost would hang the editor
+forever even when the nREPL server was listening and replying.
+
+Root cause: nrepl-send-sync runs on the main thread inside nrepl-connect
+and blocks in (loop :until done (bt:condition-wait cv lock :timeout T)).
+The reader thread routed the response handler through send-event, which
+queues it onto the main thread&#39;s event loop -- but the main thread is
+blocked in condition-wait and cannot pump that queue.  The handler that
+sets done=t and notifies the cv therefore never runs.  The :timeout on
+condition-wait does not help: the outer loop just re-enters.
+
+Fix: split response handlers into sync and async tables.  Sync handlers
+(registered by nrepl-send-sync) are invoked directly on the reader
+thread so synchronous callers can be notified without depending on the
+main thread&#39;s event loop.  Async handlers (the existing nrepl-send
+callback path, e.g. repl-handle-response) still go through send-event,
+because they touch buffers and must run on the main thread.
+
+Follow-up improvement: a cleaner long-term design is to give sync
+messages a dedicated reply channel that bypasses the shared
+response-handlers dispatch entirely (rather than maintaining two
+parallel tables on the connection).  Left for a separate change.
+
+* fix(clojure-mode): start reader thread before first sync request
+
+The reader thread was spawned *after* nrepl-clone-session-sync ran, so
+the very first synchronous request inside nrepl-connect had no one
+draining the socket: the server&#39;s reply sat in the kernel receive
+buffer and the main thread blocked on condition-wait forever.
+
+Start the reader thread immediately after the socket is open and
+before any nrepl-send-sync call.  Combined with the previous commit
+(which routes sync handlers off the main thread), the synchronous
+session clone in nrepl-connect now completes instead of hanging.
+
+* fix(clojure-mode): honor timeout in nrepl-send-sync
+
+The :timeout argument on bt:condition-wait fires correctly, but the
+outer (loop :until done ...) simply re-entered condition-wait every
+iteration, so the timeout was effectively useless: a server that
+accepted the connection but never replied (wrong port, non-nREPL
+listener, hung process) hung the editor&#39;s main thread indefinitely.
+
+Track a real deadline at entry and compute the remaining time each
+iteration.  When it reaches zero, signal an editor-error explaining
+that the request timed out.  Also drop the registered sync-response
+handler in an unwind-protect, so a late reply after timeout does not
+push onto a stale closure and the table does not grow over time.
+
+With this change, a misconfigured port now surfaces a clean
+&#34;nREPL request clone timed out after 30 seconds&#34; error and the
+editor remains responsive, instead of freezing.
+
+* fix(clojure-mode): bootstrap nREPL session synchronously on main thread
+
+nrepl-connect used to start the reader thread first and then call
+nrepl-clone-session-sync, which depended on the reader thread to
+deliver the clone response via a condition variable.  Under Lem&#39;s
+event loop that cross-thread handoff stalls -- the reader thread
+observes only the first byte of bb&#39;s reply and the next read-byte
+never returns, even though the same code outside Lem reads the full
+~100-byte response in milliseconds (verified standalone).
+
+Do the connect handshake inline on the calling thread instead: write
+the clone op, then read-bencode-message in a loop on the same thread
+until the response with status \&#34;done\&#34; arrives.  Start the reader
+thread only after the session is established, when it only needs to
+service asynchronous response delivery.
+
+This matches what other nREPL clients do during bootstrap and is the
+exact pattern that succeeds in the standalone usocket reproducer.
+nrepl-send-sync (used by nrepl-eval-sync etc.) keeps its existing
+reader-thread + cv design; if the same stall affects those calls, it
+will be addressed separately.
+
+* fix(clojure-mode): treat truncated bencode as incomplete, not fatal
+
+read-bencode-message reads one byte at a time and re-decodes the
+accumulated buffer after each byte, expecting bencode-error while
+the message is incomplete and a successful decode when the byte
+count is sufficient.
+
+The actual bencode decoder, however, signals end-of-file (raised by
+peek-char on the exhausted string-input-stream backing decode), not
+bencode-error, when its input is truncated mid-value -- e.g. after
+the leading &#34;d&#34; of a dictionary.  Our handler-case only caught
+bencode-error, so the very first byte of every server reply caused
+end-of-file to escape:
+
+  - In the reader-thread design this hit the outer (end-of-file ...)
+    handler of nrepl-reader-loop and silently killed the reader after
+    one byte, which is why bb&#39;s full clone-session response never
+    reached the waiting main thread.
+  - In the synchronous bootstrap path added in the previous commit
+    it surfaced as an unhandled end-of-file backtrace at the user.
+
+Catch end-of-file alongside bencode-error in the byte-at-a-time
+loop and continue reading.  Both conditions mean &#34;buffer not yet a
+complete bencode value.&#34;
+
+* fix(clojure-mode): suppress lsp-mode on the REPL buffer
+
+clojure-repl-mode inherits from clojure-mode, so Lem&#39;s major-mode
+activation invokes the parent mode as part of the child&#39;s setup
+(mode.lisp around line 157).  That parent step fires
+*clojure-mode-hook*, which contains enable-lsp-mode (added by
+define-language-spec in lsp-config.lisp), so lsp-mode is turned on
+briefly while the buffer is under clojure-mode -- which kicks off
+an async workspace connect for clojure-lsp.
+
+The lsp-mode hardening in the previous commit prevents that
+workspace from crashing the editor when the REPL buffer no longer
+has a language spec, but it still leaves an unnecessary
+clojure-lsp process attached to a buffer where LSP cannot do
+anything useful.
+
+Disable lsp-mode in the clojure-repl-mode body so the REPL
+transcript does not even attempt LSP attachment.  The call goes
+through find-package + uiop:symbol-call so clojure-mode does not
+hard-depend on lem-lsp-mode being loaded.
+
+* style(clojure-mode): use :do keyword in bare loops
+
+Address code-contractor loop_keywords_rule on PR #2191.  Three
+bare (loop body) forms in nrepl-client.lisp violated the Lem style
+that requires LOOP keywords with leading colons: one I introduced
+in nrepl-bootstrap-session, and two pre-existing loops in
+nrepl-reader-loop and read-bencode-message whose bodies the
+preceding commits modified.  Add an explicit :do keyword to each.
+
+* address code-contractor feedback on PR #2191
+
+Three findings from the second review pass:
+
+  - loop_keywords_rule on nrepl-bootstrap-session: the (loop :do
+    (let ...)) form was still flagged as not using proper LOOP
+    keywords throughout.  Rewrite as
+    (loop :for response := ... :do ... :until ... :finally ...) so
+    every clause uses a colon-prefixed loop keyword.
+
+  - error_handling_rule on nrepl-send-sync&#39;s timeout path: replace
+    (error &#39;editor-error :message (format ...)) with the editor-error
+    macro, which takes format-control + args directly and is the
+    convention the rule documents for user-facing errors.
+
+  - dynamic_symbol_call_rule on clojure-repl-mode: the existing
+    comment explained *what* the (uiop:symbol-call :lem-lsp-mode ...)
+    achieves but not *why* it cannot be a direct symbol reference.
+    Expand the comment to document that lem-lsp-mode is an optional
+    sibling extension: lem-clojure-mode.asd does not depend on it, so
+    a direct (lem-lsp-mode:lsp-mode nil) would either fail to load
+    in lsp-less builds or promote the optional dependency to a
+    required one for every clojure-mode user.
+
+- fix(lsp-mode): tolerate buffers whose major mode has no language spec (#2193)
+
+* fix(lsp-mode): tolerate buffers whose major mode has no language spec
+
+get-language-spec asserted the per-symbol property was a spec
+instance, but its callers (buffer-language-spec, etc.) already use
+when-let against the result -- they expect nil for modes that should
+not activate LSP.  The assertion crashed the editor command loop
+whenever a buffer&#39;s major mode lacked a registered spec.
+
+This is reachable in normal use.  clojure-repl-mode (and similar
+listener-style modes) inherits from clojure-mode, which registers a
+spec.  The parent activation fires *clojure-mode-hook* -&gt;
+enable-lsp-mode, which starts an async workspace connect.  By the
+time the workspace&#39;s :then callback fires text-document/did-open,
+the buffer&#39;s major mode has switched to clojure-repl-mode (no spec)
+and get-language-spec crashed.  Even if the open was skipped, the
+buffer kept lsp-mode&#39;s before-change hook, so the next keystroke
+hit text-document/did-change -&gt; find-workspace nil -&gt; error.
+
+Push the guard down to where it belongs -- the LSP request
+functions themselves -- so every callsite stays a single,
+unconditional invocation:
+
+  - get-language-spec returns nil for unregistered modes, matching
+    the when-let contract its callers already assume.
+  - find-workspace returns nil silently when language-id is nil,
+    regardless of :errorp.  A nil language-id means the buffer is
+    not an LSP buffer -- not a runtime failure.
+  - text-document/did-open, did-change, did-save, and did-close all
+    wrap their request body in (when-let (workspace
+    (buffer-workspace buffer nil)) ...), so a buffer that has no
+    workspace (no spec, or workspace not yet connected) becomes a
+    silent no-op instead of crashing on workspace-client nil.
+
+LSP remains fully functional for any buffer whose major mode is
+registered; non-LSP buffers (REPL transcripts, etc.) become no-ops
+on the relevant hooks.
+
+* test(lsp-mode): cover spec/workspace nil-tolerant lookups
+
+Two deftests guard the regressions the previous commit fixed:
+
+  - get-language-spec returns nil for an unregistered mode (the path
+    that previously asserted and crashed the editor command loop the
+    first time a REPL-style buffer interacted with lsp-mode).
+
+  - find-workspace returns nil for a nil language-id even with
+    :errorp t (the default path that previously signaled
+    &#34;The NIL workspace is not found.&#34; on the next keystroke).
+
+Verified both fail when the source fix is reverted.
+
+- fix: describe-bindings freeze and crash (#2190)
+
+* fix: describe-bindings freeze and crash after keymap rewrite
+
+Two regressions from PR #2100:
+
+- help.lisp: describe-bindings-internal looped forever because the
+  (setf keymap (keymap-parent keymap)) advance was removed but the
+  (loop :while keymap ...) was left in place. Terminate after one
+  iteration with (setf keymap nil).
+
+- keymap.lisp: traverse-keymap yielded transient closures (toggle,
+  choice infixes) to callbacks, causing (symbol-name command) to
+  signal a type error in describe-bindings-internal. Guard the
+  callback at the contract boundary by gating on (symbolp suffix).
+
+* test: cover describe-bindings/traverse-keymap regressions
+
+- traverse-keymap-skips-non-symbol-suffixes: builds a keymap whose
+  prefix suffix is a closure (the shape produced by transient
+  toggle/choice infixes) and asserts traverse-keymap only yields
+  symbol commands.
+
+- describe-bindings-internal-terminates: end-to-end check that the
+  function returns (with a bordeaux-threads timeout guard) on a
+  keymap containing a closure suffix, and that the rendered output
+  includes the symbol binding.
+
+* test: docstring deftests; document internal access
+
+Adds rationale docstrings to both deftest forms describing the
+regressions they guard against, and an inline comment explaining
+why the test reaches lem-core/commands/help::describe-bindings-internal
+through the internal symbol path.</div>
+</div>
+
+<a href="../project/lem-project_lem.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

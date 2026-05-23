@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (51 commits) - ag-ui-protocol/ag-ui - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (51 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/ag-ui-protocol_ag-ui.html">ag-ui-protocol/ag-ui</a> /
+    Updates in main (51 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/ag-ui-protocol_ag-ui.html">ag-ui-protocol/ag-ui</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-22 22:00 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/ag-ui-protocol/ag-ui/commits/main" target="_blank">https://github.com/ag-ui-protocol/ag-ui/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This update delivers substantial stability and performance improvements, particularly for `langgraph` and `ADK middleware`. `Langgraph` now features more robust handling of JSON parsing failures in tool calls and resume inputs, with enhanced error reporting and improved interrupt/resume lifecycle management. A major `ADK middleware` refactor addresses stale session write errors and optimistic concurrency issues, significantly boosting streaming fidelity for Human-in-the-Loop (HITL) scenarios by deferring only relevant events. Additionally, the release introduces a new Cloudflare Agents integration and updates CI/CD for npm authentication.
+
+---
+
+**Russian Translation:**
+Это обновление обеспечивает существенные улучшения стабильности и производительности, особенно для `langgraph` и `ADK middleware`. `Langgraph` теперь предлагает более надежную обработку ошибок парсинга JSON в вызовах инструментов и входных данных для возобновления, с улучшенным протоколированием ошибок и управлением жизненным циклом прерывания/возобновления. Крупный рефакторинг `ADK middleware` устраняет ошибки записи устаревших сессий и проблемы контроля оптимистической конкуренции, значительно повышая точность стриминга для сценариев Human-in-the-Loop (HITL) за счет отложенной обработки только соответствующих событий. Кроме того, релиз включает новую интеграцию Cloudflare Agents и обновляет CI/CD для аутентификации npm.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Merge pull request #1739 from ag-ui-protocol/release/next
+
+release: integration-agno + integration-langgraph-py
+
+- chore(release): bump integration-langgraph-py (ag-ui-langgraph@0.0.36)
+
+- Merge pull request #1747 from uesleilima/fix/prepare-stream-interrupt-resume
+
+fix(langgraph): check interrupt resume before regenerate heuristic
+
+- chore(langgraph): silence intentional type:ignore noise in new tests
+
+The new tests for PR #1747 intentionally assign string values to
+tool_calls[*].args (typed dict[str, Any]) to exercise the
+json.loads repair path. Add narrow # type: ignore comments so
+pyright doesn&#39;t surface these as real issues.
+
+- fix(langgraph): drop dead else branch in node_name_for_mode
+
+The conditional fell back to self.active_run.get(&#34;node_name&#34;) when
+node_name_input was absent or &#34;__end__&#34;, but active_run was just reset
+to INITIAL_ACTIVE_RUN three lines above with node_name=None. The else
+branch could never resolve to anything but None.
+
+Resolve to None directly and leave a comment so future readers don&#39;t
+have to re-derive the invariant.
+
+- fix(langgraph): log resume_input JSON parse failures with context
+
+A string resume payload that fails json.loads was previously logged at
+DEBUG with no context — invisible in production. The contract still
+forwards the raw string to Command(resume=...) because callers can pass
+plain strings legitimately, but a JSON-looking malformed string is
+almost always an integration bug worth surfacing.
+
+Raise to WARNING and include thread_id, run_id, the exception, and a
+200-char excerpt of the payload so the cause is debuggable without
+dumping unbounded strings into logs. The raw-string fallback behavior
+is preserved.
+
+Adds a test asserting logger.warning is called with the malformed
+payload excerpt and that Command(resume=...) still receives the raw
+string.
+
+- fix(langgraph): surface json.loads failures in tool-call args repair
+
+When a checkpoint AIMessage carries a tool_call whose args string is not
+valid JSON, the merge-state repair previously logged at WARNING with the
+full raw payload and set args={} unconditionally, then flagged the
+AIMessage as repaired. Two problems:
+
+1. Severity: silently downgrading a tool call to empty args is a real
+   integration failure — downstream LLMs may treat it as an empty call
+   with no signal that anything went wrong. Raise to ERROR and bound the
+   payload excerpt at 200 chars so logs stay debuggable without dumping
+   secrets or huge JSON blobs.
+
+2. Spurious &#34;repaired&#34; duplicate: setting repaired=True in the except
+   arm caused us to append the repaired AIMessage (with empty args) to
+   new_messages even when nothing actually parsed. Combined with the
+   existing checkpoint message that still has the original string args,
+   that duplicated the tool call with corrupted arguments. Only set
+   repaired_any on a successful parse, and only append the repaired copy
+   when at least one tool_call was actually fixed.
+
+Adds a test asserting the checkpoint is preserved, logger.error is
+called with the tool_call_id and a bounded excerpt, and the repaired
+copy is not returned when no parse succeeded. Also covers the mixed
+case where one tool_call parses and another fails: the repaired copy is
+returned with the parsed value plus {} for the failure.
+
+- fix(langgraph): gate AIMessage tool-call repair deepcopy on actual need
+
+The merge-state loop deepcopied every AIMessage with tool_calls in the
+checkpoint, even when none of the tool_call args were strings that
+needed repair. For long-lived threads this allocated a fresh AIMessage
+copy per checkpoint message on every request.
+
+Pre-check whether any tool_call.args is a string before paying the
+deepcopy cost; only the messages that actually need repair are copied
+into repaired_ai_messages.
+
+- fix(langgraph): avoid mutating checkpoint message repairs
+
+- fix(langgraph): harden interrupt resume lifecycle handling
+
+- fix(langgraph): check interrupt resume before regenerate heuristic
+
+- Merge pull request #1733 from ag-ui-protocol/eval/cloudflare-agents-655
+
+Add Cloudflare Agents community integration
+
+- Merge pull request #1759 from ag-ui-protocol/claude/changelog-1732-followups
+
+chore(adk-middleware): add changelog entry for #1732 + follow-up PRs (#1735, #1756-1758)
+
+- docs(adk-middleware): add changelog entry for #1732 + follow-up PRs (#1735, #1756–1758)
+
+Comprehensive unreleased-section entry documenting:
+
+- Root cause and original fix for #1732 ([PR #1735](https://github.com/ag-ui-protocol/ag-ui/pull/1735) by @he-yufeng).
+- Regression tests for #1732 (#1753 / PR #1756): synchronous smoke test
+  plus live-Gemini integration test that reproduces the exact traceback
+  when PR #1735 is reverted.
+- Producer-side buffer/flush for ``_store_lro_id_remap`` (#1754 / PR
+  #1757), fixing the latent twin of #1732 on resumable HITL with SSE
+  streaming.
+- Streaming-fidelity rework via the new ``_HitlDeferringQueue`` (#1755 /
+  PR #1758): defers only the HITL ``ToolCallEndEvent`` itself instead of
+  every event after it, so non-HITL events stream live.
+
+Credits @he-yufeng for the initial fix and @bajayo for the bug report.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Merge pull request #1758 from ag-ui-protocol/claude/issue-1755-hitl-producer-side-persistence
+
+fix(adk-middleware): move HITL persistence producer-side to preserve streaming fidelity (#1755)
+
+- fix(adk-middleware): move HITL persistence producer-side to preserve streaming fidelity (#1755)
+
+PR #1735 fixed #1732 by making the consumer ``await execution.task`` when
+it dequeues a HITL ``ToolCallEndEvent`` before persisting
+``pending_tool_calls``. That gate fired on the FIRST HITL TCE and held the
+consumer until the producer (``_run_adk_in_background``) exited. For
+resumable HITL with parallel tool calls or post-LRO text events, every
+event the producer enqueued after the LRO sat in ``event_queue`` until
+runner exit and arrived at the client as a burst instead of streaming
+live.
+
+This PR moves the HITL persistence step producer-side and defers ONLY the
+HITL ``ToolCallEndEvent`` itself. All other events (non-HITL tool calls,
+text deltas, backend ``ToolCallResultEvent``s) stream through the
+underlying queue unblocked.
+
+Mechanism:
+
+* New ``_HitlDeferringQueue`` (subclass of ``asyncio.Queue``) replaces the
+  bare queue created in ``_start_background_execution``. On ``put``:
+  - HITL ``ToolCallEndEvent`` whose id is in ``long_running_tool_ids`` →
+    buffered in a local dict instead of the inner queue.
+  - ``ToolCallResultEvent`` for a deferred id → release the buffered TCE
+    first (preserves TCE→Result order on the wire) and remove the id from
+    the deferred set (no client continuation → no need to persist).
+  - ``None`` sentinel → implicit ``flush_deferred`` first, then put None
+    so the consumer sees deferred TCEs before the stream ends.
+  - Anything else → passthrough.
+
+* ``_run_adk_in_background`` calls ``_finalize_hitl_buffer`` (new helper
+  that iterates ``deferred_hitl_ids`` and calls
+  ``_add_pending_tool_call_with_context`` for each) at all three exit
+  points: just before the normal-exit ``put(None)``, before the LRO drain
+  ``return``, and before the non-resumable LRO ``return``. Each is
+  followed by ``await event_queue.put(None)`` so the deferring queue
+  flushes via its ``put(None)`` override.
+
+* ``_run_new_execution`` no longer needs the ``await execution.task`` /
+  ``_add_pending_tool_call_with_context`` block on HITL TCE — by the time
+  the consumer observes a TCE, the producer has already persisted (or it
+  was a non-HITL TCE that doesn&#39;t need persistence). The
+  ``ToolCallResultEvent``→``_remove_pending_tool_call`` unpersist branch
+  is also gone (the queue&#39;s release-on-result path handles that case).
+
+Streaming-fidelity comparison:
+
+| Event after first HITL TCE | PR #1735 (today) | #1755            |
+|----------------------------|------------------|------------------|
+| Non-HITL tool call         | Buffered         | Streams live     |
+| Post-LRO text              | Buffered         | Streams live     |
+| Backend tool result        | Buffered         | Streams live     |
+| HITL TCE itself            | Held for runner  | Held for runner  |
+
+Invariants preserved:
+
+* PR #1581: ``pending_tool_calls`` persisted BEFORE the client sees the
+  ``ToolCallEndEvent`` (the queue holds the TCE until ``put(None)``
+  fires the flush, which happens after ``_finalize_hitl_buffer``).
+* PR #1735 / #1732: no mid-runner ``session.state`` writes (persistence
+  is the producer&#39;s last act before signalling completion, by which
+  point ``runner.run_async`` has exited).
+* #1652: only HITL/LRO ids are persisted; backend tools are passthrough.
+
+Tests:
+
+* New ``test_non_hitl_events_stream_live_after_hitl_tce`` in
+  ``tests/test_multi_instance_hitl.py``: streaming-fidelity regression.
+  Producer enqueues HITL TCE, then a non-HITL ``ToolCallStartEvent``,
+  then blocks. Asserts the non-HITL event reaches the client within 1s
+  (well before the producer finishes) AND that the HITL TCE arrives
+  later, after persistence. With PR #1735&#39;s consumer-side gate alone
+  (no #1755 wrapper) the consumer would block on ``execution.task`` and
+  the 1s wait would time out.
+
+* Existing mocks in ``test_multi_instance_hitl.py`` and
+  ``test_tool_tracking_hitl.py`` updated to call
+  ``_add_pending_tool_call_with_context`` before ``put(None)``, matching
+  the real producer&#39;s behavior. The mocks replace the producer, so they
+  need to simulate the producer-side persistence step that PR #1735&#39;s
+  consumer-side gate previously did automatically.
+
+Verification: full test suite — 806 passed, 1 skipped. HITL-related
+suites (``test_multi_instance_hitl``, ``test_pending_tool_calls_gating``,
+``test_lro_sse_persistence``, ``test_lro_sse_id_remap``,
+``test_resumability_config``, ``test_lro_tool_response_persistence``,
+``test_tool_tracking_hitl``) — 63 passed.
+
+Closes #1755.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Merge pull request #1757 from ag-ui-protocol/claude/issue-1754-store-lro-id-remap-occ
+
+fix(adk-middleware): defer LRO ID remap writes until runner finishes (#1754)
+
+- fix(adk-middleware): defer LRO ID remap writes until runner finishes (#1754)
+
+`_store_lro_id_remap` was called from inside `_run_adk_in_background`&#39;s
+`async for adk_event in runner.run_async(...)` loop at two sites (LRO drain
+branch and main branch). That write goes through `update_session_state` →
+`session_service.append_event`, which bumps the storage marker on the
+session row ADK&#39;s Runner still holds in `invocation_context.session`. On
+resumable HITL (`ResumabilityConfig(is_resumable=True)`), ADK does not
+hard-stop after the LRO event, and its subsequent `append_event` (for the
+parallel backend tool&#39;s function_response) raises
+`ValueError: The session has been modified in storage since it was loaded`
+from DatabaseSessionService&#39;s OCC check on ADK ≥ 1.27.
+
+This is the same OCC failure shape as #1732 (PR #1735 fixed), but a separate
+writer in the producer task that the consumer-side `await execution.task`
+gate cannot reach.
+
+Fix: buffer remap updates in a local `pending_lro_id_remap: Dict[str, str]`
+during the runner loop, and flush them once in the function&#39;s `finally`
+block after the runner has been closed. The flush goes through the same
+`_store_lro_id_remap` path but executes after ADK no longer holds the
+in-memory session, so no OCC violation can occur. Multiple captured remaps
+are merged into a single batched write.
+
+Adds a deterministic regression test in
+`tests/test_lro_sse_id_remap.py::TestLroIdRemapStaleSessionRegression`
+that uses a scripted LLM emitting partial+final chunks with parallel
+function_calls (backend + frontend) against a real `DatabaseSessionService`
+and resumable App. The scripted shape forces:
+- LRO ID divergence (ADK assigns fresh UUIDs to ID-less function_calls
+  via `populate_client_function_call_id` on each chunk)
+- ADK building a function_response for the backend tool AFTER the
+  middleware&#39;s remap write, exposing the stale in-memory session
+
+Without the fix, the test fails with the exact #1754 traceback. With the
+fix, it passes. Full test suite: 806 passed, 1 skipped.
+
+Closes #1754.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Merge pull request #1756 from ag-ui-protocol/claude/issue-1753-hitl-stale-session-test
+
+test(adk-middleware): add HITL stale-session regression tests for #1732
+
+- test(adk-middleware): add HITL stale-session regression tests for #1732
+
+Adds two tests to `TestStaleSessionRegression` covering the HITL/client-tool
+variant of the optimistic-concurrency-control bug that PR #1735 fixed:
+
+1. `test_hitl_client_tool_with_database_session_service` — synchronous
+   smoke coverage with a scripted LLM. Pins post-fix invariants (no
+   stale-session error, no RUN_ERROR, persistence to
+   `session.state[&#39;pending_tool_calls&#39;]`). Always runs, fast.
+
+2. `TestStaleSessionRegressionLiveLLM.test_hitl_client_tool_live_llm_with_database_session_service` —
+   live integration test driving a real Gemini call against
+   `DatabaseSessionService` with `ResumabilityConfig(is_resumable=True)`.
+   Reproduces the exact #1732 traceback when PR #1735&#39;s fix is reverted
+   (validated locally). Gated on `GOOGLE_API_KEY`; falls back to
+   `llmock_server`.
+
+Closes #1753.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Merge pull request #1735 from he-yufeng/fix/adk-hitl-pending-after-runner
+
+fix(adk): avoid stale session writes for HITL calls
+
+- Merge branch &#39;main&#39; into fix/adk-hitl-pending-after-runner
+
+- Merge pull request #1744 from ag-ui-protocol/fix/oidc-trusted-publishers
+
+fix(ci): switch to OIDC trusted publishers for npm auth
+
+- fix(ci): switch to OIDC trusted publishers for npm authentication
+
+Replace expired NPM_TOKEN-based auth with OIDC trusted publishers.
+Add id-token: write to prerelease, remove redundant npm config set
+steps and duplicate NPM_TOKEN env vars from both workflows.
+
+- chore(release): bump integration-agno (@ag-ui/agno@0.0.4)
+
+- fix(adk): avoid stale session writes for HITL calls
+
+- Add README with event coverage table and usage examples
+
+- Add 43 tests covering protocol compliance, error handling, and edge cases
+
+- Add barrel exports
+
+- Add SSE and NDJSON response helpers with error propagation
+
+- Add AI SDK v5 adapter with reasoning, streaming args, and error handling
+
+- Add WebSocket client with full AG-UI protocol compliance
+
+- Add Cloudflare Agents integration build infrastructure
+
+- Merge pull request #1725 from ag-ui-protocol/fix/a2ui-middleware-supersede-retry-renders
+
+fix(a2ui-middleware): supersede same-surface activity messages within an outer tool call
+
+- Merge branch &#39;main&#39; into fix/a2ui-middleware-supersede-retry-renders
+
+- Merge pull request #1532 from davor-bauk-sh/feat/http-agent-custom-fetch
+
+feat(client): add custom fetch function support to HttpAgent
+
+- Merge branch &#39;main&#39; into feat/http-agent-custom-fetch
+
+- fix(langgraph-typescript): bump @langchain/core to ^1.1.44 and @langchain/langgraph to ^1.1.0
+
+LangGraph 1.3+ requires @langchain/core ^1.1.44 (it imports from `./language_models/stream`, a subpath added in 1.1.44). With the previous floor of ^1.1.7 + ^1.0.7, pnpm resolved an incompatible langgraph/core pair and the LG dev server failed to start, blocking every TS example agent. The TS dojo e2e suite hit this as agenticChatPage timeouts (user message never appeared because the dev server couldn&#39;t bring up the agent).
+
+Required for the standalone middleware fix PR to clear CI on the same `langgraph-typescript` job. Same bumps were applied separately on PR #1717.
+
+- fix(a2ui-middleware): supersede same-surface activity messages within an outer tool call
+
+Track the most recent non-A2UI tool call as the active &#34;outer&#34; context and use its tool_call_id (instead of the inner render_a2ui call&#39;s id) when building the activity messageId for streamed surface events. When an outer tool (e.g. a generate_a2ui wrapper that delegates to a subagent) emits multiple inner render_a2ui attempts for the same surface — for example, validate-then-retry flows where the first attempt is invalid — the inner attempts now share a messageId and supersede each other on the frontend instead of stacking as distinct chat entries.
+
+Behavior preserved for every existing scenario:
+- Direct render_a2ui calls from the main agent (no outer context): falls back to the inner tool_call_id, identical to before.
+- Single-attempt subagent flows: one outer id, one messageId, one activity — same chat-entry count as today.
+- Multiple top-level tool calls (e.g. search_flights then search_hotels, or two separate generate_a2ui calls): distinct outer ids, distinct messageIds, distinct activities.
+
+Only the retry/duplicate-render edge case changes: previously each inner attempt produced a new chat entry because the per-attempt tool_call_id leaked into the messageId. The outer call&#39;s id is stable across attempts, so attempts now collapse cleanly.
+
+- Merge pull request #1722 from ag-ui-protocol/claude/assess-issue-1719-ISlpS
+
+fix(adk-middleware): re-parent copied sub-agents in _shallow_copy_agent_tree
+
+- docs(adk-middleware): add changelog entry for #1719 sub-agent re-parenting fix
+
+- fix(adk-middleware): re-parent copied sub-agents in _shallow_copy_agent_tree
+
+Pydantic&#39;s model_copy(deep=False) inherits parent_agent by reference, so
+each recursively-copied sub-agent still pointed at the original parent.
+ADK&#39;s transfer_to_agent walks parent_agent up to the root and searches
+its sub_agents registry — landing in the original tree whose tools were
+never replaced by _update_agent_tools_recursive, so the per-run copy was
+silently bypassed.
+
+Re-parent each copied sub-agent to its copied parent after the recursive
+copy. Guard against the early-return branch where the sub-agent could
+not be copied (non-Pydantic), so we don&#39;t leak the new parent back into
+the original tree.
+
+Fixes #1719.
+
+- Merge pull request #1689 from ag-ui-protocol/chore/publish-aws-strands-0.1.9
+
+chore: release aws strands integration 0.1.9
+
+- chore: fix test
+
+- Merge branch &#39;main&#39; into chore/publish-aws-strands-0.1.9
+
+- Merge pull request #1707 from ag-ui-protocol/claude/debug-test-failure-5cuEI
+
+fix(aws-strands): guard JSONSerializableDict import against strands reorganization
+
+- fix(aws-strands): revert speculative **_kwargs addition to stream_async
+
+The **_kwargs guard is not needed today — agent.py calls stream_async with
+a single positional argument and there is no current breakage to fix there.
+Keep the PR minimal: only the JSONSerializableDict compatibility import
+addresses the actual ModuleNotFoundError.
+
+https://claude.ai/code/session_01Uuz3Zkim3z4S8XcgtdP4vs
+
+- Merge branch &#39;main&#39; into claude/debug-test-failure-5cuEI
+
+- fix(aws-strands): guard JSONSerializableDict import against strands reorganization
+
+test_context_forwarding.py imported JSONSerializableDict directly from
+strands.types.json_dict, a private submodule removed in newer strands-agents
+versions. CI was hitting ModuleNotFoundError because uv sync re-resolved
+dependencies (due to a stale uv.lock after the version bump in the release PR),
+and picked up a strands version that reorganized the types package.
+
+Replace the hard import with a try/except chain that tries the known module
+locations in order and falls back to a minimal dict subclass only as a last
+resort, so the test remains compatible with the widest possible range of
+strands-agents versions.
+
+Also add **_kwargs to _CapturingCore.stream_async in both
+test_context_forwarding.py and test_template_agent_propagation.py, matching
+the defensive pattern already present in test_template_hooks_preservation.py
+(&#34;intentionally swallows future additions such as invocation_state in newer
+Strands versions&#34;).
+
+https://claude.ai/code/session_01Uuz3Zkim3z4S8XcgtdP4vs
+
+- Merge pull request #1706 from ag-ui-protocol/claude/update-changelog-0.6.3-5E3X8
+
+chore(adk-middleware): update CHANGELOG for 0.6.3
+
+- chore(adk-middleware): add 0.6.3 changelog entry for FunctionResponse.name fix (#1682)
+
+Documents the fix that set FunctionResponse.name to the actual called
+function name instead of the tool_call_id, restoring Gemini round-trip
+correlation for multi-leg tool workflows.
+
+https://claude.ai/code/session_0195Ur5K1eX8HrFiU1ppZBWH</div>
+</div>
+
+<a href="../project/ag-ui-protocol_ag-ui.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
