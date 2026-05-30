@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in develop (49 commits) - MemPalace/mempalace - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in develop (49 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/MemPalace_mempalace.html">MemPalace/mempalace</a> /
+    Updates in develop (49 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/MemPalace_mempalace.html">MemPalace/mempalace</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-30 03:37 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/MemPalace/mempalace/commits/develop" target="_blank">https://github.com/MemPalace/mempalace/commits/develop</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>The update addresses critical data integrity issues, notably fixing `file_already_mined` to prevent duplicate data generation and unbounded storage growth by correctly identifying already-mined files. It also resolves a `KeyError` when opening existing collections due to a missing `_type` field in ChromaDB configurations. Key improvements to entity detection include a new lexicon for atomic multi-word product names and a COCA content-word filter to reduce false positives.
+
+---
+
+Обновление устраняет критические проблемы целостности данных, в частности, исправлена функция `file_already_mined`, что предотвращает генерацию дублирующихся данных и неограниченный рост хранилища за счет корректного определения уже проанализированных файлов. Также устранена ошибка `KeyError` при открытии существующих коллекций, вызванная отсутствием поля `_type` в конфигурациях ChromaDB. Ключевые улучшения в обнаружении сущностей включают новый лексикон для атомарного распознавания многословных названий продуктов и фильтр COCA для отсеивания общеупотребительных слов, снижающий количество ложных срабатываний.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Merge pull request #1617 from mvalentsev/fix/1611-config-json-str-type
+
+fix(backends): repair missing _type in collection config (#1611)
+
+- Merge pull request #1647 from MemPalace/dependabot/pip/ruff-0.15.15
+
+build(deps-dev): bump ruff from 0.15.14 to 0.15.15
+
+- Merge pull request #1652 from MemPalace/fix/file-already-mined-multi-mtime-groups
+
+fix(palace): file_already_mined iterates all groups when source_file has multiple parent_drawer_id mining passes
+
+- fix(palace): file_already_mined iterates all groups when source_file has multiple parent_drawer_id mining passes
+
+Under the additive-mining model (drawer history preserved across re-mines),
+a single source_file can have multiple parent_drawer_id groups in the
+palace, one per mining pass. Each group carries its own stored
+source_mtime and normalize_version.
+
+`file_already_mined` previously used `collection.get(where={&#34;source_file&#34;: X},
+limit=1)` in the `extract_mode is None` branch and only checked the single
+returned row&#39;s metadata. ChromaDB&#39;s `get(..., limit=1)` has no ordering
+guarantee across multiple matching rows, so the returned row was effectively
+arbitrary. When ChromaDB happened to return a stale group (older mining
+pass with a different stored mtime), the function returned False, the
+additive miner concluded the file had changed, and wrote yet another
+duplicate group of drawers for a file that had not actually changed since
+the last successful mine.
+
+Steady-state failure: for any source_file that has ever been edited (so
+that the palace contains groups with different stored mtimes), each re-mine
+has a probability of spuriously concluding &#34;file changed&#34; and writing
+another duplicate group. Each spurious group compounds the problem because
+its stored mtime can also trigger the next spurious re-mine. Storage grows
+without bound; search results, hallway counts, and entity-frequency stats
+become inflated proportionally.
+
+The fix mirrors the paginated-iteration pattern already used in the
+`extract_mode is not None` branch — iterate every drawer for the
+source_file in 1000-row pages, short-circuit on the first matching group.
+A correct group is one that passes the existing checks: normalize_version
+not stale; if check_mtime, stored source_mtime within 0.001 seconds of the
+current file mtime. The two branches (extract_mode is None vs set) collapse
+into one loop that skips the extract_mode check when no extract_mode was
+specified.
+
+Trade-off: average-case cost rises from O(1) limit=1 query to O(N/1000)
+paginated scan. For typical sources (1-3 groups) the cost is unchanged
+because the loop short-circuits on the first matching group within the
+first page. For pathological sources with thousands of groups, the cost
+is O(number-of-pages-until-match) — still bounded, no longer flaky.
+
+RED test pins the failure space deterministically
+
+`test_file_already_mined_handles_multiple_groups_under_one_source_file`
+uses a MockCollection that simulates two parent_drawer_id groups under one
+source_file: a STALE group (older mtime) and a CURRENT group (matching
+mtime). The mock returns the STALE group when called with limit=1
+(worst-case ChromaDB ordering) and returns BOTH groups when called with
+limit=1000 (what a correctly-iterating implementation must do). Test asserts
+file_already_mined returns True even when limit=1 picks the stale group.
+
+  - Against pre-fix code: test FAILS (function returns False because
+    limit=1 picks stale group, mtime mismatch returns False)
+  - Against post-fix code: test PASSES (iteration finds the current group,
+    short-circuits to True)
+
+Verified RED-then-GREEN locally. Existing 4 file_already_mined tests in
+tests/test_miner.py continue to pass:
+  - test_file_already_mined_check_mtime
+  - test_file_already_mined_scopes_convo_extract_mode
+  - test_file_already_mined_extract_mode_paginates_large_sources
+  - test_file_already_mined_returns_false_for_stale_normalize_version
+
+Verification
+
+  - macOS Python 3.12 (local) full pytest  : 2268 passed, 0 failed
+  - Linux Python 3.9.25  (OrbStack)        : 2260 passed, 0 failed
+  - Linux Python 3.11.15 (OrbStack)        : 2261 passed, 0 failed
+  - Linux Python 3.13.13 (OrbStack)        : 2261 passed, 0 failed
+  - ruff check + ruff format --check       : all clean
+
+Provenance
+
+Surfaced during the per-query audit on the PR #1628 amendment cycle (the
+search for every bare `where={&#34;source_file&#34;: ...}` query in the repo).
+One of six sites identified. The other five are legitimately file-global
+in intent (closet purges, full-rebuild deletes, paginated mode-filtered
+scans). This site is the one whose failure mode mirrors the cross-group
+stitching pattern PR #1628 fixed at the searcher layer.
+
+- build(deps-dev): bump ruff from 0.15.14 to 0.15.15
+
+Bumps [ruff](https://github.com/astral-sh/ruff) from 0.15.14 to 0.15.15.
+- [Release notes](https://github.com/astral-sh/ruff/releases)
+- [Changelog](https://github.com/astral-sh/ruff/blob/main/CHANGELOG.md)
+- [Commits](https://github.com/astral-sh/ruff/compare/0.15.14...0.15.15)
+
+---
+updated-dependencies:
+- dependency-name: ruff
+  dependency-version: 0.15.15
+  dependency-type: direct:development
+  update-type: version-update:semver-patch
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+
+- Merge pull request #1615 from MemPalace/chore/sync-3.3.6-back-to-develop
+
+chore: sync main back to develop after v3.3.6 release
+
+- fix(backends): close sqlite connection before PersistentClient
+
+Address review feedback: `with sqlite3.connect() as conn:` only
+manages transactions, it does not close the connection.  An open
+connection before PersistentClient instantiation can leave WAL state.
+Use explicit `try...finally: conn.close()` matching the read-only
+helpers elsewhere in the module.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(backends): repair missing _type in collection config (#1611)
+
+chromadb &lt;= 1.5.8 writes config_json_str = &#39;{}&#39; (empty JSON) when
+creating collections. chromadb 1.5.9 introduced a strict _type check
+in the collection config deserialization path -- its absence raises
+KeyError: &#39;_type&#39; on palace open. Since the pin allows &gt;=1.5.4,&lt;2,
+any upgrade pulls 1.5.9 and breaks every existing palace.
+
+Add a fourth pre-open migration step (_fix_missing_collection_type)
+that injects &#34;_type&#34;: &#34;CollectionConfigurationInternal&#34; into
+collections.config_json_str rows that lack it. Same lifecycle and
+marker-file pattern as the existing _fix_blob_seq_ids.
+
+Co-Authored-By: nautis &lt;nautis@users.noreply.github.com&gt;
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Merge main back into develop after v3.3.6 release
+
+Brings in the three commits that landed on main during the v3.3.6
+release cycle but not on develop:
+
+  - 62a555c fix(release): align ruff pin to 0.15.14 + hoist COCA
+            imports out of hot paths (#1614)
+  - a1cf052 Merge pull request #1614 from MemPalace/fix/release-3.3.6-ruff-pin-align
+  - db1fbe8 Merge pull request #1610 from MemPalace/release/3.3.6
+
+Resolves conflicts in miner.py and palace.py where develop&#39;s #1613
+(known-systems lexicon, Tier 3) had added _apply_known_systems_prepass
+to module-top imports + the prepass call in build_closet_lines. Main
+side had only the COCA hoist from #1614. Resolution: keep develop&#39;s
+side (the prepass additions).
+
+Mirrors the v3.3.5 sync-back pattern (#1442).
+
+- Merge pull request #1610 from MemPalace/release/3.3.6
+
+Release v3.3.6
+
+- Merge pull request #1613 from MemPalace/feat/known-systems-lexicon-compound-matcher
+
+feat(entity): known-systems lexicon keeps multi-word product names atomic
+
+- Merge develop into feat/known-systems-lexicon-compound-matcher
+
+Resolves conflicts in miner.py and palace.py against the COCA-hoist
+work from #1612 just merged. Both files had local imports for
+_get_coca_filter / _candidate_entity_words in the function bodies;
+after #1612 those moved to module top. Resolution: hoist
+_apply_known_systems_prepass alongside _get_coca_filter at module
+top in both files, drop the now-empty local imports.
+
+No behavior change; just removes the local-import duplication that
+would have been left in place if the merge auto-resolved naively.
+
+- Merge pull request #1612 from MemPalace/chore/hoist-coca-filter-imports
+
+perf(miner,palace): hoist COCA filter imports out of per-drawer hot paths
+
+- Merge pull request #1608 from MemPalace/chore/readme-move-scam-alert-below-header
+
+docs(readme): move scam/retention alerts below header, soften tone
+
+- Merge pull request #1614 from MemPalace/fix/release-3.3.6-ruff-pin-align
+
+fix(release): align ruff pin to 0.15.14 + hoist COCA imports out of hot paths
+
+- fix(release): align ruff pin to 0.15.14 + hoist COCA imports out of hot paths
+
+Two release-blocking fixes for v3.3.6:
+
+1. CI ruff pin drift
+   .github/workflows/ci.yml installed ruff==0.15.9 while pyproject.toml
+   [dev] extras and .pre-commit-config.yaml both pin 0.15.14. Ruff&#39;s
+   formatter output can change between minor versions, so a contributor
+   running `pip install -e &#34;.[dev]&#34;` and formatting locally with 0.15.14
+   would produce output the 0.15.9 lint job rejects. Same failure mode
+   that surfaced on PR #1579 (2026-05-22). Aligning CI to 0.15.14 keeps
+   the three pin sites in lock-step.
+
+2. COCA filter imports inside per-drawer hot paths
+   PR #1605 (COCA content-word filter, shipping in 3.3.6) introduced
+   `from .entity_detector import _get_coca_filter` and
+   `from .palace import _candidate_entity_words` inside
+   _extract_entities_for_metadata (called per drawer) and
+   build_closet_lines (called per closet). Python caches module imports
+   so the runtime cost after the first call is small, but the import
+   machinery still runs Python bytecode every invocation — gemini
+   flagged this on the original PR. Hoisting to module-level removes
+   the per-call import overhead.
+
+   The hoist is identical to PR #1612, which targets develop. Folding
+   it into the release so 3.3.6 doesn&#39;t ship the perf regression that
+   3.3.7 would immediately have to fix.
+
+Verification: ruff check + format clean on 0.15.14, full pytest
+(2258 passed / 12 skipped) on Linux Py 3.9 / 3.11 / 3.13 via
+`pip install -e &#34;.[dev]&#34;` (CI-matching).
+
+- fix(entity): precompile known-systems regex once in cached loader
+
+Addresses gemini-code-assist MEDIUM finding on PR #1613: the previous
+implementation of _apply_known_systems_prepass compiled a regex pattern
+for every compound on every call, repeating the work on every drawer
+mined and every closet built. With 59 compounds × N drawers, that&#39;s
+59N re.compile() calls for a workload where the patterns never change.
+
+The fix moves compilation into _get_known_systems (already lru_cache&#39;d
+to size=1), which now returns tuple[tuple[str, re.Pattern], ...] —
+pairs of (canonical name, pre-compiled case-insensitive word-bounded
+regex). _apply_known_systems_prepass consumes the cached tuple and
+does zero compilation in the hot path.
+
+Behavior is identical: same word boundaries, same case-insensitive
+matching, same longest-first ordering, same graceful-degrade on
+malformed json. All 74 entity_detector tests still pass on macOS plus
+the full 2258-test suite on Linux Py 3.9 / 3.11 / 3.13.
+
+- feat(entity): known-systems lexicon keeps multi-word product names atomic
+
+Adds a curated list of multi-word product/system names (&#34;Claude Code&#34;,
+&#34;GitHub Copilot&#34;, &#34;Visual Studio Code&#34;, &#34;GPT-4&#34;, …) and a compound
+pre-pass that detects them atomically before the existing single-word
+extraction runs. Without this, the regex-based detector decomposes
+&#34;Claude Code&#34; into &#34;Claude&#34; + &#34;Code&#34; — and the COCA filter (shipped
+in v3.3.6) then drops &#34;Code&#34; as a content word, leaving &#34;Claude&#34; alone
+with the wrong attribution.
+
+What ships
+
+  - mempalace/data/known_systems.json — 59 curated compounds covering
+    common AI assistants, IDEs, model names, cloud platforms, and
+    Office/Google apps. Each entry is multi-word or hyphenated;
+    single-word product names (&#34;ChatGPT&#34;, &#34;Cursor&#34;) have no
+    decomposition risk and stay handled by the existing regex.
+
+  - mempalace/entity_detector.py — _get_known_systems() (cached loader,
+    mirrors _get_coca_filter from Tier 2) and _apply_known_systems_prepass
+    which scans for each compound case-insensitively with word boundaries,
+    counts occurrences, and returns the masked text + count dict so the
+    subsequent single-word + multi-word loops don&#39;t re-decompose.
+
+  - mempalace/miner.py and mempalace/palace.py — same pre-pass wired
+    into _extract_entities_for_metadata (per-drawer tagger) and
+    build_closet_lines (closet pointer construction). Without these,
+    the new behavior would only apply at init-time and per-drawer
+    metadata would still decompose compounds.
+
+How it interacts with Tier 2
+
+  Tier 2 (COCA filter) blocks single-word content nouns like &#34;Code&#34;
+  and &#34;Brutal&#34;. Tier 3 protects multi-word product names so they
+  don&#39;t get decomposed in the first place. They complement each
+  other: the compound pre-pass runs FIRST and masks compounds out
+  of the text; the COCA filter then runs on the remaining
+  single-word candidates.
+
+Behavior verification
+
+  Before this PR, mining a document containing &#34;Claude Code wrote the
+  patch&#34; three times emitted entities:
+    Claude;Claude Code;Code (Code filtered by COCA);
+
+  After this PR, the same document emits:
+    Claude Code
+
+  The standalone &#34;Claude&#34; no longer appears (it never actually appeared
+  alone in the source) and decomposition stops at the compound boundary.
+
+Tests
+
+  Nine new tests in tests/test_entity_detector.py covering:
+    - &#34;Claude Code&#34; detected as atomic compound at extract_candidates
+    - &#34;Claude&#34; alone NOT in results when only mentioned as part of compound
+    - Case-insensitive compound matching (claude code, CLAUDE CODE, etc.)
+    - Single-word &#34;Code&#34; still filtered by COCA (no Tier 2 regression)
+    - Single-word real name &#34;Aya&#34; still detected (no regression on names)
+    - Multiple distinct compounds in one text both detected
+    - Unknown two-word phrase still detected via existing multi-word regex
+    - known_systems.json ships with expected schema (&gt;=20 entries, all multi-token)
+    - known_systems.json contains expected high-value entries
+
+Verification
+
+  Full pytest 2267 passed / 3 skipped on macOS, coverage 85.34%.
+  Linux Py 3.9 / 3.11 / 3.13 via CI-matching pip install -e &#34;.[dev]&#34;:
+  2258 passed each. End-to-end mine of a compound-rich corpus
+  confirms chromadb entities metadata now shows compounds atomic
+  (Claude Code, GPT-4, GitHub Copilot, Visual Studio Code) with no
+  decomposition.
+
+- perf(miner,palace): hoist COCA filter imports out of per-drawer hot paths
+
+The COCA content-word filter shipped in PR #1605 imported
+`_get_coca_filter` and `_candidate_entity_words` locally inside two
+hot paths:
+
+  - `palace.build_closet_lines` — runs per source file during mine
+  - `miner._extract_entities_for_metadata` — runs per drawer during mine
+
+Both imports are now at module top, where they&#39;re resolved once at
+import time instead of on every per-drawer call. Module-top imports
+also make the dependency graph visible to static analysis (pylint&#39;s
+C0415 was flagging the locals).
+
+No behavior change. The `_get_coca_filter()` call is unchanged — only
+the import statement moved. End-to-end mining produces identical
+chromadb output. Addresses the MEDIUM finding gemini-code-assist
+raised on PR #1605 review.
+
+Verification: full pytest 2258 passed / 3 skipped / coverage 85.35%.
+ruff check + format clean. Linux Py 3.9 / 3.11 / 3.13 via CI-matching
+`pip install -e &#34;.[dev]&#34;`: 2249 passed each. End-to-end mine of a
+test corpus produces the expected drawer + closet pointer.
+
+- Merge pull request #1609 from MemPalace/chore/release-3.3.6
+
+chore(release): 3.3.6
+
+- docs(changelog): move tunnel fixes back under Bug Fixes (PR #1609 gemini review)
+
+The two pre-existing entries for #1467 (tunnels.json path) and #1468
+(create_tunnel endpoint validation) were sitting at the bottom of the
+[Unreleased] block before this release-prep PR. Inserting the new
+Performance section between the freshly-backfilled Bug Fixes and these
+two pre-existing entries put them under Performance, which is wrong —
+they&#39;re bug fixes. Moves them back ahead of Performance.
+
+- chore(release): 3.3.6
+
+Bumps version 3.3.5 → 3.3.6 across pyproject.toml, version.py, plugin
+manifests (.claude-plugin/plugin.json, .claude-plugin/marketplace.json,
+.codex-plugin/plugin.json), README badge, and uv.lock. Flips CHANGELOG.md
+from ``[Unreleased]`` to ``[3.3.6] — 2026-05-24`` and backfills the
+major user-facing entries that landed without changelog entries during
+the cycle:
+
+Features:
+- #1555 office-document mining via --mode extract + virtual line numbers
+- #1584 surgical closet pointers with date+line locators (Tier 6a)
+- #1558 + #1560 within-wing hallways (entity co-occurrence graph)
+- #1565 cross-wing tunnels auto-promoted from hallways
+- #1578 Hebbian potentiation + Ebbinghaus decay on hallways/tunnels
+- #1236 API-tool transcripts auto-route to wing_api
+- #711 hooks.auto_save toggle for silent-mode sessions
+- #1605 COCA content-word filter for entity detection
+- #1557 case-insensitive entity matching at mine time
+- #1483 multilingual embeddings (embeddinggemma-300m) by default
+
+Bug Fixes (selected, user-visible):
+- #1540 silent data loss in three unchunked upsert sites
+- #1538 paragraph chunker oversized chunks
+- #1554 per-file chunk cap too low for transcripts
+- #1562 Windows hook subprocess/ChromaDB deadlock
+- #1529 create_tunnel corrupted hyphenated wing names
+- #1424 save-hook truncated hyphenated project folders
+- #1383 KG cache duplicated graphs for symlinked/cased paths
+- #1466 silent symlink skip now logged
+- #1441 macOS stock-bash 3.2 hook compatibility
+- #1500 / #1513 structured JSON-RPC errors on bad MCP input
+- #1523 VACUUM + FTS5 rebuild after repair
+- #1548 FTS5 validation at end of mine
+- plus #1216, #1408, #1438, #1439, #1445, #1452, #1459, #1461, #1466,
+  #1470, #1477, #1485, #1500, #1513, #1528, #1532, #1543, #1546, #1585
+
+Performance:
+- #1474 convo miner pre-fetches mined-set
+- #1487 rebuild_index progress callback
+- #1530 MCP cold-start diagnostics + opt-in warmup
+
+Lint passes (ruff 0.15.14); mempalace-mcp entry point alignment
+verified per RELEASING.md.
+
+- Merge pull request #1422 from YuanYiZheXue/fix/lone-surrogate-clean
+
+fix(mcp): sanitize lone surrogates before ChromaDB ops (#1235)
+
+- docs(readme): move CAUTION/IMPORTANT alerts below header, soften tone
+
+The scam-alert and Claude-Code-retention admonitions were the first
+content visitors saw on the repo page — louder than the project
+introduction. Moves both below the logo/title/badges so the project
+identity reads first, and softens the scam block (drops the H1
+&#34;CRITICAL SECURITY WARNING&#34; + all-caps shouting + redundant emoji)
+to a single-paragraph CAUTION. All factual content preserved:
+impostor-domain warning, official sources, malware caveat, link to
+docs/HISTORY.md.
+
+- Merge pull request #1483 from MemPalace/feat/benchmark-multilingual
+
+feat(benchmarks): multilingual datasets + parity controls (embed model, num_ctx, language)
+
+- Merge origin/develop into feat/benchmark-multilingual (#1548, #711, #1590, #1605)
+
+- Merge origin/develop into feat/benchmark-multilingual
+
+Resolves conflicts in CHANGELOG.md and pyproject.toml by combining
+the multilingual-embedder additions (huggingface_hub/tokenizers/numpy
+core deps, [multilingual] alias, Features section) with develop&#39;s
+additions (python-dateutil core dep, [extract] extra, tunnel Bug
+Fixes and Internal sections).
+
+Prepares PR #1483 for merge into v3.3.6.
+
+- refactor(mcp): move lone-surrogate strip into shared sanitizers (#1235)
+
+Push the surrogate-cleaning behaviour from per-call-site _clean() helpers
+into sanitize_content, sanitize_kg_value, and sanitize_query so every
+caller (existing and future) gets the fix automatically. New MCP tools
+no longer need to remember to call a separate helper.
+
+- Add strip_lone_surrogates() in mempalace/config.py as the single
+  regex-based implementation (one U+FFFD per surrogate, not three).
+- Wire it into sanitize_content and sanitize_kg_value.
+- Wire it into sanitize_query so embedding lookups can&#39;t crash either.
+- Drop the _clean() helper from mcp_server.py and the per-site calls;
+  retain a direct strip_lone_surrogates() for source_file/added_by
+  metadata which doesn&#39;t route through any sanitizer.
+- Move the ONNX model-cache patch out of the test module and into
+  conftest.py so it&#39;s session-scoped instead of duplicated locally.
+- Update tests to assert one U+FFFD per surrogate and exercise the
+  sanitizer-level entry points directly.
+
+- test(mcp): add lone-surrogate sanitisation tests (issue #1235)
+
+Add tests/test_clean_lone_surrogates.py covering:
+
+Unit tests (TestCleanLoneSurrogates, 11 cases):
+- _clean() passes normal ASCII and CJK strings unchanged
+- lone surrogates (high/low, single/multiple) are replaced with U+FFFD
+- real emoji (\U0001f600 astral code points) pass through unchanged
+- empty string, all-surrogate string, SHA-256-hash-after-clean
+- the specific \udcad surrogate observed in WorkBuddy production logs
+
+Integration tests (TestLoneSurrogateCleaning, 6 cases):
+- tool_add_drawer: surrogate in content and in metadata fields
+- tool_check_duplicate: surrogate in query
+- tool_search: surrogate in search query
+- tool_update_drawer: surrogate in updated content
+- tool_diary_write: surrogate in diary entry
+
+Fix test environment issue:
+- conftest.py redirects HOME to a temp dir, causing chromadb&#39;s
+  ONNXMiniLM_L6_V2 to look for its ONNX model in the wrong location
+  and trigger a 79 MB network download on every run.
+- Fix: at module import time, recover the real USERPROFILE from
+  conftest._original_env and patch ONNXMiniLM_L6_V2.DOWNLOAD_PATH
+  before any ChromaDB collection fixture is invoked.
+
+- fix(mcp): address code review feedback (PR #1422)
+
+- Fix _clean() docstring (paired surrogate description was misleading)
+- Apply _clean() to source_file and added_by metadata fields
+- Remove redundant surrogatepass from SHA256 hashes (content already cleaned)
+- Apply _clean() to content in tool_check_duplicate
+- Apply _clean() to new_doc in tool_update_drawer
+- Apply _clean() to sanitized query in tool_search
+
+Addresses feedback from gemini-code-assist[bot] on PR #1422.
+
+- fix(mcp): clean lone surrogates before ChromaDB write (issue #1235)
+
+MCP clients can emit lone surrogates (\udc00–\udfff) that
+cause Python&#39;s str.encode(&#39;utf-8&#39;) to raise UnicodeEncodeError,
+which bubbles up as -32000 Internal Error from ChromaDB.
+
+Add _clean(text) helper that uses &#39;surrogatepass&#39;/&#39;replace&#39; to
+remove lone surrogates before the string reaches ChromaDB.
+Apply it in tool_add_drawer and tool_diary_write, and use
+&#39;surrogatepass&#39; error handler on the SHA256 hash inputs for
+defensive idempotency.
+
+- Merge pull request #1548 from mvalentsev/fix/1537-validate-fts5-after-mine
+
+fix(mine): validate FTS5 at end of mine (#1537)
+
+- Merge pull request #711 from sha2fiddy/feature/494-silent-mode-auto-save-toggle
+
+feat: add hooks.auto_save config toggle (silent mode)
+
+- fix(mine): validate FTS5 at end of mine (#1537)
+
+Wires _validate_palace_fts5_after_mine into all three mine entry
+points so corrupted-FTS5 palaces cannot silently exit 0 from any
+of them:
+
+- _mine_impl (mempalace/miner.py) — project file miner
+- mine_convos (mempalace/convo_miner.py) — conversation exports
+- mine_formats (mempalace/format_miner.py) — binary office documents
+  via --mode extract, introduced on develop by #1555 (3.3.6 release)
+  between this PR&#39;s open date and its rebase
+
+cmd_mine surfaces MineValidationError as exit 1 + the same
+print_sqlite_integrity_abort banner cmd_repair already prints,
+appended with a mine-specific stderr note that hedges attribution
+(quick_check cannot tell pre-existing corruption from corruption
+this mine produced). 17 tests in tests/test_miner_fts5_validation.py
+cover the helper, the three call sites, dry-run / KeyboardInterrupt
+skip semantics, and the MineValidationError constructor invariants.
+
+Closes #1537.
+
+Co-authored-by: Caleb Wells &lt;15988028+calebcwells@users.noreply.github.com&gt;
+
+- Merge pull request #1605 from MemPalace/feat/coca-content-word-filter
+
+feat(entity): filter common English content words from entity detection
+
+- fix(entity): ship missing COCA wordlist data file + catch TypeError on malformed JSON
+
+The previous commit landed the code referencing mempalace/data/coca_content_words.json
+but the data file itself was never actually staged (likely a multi-line paste mishap
+during the initial commit). CI on every platform failed because the file isn&#39;t in
+the repo. This commit ships the wordlist + adds TypeError to the COCA loader&#39;s
+graceful-degradation exception tuple per gemini-code-assist review on PR #1605.
+
+- feat(entity): filter common English content words from entity detection
+
+Common English content words (&#34;Code&#34;, &#34;Brutal&#34;, &#34;Phase&#34;, &#34;Line&#34;, &#34;Note&#34;,
+&#34;Planning&#34;, &#34;Chat&#34;, ...) frequently appear capitalized at sentence
+start, in headings, or in markdown — and the existing regex-based entity
+detector treats every capitalized word appearing 3+ times as a proper
+noun candidate. This produces false positives that pollute
+known_entities.json, the per-drawer entities metadata, and closet
+pointer entity lists.
+
+Adds a curated list of ~1000 common English content words (nouns,
+adjectives, verbs — no proper nouns, no known product names) at
+mempalace/data/coca_content_words.json, derived from the COCA top-2000
+frequency list and from observed false positives in real palaces.
+The list is loaded once at module import via _get_coca_filter() (cached
+frozenset) and consulted at three sites:
+
+  - entity_detector.extract_candidates — init-time entity detection
+  - palace.build_closet_lines           — closet pointer construction
+  - miner._extract_entities_for_metadata — per-drawer entity tagging
+
+Matching is case-insensitive: the candidate is lowercased before
+membership check, so &#34;Code&#34;, &#34;CODE&#34;, and &#34;code&#34; are all blocked.
+Only single-word candidates are filtered; multi-word phrases (e.g.
+&#34;Claude Code&#34;) are NOT filtered, so legitimate compound names continue
+to be detected. A future PR will add a known-systems lexicon that
+explicitly protects compound names — for now, the multi-word pass
+provides the implicit protection.
+
+Adds 8 new tests in tests/test_entity_detector.py covering:
+
+  - &#34;Code&#34; appearing 5x is filtered
+  - All known false positives from real palaces are filtered
+  - Case-insensitive matching works
+  - Real names (&#34;Aya&#34;, &#34;Riley&#34;) are NOT filtered
+  - Multi-word phrases like &#34;Claude Code&#34; are NOT filtered
+  - The data file ships in the wheel with the expected schema
+  - The data file contains every known false positive
+
+Note: this filter prevents NEW false positives at detection time. It
+does NOT retroactively scrub existing entries from a user&#39;s
+~/.mempalace/known_entities.json. Stale entries from previous runs
+must be removed via a future entity-management CLI (planned).
+
+Verification: pytest 2191 passed / 3 skipped / 0 failed on macOS.
+ruff check + format --check both clean. Cross-platform via
+pip install -e &#34;.[dev]&#34; on python:3.9-slim / 3.11-slim / 3.13-slim
+containers, each running 65 entity-detector tests including the new
+data-file-presence test that imports from the installed package.
+End-to-end pipeline test mining a deterministic corpus into an
+isolated palace confirmed entity metadata is empty (no false
+positives surface in real chromadb-backed storage).
+
+- Merge pull request #1590 from MemPalace/chore/tooling-upgrade-hypothesis-mutmut-precommit-docs
+
+chore(deps): add hypothesis + pre-commit to dev deps + document local hook activation
+
+- style: ruff format tests/test_hooks_cli.py with CI-pinned ruff 0.4.x
+
+- fix(hooks): retarget auto_save toggle at silent-save path after #1021 rebase
+
+- fix: correct precompact test assertion + ruff format tests
+
+test_precompact_hook_enabled_by_default asserted
+result[&#34;decision&#34;] == &#34;block&#34;, but hook_precompact has never emitted
+decision — it mines synchronously and returns {}. Assertion was
+copy-pasted from the stop-hook test. Fix to assert result == {} with
+_mine_sync mocked so the test verifies the real contract (enabled →
+mine + pass through) without actually mining.
+
+Plus ruff format on 6 test files the CI pin flagged.
+
+- Fix: ruff format config, hooks_cli, and test file
+
+- fix: address review — enrich block reasons, clean up tests
+
+- Add parenthetical hints to block reasons so AI knows what each tool
+  saves (session summary, quotes/decisions/code)
+- Remove dead config file creation from test_stop_hook_disabled_by_config
+- Add missing test for MEMPALACE_HOOKS_AUTO_SAVE=no env var
+- Replace bare except: with except Exception: in shell scripts
+
+- feat: add hooks.auto_save config toggle and shorten block reasons
+
+Add a clean opt-out for auto-save hook blocking (closes #494).
+
+- New `hooks.auto_save` config option (default: true) in
+  ~/.mempalace/config.json and MEMPALACE_HOOKS_AUTO_SAVE env var
+- When disabled, stop and precompact hooks pass through without blocking
+- Shorten block reason text from 6-line instructions to single-line
+  prompts — reduces UI noise while keeping tool names explicit
+- Both Python (hooks_cli.py) and standalone shell scripts respect the
+  toggle via config file or env var
+
+- chore(pre-commit): bump ruff pin v0.15.9 → v0.15.14
+
+Lock-step with pyproject.toml `[project.optional-dependencies].dev`
+(ruff bumped from 0.15.9 → 0.15.14 via PR #1583). The
+`.pre-commit-config.yaml` header explicitly requires this rev to
+match the pyproject pin — without this bump, contributors who run
+`pre-commit install` will hit the same version-mismatch debacle this
+PR was opened to prevent.
+
+- chore(deps): drop ephemeral PR refs from comments (address PR #1590 Igor review)
+
+- chore(deps): add mypy&gt;=1.0 for static type checking (closes type-hint gap caught by gemini on PR #1588)
+
+- chore(deps): add hypothesis + pre-commit to dev deps + document local hook activation
+
+Adds two test-discipline tools to the dev extras and closes a real
+contributor-onboarding gap in CONTRIBUTING.md that allowed PR #1579&#39;s
+2026-05-22 4 AM ruff-version-mismatch lint failure.
+
+Adds to ``[project.optional-dependencies].dev`` (and matching
+``[dependency-groups].dev`` for uv users):
+
+  - **``hypothesis&gt;=6.0``** — property-based testing framework.
+    Generates hundreds of random inputs per test and shrinks failing
+    cases to a minimal counterexample. Used opt-in (sprinkle
+    ``@given(...)`` on a test); zero runtime cost on tests that don&#39;t
+    use it. Would have caught the Tier 6a dateutil-fuzzy hallucination
+    on PR #1584 with one property test.
+
+  - **``pre-commit&gt;=3.0``** — the pre-commit framework itself.
+    ``.pre-commit-config.yaml`` already lives in the repo (committed
+    by @igorls on 2026-05-18, pinned to ruff 0.15.9 in lockstep with
+    CI). What was missing was making the framework a declared dev
+    dependency so ``pip install -e .[dev]`` / ``uv sync --extra dev``
+    actually pulls it in.
+
+Adds a ``pre-commit install`` line to the Getting Started bash block
+plus a short paragraph explaining why this step is required (the
+hook file at ``.git/hooks/pre-commit`` is per-machine and NOT tracked
+by git, so the repo&#39;s ``.pre-commit-config.yaml`` only takes effect
+after each developer runs ``pre-commit install`` once locally).
+
+Adds an optional &#34;Property-based tests&#34; subsection under Running
+Tests showing the minimal ``@given(...)`` pattern, so contributors
+who want to reach for the new tool know it&#39;s available.
+
+On 2026-05-22 at 4:30 AM, PR #1579 (Tier 6a) hit a CI lint failure
+caused by a ruff version mismatch: my local machine had ruff 0.4.10,
+CI runs ruff 0.15.9 (pinned in pyproject.toml). The two versions
+produce different ``ruff format`` output for the same code. The repo
+HAD ``.pre-commit-config.yaml`` pinning ruff 0.15.9 — but the local
+git hook had never been wired on my machine because nothing in
+CONTRIBUTING.md said to run ``pre-commit install``. The protection
+existed at the project layer; the activation gap was at the
+contributor-onboarding layer.
+
+This commit closes that gap structurally. Anyone cloning the repo
+from now on sees ``pre-commit install`` as part of the Getting Started
+flow and is protected from the same failure.
+
+- **No ``mutmut`` in dev deps.** Mutation testing is heavier (runs
+  the whole test suite per mutation) and useful periodically rather
+  than every commit. Contributors who want to run it can install
+  manually. Adding it to dev deps would bloat the install footprint
+  for every contributor when most will never use it.
+
+- **No new property tests.** This PR ships the TOOL, not new test
+  coverage. Property tests should land alongside the specific
+  functions they cover, in their own PRs.
+
+- **No changes to ``.pre-commit-config.yaml``.** That file is correct
+  as Igor wrote it. The fix here is purely making the framework
+  installable + documenting the activation step.
+
+  ruff check .
+    → All checks passed.
+
+  pre-commit run --all-files (locally)
+    → ruff (legacy alias): Passed
+    → ruff format: Passed
+
+  OrbStack triple-Linux verify (Py 3.9 / 3.11 / 3.13)
+    → ``pip install -e .[dev]`` resolves cleanly; hypothesis +
+       pre_commit import successfully; existing test suite unaffected.
+
+- Merge pull request #1584 from MemPalace/feat/closet-date-line-pointer-emission
+
+feat(closets): Tier 6a — date+line locators with content-date hierarchy</div>
+</div>
+
+<a href="../project/MemPalace_mempalace.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (29 commits) - langchain-ai/langgraph - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (29 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/langchain-ai_langgraph.html">langchain-ai/langgraph</a> /
+    Updates in main (29 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/langchain-ai_langgraph.html">langchain-ai/langgraph</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-29 21:14 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/langchain-ai/langgraph/commits/main" target="_blank">https://github.com/langchain-ai/langgraph/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Langgraph-sdk был значительно обновлен для внедрения возможностей стриминга V3, включая новые классы `Decoder` для проекций, `interleave_projections` для мультиплексирования потоков и надежные транспортные механизмы, такие как SSE и WebSockets с обработкой переподключений. Этот новый стриминг V3 теперь интегрирован в `RemoteGraph` через `stream_events(version=&#34;v3&#34;)`, что обеспечивает полиморфный стриминг как для локальных, так и для удаленных графов. Несколько исправлений повышают стабильность, например, обеспечение стабильных идентификаторов сообщений при записи в `DeltaChannel`, различение отмен узлов от других типов и повышение надежности развертывания через CLI путем привязки образов Docker по дайджесту.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- feat(sdk-py): extract stream decoders and add interleave_projections (#7935)
+
+## Summary
+
+Refactors the four (now five) sdk-py streaming projections into
+reusable, transport-agnostic `Decoder` classes and adds a new
+`interleave_projections(channels)` method to `AsyncThreadStream` and
+`SyncThreadStream` that drives multiple decoders from one shared
+subscription, yielding `(channel_name, item)` tuples in arrival order
+(the SDK analog of local `GraphRunStream.interleave`).
+
+- **New `langgraph_sdk/stream/decoders.py`**: pure `feed(event) -&gt;
+Iterable[item]` state machines — `ValuesDecoder`, `MessagesDecoder`,
+`ToolCallsDecoder`, `SubgraphsDecoder`, `ExtensionsDecoder` — behind a
+`Decoder` Protocol. No subscription/queue/thread access.
+- **Projection migration (async + sync)**: the five existing projections
+now delegate their per-event logic to the decoders. Behavior-preserving
+— the existing test suite is the regression net. Thread-coupled side
+effects (active-stream registration, terminal-error-on-close, root-inbox
+forwarding) stay in the projection wrappers; sync messages/tool_calls
+keep their pre-dispatch contract (handle/stream resolved on yield) via a
+FIFO-head buffer.
+- **`interleave_projections`**: flat-namespace channel list (built-ins +
+extension names), `tool_calls`↔`tools` wire mapping, subgraphs fed every
+event, extensions keyed by bare name.
+
+### Notable
+- Fixes a latent sync bug surfaced by the refactor: two tool calls /
+messages whose events interleave previously dropped the second; both now
+surface. Locked in with a regression test.
+- `Decoder.feed` takes `Mapping[str, Any]` (read-only), so the Protocol
+is load-bearing in both stream files.
+
+### Deferred (not in this PR)
+- Wiring `RemoteGraph._RemoteGraphRunStream.interleave` to
+`interleave_projections` (gated on #7927).
+- Migrating the handle-scoped projections (`_Handle*Projection`) to the
+decoders — hence the small, verified-identical helper duplication
+between `decoders.py` and `_async/stream.py`.
+- `interleave_projections` handles aren&#39;t registered for thread-close
+cleanup (additive follow-up).
+
+## Test Plan
+- [x] `make test` in `libs/sdk-py` — 464 passed, 0 failures
+- [x] `make format` / `make lint` (ruff + ty) clean
+- [x] Per-decoder unit tests in `tests/streaming/test_decoders.py`
+- [x] `interleave_projections` tests (single-channel, multi-channel
+arrival order, builtin+extension mix, tool_calls public-name, subgraphs
+discovery) async + sync
+- [x] Existing projection suites pass unchanged (regression net for the
+migration)
+
+- feat(langgraph): add v3 streaming support to RemoteGraph (#7927)
+
+## Summary
+
+- Adds `stream_events(version=&#34;v3&#34;)` and `astream_events(version=&#34;v3&#34;)`
+to `RemoteGraph`, matching the local `CompiledStateGraph` surface and
+unblocking polymorphic v3 streaming over `Graph | RemoteGraph`.
+- Implementation is a thin adapter
+(`libs/langgraph/langgraph/pregel/_remote_run_stream.py`) that wraps the
+v3 SDK&#39;s `AsyncThreadStream` / `SyncThreadStream` and duck-types
+`GraphRunStream` / `AsyncGraphRunStream`. No coupling to local v3 mux
+internals.
+- `v1` / `v2` paths unchanged. `astream_events(version=&#39;v1&#39;|&#39;v2&#39;)` still
+raises `NotImplementedError` (separate gap).
+
+### Scope decisions baked into this PR
+
+- Unsupported v3 kwargs hard-reject at dispatch with
+`NotImplementedError`: `control`, `transformers`, `interrupt_before`,
+`interrupt_after`, and any unknown `**kwargs`. Server / SDK don&#39;t plumb
+these through v3 yet; easy to lift later.
+- Sync `interleave()` raises `NotImplementedError` pointing callers at
+`astream_events`. Real sync interleave would need drainer threads;
+deferred since most sync RemoteGraph callers just iterate raw events.
+- Async `interleave()` is best-effort ordering (client receive order),
+documented as a divergence from local v3&#39;s monotonic stamp ordering.
+- Adapter `interrupted` / `interrupts` properties are **non-blocking**
+snapshots of the SDK&#39;s current state. This differs from local
+`(Async)GraphRunStream.interrupted`, which pump-drives the run to
+terminal before returning. Callers needing a wait-for-interrupt pattern
+should drain a projection (e.g., `interleave(&#39;values&#39;)`) until the SDK&#39;s
+paused sentinel fires. Documented in the adapter docstrings.
+
+### Audit of impact
+
+Existing RemoteGraph callers in this org all use the v2 `.stream()` /
+`.astream()` path (deepagents production wrapper, langgraph-api test
+graphs, langgraph-supervisor TS type guard). **Zero callers** use
+`stream_events` / `astream_events` on RemoteGraph today, so the new v3
+methods are net-new surface — no risk of breaking existing consumers.
+
+### Out of scope (follow-ups)
+
+- Bumping `libs/langgraph/pyproject.toml`&#39;s `langgraph-sdk` constraint
+from `&lt;0.4.0` to `&lt;0.5.0`. Deferred until 0.4.0 publishes to PyPI; dev
+resolution unaffected via the editable workspace dep.
+- Real `astream_events(version=&#39;v1&#39;|&#39;v2&#39;)` implementation.
+- Server-side plumbing for `control` / `interrupt_before` /
+`interrupt_after` on v3 runs.
+- Sync `interleave()` via drainer threads.
+
+
+## Test plan
+
+- [x] \`make test\` in \`libs/langgraph/\`: 1874 passed, 4 skipped (43
+new in \`test_remote_graph_v3.py\`)
+- [x] \`make lint\` in \`libs/langgraph/\`: ruff + mypy clean
+- [x] \`pytest -m integration
+tests/integration/test_remote_graph_v3.py\` in \`libs/sdk-py/\` against
+the docker stack: 4/4 passed in 1.35s
+- [x] Manual smoke: \`RemoteGraph(&#39;tools_agent&#39;,
+url=&#39;http://localhost:2024&#39;).astream_events(..., version=&#39;v3&#39;)\`
+end-to-end against the v3 integration api
+- [x] Existing RemoteGraph v2 tests untouched (31 passed, 3 skipped with
+docker up)
+- [x] Will need rebase after \`langgraph-sdk 0.4.0\` lands on PyPI and
+the version constraint is bumped in a separate PR
+
+- feat(langgraph): name tool-dispatched subagents via lc_agent_name (#7928)
+
+- chore(langgraph): Track ADK/other library usage when deploying using cli (#7939)
+
+&lt;!-- Replace everything above this line with a 1-2 sentence description
+of your change. Keep the &#34;Fixes #xx&#34; keyword and update the issue
+number. --&gt;
+- Add a property to revisions table metadata column for Google ADK
+version
+- This helps us track the deployments that use Google ADK
+- Similar to this PR:
+https://github.com/langchain-ai/langchainplus/pull/22087
+
+Read the full contributing guidelines:
+https://docs.langchain.com/oss/python/contributing/overview
+
+&gt; **All contributions must be in English.** See the [language
+policy](https://docs.langchain.com/oss/python/contributing/overview#language-policy).
+
+If you paste a large clearly AI generated description here your PR may
+be IGNORED or CLOSED!
+
+Thank you for contributing to LangGraph! Follow these steps to have your
+pull request considered as ready for review.
+
+1. PR title: Should follow the format: TYPE(SCOPE): DESCRIPTION
+
+    - feat(langgraph): add multi-tenant support
+- Allowed TYPE and SCOPE values:
+https://github.com/langchain-ai/langgraph/blob/main/.github/workflows/pr_lint.yml#L19-L43
+
+2. PR description:
+
+  - Write 1-2 sentences summarizing the change.
+- The `Fixes #xx` line at the top is **required** for external
+contributions — update the issue number and keep the keyword. This links
+your PR to the approved issue and auto-closes it on merge.
+  - If there are any breaking changes, please clearly describe them.
+- If this PR depends on another PR being merged first, please include
+&#34;Depends on #PR_NUMBER&#34; in the description.
+
+3. Run `make format`, `make lint` and `make test` from the root of the
+package(s) you&#39;ve modified.
+
+  - We will not consider a PR unless these three are passing in CI.
+
+4. How did you verify your code works?
+
+Additional guidelines:
+
+- All external PRs must link to an issue or discussion where a solution
+has been approved by a maintainer, and you must be assigned to that
+issue. PRs without prior approval will be closed.
+- PRs should not touch more than one package unless absolutely
+necessary.
+- Do not update the `uv.lock` files or add dependencies to
+`pyproject.toml` files (even optional ones) unless you have explicit
+permission to do so by a maintainer.
+
+## Social handles (optional)
+&lt;!-- If you&#39;d like a shoutout on release, add your socials below --&gt;
+Twitter: @
+LinkedIn: https://linkedin.com/in/
+
+- fix(langgraph): rename ProtocolEvent.eventId to event_id to match the wire field (#7942)
+
+- fix(langgraph): merge instead of overwrite in ensure_config for callbacks, tags, metadata, configurable (#7926)
+
+- fix(langgraph): [LSD-1507] Distinguish between user cancelled and other cancellations (#7920)
+
+- Distinguish between Node cancellations and other cancellations
+- Use python 3.11+ feature where `cancelling() == 0` when it is the node
+cancelling
+- Bubble up the node cancellation example so the client can take care of
+it instead of silently failing without reporting it.
+
+Read the full contributing guidelines:
+https://docs.langchain.com/oss/python/contributing/overview
+
+&gt; **All contributions must be in English.** See the [language
+policy](https://docs.langchain.com/oss/python/contributing/overview#language-policy).
+
+If you paste a large clearly AI generated description here your PR may
+be IGNORED or CLOSED!
+
+Thank you for contributing to LangGraph! Follow these steps to have your
+pull request considered as ready for review.
+
+1. PR title: Should follow the format: TYPE(SCOPE): DESCRIPTION
+
+    - feat(langgraph): add multi-tenant support
+- Allowed TYPE and SCOPE values:
+https://github.com/langchain-ai/langgraph/blob/main/.github/workflows/pr_lint.yml#L19-L43
+
+2. PR description:
+
+  - Write 1-2 sentences summarizing the change.
+- The `Fixes #xx` line at the top is **required** for external
+contributions — update the issue number and keep the keyword. This links
+your PR to the approved issue and auto-closes it on merge.
+  - If there are any breaking changes, please clearly describe them.
+- If this PR depends on another PR being merged first, please include
+&#34;Depends on #PR_NUMBER&#34; in the description.
+
+3. Run `make format`, `make lint` and `make test` from the root of the
+package(s) you&#39;ve modified.
+
+  - We will not consider a PR unless these three are passing in CI.
+
+4. How did you verify your code works?
+- Existing unit tests pass
+- New unit tests added
+- Used langgraph deployment to make sure the feature is working as
+expected.
+
+Additional guidelines:
+
+- All external PRs must link to an issue or discussion where a solution
+has been approved by a maintainer, and you must be assigned to that
+issue. PRs without prior approval will be closed.
+- PRs should not touch more than one package unless absolutely
+necessary.
+- Do not update the `uv.lock` files or add dependencies to
+`pyproject.toml` files (even optional ones) unless you have explicit
+permission to do so by a maintainer.
+
+## Social handles (optional)
+&lt;!-- If you&#39;d like a shoutout on release, add your socials below --&gt;
+Twitter: @
+LinkedIn: https://linkedin.com/in/
+
+- fix(sdk-py): make `tools_agent` fake model stateless (#7930)
+
+- release(sdk-py): 0.4.0 (#7923)
+
+## Summary
+
+Bumps `langgraph-sdk` `0.3.15` → `0.4.0`.
+
+Minor bump to reflect the v3 streaming public API that landed
+since 0.3.15:
+
+- `client.threads.stream(...)` — new thread-centric streaming entry
+point (async + sync)
+- SSE and WebSocket transports (`ProtocolSseTransport`,
+`ProtocolWebSocketTransport`) with reconnect handling and stream
+selection
+- Shared stream subscriptions, lifecycle / interrupts state, output /
+values projections, messages / tool-call projections, scoped subgraph
+handles, thread stream helpers
+
+- release(cli): 0.4.27 (#7925)
+
+Bumping the CLI to 0.4.27.
+
+- fix(cli): pin internal_docker deploy images by digest (#7924)
+
+## Summary
+
+`langgraph deploy` now pins images by digest when handing the URI to the
+LangGraph host backend. After `docker push`, the CLI reads the manifest
+digest from the local Docker daemon&#39;s `RepoDigests` and sends
+`registry/repo@sha256:&lt;hex&gt;` to the host backend instead of the
+tag-based reference. Mutable tags cause downstream inconsistency — the
+same revision can refer to different images over time.
+
+The image is still pushed under the user-supplied `--tag` (default
+`:latest`) so it stays discoverable by tag in the registry — only the
+URI persisted with the revision changes.
+
+## Behavior on failure
+
+If the digest can&#39;t be resolved (empty `RepoDigests`, or no entry
+matching the just-pushed repo), the CLI warns and falls back to the
+tag-based reference. Deploys never fail on a digest-resolution issue.
+
+## Test plan
+
+- [x] `make test` passes (new `TestResolvePushedImageDigest` cases
+included)
+- [x] `--verbose` deploy shows the `docker image inspect` call resolving
+  the digest
+- [x] Deploy with a clean Docker daemon (no matching `RepoDigests`)
+  emits the fallback warning and still completes successfully
+
+---------
+
+Co-authored-by: Josh Rogers &lt;josh@langchain.dev&gt;
+
+- fix(cli): bump api bound to 0.10.0 (#7922)
+
+Allows the CLI to support langgraph-api versions 0.9.x
+
+- feat(sdk-py): add thread stream helpers (#7833)
+
+- feat(sdk-py): wire websocket stream selection (#7832)
+
+- feat(sdk-py): add websocket stream transports (#7830)
+
+- feat(sdk-py): harden streaming reconnects (#7829)
+
+- feat(sdk-py): add sync scoped subgraphs (#7828)
+
+- feat(sdk-py): add sync messages and tool calls (#7827)
+
+- feat(sdk-py): add sync thread stream core (#7826)
+
+- feat(sdk-py): add async stream reconnect support (#7825)
+
+- feat(sdk-py): add scoped subgraph handles (#7824)
+
+- feat(sdk-py): add messages and tool call projections (#7823)
+
+- feat(sdk-py): add output, values, and controller extraction (#7822)
+
+- feat(sdk-py): wire lifecycle state and output prerequisites (#7821)
+
+- feat(sdk-py): add shared stream subscriptions (#7820)
+
+- feat(sdk-py): add async thread stream skeleton (#7819)
+
+- feat(sdk-py): add v3 streaming primitives and SSE transport (#7818)
+
+- chore(langgraph): bump version to 1.2.2 (#7914)
+
+Patch bump to 1.2.2 following the 1.2.1 release.
+
+- fix(langgraph): assign stable IDs to id=None BaseMessages before DeltaChannel checkpoint writes (#7913)
+
+## TL;DR
+
+Applications depend on stable message IDs — LangSmith traces, message
+views, and `RemoveMessage` all break when the same message gets a
+different ID on every load.
+
+ID assignment has historically lived in the `add_messages` reducer, but
+that&#39;s the wrong place: reducer logic runs *after* checkpoint
+serialisation has already started. The correct long-term fix is to
+assign IDs in `BaseMessage.__init__`, but that requires changes to
+`langchain-core` equality semantics first.
+
+**This PR is the non-breaking interim fix:** assign IDs to `BaseMessage`
+objects in `put_writes()`, before the DeltaChannel write is handed to
+the background serialiser. This unblocks applications now without
+touching `BaseMessage`.
+
+---
+
+## Problem
+
+In the default durability mode, `put_writes()` submits checkpoint writes
+to a background thread before `apply_writes()` runs. For DeltaChannel
+writes containing `BaseMessage` objects with `id=None`, the background
+thread may serialise `id=None` before the reducer ever sees them. Every
+`get_state()` call then replays `id=None` and assigns a fresh UUID — the
+same message has a different ID on every load and across every resumed
+invocation.
+
+## Fix
+
+Add `ensure_message_ids(value)` to `pregel/_messages.py` and call it in
+`put_writes()` for DeltaChannel writes **before** submitting to the
+background executor. This assigns UUIDs synchronously so the serialised
+bytes always carry a stable ID.
+
+Both `SyncPregelLoop` and `AsyncPregelLoop` delegate to
+`super().put_writes()`, so both paths are covered with one change.
+
+## Long-term
+
+ID assignment belongs in `BaseMessage.__init__`. That requires first
+excluding `id` from `BaseMessage.__eq__` (currently `HumanMessage(&#34;x&#34;)
+!= HumanMessage(&#34;x&#34;)` if both get different auto-assigned UUIDs). That
+is a `langchain-core` change tracked separately.
+
+## Changes
+
+- `pregel/_messages.py` — `ensure_message_ids(value)`: assigns a UUID to
+any `id=None` `BaseMessage`, handles single messages and lists
+- `pregel/_loop.py` — call it for DeltaChannel writes in `put_writes()`
+- `tests/test_delta_channel_id_stability.py` — two tests (sync + async)
+using a plain append reducer (no ID logic), confirmed to **fail on
+`main`** and pass with this fix
+
+Related deepagents PR:
+https://github.com/langchain-ai/deepagents/pull/3590</div>
+</div>
+
+<a href="../project/langchain-ai_langgraph.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

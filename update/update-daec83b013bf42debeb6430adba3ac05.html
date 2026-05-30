@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (19 commits) - facebookresearch/faiss - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (19 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a> /
+    Updates in main (19 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-30 02:25 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/facebookresearch/faiss/commits/main" target="_blank">https://github.com/facebookresearch/faiss/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Этот пакет обновлений Faiss значительно повышает производительность и улучшает стабильность различных компонентов. Среди ключевых оптимизаций — исключение денормализации на код в вычислениях расстояний для равномерных скалярных квантователей (ускорение до 1.39x) и внедрение ядра RaBitQ на основе VPOPCNTDQ для процессоров Sapphire Rapids+ (ускорение ядра до 1.6x). Также исправлены критические ошибки повреждения данных в Python-биндингах и скорректирована логика диспетчеризации SIMD, ранее приводившая к скрытому переключению на скалярный код. Наконец, добавлена возможность установки `faiss-gpu` через `pip` для упрощения интеграции с GPU.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Fix broken fbcode//faiss/tests:test_index_binary - test_replicas (test_index_binary.TestReplicasAndS (#5258)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5258
+
+Reviewed By: limqiying
+
+Differential Revision: D106125838
+
+fbshipit-source-id: e1cf62d25f7d270e69489be8dee2f3aad820bcd3
+
+- Eliminate per-code denormalization in uniform SQ distance computation (#5166)
+
+Summary:
+This PR removes per-code denormalization from the inner loop of L2 and inner product distance computations for uniform scalar quantizers (`QT_8bit_uniform` and `QT_4bit_uniform`), yielding a speedup of up to **1.39x**.
+
+For uniform integer scalar quantizers, `vmin` and `vdiff` are scalars shared across all dimensions. The reconstructed value for each component is therefore a function of a per-code decode `n` that depends only on the byte code:
+
+```
+x_hat = vmin + vdiff * n
+```
+
+This structure lets us factor `vmin` and `vdiff` out of the per-database-vector inner loop entirely, instead of recomputing the transform on every code on every distance evaluation.
+
+**L2 distance.**
+
+```
+||q - x_hat||^2 = ||q - (vmin + vdiff * n)||^2
+                = vdiff^2 * ||(q - vmin) / vdiff - n||^2
+```
+
+We pre-adjust the query once in `set_query()` to `q_adj = (q - vmin) / vdiff` and precompute `scale = vdiff^2`. The hot loop then compares codes directly against `q_adj` in the codec&#39;s native decode space, applying `scale` exactly once at the end.
+
+**Inner product.**
+
+```
+&lt;q, x_hat&gt; = sum_i q[i] * (vmin + vdiff * n[i])
+           = vmin * sum_i q[i] + vdiff * sum_i q[i] * n[i]
+           = bias + scale * &lt;q, n&gt;
+```
+
+We compute `bias = vmin * sum_i q[i]` and `scale = vdiff` once in `set_query()`. The hot loop accumulates the dot product against the raw decode `n` and applies `bias + scale` once at the end.
+
+In both cases this removes one FMA (the `vmin + vdiff * n` denormalization) from the inner loop per 8 components per database vector. Beyond the raw FLOP reduction, shortening the dependency chain lets SIMD pipelines better overlap the decode of the next lane with the accumulator update of the previous lane.
+
+**The Change**
+
+```
+                    Current                           This PR
+                    --------                          ---------
+set_query(q):      store q                           q_adj = (q - vmin) / vdiff  [once]
+
+per code (×N):     raw = decode(bytes)               raw = decode(bytes)
+                   x = vmin + raw * vdiff  ← gone    diff = q_adj - raw
+                   diff = q - x                      accu += diff^2
+                   accu += diff^2
+```
+
+The optimization is gated on a C++20 `requires` check for a new `decode_8_raw()` method, defined only on the uniform `QuantizerTemplate` specializations. All other quantizer types fall through to the original `compute_distance` path unchanged.
+
+**Speedup**
+
+Below are the results from running `benchs/bench_scalar_quantizer.py` for a `dd` build on SPR, compared to the existing implementation. Similar results were observed for `avx-2` as well.
+
+```
+|              | QT_4bit_uniform | QT_8bit_uniform |
+|--------------|-----------------|-----------------|
+| RS_minmax    | 0.99x           | 1.05x           |
+| RS_minmax    | 1.07x           | 1.03x           |
+| RS_minmax    | 0.83x           | 1.03x           |
+| RS_minmax    | 0.96x           | 1.05x           |
+| RS_minmax    | 0.89x           | 1.03x           |
+| RS_minmax    | 1.14x           | 1.03x           |
+| RS_minmax    | 0.99x           | 1.05x           |
+| RS_meanstd   | 1.28x           | 1.09x           |
+| RS_meanstd   | 1.10x           | 1.01x           |
+| RS_meanstd   | 1.14x           | 1.06x           |
+| RS_meanstd   | 1.18x           | 1.08x           |
+| RS_meanstd   | 1.11x           | 1.05x           |
+| RS_meanstd   | 1.18x           | 1.06x           |
+| RS_meanstd   | 1.16x           | 1.08x           |
+| RS_quantiles | 1.39x           | 1.07x           |
+| RS_quantiles | 1.08x           | 1.01x           |
+| RS_quantiles | 1.21x           | 0.99x           |
+| RS_quantiles | 1.25x           | 1.10x           |
+| RS_optim     | 1.03x           | 1.03x           |
+```
+
+The raw performance results are available here: https://gist.github.com/mulugetam/7db50f89279bb270a1fe336206730d60
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5166
+
+Test Plan: Ran `python benchs/bench_scalar_quantizer.py` on SPR to validate performance results (see summary table). Ran `pytest tests/test_index_accuracy.py` to verify correctness is preserved for uniform SQ types (`QT_8bit_uniform`, `QT_4bit_uniform`).
+
+Reviewed By: mdouze
+
+Differential Revision: D106148760
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 65769cfe9cf8d2d1ef5de05b6bdecf9dbee96d5c
+
+- fix(python): int64 coercions for MapLong2Long + InvertedLists DOWNCAST chain (#5257)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5257
+
+Two Python binding correctness fixes. Both are silent data-corruption bugs that affect callers using standard numpy idioms.
+
+## Fix 1: MapLong2Long missing int64 dtype coercions
+
+`handle_MapLong2Long` in `class_wrappers.py` passed `keys` and `vals` directly to `swig_ptr` without int64 coercion. `swig_ptr` returns the raw memory pointer of the numpy array, ignoring its dtype. The C++ `MapLong2Long::add` and `search_multiple` methods take `const int64_t*`, so when callers pass `int32` arrays (e.g., `np.arange(n)`, which defaults to int32 on most platforms), C++ reads every 8 bytes as one `int64_t`. For a 5-element int32 array, this reads 2 int64 values instead of 5, and each int64 is a bit-merge of two adjacent int32 values. The map is silently populated with completely wrong keys and values, with no exception or warning.
+
+This is the identical bug class as the `add_sa_codes` int64 coercion fix (D103384269, 2026-05-01), and the identical pattern omission. Every other ids-accepting wrapper in `class_wrappers.py` (`replacement_add_with_ids`, `replacement_remove_ids`, `replacement_permute_entries`) applies `np.ascontiguousarray(..., dtype=&#39;int64&#39;)` before `swig_ptr`. `handle_MapLong2Long` was added separately and missed this step.
+
+**Fix:** Add `np.ascontiguousarray(keys, dtype=&#39;int64&#39;)` and `np.ascontiguousarray(vals, dtype=&#39;int64&#39;)` in `replacement_map_add`, and `np.ascontiguousarray(keys, dtype=&#39;int64&#39;)` in `replacement_map_search_multiple`.
+
+## Fix 2: InvertedLists* DOWNCAST chain missing ArrayInvertedListsPanorama and SliceInvertedLists
+
+The `%typemap(out) faiss::InvertedLists *` in `swigfaiss.swig` runs whenever a C++ function returns `faiss::InvertedLists*` (including `downcast_InvertedLists`). Before this fix, `ArrayInvertedListsPanorama` was absent from the DOWNCAST chain, so `dynamic_cast&lt;faiss::ArrayInvertedLists*&gt;` succeeded first (since `ArrayInvertedListsPanorama` IS-A `ArrayInvertedLists`) and the object was returned as `faiss.ArrayInvertedLists`, hiding all Panorama-specific fields (`cum_sums`, `n_levels`, `level_width`, `get_cum_sums()`). `SliceInvertedLists` fell through all entries to the base `DOWNCAST(InvertedLists)`, returning the base type.
+
+`ArrayInvertedListsPanorama` and `SliceInvertedLists` are both defined in `InvertedLists.h` (already `%include`d at line 551) and are fully exposed as Python types. The DOWNCAST entries were simply missing.
+
+**Fix:** Add `DOWNCAST(ArrayInvertedListsPanorama)` immediately before `DOWNCAST(ArrayInvertedLists)` (subclass must precede parent); add `DOWNCAST(SliceInvertedLists)` before the base `DOWNCAST(InvertedLists)` catch-all. `downcast_InvertedLists` now returns the correct subtype for both.
+
+Note: `%typemap(out)` applies to function return types, not raw member field access. Tests use `faiss.downcast_InvertedLists(index.invlists)`, not `index.invlists` directly — the same pattern as `faiss.downcast_index()` for the `Index*` chain.
+
+## Tests
+
+4 new tests in `TestMapLong2Long`: verify int32 keys/vals are stored and looked up correctly, verify int64 is unchanged, verify search_multiple with int32 keys, verify missing key returns -1.
+
+2 new tests in `TestInvertedListsDowncast`: verify `downcast_InvertedLists` returns `ArrayInvertedListsPanorama` for a Panorama index (with Panorama-specific field access), and `SliceInvertedLists` after `replace_invlists` (with `i0`/`i1` field access).
+
+Reviewed By: junjieqi
+
+Differential Revision: D106074206
+
+fbshipit-source-id: d0f59ac1e27c37add9c21927ce1dc9af9771d17b
+
+- Revert D106693266: Implement NEON-based FINE_SIZE=2 specializations for Index2LevelDecoderImpl and IndexPQDecoder
+
+Differential Revision:
+D106693266
+
+Original commit changeset: 21fa2c63c20f
+
+Original Phabricator Diff: D106693266
+
+fbshipit-source-id: 2747bdafa1498bbf8905fdb4a38ac533a46248a0
+
+- Updating CI to ROCm 7 (#5196)
+
+Summary:
+Updating CI from ROCm 6.2 to 7.2. Also updating PyTorch to version 7.2 for ROCm.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5196
+
+Reviewed By: limqiying
+
+Differential Revision: D104747603
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 8476de7ebab846d3187893450da79a03c7c25785
+
+- Implement NEON-based FINE_SIZE=2 specializations for Index2LevelDecoderImpl and IndexPQDecoder (#5255)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5255
+
+Implement NEON-based FINE_SIZE=2 specializations for Index2LevelDecoderImpl and IndexPQDecoder, previously being compiled from AVX2 code through aarch64 compat layers.
+
+Remove usage of aarch64 compatibility layers, as they are not needed anymore.
+
+Reviewed By: YifanYuan3
+
+Differential Revision: D106693266
+
+fbshipit-source-id: 21fa2c63c20ff7ffd25fc88b877e6331bcc649af
+
+- facebook-unused-include-check in IndexBinaryHNSW.cpp (#5251)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5251
+
+Reviewed By: limqiying
+
+Differential Revision: D106081973
+
+fbshipit-source-id: 6d315790723b21dc4b346a0d5f45e29227ec8479
+
+- facebook-unused-include-check in IndexBinaryIVF.cpp (#5252)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5252
+
+Reviewed By: limqiying
+
+Differential Revision: D106081889
+
+fbshipit-source-id: f4b5d7cecdf33cb6bcda3902ac594ff227c95aa8
+
+- Reject null inner index in IDMap and BinaryFromFloat deserialization (#5239)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5239
+
+Two deserialize sites in `read_index_up` / `read_index_binary_up` accept a `nullptr` sub-index without validation:
+
+1. `IndexIDMap` (`IxMp` / `IxM2`): the recently-added inner-ntotal cross-validator compares `idxmap-&gt;index-&gt;ntotal` against `idxmap-&gt;ntotal` without first verifying `idxmap-&gt;index` is non-null. A corrupt or maliciously constructed payload with a `&#34;null&#34;` inner fourcc dereferences the null pointer inside the validator that was meant to protect against exactly this class of failure. The binary `IndexBinaryIDMap` (`IBMp` / `IBM2`) path has the same cross-check shape, but is not reachable directly because `read_index_binary` rejects an unknown `&#34;null&#34;` fourcc at dispatch; the same payload class still reaches the float `IxMp` / `IxM2` validator transitively when an embedded float index sits inside a binary wrapper (e.g. `IndexBinaryFromFloat`).
+
+2. `IndexBinaryFromFloat` (`IBFf`): the deserialize site reads `idxff-&gt;index = read_index(...)` and unconditionally accepts the result. When the inner fourcc is `&#34;null&#34;` the field is left as `nullptr`, and every subsequent operation (`search`, `add`, `sa_code_size`, ...) dereferences it. Unlike the `IxMp` / `IxM2` case the failure is deferred to a downstream call site rather than crashing at the deserialization boundary, but the deserialized object is unusable.
+
+Reject a null inner index immediately after the inner `read_index` returns at both sites, with a clear `FaissException` message naming the field. The new guard sits before any field access, so subsequent validators (`id_map.size() == ntotal`, `index-&gt;ntotal == ntotal`) can safely deref. The guard preserves the existing semantics for well-formed payloads: a legitimately-missing inner index never reaches `IxMp` / `IxM2` / `IBFf` deserialization in any documented `faiss` workflow. The public single-argument constructors of `IndexIDMap` / `IndexIDMap2` / `IndexBinaryFromFloat` already enforce that `index` is non-null on construction; this change makes the post-deserialization invariant match.
+
+Reviewed By: mnorris11
+
+Differential Revision: D106309947
+
+fbshipit-source-id: e8455fe5ece9ec4df462f7b26d6fc8deba14a2fe
+
+- Add IndexLattice r2 limit to cap decode-cache build cost (#5238)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5238
+
+`ZnSphereCodecRec` is constructed at `IndexLattice` deserialization time and populates a decode cache by calling `decode()` once per cache entry. The existing in-codec guard caps total cache float entries at `2^27 / dimsub`, which bounds the cache memory footprint but not the CPU cost of populating it. For small `dimsub` the cap permits up to roughly `2^27` `decode()` invocations, each doing `O(dim * log(r2))` work, which can run well past any reasonable load-time budget. A corrupt or maliciously constructed serialized index file can choose parameters that pass every existing structural check (`d`, `nsq`, `dsq`, `r2 &gt; 0`, `code_size`) yet still produce this load-time CPU blowup.
+
+Add a configurable per-payload `r2` ceiling mirroring the existing `deserialization_loop_limit` and `deserialization_vector_byte_limit` APIs. `get_deserialization_lattice_r2_limit()` and `set_deserialization_lattice_r2_limit()` expose the knob; the default of `0` preserves existing behavior so library callers see no change. `read_index_up` rejects `IndexLattice` payloads whose `r2` exceeds the limit before constructing the `IndexLattice` (and hence before invoking the underlying `ZnSphereCodecRec`), raising a `FaissException` with a message naming the limit.
+
+The new limit is scoped specifically to `r2` rather than reused from `deserialization_loop_limit` because the cost-per-unit of these fields is fundamentally different. `nlist` drives `O(nlist)` allocations and legitimately reaches the thousands in real workloads; `r2` drives polynomial decode-cache build work and stays in the tens for any documented `IndexLattice` configuration (`ZnSphereCodecAlt` hardcodes `r2 = 14` for its fallback codec). Reusing the existing limit would either be a no-op for the `r2` cost class if sized for `nlist`, or incorrectly reject legitimate IVF workloads if sized for `r2`.
+
+Reviewed By: mnorris11
+
+Differential Revision: D106309812
+
+fbshipit-source-id: 360b406d2b178e13cd6ad9671207c431563bd8af
+
+- faiss: initialize ids_tab to -1 in Top1BlockResultHandler::begin_multiple (#5249)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5249
+
+Before this change, Top1BlockResultHandler::begin_multiple initialized
+dis_tab[i] to C::neutral() but left ids_tab[i] uninitialized for every
+query slot. This was inconsistent with two related code paths in the same
+class:
+
+1. SingleResultHandler::begin() (the per-query API) explicitly sets
+   min_idx = -1 before accumulating results.
+2. HeapBlockResultHandler::begin_multiple() calls heap_heapify&lt;C&gt;()
+   which sets ids_tab[i*k + j] = -1 for all k result slots.
+
+The inconsistency means that any caller invoking begin_multiple +
+end_multiple without an intervening add_results — for example, when
+the database is empty and there are no results to report — reads
+uninitialized memory from ids_tab instead of the expected -1 sentinel.
+
+Fix: add ids_tab[i] = -1 inside the begin_multiple loop, making the
+block API consistent with the single-query API and with the Heap handler.
+This is a strictly additive, zero-risk change: in the normal path where
+add_results is called and covers all queries, the -1 is overwritten
+with the actual winner index before end_multiple returns.
+
+Test: TestTop1BlockResultHandler/BeginMultipleInitializesIds — calls
+begin_multiple(0, nq) followed by end_multiple() with no add_results,
+then verifies every ids_tab[i] == -1 and dis_tab[i] == C::neutral().
+
+Reviewed By: junjieqi
+
+Differential Revision: D106359898
+
+fbshipit-source-id: f864016703aa98b0c3ff6226968bb61f361a45f7
+
+- Add faiss-gpu pip wheel packaging (#5131)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5131
+
+Add pip wheel packaging for `faiss-gpu`, enabling `pip install faiss-gpu`
+from PyPI. Builds GPU wheels for Linux x86_64, Python 3.10-3.13, with
+CUDA 12.6 on manylinux_2_28.
+
+**New files:**
+- `pyproject-gpu.toml`: scikit-build-core config for faiss-gpu. Enables
+  CUDA GPU support, uses Dynamic Dispatch, OpenBLAS, and excludes CUDA
+  runtime libs (provided by nvidia-cuda-runtime-cu12 pip dependency).
+- `.github/workflows/build-pip-gpu.yml`: CI workflow for GPU wheels using
+  cibuildwheel on GPU runners (4-core-ubuntu-gpu-t4).
+- `tests/test_wheel_smoke_gpu.py`: GPU smoke tests validating GPU
+  detection, StandardGpuResources, GPU FlatL2/IP search, IVF+PQ on GPU,
+  CPU&lt;-&gt;GPU transfer roundtrip, and GPU serialization.
+
+**Modified files:**
+- `python/__init__.py`: Added `_preload_gpu_libs()` to pre-load CUDA
+  shared libraries from pip packages before SWIG import. No-op on
+  CPU-only installs.
+- `.github/workflows/build.yml`: Added `build-pip-gpu` workflow call.
+- `tests/BUCK`: Added `test_wheel_smoke_gpu` target for Buck CI.
+
+Reviewed By: junjieqi
+
+Differential Revision: D97507525
+
+fbshipit-source-id: f8b5fa08405aa53267e791c2c0d263e2d6190741
+
+- faiss: Replace remaining get_single_code calls with ScopedCodes (#5248)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5248
+
+D106493174 converted several `get_single_code` call sites to
+`InvertedLists::ScopedCodes`. This diff converts the 11 remaining
+sites across 10 files that were missed.
+
+Per the `InvertedLists` API contract, callers of `get_single_code`
+must call `release_codes` on the returned pointer. For
+`ArrayInvertedLists` (the default), `release_codes` is a no-op so
+omitting it is benign. However, `ArrayInvertedListsPanorama` and
+`HStackInvertedLists` both heap-allocate in `get_single_code`
+(via `new uint8_t[code_size]`), so omitting `release_codes`
+leaks memory for users of these backends.
+
+Sites converted:
+- `IndexIVFFlat::reconstruct_from_offset`
+- `IndexIVFPQ::reconstruct_from_offset`
+- `IndexIVFAdditiveQuantizer::reconstruct_from_offset`
+- `IndexIVFRaBitQ::reconstruct_from_offset`
+- `IVFRaBitDistanceComputer::operator()` (had manual release_codes)
+- `IndexIVFScalarQuantizer::reconstruct_from_offset`
+- `IndexBinaryIVF::reconstruct_from_offset`
+- `IndexIVFPQR::search_preassigned` (refinement loop, inside OMP parallel for)
+- `IndexIVF::reconstruct_n` (reorder_quantizer_codes path)
+- `IndexIVFFlatPanorama::reconstruct_from_offset` (had manual release_codes)
+- `DirectMap::update_id`
+
+All changes are mechanical. No functional change for ArrayInvertedLists users.
+
+Reviewed By: mdouze
+
+Differential Revision: D106638578
+
+fbshipit-source-id: ac234d8fd8cb8fe745d521d713b9465cd7f21b7d
+
+- Fix: static SIMD dispatch falls to scalar for avx512_spr/avx512/arm_sve builds (#5057)
+
+Summary:
+While running `benchs/bench_rabitq.py`, I observed that the execution path is using scalar instructions instead of AVX-512, despite FAISS being built with a static dispatch target of `avx512_spr`. Below is a summary and a fix.
+
+**Summary**
+
+Static (non-DD) builds with `avx512_spr`, and partially `avx512` and `arm_sve`, silently fall back to scalar (`SIMDLevel::NONE`) for all SIMD-dispatched functions. This is because the static dispatch path in `with_selected_simd_levels` lacks the fallthrough logic that the DD path implements via `switch`/`[[fallthrough]]`.
+
+**Problem**
+
+The static dispatch in `faiss/impl/simd_dispatch.h` performs a single check:
+
+```cpp
+if constexpr (available_levels &amp; (1 &lt;&lt; int(SINGLE_SIMD_LEVEL))) {
+    return action.template operator()&lt;SINGLE_SIMD_LEVEL&gt;();
+} else {
+    return action.template operator()&lt;SIMDLevel::NONE&gt;();
+}
+```
+
+This is a binary decision and none of the predefined masks (`A0`, `A1`, `A2`, `AVX2_NEON`, `MINIMAX_HEAP_SIMD_LEVELS`) include `AVX512_SPR`, so in a static `avx512_spr` build, it resolves to scalar.
+
+For example, `RaBitQuantizer` dispatches via `with_selected_simd_levels&lt;AVAILABLE_SIMD_LEVELS_A0&gt;(...)`.
+`AVAILABLE_SIMD_LEVELS_A0` is defined as:
+
+```cpp
+constexpr int AVAILABLE_SIMD_LEVELS_A0 =
+       AVAILABLE_SIMD_LEVELS_AVX2_NEON | (1 &lt;&lt; int(SIMDLevel::AVX512));
+```
+
+This mask includes bits for `NONE (0)`, `AVX2 (1)`, `AVX512 (2`), and `ARM_NEON (4)` but it does NOT include `AVX512_SPR (3)`.
+
+The DD path handles this correctly because its `switch` statement falls through from `AVX512_SPR` --&gt; `AVX512` --&gt; `AVX2` --&gt; `NONE`, picking the best available implementation. The static path had no equivalent mechanism.
+
+**Affected configurations**
+
+| Static build | Mask | Dispatches to (current) | Should dispatch to |
+|---|---|---|---|
+| `avx512_spr` | A0, A1, MINIMAX | `NONE` | `AVX512` |
+| `avx512_spr` | A2, AVX2_NEON | `NONE` | `AVX2` |
+| `avx512` | A2, AVX2_NEON | `NONE` | `AVX2` |
+| `arm_sve` | A0, AVX2_NEON | `NONE` | `ARM_NEON` |
+
+DD builds are not affected.
+
+**Fix**
+
+Add a compile-time fallthrough chain in the static dispatch path that mirrors the DD runtime behavior:
+
+- `AVX512_SPR` --&gt; try `AVX512` --&gt; try `AVX2` --&gt; `NONE`
+- `AVX512` --&gt; try `AVX2` --&gt; `NONE`
+- `ARM_SVE` --&gt; try `ARM_NEON` --&gt; `NONE`
+
+This would fix broken (level x mask) combinations across distances, RaBitQ, scalar/product quantizer, HNSW, IndexFlat, IVF, and fused distances.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5057
+
+Reviewed By: mdouze
+
+Differential Revision: D106149188
+
+Pulled By: mnorris11
+
+fbshipit-source-id: bc78f7613c2baa90ce582649b88e9e19b7bbacf5
+
+- facebook-unused-include-check in hamming_avx2.cpp (#5242)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5242
+
+Reviewed By: limqiying
+
+Differential Revision: D105884686
+
+fbshipit-source-id: 6e1e1359e6dd5698a6b74d612d9120ad48dfd87b
+
+- Add VPOPCNTDQ-based RaBitQ kernel for Sapphire Rapids+ (#5149)
+
+Summary:
+Adds a `SIMDLevel::AVX512_SPR` specialization of `bitwise_and_dot_product`, `bitwise_xor_dot_product`, and `popcount` that uses `vpopcntq` across all SIMD widths (512/256/128-bit). It is selected on SPR+ when built with `FAISS_OPT_LEVEL=avx512_spr` or `=dd`.
+
+Recall@100 is bit-identical to the baseline. Flat RaBitQ sees a **1.4–1.6x** kernel-level speedup, while end-to-end `IndexIVFRaBitQ` at `nprobe=32` improves by up to **~1.08x**.
+
+This PR is sufficient on its own for both DD and static `avx512_spr` builds. PR https://github.com/facebookresearch/faiss/issues/5057 addresses the same root cause for the rest of faiss&#39;s static dispatch.
+
+The `benchs/bench_rabitq.py` benchmark now sweeps d values `256, 512, 768, 1024` and reports mean/median/stdev across 3 runs per configuration.
+
+**Performance (Sapphire Rapids, `benchs/bench_rabitq.py`, k=100)**
+
+`IndexIVFRaBitQ` end-to-end, mean of 3 runs (speedup):
+
+| d    | nprobe=4 | nprobe=16 | nprobe=32 |
+|------|----------|-----------|-----------|
+| 256  | 1.01x    | 1.04x     | 1.06x     |
+| 512  | 1.05x    | 1.08x     | 1.08x     |
+| 768  | 1.06x    | 1.08x     | 1.08x     |
+| 1024 | 1.05x    | 1.06x     | 1.06x
+
+Flat `RaBitQ` shows 1.4–1.6x on the kernel itself. Non-rabitq indexes (SQ, PQ, HNSW) are unaffected.
+
+**Raw performance numbers**
+
+*Existing impl:*
+
+```
+========== d=256 ==========
+RaBitQ_d256 recall@100: 0.73203.  Speed: mean=68.5ms median=71.9ms stdev=10.88ms.  Memory: 8.000MB
+IVF1000,RaBitQ_d256 nprobe=4: recall@100: 0.44754.  Speed: mean=110.2ms median=110.1ms stdev=0.51ms.  Memory: 8.000MB
+IVF1000,RaBitQ_d256 nprobe=16: recall@100: 0.68151.  Speed: mean=297.4ms median=297.5ms stdev=0.94ms.  Memory: 8.000MB
+IVF1000,RaBitQ_d256 nprobe=32: recall@100: 0.7314.  Speed: mean=541.7ms median=541.9ms stdev=0.47ms.  Memory: 8.000MB
+IVF1000,RaBitQ_RROT_d256 nprobe=4: recall@100: 0.44089.  Speed: mean=109.4ms median=109.2ms stdev=0.69ms.  Memory: 8.000MB
+IVF1000,RaBitQ_RROT_d256 nprobe=16: recall@100: 0.65533.  Speed: mean=297.0ms median=297.4ms stdev=0.73ms.  Memory: 8.000MB
+IVF1000,RaBitQ_RROT_d256 nprobe=32: recall@100: 0.69907.  Speed: mean=541.0ms median=542.0ms stdev=1.78ms.  Memory: 8.000MB
+
+========== d=512 ==========
+RaBitQ_d512 recall@100: 0.80889.  Speed: mean=62.7ms median=61.4ms stdev=3.23ms.  Memory: 14.400MB
+IVF1000,RaBitQ_d512 nprobe=4: recall@100: 0.46053.  Speed: mean=172.2ms median=172.2ms stdev=0.35ms.  Memory: 14.400MB
+IVF1000,RaBitQ_d512 nprobe=16: recall@100: 0.73607.  Speed: mean=515.6ms median=516.2ms stdev=1.14ms.  Memory: 14.400MB
+IVF1000,RaBitQ_d512 nprobe=32: recall@100: 0.7941.  Speed: mean=966.0ms median=966.0ms stdev=0.09ms.  Memory: 14.400MB
+IVF1000,RaBitQ_RROT_d512 nprobe=4: recall@100: 0.4576.  Speed: mean=169.7ms median=169.5ms stdev=0.40ms.  Memory: 14.400MB
+IVF1000,RaBitQ_RROT_d512 nprobe=16: recall@100: 0.7223.  Speed: mean=505.9ms median=506.0ms stdev=0.36ms.  Memory: 14.400MB
+IVF1000,RaBitQ_RROT_d512 nprobe=32: recall@100: 0.78092.  Speed: mean=948.7ms median=948.9ms stdev=0.58ms.  Memory: 14.400MB
+
+========== d=768 ==========
+RaBitQ_d768 recall@100: 0.84618.  Speed: mean=107.0ms median=104.8ms stdev=4.62ms.  Memory: 20.800MB
+IVF1000,RaBitQ_d768 nprobe=4: recall@100: 0.46056.  Speed: mean=240.5ms median=240.5ms stdev=1.36ms.  Memory: 20.800MB
+IVF1000,RaBitQ_d768 nprobe=16: recall@100: 0.75465.  Speed: mean=745.8ms median=745.8ms stdev=0.11ms.  Memory: 20.800MB
+IVF1000,RaBitQ_d768 nprobe=32: recall@100: 0.82038.  Speed: mean=1414.5ms median=1414.7ms stdev=0.40ms.  Memory: 20.800MB
+IVF1000,RaBitQ_RROT_d768 nprobe=4: recall@100: 0.45859.  Speed: mean=236.7ms median=236.7ms stdev=0.27ms.  Memory: 20.800MB
+IVF1000,RaBitQ_RROT_d768 nprobe=16: recall@100: 0.74643.  Speed: mean=732.0ms median=731.8ms stdev=1.01ms.  Memory: 20.800MB
+IVF1000,RaBitQ_RROT_d768 nprobe=32: recall@100: 0.81462.  Speed: mean=1385.5ms median=1384.9ms stdev=1.17ms.  Memory: 20.800MB
+
+========== d=1024 ==========
+RaBitQ_d1024 recall@100: 0.85359.  Speed: mean=119.4ms median=118.9ms stdev=8.65ms.  Memory: 27.200MB
+IVF1000,RaBitQ_d1024 nprobe=4: recall@100: 0.4677.  Speed: mean=298.7ms median=298.7ms stdev=0.71ms.  Memory: 27.200MB
+IVF1000,RaBitQ_d1024 nprobe=16: recall@100: 0.77201.  Speed: mean=951.4ms median=951.4ms stdev=0.16ms.  Memory: 27.200MB
+IVF1000,RaBitQ_d1024 nprobe=32: recall@100: 0.83407.  Speed: mean=1815.6ms median=1815.6ms stdev=0.42ms.  Memory: 27.200MB
+IVF1000,RaBitQ_RROT_d1024 nprobe=4: recall@100: 0.46647.  Speed: mean=296.0ms median=295.7ms stdev=1.52ms.  Memory: 27.200MB
+IVF1000,RaBitQ_RROT_d1024 nprobe=16: recall@100: 0.76792.  Speed: mean=938.5ms median=938.8ms stdev=0.54ms.  Memory: 27.200MB
+IVF1000,RaBitQ_RROT_d1024 nprobe=32: recall@100: 0.83541.  Speed: mean=1788.2ms median=1788.5ms stdev=1.38ms.  Memory: 27.200MB
+IndexSQ4 recall@100: 0.96499.  Speed: mean=137.8ms median=136.2ms stdev=3.08ms.  Memory: 25.600MB
+IndexSQ6 recall@100: 0.99113.  Speed: mean=86.9ms median=86.9ms stdev=4.04ms.  Memory: 38.400MB
+IndexSQ8 recall@100: 0.99764.  Speed: mean=73.9ms median=74.3ms stdev=2.31ms.  Memory: 51.200MB
+IVF1000,SQ4 nprobe=4: recall@100: 0.45561.  Speed: mean=70.5ms median=69.7ms stdev=1.95ms.  Memory: 25.600MB
+IVF1000,SQ4 nprobe=16: recall@100: 0.77066.  Speed: mean=174.6ms median=174.5ms stdev=0.63ms.  Memory: 25.600MB
+IVF1000,SQ4 nprobe=32: recall@100: 0.87583.  Speed: mean=306.6ms median=306.7ms stdev=0.39ms.  Memory: 25.600MB
+IVF1000,SQ6 nprobe=4: recall@100: 0.45571.  Speed: mean=69.1ms median=67.7ms stdev=2.78ms.  Memory: 38.400MB
+IVF1000,SQ6 nprobe=16: recall@100: 0.7737.  Speed: mean=154.0ms median=154.1ms stdev=0.26ms.  Memory: 38.400MB
+IVF1000,SQ6 nprobe=32: recall@100: 0.88908.  Speed: mean=260.4ms median=260.3ms stdev=0.13ms.  Memory: 38.400MB
+PQ32x4fs recall@100: 0.48208.  Speed: mean=2.6ms median=2.3ms stdev=0.91ms.  Memory: 3.200MB
+PQ64x4fs recall@100: 0.72556.  Speed: mean=3.6ms median=3.4ms stdev=0.32ms.  Memory: 6.400MB
+PQ128x4fs recall@100: 0.87733.  Speed: mean=7.1ms median=6.1ms stdev=1.71ms.  Memory: 12.800MB
+IVF1000,PQ32x4fs nprobe=4: recall@100: 0.37591.  Speed: mean=17.8ms median=17.8ms stdev=1.23ms.  Memory: 3.200MB
+IVF1000,PQ32x4fs nprobe=16: recall@100: 0.48407.  Speed: mean=15.6ms median=14.3ms stdev=2.69ms.  Memory: 3.200MB
+IVF1000,PQ32x4fs nprobe=32: recall@100: 0.49783.  Speed: mean=14.5ms median=14.1ms stdev=1.72ms.  Memory: 3.200MB
+IVF1000,PQ64x4fs nprobe=4: recall@100: 0.43902.  Speed: mean=14.7ms median=14.3ms stdev=1.20ms.  Memory: 6.400MB
+IVF1000,PQ64x4fs nprobe=16: recall@100: 0.65281.  Speed: mean=14.4ms median=13.7ms stdev=1.63ms.  Memory: 6.400MB
+IVF1000,PQ64x4fs nprobe=32: recall@100: 0.69939.  Speed: mean=14.8ms median=14.7ms stdev=1.16ms.  Memory: 6.400MB
+IVF1000,PQ128x4fs nprobe=4: recall@100: 0.45462.  Speed: mean=14.0ms median=14.0ms stdev=0.40ms.  Memory: 12.800MB
+IVF1000,PQ128x4fs nprobe=16: recall@100: 0.74517.  Speed: mean=14.8ms median=14.5ms stdev=1.18ms.  Memory: 12.800MB
+IVF1000,PQ128x4fs nprobe=32: recall@100: 0.82454.  Speed: mean=16.6ms median=16.9ms stdev=1.86ms.  Memory: 12.800MB
+HNSW8 recall@100: 0.50921.  Speed: mean=1.2ms median=1.2ms stdev=0.04ms.  Memory: 220.117MB
+HNSW16 recall@100: 0.60776.  Speed: mean=1.5ms median=1.5ms stdev=0.05ms.  Memory: 232.859MB
+HNSW32 recall@100: 0.78643.  Speed: mean=2.1ms median=2.0ms stdev=0.06ms.  Memory: 258.428MB
+```
+
+*This PR:*
+
+```
+========== d=256 ==========
+RaBitQ_d256 recall@100: 0.73203.  Speed: mean=43.7ms median=44.1ms stdev=3.95ms.  Memory: 8.000MB
+IVF1000,RaBitQ_d256 nprobe=4: recall@100: 0.44754.  Speed: mean=108.5ms median=108.9ms stdev=1.13ms.  Memory: 8.000MB
+IVF1000,RaBitQ_d256 nprobe=16: recall@100: 0.68151.  Speed: mean=284.9ms median=285.7ms stdev=2.02ms.  Memory: 8.000MB
+IVF1000,RaBitQ_d256 nprobe=32: recall@100: 0.7314.  Speed: mean=510.1ms median=510.1ms stdev=0.23ms.  Memory: 8.000MB
+IVF1000,RaBitQ_RROT_d256 nprobe=4: recall@100: 0.44089.  Speed: mean=105.4ms median=105.2ms stdev=1.17ms.  Memory: 8.000MB
+IVF1000,RaBitQ_RROT_d256 nprobe=16: recall@100: 0.65533.  Speed: mean=277.4ms median=277.7ms stdev=0.62ms.  Memory: 8.000MB
+IVF1000,RaBitQ_RROT_d256 nprobe=32: recall@100: 0.69907.  Speed: mean=499.0ms median=499.0ms stdev=0.74ms.  Memory: 8.000MB
+
+========== d=512 ==========
+RaBitQ_d512 recall@100: 0.80889.  Speed: mean=45.8ms median=44.2ms stdev=6.39ms.  Memory: 14.400MB
+IVF1000,RaBitQ_d512 nprobe=4: recall@100: 0.46053.  Speed: mean=163.6ms median=163.9ms stdev=0.50ms.  Memory: 14.400MB
+IVF1000,RaBitQ_d512 nprobe=16: recall@100: 0.73607.  Speed: mean=477.1ms median=477.2ms stdev=0.28ms.  Memory: 14.400MB
+IVF1000,RaBitQ_d512 nprobe=32: recall@100: 0.7941.  Speed: mean=890.5ms median=890.5ms stdev=0.60ms.  Memory: 14.400MB
+IVF1000,RaBitQ_RROT_d512 nprobe=4: recall@100: 0.45746.  Speed: mean=162.3ms median=162.2ms stdev=0.35ms.  Memory: 14.400MB
+IVF1000,RaBitQ_RROT_d512 nprobe=16: recall@100: 0.72246.  Speed: mean=472.3ms median=472.3ms stdev=0.42ms.  Memory: 14.400MB
+IVF1000,RaBitQ_RROT_d512 nprobe=32: recall@100: 0.78102.  Speed: mean=882.7ms median=882.6ms stdev=0.41ms.  Memory: 14.400MB
+
+========== d=768 ==========
+RaBitQ_d768 recall@100: 0.84618.  Speed: mean=80.9ms median=85.4ms stdev=9.49ms.  Memory: 20.800MB
+IVF1000,RaBitQ_d768 nprobe=4: recall@100: 0.46056.  Speed: mean=226.3ms median=226.3ms stdev=0.14ms.  Memory: 20.800MB
+IVF1000,RaBitQ_d768 nprobe=16: recall@100: 0.75465.  Speed: mean=691.9ms median=692.3ms stdev=0.81ms.  Memory: 20.800MB
+IVF1000,RaBitQ_d768 nprobe=32: recall@100: 0.82038.  Speed: mean=1307.9ms median=1307.5ms stdev=0.91ms.  Memory: 20.800MB
+IVF1000,RaBitQ_RROT_d768 nprobe=4: recall@100: 0.45859.  Speed: mean=221.1ms median=221.1ms stdev=0.46ms.  Memory: 20.800MB
+IVF1000,RaBitQ_RROT_d768 nprobe=16: recall@100: 0.74643.  Speed: mean=674.7ms median=674.7ms stdev=0.39ms.  Memory: 20.800MB
+IVF1000,RaBitQ_RROT_d768 nprobe=32: recall@100: 0.81462.  Speed: mean=1277.1ms median=1276.0ms stdev=2.64ms.  Memory: 20.800MB
+
+========== d=1024 ==========
+RaBitQ_d1024 recall@100: 0.85359.  Speed: mean=62.2ms median=62.4ms stdev=0.83ms.  Memory: 27.200MB
+IVF1000,RaBitQ_d1024 nprobe=4: recall@100: 0.46796.  Speed: mean=284.4ms median=284.5ms stdev=0.51ms.  Memory: 27.200MB
+IVF1000,RaBitQ_d1024 nprobe=16: recall@100: 0.77189.  Speed: mean=897.5ms median=897.4ms stdev=0.73ms.  Memory: 27.200MB
+IVF1000,RaBitQ_d1024 nprobe=32: recall@100: 0.83408.  Speed: mean=1710.7ms median=1710.2ms stdev=2.59ms.  Memory: 27.200MB
+IVF1000,RaBitQ_RROT_d1024 nprobe=4: recall@100: 0.46647.  Speed: mean=277.7ms median=277.7ms stdev=0.16ms.  Memory: 27.200MB
+IVF1000,RaBitQ_RROT_d1024 nprobe=16: recall@100: 0.76792.  Speed: mean=874.8ms median=874.4ms stdev=1.96ms.  Memory: 27.200MB
+IVF1000,RaBitQ_RROT_d1024 nprobe=32: recall@100: 0.83541.  Speed: mean=1665.6ms median=1666.3ms stdev=1.43ms.  Memory: 27.200MB
+IndexSQ4 recall@100: 0.96499.  Speed: mean=142.7ms median=142.1ms stdev=3.98ms.  Memory: 25.600MB
+IndexSQ6 recall@100: 0.99113.  Speed: mean=100.7ms median=100.2ms stdev=7.29ms.  Memory: 38.400MB
+IndexSQ8 recall@100: 0.99764.  Speed: mean=72.2ms median=71.4ms stdev=3.09ms.  Memory: 51.200MB
+IVF1000,SQ4 nprobe=4: recall@100: 0.45561.  Speed: mean=69.4ms median=69.4ms stdev=0.20ms.  Memory: 25.600MB
+IVF1000,SQ4 nprobe=16: recall@100: 0.77066.  Speed: mean=173.3ms median=173.2ms stdev=0.57ms.  Memory: 25.600MB
+IVF1000,SQ4 nprobe=32: recall@100: 0.87583.  Speed: mean=304.5ms median=304.4ms stdev=0.82ms.  Memory: 25.600MB
+IVF1000,SQ6 nprobe=4: recall@100: 0.45571.  Speed: mean=65.2ms median=64.4ms stdev=1.68ms.  Memory: 38.400MB
+IVF1000,SQ6 nprobe=16: recall@100: 0.7737.  Speed: mean=154.5ms median=154.4ms stdev=0.37ms.  Memory: 38.400MB
+IVF1000,SQ6 nprobe=32: recall@100: 0.88908.  Speed: mean=262.6ms median=262.3ms stdev=1.52ms.  Memory: 38.400MB
+PQ32x4fs recall@100: 0.48208.  Speed: mean=51.4ms median=51.1ms stdev=1.69ms.  Memory: 3.200MB
+PQ64x4fs recall@100: 0.72556.  Speed: mean=99.4ms median=98.5ms stdev=3.09ms.  Memory: 6.400MB
+PQ128x4fs recall@100: 0.87733.  Speed: mean=189.9ms median=190.5ms stdev=1.03ms.  Memory: 12.800MB
+IVF1000,PQ32x4fs nprobe=4: recall@100: 0.37591.  Speed: mean=14.9ms median=15.1ms stdev=0.89ms.  Memory: 3.200MB
+IVF1000,PQ32x4fs nprobe=16: recall@100: 0.48407.  Speed: mean=16.2ms median=14.8ms stdev=2.51ms.  Memory: 3.200MB
+IVF1000,PQ32x4fs nprobe=32: recall@100: 0.49783.  Speed: mean=22.1ms median=22.2ms stdev=2.85ms.  Memory: 3.200MB
+IVF1000,PQ64x4fs nprobe=4: recall@100: 0.43902.  Speed: mean=12.8ms median=13.2ms stdev=1.17ms.  Memory: 6.400MB
+IVF1000,PQ64x4fs nprobe=16: recall@100: 0.65281.  Speed: mean=18.0ms median=17.6ms stdev=1.10ms.  Memory: 6.400MB
+IVF1000,PQ64x4fs nprobe=32: recall@100: 0.69939.  Speed: mean=21.3ms median=20.4ms stdev=1.64ms.  Memory: 6.400MB
+IVF1000,PQ128x4fs nprobe=4: recall@100: 0.45462.  Speed: mean=16.1ms median=16.0ms stdev=0.82ms.  Memory: 12.800MB
+IVF1000,PQ128x4fs nprobe=16: recall@100: 0.74517.  Speed: mean=21.6ms median=21.6ms stdev=0.37ms.  Memory: 12.800MB
+IVF1000,PQ128x4fs nprobe=32: recall@100: 0.82454.  Speed: mean=26.9ms median=26.8ms stdev=2.79ms.  Memory: 12.800MB
+HNSW8 recall@100: 0.5081.  Speed: mean=1.2ms median=1.2ms stdev=0.14ms.  Memory: 220.117MB
+HNSW16 recall@100: 0.60682.  Speed: mean=1.4ms median=1.4ms stdev=0.06ms.  Memory: 232.859MB
+HNSW32 recall@100: 0.79069.  Speed: mean=2.0ms median=2.0ms stdev=0.01ms.  Memory: 258.428MB
+```
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5149
+
+Reviewed By: mdouze
+
+Differential Revision: D106148864
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 135b35bfa1eaf9536b75a18f5f23e11d182f8612
+
+- Guard Panorama autovec pragmas against nvcc frontend (#5241)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5241
+
+## THIS DIFF
+
+Wrap the four `FAISS_PRAGMA_IMPRECISE_FUNCTION_BEGIN` / `_END` callsites in `faiss/impl/Panorama.h` with `#if !defined(__NVCC__)` so the GCC `#pragma GCC optimize(...)` they expand to is skipped when nvcc&#39;s frontend parses translation units that transitively include this header.
+
+## CONTEXT
+
+When nvcc (EDG-based frontend) parses `.cu` files that transitively include `faiss/impl/Panorama.h`, it emits warning #1675-D for each `#pragma GCC optimize(...)` it does not recognize. We saw ~16 of these per `.cu` file in the faiss-gpu pip wheel build, all originating from `Panorama.h:39` (`compute_level_dot_kernel`) and `Panorama.h:95` (`prune_kernel`). The pragmas guide GCC&#39;s host-side autovectorization for those templates and are not relevant to nvcc&#39;s device-code generation, since the templates are CPU-only and never instantiated on the GPU side.
+
+Skipping the pragmas under `__NVCC__` is safe:
+1. nvcc defines `__NVCC__` during both its device pass and its host pass. The pragmas are skipped for both. The wrapped templates are only instantiated by CPU translation units (compiled by gcc directly, without nvcc), so the optimization hint is still applied where it matters.
+2. Localizing the guard to `Panorama.h` instead of `platform_macros.h` keeps the shared macro definition untouched for everyone else. `Panorama.h` is the only header observed to trigger this warning in the current GPU build path; other `FAISS_PRAGMA_IMPRECISE_*` users (`kernels_simd512.h`, `distances_autovec-inl.h`, `distances_arm_sve.cpp`) are not transitively included by any `.cu` file.
+
+No functional change for CPU builds. Eliminates the warning noise in the GPU build and improves log readability for the faiss-gpu wheel CI on D97507525.
+
+## PLAN
+
+Land this diff first. D97507525 (`[faiss] Add faiss-gpu pip wheel packaging`) is stacked on top and will pick up the fix automatically.
+
+Reviewed By: junjieqi, mnorris11
+
+Differential Revision: D106398648
+
+fbshipit-source-id: bb78d24f4646db4fc81a45c844fde8cc9e734b85
+
+- Use per-SIMD TU scan for standalone PQ (AVX2 gather inlining) (#5233)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5233
+
+TLDR: we captured a statistically significant regression in PQ even though the code wasn&#39;t touched since 2022. AI thinks it was due to including more things in the translation unit due to DD. I am unsure of that explanation, but this diff SIMDifies this part of PQ and make it faster on Intel. On AMD AVX2, it was slower across all 10 datasets tested, but with AVX-512 (DD mode) AMD is competitive except for PQ16. Since we&#39;re moving to DD mode anyway, we ship without an AMD-specific workaround.
+
+What this diff does
+--
+
+The standalone PQ scan in `pq_estimators_from_tables` uses a scalar gather loop (`dis += dt[*codes++]`) to accumulate distances from precomputed tables. This diff moves it into per-SIMD translation units so that AVX2/AVX-512 gather intrinsics inline into the scan loop, following the same pattern already used by the IVF+PQ scanner.
+
+- New `pq_scan_impl.h` defines the scan loop calling `pq_code_distance_8bit_four_impl&lt;THE_SIMD_LEVEL&gt;()` directly
+- Included from `avx2.cpp`, `avx512.cpp`, `neon.cpp`, `rvv.cpp`, `pq_code_distance-sve.cpp` — SIMD gathers inline into the scan loop in each TU
+- Non-templated `pq_scan_8bit()` dispatch wrapper in `pq_code_distance-generic.cpp`
+- `pq_knn_search_with_tables` dispatches to `pq_scan_8bit()` for 8-bit codes with ksub=256
+- One cross-TU call per query (not per code), so dispatch overhead is negligible
+- IVF+PQ and FastScan (`PQ32x4fs`) are unchanged
+
+Initial benchmark results (Intel only)
+--
+
+Benchmarked with vench on sift-1M (dim=128, L2) and vibe-yi-128 (dim=128, IP):
+
+**sift-1M standalone PQ (Median QPS, higher is better):**
+
+| Algorithm | nq | Baseline | This diff | Speedup |
+|---|---|---|---|---|
+| `PQ8` | 100 | 3,236 | 3,672 | +13% |
+| `PQ8` | 10,000 | 5,149 | 6,476 | +26% |
+| `PQ16` | 100 | 2,461 | 2,875 | +17% |
+| `PQ16` | 10,000 | 3,072 | 3,729 | +21% |
+| `PQ32` | 1 | 47 | 64 | +36% |
+| `PQ32` | 100 | 1,006 | 1,499 | +49% |
+| `PQ32` | 10,000 | 1,338 | 1,918 | +43% |
+| `PQ32x4fs` | 10,000 | 2,363 | 2,364 | ~0% (control) |
+
+**vibe-yi-128 standalone PQ (Median QPS):**
+
+| Algorithm | nq | Baseline | This diff | Speedup |
+|---|---|---|---|---|
+| `PQ8` | 10,000 | 24,037 | 31,544 | +31% |
+| `PQ32` | 1 | 220 | 341 | +55% |
+| `PQ32` | 100 | 5,173 | 7,424 | +44% |
+| `PQ32` | 10,000 | 5,826 | 9,360 | +61% |
+| `PQ32x4fs` | 10,000 | 9,556 | 9,704 | ~0% (control) |
+
+AVX2 gather results across Intel and AMD
+--
+
+The initial benchmarks above ran on Intel only. AVX2 `vpgatherdd` (`_mm256_i32gather_ps`) performance differs fundamentally between Intel and AMD: Intel has a hardware gather unit, AMD Zen 4 micro-codes gathers into individual scalar loads.
+
+ServiceLab A/B across 10 datasets (d=128 to d=2048), `force_same_processor_type=True`. Side A = old scalar code (parent commit), Side B = this diff (AVX2 gathers). Median QPS:
+
+**Intel (Cooper Lake, Xeon Platinum 8321HC) — gains for PQ32/PQ64:**
+
+| PQ | nq | scalar | gather | Δ% |
+|---|---:|---:|---:|---|
+| PQ8 | 1 | 116 | 98 | -16% |
+| PQ8 | 100 | 3,442 | 3,168 | -8% |
+| PQ8 | 10,000 | 3,732 | 3,698 | -1% |
+| PQ16 | 1 | 68 | 82 | +21% |
+| PQ16 | 100 | 1,871 | 1,485 | -21% |
+| PQ16 | 10,000 | 2,239 | 2,122 | -5% |
+| PQ32 | 1 | 43 | 50 | +16% |
+| PQ32 | 100 | 896 | 1,044 | +17% |
+| PQ32 | 10,000 | 987 | 1,218 | **+23%** |
+| PQ64 | 1 | 25 | 32 | +28% |
+| PQ64 | 100 | 388 | 508 | +31% |
+| PQ64 | 10,000 | 403 | 533 | **+32%** |
+
+**AMD (Bergamo, EPYC 9D64 88-Core) — regression across the board:**
+
+| PQ | nq | scalar | gather | Δ% |
+|---|---:|---:|---:|---|
+| PQ8 | 1 | 237 | 180 | -24% |
+| PQ8 | 100 | 4,370 | 2,176 | -50% |
+| PQ8 | 10,000 | 7,389 | 4,078 | **-45%** |
+| PQ16 | 1 | 142 | 76 | -46% |
+| PQ16 | 100 | 2,350 | 1,524 | -35% |
+| PQ16 | 10,000 | 3,745 | 2,085 | **-44%** |
+| PQ32 | 1 | 63 | 41 | -35% |
+| PQ32 | 100 | 1,111 | 765 | -31% |
+| PQ32 | 10,000 | 1,262 | 874 | **-31%** |
+| PQ64 | 1 | 33 | 24 | -27% |
+| PQ64 | 100 | 430 | 402 | -7% |
+| PQ64 | 10,000 | 543 | 452 | **-17%** |
+
+AVX-512 gather results (DD mode)
+--
+
+AVX-512 gathers on AMD Zen 4 are much better than AVX2 gathers. Tested with Dynamic Dispatch enabled (`benchmark_vench_cpu_dd` workload). Side A = parent commit (old scalar code), Side B = this diff (AVX-512 gathers via `with_simd_level`). See D106248768 for the test commit.
+
+**Intel (Cooper Lake) — large gains for PQ16/32/64:**
+
+| Dataset | PQ | scalar | gather | Δ% |
+|---|---|---:|---:|---|
+| contriever-1M | PQ8 | 2,878 | 3,172 | +10% ns |
+| contriever-1M | PQ16 | 1,783 | 2,282 | **+28%** |
+| contriever-1M | PQ32 | 710 | 1,082 | **+52%** |
+| contriever-1M | PQ64 | 349 | 510 | **+46%** |
+| vibe-celeba-resnet-2048 | PQ8 | 13,152 | 13,595 | +3% ns |
+| vibe-celeba-resnet-2048 | PQ16 | 8,070 | 9,522 | **+18%** |
+| vibe-celeba-resnet-2048 | PQ32 | 3,410 | 5,233 | **+54%** |
+| vibe-celeba-resnet-2048 | PQ64 | 1,695 | 2,418 | **+43%** |
+| vibe-llama-128 | PQ8 | 9,802 | 8,051 | -18% |
+| vibe-llama-128 | PQ16 | 5,183 | 8,446 | **+63%** |
+| vibe-llama-128 | PQ32 | 2,567 | 4,156 | **+62%** |
+| vibe-llama-128 | PQ64 | 1,276 | 1,963 | **+54%** |
+
+**AMD (Bergamo) — competitive except PQ16:**
+
+| Dataset | PQ | scalar | gather | Δ% |
+|---|---|---:|---:|---|
+| sift-1M | PQ8 | 3,958 | 5,271 | **+33%** |
+| sift-1M | PQ16 | 2,452 | 1,900 | **-23%** |
+| sift-1M | PQ32 | 1,018 | 994 | -2% ns |
+| sift-1M | PQ64 | 458 | 447 | -2% ns |
+| gist-1M | PQ8 | 4,043 | 5,222 | **+29%** |
+| gist-1M | PQ16 | 2,421 | 1,896 | **-22%** |
+| gist-1M | PQ32 | 1,001 | 990 | -1% ns |
+| gist-1M | PQ64 | 430 | 421 | -2% ns |
+| vibe-imagenet-clip-512 | PQ8 | 3,160 | 3,852 | **+22%** |
+| vibe-imagenet-clip-512 | PQ16 | 1,908 | 1,490 | **-22%** |
+| vibe-imagenet-clip-512 | PQ32 | 803 | 784 | -2% ns |
+| vibe-imagenet-clip-512 | PQ64 | 353 | 346 | -2% ns |
+
+With AVX-512, AMD goes from -17% to -45% regression (AVX2) to: PQ8 gains +22-33%, PQ32/64 neutral, only PQ16 still regresses -22%. This is acceptable since we&#39;re moving to DD mode.
+
+Investigation details
+--
+
+**Why the original regression happened:** The standalone PQ scan code hasn&#39;t changed since 2022, but its performance regressed vs the pre-DD baseline (D98255490). The most likely cause is compilation-context interference: `ProductQuantizer.cpp` now includes `simd_dispatch.h` and instantiates `with_simd_level` lambdas for `compute_distance_table` / `compute_inner_prod_table`, pulling in more template machinery. The compiler&#39;s optimization budget is finite — additional template instantiations in the same TU can change register allocation, loop unrolling, and instruction scheduling decisions for unrelated functions like the scalar PQ scan loop, even though that loop&#39;s source code is identical.
+
+**Why PQ16 still regresses on AMD with AVX-512:** The AVX-512 inner loop processes 16 subquantizers per iteration. For PQ16 (M=16), this means one loop iteration with 4 `_mm512_i32gather_ps` instructions (one per code in the 4-code batch). Each gathers 16 floats from scattered locations in a 16 KB distance table. Even with AVX-512, Zen 4 decomposes each gather into 16 individual loads, creating 64 scattered loads per iteration that congest the load-store unit. Scalar code lets the out-of-order engine overlap independent loads more freely.
+
+**Why PQ8 gains on AMD:** The AVX-512 code&#39;s main loop doesn&#39;t execute for M=8 (`M/16 = 0`) — it falls through to the scalar leftover path. The +33% gain is purely from the per-SIMD TU compilation context isolation (same scalar algorithm, better codegen in a clean TU).
+
+**Why PQ32/PQ64 are neutral on AMD:** The gather overhead is amortized over more loop iterations, and the distance table exceeds L1 cache (32 KB on Zen 4), so cache misses dominate regardless of scalar vs SIMD.
+
+**Other strategies evaluated (D106200308):** We also benchmarked manual scalar loads packed into SIMD (`_mm256_setr_ps`) and an M-threshold hybrid (scalar for M&lt;=16, gathers for M&gt;16). Both performed worse than unconditional `with_simd_level` dispatch.
+
+See ServiceLab experiments in D106200308 (AVX2 strategy comparison), D106248768 (AVX-512 DD test), and P2347932292, P2347835369.
+
+Reviewed By: mdouze
+
+Differential Revision: D105966976
+
+fbshipit-source-id: 0257f1c070b49a0e66ed66c1d7947ffa17735c39
+
+- Fix ODR violation in ScannerMixIn by adding SIMDLevel template parameter (#5148)
+
+Summary:
+While benchmarking FastScan on an AVX-512 SPR system with a DD (dynamic dispatch) build, we observed that the generated code was executing scalar (NONE-level) instructions instead of the expected AVX2/AVX-512 kernels.
+
+**Root cause**
+
+`ScannerMixIn&lt;Handler&gt;` is defined in `dispatching.h`, which is compiled once per SIMD level in DD mode. Each translation unit defines `THE_LEVEL_TO_DISPATCH` to a different `SIMDLevel` value (NONE, AVX2, AVX512, AVX512_SPR), and the class uses this macro in its method bodies to select SIMD code paths.
+
+However, since `ScannerMixIn` is only templated on `Handler`, every TU produces a class with the same mangled name — regardless of the SIMD level it was compiled for. The linker silently picks one, and in practice it chose the NONE version, making all FastScan searches fall back to scalar code.
+
+**Fix**
+
+Add a non-type template parameter `SIMDLevel SL = THE_LEVEL_TO_DISPATCH` to `ScannerMixIn`. This makes each TU&#39;s instantiation a distinct template specialization with a unique mangled name, so the linker preserves all versions and runtime dispatch selects the correct one.
+
+**Impact**
+
+- DD builds now correctly dispatch FastScan to the highest available SIMD level at runtime
+- No effect on static (non-DD) builds, where only one SIMD level is compiled
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5148
+
+Reviewed By: mdouze
+
+Differential Revision: D106148970
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 7b7b89200b6e2826d1dc5b5a8f599e733e478ed5</div>
+</div>
+
+<a href="../project/facebookresearch_faiss.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

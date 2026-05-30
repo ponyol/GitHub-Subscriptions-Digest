@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (56 commits) - AI-Hypercomputer/maxtext - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (56 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/AI-Hypercomputer_maxtext.html">AI-Hypercomputer/maxtext</a> /
+    Updates in main (56 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/AI-Hypercomputer_maxtext.html">AI-Hypercomputer/maxtext</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-30 07:28 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/AI-Hypercomputer/maxtext/commits/main" target="_blank">https://github.com/AI-Hypercomputer/maxtext/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This update significantly enhances NNX integration, enabling native MaxEngine inference and Direct Preference Optimization (DPO) with full checkpoint compatibility with Linen. A major security and cleanup effort involved removing obsolete Paged Attention serving kernels. Key performance and correctness fixes include addressing a Mixture-of-Experts (MoE) throughput regression and improving attention masking for padded sequences. Various other improvements span model architectures like Gemma4 and platform-specific enhancements.
+
+---
+
+Это обновление значительно улучшает интеграцию NNX, позволяя использовать нативную инференцию MaxEngine и оптимизацию прямых предпочтений (DPO) с полной совместимостью чекпоинтов с Linen. Крупные усилия по безопасности и очистке включали удаление устаревших ядер Paged Attention. Ключевые исправления производительности и корректности включают устранение регрессии пропускной способности Mixture-of-Experts (MoE) и улучшение маскирования внимания для дополненных последовательностей. Различные другие улучшения охватывают архитектуры моделей, такие как Gemma4, и платформенные доработки.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Eliminate out-projection remat.
+
+PiperOrigin-RevId: 923800092
+
+- Shard GMM weights on the expert dimension, mask out unprocessed tokens, and conditionally remat gating GMMs in the bwd pass.
+
+PiperOrigin-RevId: 923759264
+
+- Merge pull request #3821 from AI-Hypercomputer:feat/nnx-native-maxengine
+
+PiperOrigin-RevId: 923723235
+
+- Merge pull request #4017 from AI-Hypercomputer:gagik-gemma4-flops-fix
+
+PiperOrigin-RevId: 923690906
+
+- Merge pull request #3991 from AI-Hypercomputer:agagik-gemma4-vllm
+
+PiperOrigin-RevId: 923686164
+
+- Merge pull request #4023 from AI-Hypercomputer:fix-eval-docs
+
+PiperOrigin-RevId: 923680504
+
+- Add eval docs to RTD
+
+- Merge pull request #4016 from AI-Hypercomputer:pr/segment-ids-fix
+
+PiperOrigin-RevId: 923664190
+
+- NNX: native MaxEngine inference (drop route-to-Linen path in maxengine.py)
+
+PR5 audited maxengine.py and routed the inference path to the Linen
+implementation regardless of pure_nnx, with a comment block explaining
+that &#34;the flag affects training, not inference serving.&#34; That kept the
+Linen serving path unchanged but meant pure_nnx=True users silently got
+the Linen engine. This change replaces the route with a real NNX flow:
+when config.pure_nnx=True, the engine builds an NNX Transformer, splits
+out (params, cache, rest) with nnx.split, and at every JIT body merges
+the model concretely with nnx.merge to run the forward pass. Linen is
+preserved byte-for-byte; every NNX edit is gated `if config.pure_nnx:`
+and pure_nnx=False is still the default.
+
+maxengine.py (__init__):
+- Build two abstract NNX Transformers on the NNX path: self.model with
+  model_mode=PREFILL (batch=1, single padded prompt) and self.model_ar
+  with model_mode=AUTOREGRESSIVE (batch=micro_batch_size_to_train_on,
+  decode_state shape). Both are needed because NNX cache vars inherit
+  CACHE_BATCH_PREFILL vs CACHE_BATCH from the construction model_mode,
+  and bulk_insert searches for the substring &#34;cache_batch&#34; in the
+  AR-mode logical-axes tuple. nnx.eval_shape is called directly inside
+  nn_partitioning.axis_rules rather than through create_nnx_abstract_model
+  to avoid the jax.set_mesh wrap that trips Flax 0.12.6 on logical-only
+  axes like &#34;norm&#34; (same reason get_abstract_state_nnx avoids set_mesh).
+- Cache the graphdef from a 3-way nnx.split(Param, Cache, ...) so JIT
+  bodies can pass (params, cache, rest) separately to nnx.merge. The
+  rest slot (RNG vars etc.) is materialized concretely in load_params.
+
+maxengine.py (cache adapter + _nnx_run_model):
+- bulk_insert / _insert_jit / _maybe_*_prefill_result_cache walk the
+  cache via tree_map_with_path and switch on path[-1].key (the cache
+  variable name like &#34;cached_prefill_key&#34;). Linen mutable cache is a
+  plain nested dict. NNX Cache state would expose a &#34;.value&#34; accessor
+  at that position. Bridge via nnx.State.to_pure_dict() (after the
+  model run) and nnx.replace_by_pure_dict (before nnx.merge), so the
+  cache plumbing helpers see the same shape on both paths.
+- Add _nnx_run_model: nnx.merge(graphdef, params, cache, rest, copy=True)
+  -&gt; model(...) -&gt; nnx.state(model, nnx.Cache).to_pure_dict(). copy=True
+  avoids reusing Variable objects across traces (TraceContextError),
+  mirroring train.py&#39;s diff_wrapper workaround.
+- Add _nnx_cache_state_template / _nnx_init_cache_dict helpers
+  parametrised by mode so prefill (batch 1) and decode_state (batch N)
+  pull from the right abstract model.
+
+maxengine.py (load_params):
+- New _load_params_nnx: accepts user-provided NNX-shape params or loads
+  via from_pretrained. For user-provided params, materializes a concrete
+  model once via _create_model_fn() to capture a real rest state for
+  nnx.merge (wasteful but simple; the from_pretrained branch avoids
+  this). Refreshes self.graphdef from the concrete model so subsequent
+  merges line up exactly.
+- Builds self.abstract_params, populates self.prefill_kv_cache_annotations
+  and self.kv_cache_annotations (using model_ar for the latter so
+  bulk_insert&#39;s substring lookup hits), wraps both into NamedSharding.
+- pure_nnx + quantization, pure_nnx + LoRA, pure_nnx +
+  stack_prefill_result_cache=True, pure_nnx + prefill_multisampling,
+  and pure_nnx + prefill_concat raise NotImplementedError for now;
+  the Linen path is the workaround. AOT compilation
+  (aot_compile / _compile_generate_and_get_layouts) is not gated and
+  may work as-is; not exercised by tests yet.
+
+maxengine.py (init_decode_state, _prefill_jit, _generate_jit):
+- _init_decode_state_nnx zero-initializes a pure-dict cache from
+  model_ar (so the leading batch dim matches generate&#39;s input shape)
+  and builds kv_cache_annotations_named per leaf by reading
+  nnx.Cache.metadata. Tries &#34;out_sharding&#34;, &#34;sharding&#34;, and
+  &#34;sharding_names&#34; because Flax 0.12.6 renamed these.
+- _prefill_jit / _generate_jit add an `if config.pure_nnx:` branch
+  that calls _nnx_run_model in place of self.model.apply with
+  mutable=[&#34;cache&#34;]. existing_prefix.cache is threaded as a pure-dict
+  cache directly (no params|{&#34;cache&#34;:...} dict-merge — params is an
+  nnx.State, not a dict).
+
+maxtext_utils.py:
+- New get_prefill_kv_cache_annotations_nnx / get_kv_cache_annotations_nnx
+  that mirror the Linen helpers&#39; return shape (per-leaf PartitionSpec
+  tree). Both delegate to _nnx_cache_partition_specs which extracts
+  nnx.Cache state via nnx.split, calls
+  get_nnx_named_sharding_with_scan_axis inside
+  nn_partitioning.axis_rules so logical axes (&#34;layers&#34;, &#34;cache_batch&#34;,
+  &#34;norm&#34;, ...) resolve to physical mesh axes, and converts the result
+  to a pure-dict tree.
+
+tests/unit/maxengine_test.py:
+- New tests: test_init_nnx, test_basic_prefill_nnx (with NaN/inf and
+  per-layer cache shape checks), test_basic_decode_nnx (4-step generate
+  with next_pos advancement check), test_quantize_raises_for_nnx,
+  test_lora_raises_for_nnx.
+- New test_linen_nnx_parity_prefill: bridges Linen-init params into
+  the NNX engine via linen_nnx_converter (convert_linen_to_nnx -&gt;
+  _strip_value_wrappers -&gt; nnx.replace_by_pure_dict) and asserts the
+  NNX engine&#39;s prefill matches Linen on the same weights — logits
+  within bf16 tolerance (rtol=0.05, atol=0.1; the test config uses
+  bf16 compute) and exact greedy first-token argmax.
+- Existing Linen tests untouched.
+
+Test summary: 9 passed, 1 skipped (test_chunked_prefill is a
+pre-existing CPU-only skip). bash lint.sh: codespell + pylint + pyink
+all green.
+
+- Fix: synthesize segment_ids in TunixMaxTextAdapter to mask pad attention
+
+When tunix invokes the model with `decoder_segment_ids=None`, MaxText falls
+back to causal-only attention masking. With left/right-padded batches this
+silently lets queries at non-pad positions attend to pad-position keys,
+producing corrupted log-probs in the trainer forward (rollout-side vLLM is
+fine — its scheduler avoids padded sequences).
+
+Add an optional `pad_id` constructor arg to TunixMaxTextAdapter. When set
+AND tunix passes `decoder_segment_ids=None`, synthesize per-token
+segment_ids = (input_tokens != pad_id), so MaxText&#39;s segment-based mask
+blocks attention across pad/non-pad boundaries.
+
+Plumb the tokenizer&#39;s pad_token_id through model_creation_utils so the
+RL training path (train_rl.py) picks it up automatically.
+
+Behavior is opt-in: existing callers that omit `pad_id` see no change.
+
+Empirical impact (Qwen3-1.7B GRPO on GSM8K, GPU recipe LR=2e-6 beta=0.04):
+- with this fix:    step-50 vtc_mean_reward 0.5601 -&gt; 0.6970 (+0.137)
+- without this fix: step-50 vtc_mean_reward 0.5601 -&gt; 0.5545 (-0.005)
+The fix is load-bearing for matching GPU&#39;s training trajectory.
+
+- Merge pull request #3992 from AI-Hypercomputer:safetensor
+
+PiperOrigin-RevId: 923614261
+
+- gemma4: vLLM inference quickstart + adapter global-KV null-guard.
+
+- Fix shared expert FLOPs under-count for Gemma4 MoE
+
+- Merge pull request #3995 from AI-Hypercomputer:hengtaoguo-va
+
+PiperOrigin-RevId: 923605138
+
+- Merge pull request #4010 from AI-Hypercomputer:gemma4_sft
+
+PiperOrigin-RevId: 923592408
+
+- Merge pull request #4013 from AI-Hypercomputer:vladk/maxtwin_xm_support
+
+PiperOrigin-RevId: 923553393
+
+- doc change
+
+- Omni Video/audio decoding
+
+- Merge pull request #4011 from AI-Hypercomputer:multimodal_gemma3
+
+PiperOrigin-RevId: 923520359
+
+- prepare distill pipeline for xm use
+
+- Merge pull request #3989 from olupton:fix-metrics
+
+PiperOrigin-RevId: 923071757
+
+- Fix Gemma3-4b multimodal SFT test script
+
+- Merge pull request #4008 from AI-Hypercomputer:fix-pathways-skipped-tests
+
+PiperOrigin-RevId: 922955511
+
+- Merge pull request #4007 from ROCm:yeandy/fix-moe-expert-sharding
+
+PiperOrigin-RevId: 922937642
+
+- Merge pull request #3986 from AI-Hypercomputer:doc_change_multihost
+
+PiperOrigin-RevId: 922857041
+
+- Merge pull request #4006 from AI-Hypercomputer:decoupled-tpu7x-zero1-skip
+
+PiperOrigin-RevId: 922847201
+
+- Merge pull request #4003 from ROCm:upstream-fix-decoupled-gcs-collection
+
+PiperOrigin-RevId: 922845285
+
+- Fix pathways integration tests being skipped on TPU proxy backend
+
+PR #3980 refactored TPU/GPU/CPU hardware platform checks to avoid early JAX initialization. Under Pathways, JAX_PLATFORMS is set to &#34;proxy&#34;, which doesn&#34;t contain &#34;tpu&#34;, causing all tpu_only integration tests to get skipped. This fix adds &#34;proxy&#34; to the check to correctly detect the TPU platform.
+
+- Fix SFT prompt masking for Gemma4
+
+- Skip Zero-1 testcase on TPU7x platforms in decoupled offline mode to prevent compiler crash
+
+- PR #3948: Scrub Paged Attention Serving Kernels and Obsolete Allocators
+
+Imported from GitHub PR https://github.com/AI-Hypercomputer/maxtext/pull/3948
+
+# Description
+
+This PR completely removes and scrubs the obsolete, TPU-specific, and vulnerable custom JAX Pallas Paged Attention serving kernels and configurations from MaxText. During security reviews (such as `b/510375529`), the physical page manager allocator was flagged for potential cross-tenant HBM memory leaks. Following team alignment, it was confirmed that no production multimodal or Reinforcement Learning (RL) serving pipelines use `attention=&#34;paged&#34;`.
+
+To ensure model architecture definitions (Gemma, Llama, Mistral, Qwen, DeepSeek) and attention layer files do not crash on missing imports during this transition, this PR introduces lightweight, zero-overhead transitional compatibility shims in place of the deleted allocator and operator.
+
+### Details &amp; Implementation:
+* **Paged Attention Deletion**: Purged custom Pallas kernels (`paged_attention_kernel_v2.py`) and page manager tests (`page_manager_test.py`). Scrubbed `pagedattn_` variables from `base.yml`, `types.py`, and config validators inside `pyconfig_deprecated.py`. Scrubbed page allocators and layout bindings inside `maxengine.py`.
+* **Transitional Compatibility Shims**: Created dummy shims for `src/maxtext/inference/page_manager.py` (`PageState`, `PageManager`) and `src/maxtext/inference/paged_attention.py` (`PagedAttentionOp`) to allow all model layers to compile successfully with zero code mutations.
+
+# Tests
+
+CI integration tests
+
+# Checklist
+
+Before submitting this PR, please make sure (put X in square brackets):
+- [X] I have performed a self-review of my code. For an optional AI review, add the `gemini-review` label.
+- [X] I have necessary comments in my code, particularly in hard-to-understand areas.
+- [X] I have run end-to-end tests tests and provided workload links above if applicable.
+- [X] I have made or will make corresponding changes to the doc if needed, including adding new documentation pages to the relevant Table of Contents (toctree directive) as explained in [our documentation](https://maxtext.readthedocs.io/en/latest/development.html#adding-new-documentation-files).
+
+Copybara import of the project:
+
+--
+4c9c3b26f45f88816058dfd1e72b568ef371eb2e by Jetski &lt;jetski@google.com&gt;:
+
+Fix MaxEngine chunked prefill JAX dynamic shape trace alignment, serving batch capacity mismatch, and purge obsolete paged attention serving kernels
+
+Merging this change closes #3948
+
+COPYBARA_INTEGRATE_REVIEW=https://github.com/AI-Hypercomputer/maxtext/pull/3948 from AI-Hypercomputer:fix-oom-aot-clean 4c9c3b26f45f88816058dfd1e72b568ef371eb2e
+PiperOrigin-RevId: 922761322
+
+- Fix MoE throughput regression: restore expert sharding + stack remat names
+
+Two independent bugs cause a 2.6x throughput regression for MoE training
+on configs using capacity_factor &gt; 0 with expert-parallel sharding as
+the primary axis (e.g., single-node GPU, ici_expert_parallelism=-1).
+
+Bug 1: activation_batch_moe in base.yml omits &#39;expert&#39;, causing MoE
+activations to become unsharded when expert is the only active mesh axis.
+
+Bug 2: checkpoint annotations renamed from mlpwi_* to moe_mlpwi_*, but
+minimal_policy() still matches mlpwi_*, silently disabling MoE remat.
+
+Fix: Add &#39;expert&#39; to activation_batch_moe, and stack both checkpoint
+names so minimal_flash matches the inner mlpwi_* while preserving
+moe_mlpwi_* for custom remat policies.
+
+Benchmarked on MI325X (8 GPU): 120 -&gt; 360 TFLOP/s (3x recovery).
+
+Fixes regressions from PRs #3473, #3606 (sharding) and #3414 (remat).
+EOF
+
+- checkpoint_conversion: import GCS via gcloud_stub for decoupled mode
+The top-level `from google.cloud.storage import Client, transfer_manager`
+in checkpoint_conversion/utils/utils.py broke pytest collection for
+the ROCm decoupled tests (DECOUPLE_GCLOUD=TRUE), since the package
+isn&#39;t installed in that environment.
+- gcloud_stub.gcs_storage(): also import and attach the
+  transfer_manager submodule (it isn&#39;t auto-imported by
+  `from google.cloud import storage`); extend _gcs_stubs() with a
+  no-op transfer_manager stub.
+- checkpoint_conversion/utils/utils.py: drop the direct google.cloud
+  import and bind Client/transfer_manager via gcs_storage(), matching
+  the existing pattern in src/maxtext/utils/gcs_utils.py.
+
+(cherry picked from commit 698624b35843a728f49c6bc20e50f53a1b2839d4)
+
+- Merge pull request #3923 from AI-Hypercomputer:igorts/clean_up_yml_files
+
+PiperOrigin-RevId: 922538927
+
+- Merge pull request #4001 from AI-Hypercomputer:decoupled-tokenizer-skips
+
+PiperOrigin-RevId: 922538080
+
+- Merge pull request #3929 from AI-Hypercomputer:feat/checkpoint-linen-to-nnx-adapter
+
+PiperOrigin-RevId: 922524134
+
+- Skip GCS-dependent tokenizer unit tests under decoupled offline mode to eliminate 5 collection errors
+
+- Clean up YAML files: lowercase booleans, trailing whitespace, and yamllint integration
+
+- Merge pull request #3996 from AI-Hypercomputer:hengtaoguo-rename
+
+PiperOrigin-RevId: 922427130
+
+- Merge pull request #3980 from AI-Hypercomputer:decoupled-test-fixes
+
+PiperOrigin-RevId: 922414841
+
+- Rename to train_sft_native.py
+
+- feat: Fix decoupled and GPU integration test failures on TPU7x
+
+This squashed commit consolidates all fixes to make the MaxText offline/decoupled
+test suite and GPU integration tests run successfully in the CI:
+
+- Fix incorrect imports (maxtext.src.maxtext and maxtext.tests) in unit and integration tests.
+- Fix Google3 import-error in gather_reduce_sc_test.py by using a runtime JAX device platform check instead of importing tests.conftest.
+- Refactor static skips using jax.device_count() (decorators) to dynamic, runtime-evaluated skips inside test functions to prevent early JAX/PJRT initialization during PyTest collection.
+- Fix GHA GPU runner NCCL failures:
+  - Dynamically discover pip-installed &#39;nvidia&#39; packages and prepend all &#39;nvidia/*/lib&#39; paths to LD_LIBRARY_PATH to avoid conflicts with incompatible system-level CUDA/NCCL libraries.
+  - Force early JAX GPU initialization in tests/conftest.py (triggered by GHA-specific markers) to prevent CUDA context corruption caused by TensorFlow/PyTorch importing early during collection.
+- Clean up all temporary debug prints and enable/disable verbose logs.
+- Add comprehensive in-line comments explaining the rationale for skips and CUDA context workarounds.
+
+TAG=agy
+
+- NNX: save checkpoints in the Linen on-disk layout (interchangeable with Linen)
+
+pure_nnx runs now write the exact Linen checkpoint layout, so Linen and NNX
+checkpoints are interchangeable across all load paths (default auto-resume,
+load_parameters_path, load_full_state_path) in both directions. The format
+conversion lives on TrainStateNNX (to_linen_checkpoint_dict /
+from_linen_checkpoint_dict): top-level params/step/opt_state, the params
+collection wrap, the optax chain list-with-None, and step dtype. NNX-only
+rngs/dropout are dropped on save and re-initialized on load, filled under jit
+with out_shardings so it works on multi-host meshes.
+
+Verified byte-identical to a real Linen checkpoint, with all six cross-framework
+load combinations passing on gpt3-52k, gpt3-6b, gemma2-2b, gemma2-9b, llama2-7b,
+and qwen3-8b.
+
+- Merge pull request #3985 from AI-Hypercomputer:doc_change
+
+PiperOrigin-RevId: 922357219
+
+- Merge pull request #3951 from AI-Hypercomputer:aireen/rm_tf_post_train
+
+PiperOrigin-RevId: 922330590
+
+- Remove tf from post training
+
+- fix
+
+- docs: clarify that setting MAXTEXT_CKPT_PATH is required in Option 2
+
+The word &#34;can&#34; made the step sound optional, but the env var is required
+for the training command to succeed. Align phrasing with Option 1.
+
+- Fix device bubbles introduced by PR#3840.
+
+- Merge pull request #3982 from AI-Hypercomputer:fix_docs
+
+PiperOrigin-RevId: 921725349
+
+- Merge pull request #3773 from AI-Hypercomputer:feat/nnx-native-dpo
+
+PiperOrigin-RevId: 921700027
+
+- Clarify the use of Pathways flag for checkpoint conversion.
+
+- Merge pull request #3972 from niting:conversion_perf
+
+PiperOrigin-RevId: 921633048
+
+- NNX: native DPO (TrainStateNNX.reference_model + dpo_loss_fn_nnx)
+
+Implements NNX-native DPO so that the pure_nnx=True training path no
+longer raises NotImplementedError on use_dpo runs. The Linen DPO
+overlay pattern (model.apply(params=..., reference_params=...)) does
+not translate to NNX modules, which carry their parameters internally.
+Instead the policy and reference models are held as separate
+nnx.Module instances on TrainStateNNX, and a new dpo_loss_fn_nnx
+runs both forwards with stop_gradient on the reference logits.
+
+TrainStateNNX:
+- Add optional `reference_model: nnx.Module` field. apply_gradients
+  continues to update only `self.model`, leaving `self.reference_model`
+  bit-identical across steps.
+
+dpo_utils.py:
+- Add dpo_loss_fn_nnx(policy_model, config, data, dropout_rng, params,
+  reference_model, is_train=True). Signature mirrors the Linen
+  dpo_loss_fn so it slots into gradient_accumulation_loss_and_grad&#39;s
+  dispatcher (dropout_rng / params slots are unused for NNX; carried
+  for parity, and reference_model is passed as the single
+  extra_dpo_args entry). With nnx.value_and_grad(..., argnums=0) over
+  the policy, no gradient flows to the reference model&#39;s nnx.Param
+  leaves; the explicit jax.lax.stop_gradient on ref_logits is a
+  belt-and-braces guard.
+- Both dpo_loss_fn (Linen) and dpo_loss_fn_nnx (NNX) now include
+  indexer_loss=0.0 and mtp_loss=0.0 in aux so the
+  gradient_accumulation aux pytree shape matches the non-DPO loss_fn.
+
+train.py:
+- Drop the NotImplementedError in train_step&#39;s NNX branch. When
+  use_dpo, dispatch to dpo_loss_fn_nnx with state.reference_model as
+  extra_dpo_args; otherwise use the regular loss_fn. eval_step gains
+  the same dispatch.
+- diff_wrapper picks _loss_fn / extra_dpo_args from the per-path init
+  block, so both the GA and non-GA NNX paths route DPO identically.
+- Checkpoint-save _split_dpo_state stripping is now Linen-only;
+  TrainStateNNX saves whole (reference_model included) — the step-0
+  reload later overwrites reference_model from the step-0 checkpoint.
+
+train_utils.py:
+- NNX init_state_fn materializes a frozen reference_model alongside
+  the policy when config.use_dpo. Both are constructed by
+  _create_model_partial() with config.init_weights_seed, so they
+  start identical (standard DPO practice) until the step-0 reload.
+- Step-0 checkpoint reload: copy step0_state[&#34;model&#34;] into
+  state[&#34;reference_model&#34;]. Linen path unchanged.
+
+Tests:
+- New tests/unit/dpo_nnx_test.py (7 tests): TrainStateNNX
+  reference_model init/hasattr semantics; apply_gradients leaves
+  reference bit-identical; aux key set; identical policy/reference
+  yields loss=log(2) and reward_accuracy=0.0 (strict &gt; on equal
+  logratios); dropout_rng/params slots are signature-compat only;
+  nnx.value_and_grad(argnums=0) over the policy yields finite grads
+  on policy params only.
+- train_nnx_test.py: drop the two stale negative tests
+  (vocab_tiling_raises_not_implemented,
+  train_step_dpo_raises_for_nnx) — both features are now real.
+
+Stats: 4 source files + 2 test files, +199/-22 source lines. Linen
+DPO path behaviorally unchanged (only adds two harmless aux-dict
+keys); NNX non-DPO path unchanged (all changes gated on
+config.use_dpo).
+
+- Merge pull request #3977 from CIeNET-International:maxtext/user/dora/v5e_config_oom
+
+PiperOrigin-RevId: 921524627
+
+- change model config to fix OOM</div>
+</div>
+
+<a href="../project/AI-Hypercomputer_maxtext.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

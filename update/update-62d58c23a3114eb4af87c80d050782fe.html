@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (7 commits) - FluidInference/FluidAudio - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (7 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a> /
+    Updates in main (7 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-30 02:09 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/FluidInference/FluidAudio/commits/main" target="_blank">https://github.com/FluidInference/FluidAudio/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>The update adds Parleq, a privacy-first macOS dictation app, to the showcase and enhances diarization by exposing per-chunk speaker embeddings for improved post-processing. ASR accuracy is significantly improved with a fix for &#34;English drift&#34; in French recordings, expanded language support (e.g., Greek), and timestamp integration for streaming diarized transcripts. Furthermore, token timing emissions are corrected to refine alignment accuracy, a change validated by a new benchmarking tool.
+
+---
+
+Обновление добавляет в демонстрационный раздел Parleq, новое конфиденциальное приложение для диктовки на macOS, и улучшает диаризацию за счет предоставления встраиваний динамиков для каждого фрагмента для более точной постобработки. Точность ASR значительно повышена благодаря исправлению «английского дрейфа» во французских записях, расширенной языковой поддержке (например, греческого) и интеграции временных меток для потоковой транскрипции с диаризацией. Кроме того, скорректированы эмиссии временных меток токенов для повышения точности выравнивания, что подтверждено новым инструментом для бенчмаркинга.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Showcase: add Parleq (#639)
+
+Adds **Parleq** to the Showcase, appended in chronological order per the
+contributing note.
+
+[Parleq](https://parleq.app/) is a privacy-first, open-source macOS
+dictation app: press a hotkey, speak, and paste cleaned-up text. It runs
+FluidAudio&#39;s **Parakeet TDT v3** on the Apple Neural Engine with CTC
+vocabulary boosting (audio never leaves the device), plus
+provider-pluggable LLM cleanup.
+
+Logo for the curated logo block whenever convenient:
+- Light: https://parleq.app/logo.svg
+- Dark: https://parleq.app/logo-dark.svg
+
+Thanks for maintaining FluidAudio and the showcase!
+
+- feat(diarizer): expose per-chunk embeddings on DiarizationResult (#633)
+
+### Why is this change needed?
+
+Surfaces the per-chunk speaker embeddings the offline pipeline already
+computes internally (currently only reachable via `--export-embeddings`
+JSON dump in the CLI), so consumers can implement chunk-granularity
+post-processing without re-running the embedding model.
+
+The motivating use case is downstream cluster-purity correction: the
+clustering step occasionally lands a fraction of one speaker&#39;s chunks in
+another speaker&#39;s cluster (mega-cluster contamination on long files,
+bidirectional smearing between similar voices). With per-chunk
+embeddings plus their cluster assignments exposed on
+`DiarizationResult`, downstream code can compute per-cluster centroids
+and migrate chunks whose own-cluster cosine is dominated by an alternate
+centroid — pure NumPy/BLAS-equivalent post-processing, no extra model
+calls.
+
+Validated in production at a downstream consumer across a 58-file
+canonical diarization corpus: +0.225pp aggregate post-LLM SAA, no
+per-corpus regression, ~70–557ms compute on M-series silicon (well under
+1% of total pipeline time vs ASR/snap/LLM stages).
+
+### What changed
+
+- New public `ChunkEmbedding` struct (`Sendable, Codable`) carrying
+`speakerId`, `chunkIndex`, `speakerIndex`, `startTimeSeconds`,
+`endTimeSeconds`, `embedding256`, and `rho128`. Speaker IDs follow the
+same `&#34;S\(cluster + 1)&#34;` convention as `TimedSpeakerSegment.speakerId`
+so chunk embeddings align to segments by string equality. `rho128` is
+non-optional and empty when no PLDA model is loaded, matching the
+internal `TimedEmbedding.rho128` shape.
+- New optional `chunkEmbeddings: [ChunkEmbedding]?` field on
+`DiarizationResult` (defaults to `nil`, populated only when opted in).
+- New `OfflineDiarizerConfig.exposeChunkEmbeddings: Bool` flag (defaults
+to `false`). When enabled, `OfflineDiarizerManager.process(...)` maps
+the internal `[TimedEmbedding] + assignments` to the public
+`[ChunkEmbedding]` array via `buildPublicChunkEmbeddings(...)`.
+- 9 new unit tests covering default values, opt-in behavior, initializer
+round-trip, the cluster-int → `&#34;S\(N)&#34;` mapping, length-mismatch
+handling (returns empty + warns), empty input, and `Codable`
+round-tripping.
+
+### Backwards compatibility &amp; performance
+
+- Fully opt-in. With `exposeChunkEmbeddings = false` (the default), the
+new code path is one boolean check that lands in the `nil` branch — no
+extra allocation, no extra compute, no memory cost.
+- `DiarizationResult.init(...)` adds `chunkEmbeddings:` between
+`speakerDatabase:` and `timings:` with default `nil`. All existing
+callers in this repo use named arguments (`DiarizerManager.swift:220`,
+with one positional-`segments`-only call at `:223`), so no call site
+changes.
+- `OfflineDiarizerConfig.init(...)` adds `exposeChunkEmbeddings:` with
+default `false`. The community/community-1 presets and existing init
+overloads keep their behavior.
+- When opted in: ~1–2 MB per hour of audio for the embedding + PLDA
+payload. Helper is O(n) over already-computed data — no model calls, no
+audio access, ~1 ms even on 90-min files.
+
+### Tests &amp; lint
+
+```
+$ swift test
+Executed 1352 tests, with 24 tests skipped and 0 failures (0 unexpected)
+
+$ swift format lint --recursive --configuration .swift-format Sources/ Tests/
+# (only pre-existing warnings on Fa/Fb in OfflineDiarizerConfig and
+#  Sortformer/CLI files; none introduced by this change)
+```
+
+### Out of scope
+
+The downstream consumer that motivated this API lives outside this repo
+and is not part of this PR.
+
+---
+
+- fix(asr): reduce English drift on French recordings via token blocklist (#630)
+
+Parakeet TDT v3 has no language conditioning token. On spontaneous
+non-English speech, the model falls back to its English training prior
+and produces output that reads like a real-time translation. This is a
+known architectural limitation.
+
+This PR adds a post-processing step in the decoder that partially
+mitigates it for French.
+
+## Mechanism
+
+When the joint model picks a token from an English-exclusive blocklist
+(48 space-prefixed SentencePiece tokens: `&#39; the&#39;`, `&#39; and&#39;`, `&#39; with&#39;`,
+etc.), `applyEnglishBlocklist` scans the top-64 logits for the
+highest-scoring non-blocked Latin-script alternative and substitutes it.
+If nothing suitable is in top-64, the original prediction stands.
+
+The substituted score is fed back into the transducer&#39;s LSTM state,
+which compounds: each forced French token nudges the following frames
+away from English.
+
+Runs in O(64) per non-blank token. No additional model call, no latency
+impact.
+
+## Benchmark
+
+French recordings, drift = % sentences flagged by English function-word
+scan or langdetect=EN:
+
+| Recording | Before | After |
+|---|---|---|
+| Children&#39;s weather segment | 0% | 0% |
+| Archival 1912 | 2.9% | 2.7% |
+| Weightlifting documentary | 7.1% | 0% |
+| French slang documentary | 18.2% | 3.7% |
+| Picard dialect documentary | 16.7% | 0% |
+| Spontaneous interview (57 min) | 31.3% | 13.5% |
+
+The remaining 13.5% on the interview is architectural: sustained English
+passages where no French candidate appeared in top-64 at all. The
+blocklist cannot help there.
+
+## Test recordings
+
+All INA recordings are publicly available on YouTube:
+
+- [Argot et langage populaire
+(1981)](https://www.youtube.com/watch?v=zem3PVMsy8g)
+- [Phonographe de
+1912](https://www.youtube.com/watch?v=amPtXEaXQO0&amp;t=12s)
+- [Le parler picard
+(1982)](https://www.youtube.com/watch?v=W17uYuQA9Mc&amp;t=8s)
+- [Meteo pour les enfants
+(1980)](https://www.youtube.com/watch?v=sMSRyg172C0&amp;t=8s)
+- [Halterophilie
+(1975)](https://www.youtube.com/watch?v=E4xalDom8VY&amp;t=2s)
+
+The sixth recording (57-minute spontaneous interview) is private.
+
+## Scope
+
+This patch is French/English specific. The 48-token blocklist was
+derived empirically from the Parakeet TDT v3 SentencePiece vocabulary
+for French. The mechanism generalises to other language pairs but
+building equivalent blocklists requires the same vocabulary analysis
+and, critically, someone who can actually evaluate the output quality. I
+only speak French, so I only benchmarked French. I&#39;m not going to claim
+results for languages I can&#39;t verify.
+
+Flagging this as a starting point and leaving the generalisation to
+contributors who know the other languages and have audio to test
+against.
+
+## Context
+
+I&#39;m not a professional developer. I found this problem while building a
+personal project on top of FluidAudio and did the diagnostic work:
+instrumented the decoder to log English token wins, measured that 84% of
+them had a French alternative in the top-64, ran before/after benchmarks
+across six recordings.
+
+- Add timestamp support to EoU Streaming (#629)
+
+### Why is this change needed?
+
+Currently, FluidAudio supports both diarization and transcription, but
+there is no easy way to fuse them to create a diarized transcript when
+streaming. This PR adds timestamps to the StreamingEouAsrManager so that
+tokens can be matched with diarization segments.
+
+---------
+
+Co-authored-by: Copilot Autofix powered by AI &lt;175728472+Copilot@users.noreply.github.com&gt;
+
+- fix(cli): expose missing Parakeet langs, add Greek script support (#637)
+
+## Summary
+
+The supported languages list in `TokenLanguageFilter` omits several
+languages currently supported by
+[Parakeet-TDT-0.6B-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3):
+- Danish (da)
+- Dutch (nl)
+- Estonian (et)
+- Finnish (fi)
+- Greek (el)
+- Hungarian (hu)
+- Latvian (lv)
+- Lithuanian (lt)
+- Maltese (mt)
+- Swedish (sv)
+
+This pull request proposes to incorporate these languages so that they
+are available to users of the FluidAudio SDK.
+
+### Reproduction
+
+Using the first 90 seconds of an [Greek language learning
+video](https://www.youtube.com/watch?v=gtmBaIKw5P4) I found online, the
+previous behavior:
+
+```
+$ fluidaudiocli transcribe greek-90s.wav --language el
+&lt;unk&gt;7&lt;unk&gt;, Easy Greek. &lt;unk&gt;00&lt;unk&gt;, &lt;unk&gt;&lt;unk&gt;2&lt;unk&gt; &lt;unk&gt; &lt;unk&gt;. &lt;unk&gt; &lt;unk&gt; &lt;unk&gt;. &lt;unk&gt; &lt;unk&gt;3&lt;unk&gt;00. . Aozaj, bo&#39;ă. 100 000. 1, 5, 0, 6. O cožmo. Opa, 30. Oit 1. Pulše, 50. 10. Tit&#39;a pärast i 6000. 800 000. &lt;unk&gt; 8.500, 100 000. ...5... ... 34 000. &lt;unk&gt; 0 &lt;unk&gt; 5. 50, o &lt;unk&gt;-vą po&lt;unk&gt; 2? ...Ti&#39;6 &lt;unk&gt; 0.000. ...000, 1000.000, 100%. ...0or&#39;0, &lt;unk&gt;...0&lt;unk&gt;.,5 4, 1 2.0. &lt;unk&gt;Meta&lt;unk&gt;, &lt;unk&gt;4&lt;unk&gt;, &lt;unk&gt;000&lt;unk&gt;, &lt;unk&gt;Ca&lt;unk&gt;, &lt;unk&gt;2.
+```
+
+After additions to code:
+
+```
+$ fluidaudiocli transcribe greek-90s.wav --language el
+Πασα, φίλη του Εσυγ. Είμαι η Έλληνα και είμαι μπροστά από το λευκό πύργο. Σήμερα θα μιλήσουμε για τη Θεσσαλονίκη. Πάμε. Από που είστε. Κασαλληνο. Ωραία, τι σα αρέσει περισσότερο στη Θεσσαλονίκη. Ο κόσμο. Ο παλιό κόσμο τη Θεσσαλονίκη. Ο ήταν ένα κόσμο που σε βότανε που αγαπούσε και τον αγαπούσαν. Πού είσαι, αποκαζάνη. Ωραία. Τι σε αρέσει περισσότερο στη Θεσσαλονίκη. Ότι είναι πολύ ομορφιό και ότι έχει πολλού φοιτητέ και έχει και την παραλία δίπλα. Απ&#39; την Κύπρο. Τι σα αρέσει περισσότερο στη Θεσσαλονίκη. Η ζωή εδώ πέρα. Η κίνηση, ο κόσμο. Από πού είστε. Εγώ είμαι από Αλβανία. Τι σα αρέσει περισσότερο στη Θεσσαλονίκη. Στη Θεσσαλονίκη περισσότερο οι άνθρωποι είναι όλοι ωραία και φελξουν η μέλη. Μα φελθωθεί και πάρα πολλά αλλά γιατί η Θεσσαλονίκη μα είναι μια να μην μπορεί πιο ομορφι, θα είναι εγγυαστικό πόλη στην Ελλάδα. Αλλά μέσα στι πιο όμορφε πόλει είναι η Θεσσαλονίκη, η Καβάλα και τον Αύγουο.
+```
+
+Also tested with Dutch language source with much longer clip,
+transcription was successful.
+
+### Edits
+
+Parakeet TDT v3 supports Dutch, Danish, Swedish, Finnish, Greek,
+Hungarian, Estonian, Latvian, Lithuanian, and Maltese but these were
+absent from the Language enum in TokenLanguageFilter.swift, causing the
+CLI to reject them with &#39;Unknown language&#39; although the underlying model
+handles them correctly.
+
+Modified
+`FluidAudio/Sources/FluidAudio/Shared/TokenLanguageFilter.swift` to add
+missing languages supported by current version of Parakeet, as well as
+Greek script (U+0370-U+03FF, U+1F00-U+1FFF) case.
+
+---------
+
+- docs: remove stray leading &#34;d&#34; in README (#636)
+
+- Fix/word boost improvements (#634)
+
+### Why is this change needed?
+  
+This PR is a series of measurement-driven improvements to the CTC
+vocabulary rescoring pipeline plus a build cleanup. Each change was
+validated against earnings22 (771 files, ~12K vocab terms) and a separat
+FDA / FDA-extended drug benchmarks.
+
+The baseline earnings22 benchmarks at: TP 1133 / FP 6 / F 94.7 and with
+the PR, it&#39;s TP 1136 / FP 6 / F 94.8 It&#39;s a marginal improvement.
+
+The +1 frame correction is correct, not a tuning hack. It removes a
+known systematic bias in RNN-T decoders. The benchmark gain is small
+because earnings22 is fairly forgiving — the bias mattered most on a few
+edge cases. But every downstream consumer of TDT timestamps inherits the
+right numbers from now on: subtitle alignment, diarization-ASR
+alignment, streaming finalization, any future forced-alignment work.
+That&#39;s hard to capture in earnings22 numbers but real.
+
+**TDT emission-delay correction and tighter rescoring margin**
+
+Calibration-driven correctness fix.
+
+Measured TDT-emitted token timestamps vs CTC log-prob argmax peaks
+across 8 667 word samples on full earnings22 (both v2 and v3). Median
+offset is consistently +1 encoder frame (~80 ms): TDT emits roughly one
+frame after the acoustic event, which biases the rescorer&#39;s CTC search
+window upstream of where the keyword actually lives.
+
+Two changes:
+1. Subtract one frame from emitted timestamps in createTokenTimings.
+Bounded with max(0, ...). Override via TDT_EMISSION_DELAY_FRAMES env var
+for sweep experiments.
+2. Tighten defaultMarginSeconds from 0.5 → 0.10. Margin sweep showed
+identical TP/FP/F-score from 0.5 down to 0.10; first regression at 0.05
+(-8 TP earnings22). 0.10 covers the post-correction p10..p90 of the
+offset distribution (~±5 frames).
+
+**emission-delay-benchmark for measuring TDT vs CTC offsets**
+
+New CLI subcommand that compares TDT-emitted timestamps against CTC
+argmax peaks on earnings22 (or any compatible dataset). Per-word
+constrained CTC DP within a configurable window; outputs aggregate stats
+(mean / median / p10..p90) plus per-sample JSON with TDT confidence and
+word duration for downstream analysis.
+
+This is the calibration tool used to derive the +1-frame correction. The
+per-sample dump also drove the post-hoc analysis that confirmed adaptive
+correction has no useful headroom and that confidence isn&#39;t predictive
+of offset.
+
+Flags:
+  - --tdt-version (v2/v3/110m)
+  - --search-half-width, --max-offset-seconds
+  - --min-ctc-score, --min-word-chars
+  - --max-files
+
+Combine with TDT_EMISSION_DELAY_FRAMES=0 to measure raw uncorrected
+offsets.
+  
+The emission-delay-benchmark tool is the real durable artifact. When
+future model updates change the encoder stride or the emission delay,
+somebody will need to remeasure. That tool means they don&#39;t have to
+rebuild it.
+
+We measured an asymmetry that&#39;s documented in the RNN-T literature but
+hadn&#39;t been quantified for our specific models:
+TDT decoders tend to emit a token a few frames after the audio event
+that triggered it. The rescorer was building its
+CTC search window from TDT timestamps, so it was systematically looking
+upstream of where the acoustic evidence
+  actually was.
+
+The tool answered three questions:
+
+1. Is the bias real? Yes. Median offsetStart = +1 frame (~80 ms) on full
+earnings22, consistent across v2 and v3. 8 667 word samples.
+2. Is a static correction the right fix, or do we need a per-token
+model? Static is fine — bucketing the per-sample dump showed median is
++1 across the bulk duration range; confidence is uncorrelated with
+offset.
+3. What&#39;s the residual variance? ~3.5 frame stdev. That&#39;s noise we can&#39;t
+fix with a global shift, which informed the new tighter marginSeconds =
+0.10 — wide enough to absorb the variance, narrow enough to avoid
+pulling in adjacent-word distractors.
+
+Without the tool, the +1 frame correction would have been a guess. With
+it, the correction it&#39;s a measurement.
+
+---------
+
+Co-authored-by: Sachin Desai &lt;sdesai@salesforce.com&gt;</div>
+</div>
+
+<a href="../project/FluidInference_FluidAudio.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

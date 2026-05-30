@@ -1,0 +1,2544 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (100 commits) - infiniflow/ragflow - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (100 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/infiniflow_ragflow.html">infiniflow/ragflow</a> /
+    Updates in main (100 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/infiniflow_ragflow.html">infiniflow/ragflow</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-29 13:52 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/infiniflow/ragflow/commits/main" target="_blank">https://github.com/infiniflow/ragflow/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>RAGFlow significantly expanded its data source integration by adding native connectors for Microsoft Outlook, OneDrive, Teams, SharePoint, and Slack, enabling comprehensive indexing of Microsoft 365 and communication platforms. Concurrently, substantial progress was made in migrating RAGFlow&#39;s backend to Go, implementing numerous API endpoints, a new ingestion server, and integrating a wide array of new and refactored AI model providers (e.g., GiteeAI, HuaweiCloud, AWS Bedrock, Ollama) with enhanced validation. The update also delivered critical security fixes, including addressing a JWT algorithm-confusion vulnerability and a local file inclusion, alongside numerous bug fixes across the OpenSearch backend, API functionality, and core system stability.
+
+---
+
+RAGFlow значительно расширил интеграцию источников данных, добавив нативные коннекторы для Microsoft Outlook, OneDrive, Teams, SharePoint и Slack, что позволяет всесторонне индексировать данные из Microsoft 365 и коммуникационных платформ. Одновременно был достигнут значительный прогресс в переносе бэкенда RAGFlow на Go, включая реализацию многочисленных API-интерфейсов, нового сервера ингестии данных и интеграцию множества новых и переработанных провайдеров ИИ-моделей (например, GiteeAI, HuaweiCloud, AWS Bedrock, Ollama) с улучшенной валидацией. Обновление также содержит критические исправления безопасности, в том числе устранение уязвимостей, связанных с путаницей алгоритмов JWT и включением локальных файлов, а также многочисленные исправления ошибок, затрагивающих бэкенд OpenSearch, функциональность API и общую стабильность системы.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- feat(connector): implement Outlook data source connector (issue #15332) (#15333)
+
+### What problem does this PR solve?
+
+Closes #15332.
+
+RAGFlow can index Gmail and generic IMAP mailboxes but had no native
+connector for Outlook / Microsoft 365 mail. Organisations on Microsoft
+365 had no way to bring mailbox content into a knowledge base through
+Microsoft Graph.
+
+This PR adds a net-new Outlook data source that:
+
+- Authenticates against Microsoft Graph with the same MSAL
+client-credentials flow already used by the SharePoint and Teams
+  connectors (no new auth primitives).
+- Pages over `/users/{id}/mailFolders/{folder}/messages/delta` per
+mailbox and persists `@odata.deltaLink` values in
+`OutlookCheckpoint.delta_links`, so incremental syncs only fetch changed
+messages.
+- Supports two scoping modes:
+- **Tenant-wide** (default): enumerates every user in the tenant via
+`/users` and syncs each mailbox. Requires `User.Read.All`.
+- **Targeted**: when `user_ids` is provided (comma-separated UPNs or
+object IDs), only those mailboxes are synced. `User.Read.All` is not
+needed in this mode.
+- Lets the caller pick the mail folder (`inbox`, `sentitems`, `archive`,
+...). Defaults to `inbox`.
+- Maps each message to a `Document` shaped after the Gmail connector:
+one `TextSection` carrying `From/To/Cc/Subject` headers + body, with
+HTML bodies stripped to text inline (no extra dependency).
+- Surfaces typed errors on the validation probe:
+401 → `ConnectorMissingCredentialError`, 403 →
+`InsufficientPermissionsError` (with `Mail.Read` / `User.Read.All`
+hint), 404 on a configured mailbox → `ConnectorValidationError`, 5xx →
+`UnexpectedValidationError`.
+- Skips messages flagged `@removed` by the delta semantics and messages
+whose `receivedDateTime` is older than `poll_range_start`.
+
+#### Files
+
+| File | Change |
+|------|--------|
+| `common/data_source/outlook_connector.py` | **New** —
+`OutlookConnector` (`CheckpointedConnectorWithPermSync` +
+`SlimConnectorWithPermSync`) + `OutlookCheckpoint` + tiny `_strip_html`
+helper. |
+| `common/data_source/config.py` | `DocumentSource.OUTLOOK = &#34;outlook&#34;`.
+|
+| `common/constants.py` | `FileSource.OUTLOOK = &#34;outlook&#34;`. |
+| `common/data_source/__init__.py` | Export `OutlookConnector`. |
+| `rag/svr/sync_data_source.py` | `Outlook(SyncBase)` with `batch_size`
+normalisation, CSV/list parsing of `user_ids`; registered in
+`func_factory`. |
+| `web/src/pages/user-setting/data-source/constant/index.tsx` |
+`DataSourceKey.OUTLOOK`, visibility map (`syncDeletedFiles: true`), info
+entry, form fields (tenant_id, client_id, client_secret, folder,
+user_ids, batch_size), default values. |
+| `web/src/locales/en.ts`, `web/src/locales/zh.ts` |
+`outlookDescription` + 5 tooltip keys (EN + ZH). |
+| `test/unit_test/data_source/test_outlook_connector_unit.py` | **New**
+— 19 unit tests (`p1`/`p2`/`p3`) covering auth, validation (tenant-wide
+vs specific user vs error paths), checkpoint helpers, user enumeration
+pagination, message filtering, HTML body stripping. |
+
+#### Required Azure AD permissions
+
+- `Mail.Read` (Application, admin-granted) — always.
+- `User.Read.All` (Application, admin-granted) — only when `user_ids` is
+left blank so the connector can enumerate mailboxes.
+
+#### Out of scope
+
+- **Attachment indexing.** The current connector emits message body +
+headers; binary attachments are flagged via `metadata.has_attachments`
+but not pulled. Adding attachment hydration is straightforward but
+scoped out per the issue&#39;s &#34;decide whether attachments are indexed in
+the first version&#34; note.
+- **Delegated (per-user) OAuth.** The connector uses app-only
+credentials, consistent with the SharePoint / Teams precedent in this
+codebase.
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+
+- fix(opensearch): repair document-metadata path broken by #14577 (#15393)
+
+### What problem does this PR solve?
+
+Document metadata is completely broken on the OpenSearch backend
+(`DOC_ENGINE=opensearch`). Both failures were introduced by #14577,
+which added
+a doc-metadata dispatch surface but only validated it against
+Elasticsearch.
+
+**1. Index creation rejected (`mapper_parsing_exception`).**
+`OSConnection.create_doc_meta_idx` feeds `conf/doc_meta_es_mapping.json`
+verbatim to OpenSearch. That file declares a top-level `&#34;dynamic&#34;:
+&#34;runtime&#34;`.
+Runtime fields are Elasticsearch-only; OpenSearch cannot parse the
+value:
+
+mapper_parsing_exception: Could not convert [dynamic.dynamic] to boolean
+(400)
+
+**2. `search()` signature mismatch (`TypeError`).**
+`DocMetadataService` (added by #14577) calls `docStoreConn.search(...)`
+with
+snake_case kwargs (`select_fields=`, `index_names=`,
+`knowledgebase_ids=`, …),
+matching `ESConnection.search`. But `OSConnection.search` still uses
+camelCase
+parameters (`selectFields`, `indexNames`, `knowledgebaseIds`, …):
+
+TypeError: OSConnection.search() got an unexpected keyword argument
+&#39;select_fields&#39;
+
+The UI then shows &#34;0 fields&#34; for every document on OpenSearch.
+
+### Fix
+
+1. In `OSConnection.create_doc_meta_idx`, normalize a top-level
+`&#34;dynamic&#34;: &#34;runtime&#34;` to `True` **for the OpenSearch request only**.
+The
+shared mapping file is left untouched, so the Elasticsearch backend
+keeps its
+runtime-field behavior. Dynamic field discovery is preserved on
+OpenSearch.
+2. Rename the `OSConnection.search()` parameters (and their in-method
+local
+uses) from camelCase to snake_case so they match `ESConnection.search()`
+and
+the `DocMetadataService` call sites. The change is confined to
+`search()`;
+`get/insert/update/delete` keep their existing positional signatures
+(they
+   are called positionally from `rag/nlp/search.py`).
+
+### Type of change
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+### Affected backends
+OpenSearch only. Elasticsearch, Infinity and OceanBase are untouched.
+
+### How to reproduce
+1. `DOC_ENGINE=opensearch`, restart the stack.
+2. Upload/parse a document, then open the dataset&#39;s document list / set
+metadata.
+- Before: index creation 400s (`Could not convert [dynamic.dynamic]`),
+and/or
+     `TypeError ... &#39;select_fields&#39;`; document metadata shows 0 fields.
+
+### Risk &amp; backward compatibility
+- ES default deployment: no change. `doc_meta_es_mapping.json` is not
+modified,
+  so ES still receives `&#34;dynamic&#34;: &#34;runtime&#34;`.
+- `search()` rename is internal; the only kwarg caller
+(`DocMetadataService`)
+  already uses the snake_case names this PR aligns to.
+
+### Test plan
+- [ ] `DOC_ENGINE=opensearch`: per-tenant `ragflow_doc_meta_*` index is
+created
+(no `mapper_parsing_exception`); document metadata reads/writes work.
+- [ ] `DOC_ENGINE=elasticsearch` regression: doc-meta index still
+created with
+      runtime mapping; metadata unchanged.
+
+- fix(opensearch): implement get_scores for KNN second-pass scoring (#15390)
+
+### What problem does this PR solve?
+
+On the OpenSearch backend (`DOC_ENGINE=opensearch`), every retrieval
+that
+performs the KNN second-pass scoring crashes with:
+
+    AttributeError: &#39;OSConnection&#39; object has no attribute &#39;get_scores&#39;
+
+**Root cause.** #14970 (&#34;Refactor: Drop the vector fetch for ES&#34;) added
+a
+`get_scores()` helper to `ESConnectionBase`
+(`common/doc_store/es_conn_base.py`)
+and introduced `Dealer._knn_scores()` in `rag/nlp/search.py`, which
+calls
+`self.dataStore.get_scores(res)`. `search.py` routes Infinity and
+OceanBase to
+their own similarity paths via `DOC_ENGINE_INFINITY` /
+`DOC_ENGINE_OCEANBASE`,
+but OpenSearch sets neither flag, so it falls into the Elasticsearch
+branch and
+calls `get_scores`. `OSConnection` (which subclasses
+`DocStoreConnection`
+directly, not `ESConnectionBase`) never received that method, so any
+vector-search hit triggers the crash. It reproduces with any normal
+embedding
+(e.g. 1024-dim mistral-embed) as soon as a KNN query returns hits.
+
+### Fix
+
+Add `OSConnection.get_scores()`, mirroring
+`ESConnectionBase.get_scores()`.
+OpenSearch hit headers expose `_score` exactly like Elasticsearch (the
+existing
+`OSConnection.__getSource` already reads `d[&#34;_score&#34;]`), so the
+implementation
+is identical.
+
+Scope note: Infinity and OceanBase deliberately do not use `get_scores`
+(#14970 routes them elsewhere), so this fix is intentionally limited to
+the
+OpenSearch backend, which is the only one reaching the ES KNN-score
+path.
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+### Affected backends
+OpenSearch only. Elasticsearch already implements `get_scores`; Infinity
+/
+OceanBase are routed away from it.
+
+### How to reproduce
+1. `DOC_ENGINE=opensearch` (docker `.env`), restart the stack.
+2. Create a knowledge base with any dense embedding model and parse a
+document.
+3. Run a retrieval / chat over that KB -&gt; 500 with the AttributeError
+above.
+
+### Risk &amp; backward compatibility
+None for the default Elasticsearch deployment -- the change only adds a
+method
+to `OSConnection`. No default values or ES/Infinity/OceanBase behavior
+change.
+
+### Test plan
+- [ ] With `DOC_ENGINE=opensearch`, retrieval over a KB returns scored
+chunks
+      (no AttributeError).
+- [ ] `DOC_ENGINE=elasticsearch` regression: retrieval unchanged.
+- [ ] Empty-result path: `_knn_scores` early-returns `{}` (guarded),
+get_scores
+      handles an empty `hits` list gracefully.
+
+- fix(api): move dify retrieval health check to /dify/retrieval/health (#15311)
+
+### Related issues
+Closes #15310
+
+### What problem does this PR solve?
+
+`/api/v1/dify/retrieval` had duplicate `GET` route registrations in
+`dify_retrieval_api.py`: one for authenticated retrieval and another for
+unauthenticated health checks. Sharing the same path and method created
+ambiguous routing behavior and an unstable API contract for Dify
+external knowledge base integration.
+
+This PR separates concerns by moving the health-check endpoint to `GET
+/api/v1/dify/retrieval/health`, while keeping retrieval on
+`/api/v1/dify/retrieval`. This makes auth behavior deterministic and
+prevents route shadowing/conflicts.
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+- fix: upgrade crawl4ai to 0.8.0 (CVE-2026-26217) (#15415)
+
+## Summary
+Upgrade crawl4ai from 0.7.6 to 0.8.0 to fix CVE-2026-26217.
+
+## Vulnerability
+| Field | Value |
+|-------|-------|
+| **ID** | CVE-2026-26217 |
+| **Severity** | CRITICAL |
+| **Scanner** | trivy |
+| **Rule** | `CVE-2026-26217` |
+| **File** | `uv.lock` |
+| **Assessment** | Likely exploitable |
+
+**Description**: Crawl4AI Has Local File Inclusion in Docker API via
+file:// URLs
+
+## Evidence
+
+**Scanner confirmation**: trivy rule `CVE-2026-26217` flagged this
+pattern.
+
+**Production code**: This file is in the production codebase, not
+test-only code.
+
+## Threat Model Context
+
+This is a web service - vulnerabilities in request handlers are directly
+exploitable by remote attackers.
+
+## Changes
+- `pyproject.toml`
+- `uv.lock`
+
+## Verification
+- [x] Build passes
+- [x] Scanner re-scan confirms fix
+- [x] LLM code review passed
+
+---
+*This change addresses a pattern flagged by static analysis. The code
+path handles user-influenced input and the fix reduces the attack
+surface against both manual and automated exploitation.*
+
+---
+*Automated security fix by [OrbisAI Security](https://orbisappsec.com)*
+
+- File addition .rooignore (#15414)
+
+This PR introduces a `.rooignore` file to the root of the repository to
+optimize how AI coding assistants (like Roo) interact with the RAGFlow
+codebase.
+
+Currently, when AI agents index the workspace, they can waste tokens and
+processing time reading through generated files, caches, large
+dependency artifacts, and runtime logs. This `.rooignore` file provides
+a standard configuration to exclude these irrelevant directories and
+files (such as `.venv/`, `node_modules/`, `__pycache__/`, logs, and
+large binaries). This significantly reduces indexing noise, prevents
+accidental reads of sensitive or bulky local data, and ensures AI coding
+agents remain focused strictly on relevant source code.
+
+### Type of change
+
+- [x] Other (please describe): Developer Experience (DX) / AI Tooling
+configuration
+
+- fix: backfill missing api token beta values (#15405)
+
+### What problem does this PR solve?
+
+This PR updates `SystemService.ListAPITokens` to lazily backfill missing
+`beta` values for API tokens, matching the Python behavior of
+`/api/v1/system/tokens`.
+
+### Type of change
+  
+  - When an API token has an empty `beta`, generate a new one.
+  - Persist the generated `beta` back to the `api_token` table.
+  - Keep the handler/routing unchanged.
+- `GET /api/v1/system/tokens` now returns tokens with `beta` filled in
+for older records that were missing it.
+  - This aligns Go behavior with the Python implementation.
+
+- fix(go-models): harden Hunyuan embedding validation (#15249)
+
+## Summary
+- Validate Hunyuan embedding model name and API key before building
+requests.
+- Reuse region-aware base URL validation for embedding requests.
+- Replace the stale unsupported Embed test with happy-path and
+validation coverage.
+
+## What changed
+- Added early Hunyuan Embed validation for missing model names and API
+keys.
+- Routed Embed through the same base URL region guard used by the other
+Hunyuan methods.
+- Updated Hunyuan tests to configure the embedding suffix and cover
+Embed success plus invalid inputs.
+
+## Why
+Hunyuan Embed is implemented, but the existing test still expected it to
+be unsupported and could panic before returning a normal validation
+error. This keeps the implemented embedding path aligned with the
+current driver behavior and prevents nil input panics.
+
+Closes #15087
+Refs #14736
+
+- Fix: JWT algorithm-confusion in OIDC ID token verification (#15181)
+
+### What problem does this PR solve?
+
+Closes #15180.
+
+`OIDCClient.parse_id_token` in `api/apps/auth/oidc.py` read the JWT
+signing
+algorithm from the **unverified** JWT header and passed it through to
+`jwt.decode(..., algorithms=[alg], ...)` as the trust anchor. This is
+the
+textbook JWT algorithm-confusion vulnerability (CWE-345 / CWE-347). Any
+unauthenticated client capable of reaching the OIDC callback could take
+over
+an arbitrary account on any RAGFlow deployment with OIDC login enabled:
+
+1. **`alg: &#34;none&#34;`** — present a JWT with `{&#34;alg&#34;: &#34;none&#34;}` and no
+   signature segment → `jwt.decode(..., algorithms=[&#34;none&#34;])` → PyJWT&#39;s
+   `NoneAlgorithm` accepts the token without verification → login as any
+   user.
+2. **RSA / HMAC confusion** — fetch the public RSA key from the
+provider&#39;s
+   JWKS (it&#39;s public), forge a JWT with `{&#34;alg&#34;: &#34;HS256&#34;}` HMAC-signed
+   using the public-key bytes as the secret → `jwt.decode(...,
+   algorithms=[&#34;HS256&#34;], key=public_key)` → verifier accepts → login as
+   any user. (Modern PyJWT independently refuses to use a PEM-formatted
+   key as an HMAC secret, which mitigates this leg for PEM key formats;
+the fix here is the only mitigation for raw / DER / JWK octet keys and
+   for older PyJWT versions.)
+
+### What changed
+
+**`api/apps/auth/oidc.py`:**
+
+- New module constants `_ALLOWED_OIDC_SIGNING_ALGS` (asymmetric-only:
+  `RS*`, `ES*`, `PS*`, `EdDSA` — explicitly excludes `none` and `HS*`)
+  and `_DEFAULT_OIDC_SIGNING_ALGS = (&#34;RS256&#34;,)` (the OIDC Core 1.0 §2
+  spec default).
+- New helper `_resolve_id_token_signing_algs(metadata)` — intersects the
+  provider&#39;s advertised `id_token_signing_alg_values_supported` from
+`/.well-known/openid-configuration` with the safe allowlist; falls back
+  to RS256 when the field is missing or contains only unsafe values.
+- `OIDCClient.__init__` now stores the resolved allowlist on
+  `self.id_token_signing_algs` — pinned once, from a trusted source, at
+  construction time.
+- `parse_id_token` no longer calls `jwt.get_unverified_header` and no
+  longer reads `alg` from the JWT header. It passes
+  `self.id_token_signing_algs` to `jwt.decode(..., algorithms=...)`.
+  `PyJWKClient.get_signing_key_from_jwt` still reads the `kid` from the
+  header internally for JWKS lookup — that&#39;s fine, `kid` is not a
+  security decision; the signature still proves which key was actually
+  used.
+
+
+**`test/testcases/test_web_api/test_auth_app/test_oidc_client_unit.py`:**
+
+- Existing `test_parse_id_token_success_and_error` drops its
+`jwt.get_unverified_header` mock (no longer called by `parse_id_token`).
+- `_metadata` and `_make_client` helpers grew an optional `signing_algs`
+parameter so tests can configure what the discovery document advertises.
+- New `TestSSRFValidation` / algorithm-confusion regression block (7
+  tests):
+  - `test_id_token_signing_algs_default_to_rs256_when_metadata_missing`
+  - `test_id_token_signing_algs_intersect_metadata_with_safe_allowlist`
+  - `test_id_token_signing_algs_fall_back_when_only_unsafe_advertised`
+  - `test_id_token_signing_algs_ignores_non_string_entries`
+  - `test_id_token_signing_algs_handles_non_list_metadata_field`
+  - `test_parse_id_token_passes_pinned_algorithms_to_jwt_decode` —
+    sabotages `jwt.get_unverified_header` to raise on call, proving the
+    verification path never consults the unverified header.
+- `test_parse_id_token_rejects_alg_none` — uses real PyJWT to encode an
+    `alg: &#34;none&#34;` token; `parse_id_token` raises `ValueError(&#34;Error
+    parsing ID Token: …&#34;)` instead of accepting it.
+  - `test_parse_id_token_rejects_hs256_when_allowlist_is_asymmetric` —
+    uses real PyJWT to forge an `alg: &#34;HS256&#34;` token with a non-PEM
+    shared secret (so PyJWT&#39;s incidental PEM-as-HMAC refusal isn&#39;t what
+    blocks it); `parse_id_token` raises because `HS256` is not in the
+    pinned allowlist.
+
+Sanity-checked end-to-end with real PyJWT outside the project test
+runner:
+
+- `alg=none` forged token + `algorithms=[&#34;RS256&#34;]` →
+`InvalidAlgorithmError` ✓
+- `alg=HS256` forged token + `algorithms=[&#34;RS256&#34;]` →
+`InvalidAlgorithmError` ✓
+- Same `alg=HS256` token + `algorithms=[&#34;HS256&#34;]` → **accepted**
+({&#39;sub&#39;: &#39;admin&#39;})
+  — confirming the attack path was real before the fix.
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+Co-authored-by: galuis116 &lt;contact@duerrimports.com&gt;
+
+- Validate chunk image_base64 before doc-store write (#15364)
+
+## Summary
+
+Fixes [#15363](https://github.com/infiniflow/ragflow/issues/15363) —
+`add_chunk` / `update_chunk` indexed chunks with `image_id` before
+validating or storing `image_base64`, leaving orphan chunks on invalid
+input.
+
+## Related Issue
+
+Fixes #15363
+
+## Change Type
+
+- [x] Bug fix
+- [x] Regression tests
+
+## What Changed
+
+- Added `_decode_chunk_image_base64()` — strict base64 decode with
+structured 4xx errors
+- Added `_store_chunk_image_or_error()` — catches `store_chunk_image`
+failures
+- **`add_chunk` / `update_chunk`**: decode + store image **before**
+`docStoreConn.insert` / `update`; only set `img_id` after successful
+storage
+
+## Files Changed
+
+| File | Change |
+|------|--------|
+| `api/apps/restful_apis/chunk_api.py` | Helpers + reorder image
+handling |
+| `test/testcases/test_web_api/test_chunk_app/test_chunk_routes_unit.py`
+| 3 regression tests |
+
+## Validation
+
+```bash
+cd /root/gittensor/ragflow
+pytest test/testcases/test_web_api/test_chunk_app/test_chunk_routes_unit.py::test_restful_add_chunk_invalid_image_base64_does_not_index_chunk -v
+pytest test/testcases/test_web_api/test_chunk_app/test_chunk_routes_unit.py::test_restful_update_chunk_invalid_image_base64_does_not_update_chunk -v
+pytest test/testcases/test_web_api/test_chunk_app/test_chunk_routes_unit.py::test_restful_add_chunk_valid_image_base64_stores_before_insert -v
+pytest test/testcases/test_web_api/test_chunk_app/test_chunk_routes_unit.py -v
+```
+
+## Test Plan
+
+- [x] Invalid `image_base64` on add → 4xx, no doc-store insert
+- [x] Invalid `image_base64` on update → 4xx, no doc-store update
+- [x] Valid PNG base64 on add → image stored, chunk indexed with
+`img_id`
+- [ ] CI green
+
+- fix(go-models): raise SSE scanner buffer so large stream chunks are not dropped (#15382)
+
+### Summary
+
+Closes #15381 
+
+Every provider in `internal/entity/models/` reads its streaming response
+with `bufio.NewScanner(resp.Body)` and iterates over `scanner.Scan()`.
+The default `bufio.Scanner` maximum token size is 64KB, so when an
+upstream sends a single SSE `data:` line larger than 64KB (long content
+deltas, large tool or function call argument blobs, bundled
+`reasoning_content`, or providers that emit a whole message in one
+event) `scanner.Scan()` returns `false` and `scanner.Err()` returns
+`bufio.ErrTooLong`. Streaming chat then ends with an error partway
+through the response.
+
+This change adds `scanner.Buffer(make([]byte, 64*1024), 1024*1024)`
+immediately after every SSE scanner that was still bare, raising the cap
+to 1MB. 1MB is the value already used for streaming chat in `openai.go`,
+`modelscope.go`, `groq.go`, `mistral.go`, `xai.go` and the other already
+patched providers (the 8MB cap in the repo is reserved for TTS and
+embedding paths), so this simply converges the remaining providers onto
+the established pattern. Nothing else changes: line parsing, `data:`
+prefix handling, `[DONE]` detection, JSON unmarshalling, error handling,
+and the existing `scanner.Err()` checks all stay the same.
+
+Providers covered (23 scanners across 22 files): 302ai, aliyun,
+baichuan, baidu, cohere, deepinfra, deepseek, gitee, huggingface,
+lmstudio, minimax (the chat scanner, whose TTS scanner was already
+bumped), moonshot, nvidia, ollama, openrouter, orcarouter, paddleocr,
+siliconflow, tokenhub, vllm, volcengine, xunfei, zhipu-ai. `jiekouai.go`
+is excluded because it is covered by the in flight #15337.
+
+A table driven regression test (`sse_scanner_buffer_test.go`) streams a
+single 128KB `data:` content delta followed by `data: [DONE]` through an
+`httptest` server and asserts that `ChatStreamlyWithSender` delivers the
+full content with no error across a representative subset of providers.
+Without the buffer fix the test fails with `bufio.Scanner: token too
+long`.
+
+This PR also removes three duplicate declarations of the package level
+`roundTripperFunc` test helper that several recently merged provider PRs
+each added independently, which had left the `internal/entity/models`
+test package unable to compile. The helper now lives in a single place
+and is shared.
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+- fix(metadata): preserve empty AND results across filter conditions (#15386)
+
+## Summary
+- Fix `meta_filter()` AND logic so an empty result from an early
+condition is not overwritten when a later condition matches.
+- Add regression tests for empty-first AND, successful AND intersection,
+and OR behavior after an empty first condition.
+
+Fixes incorrect `/retrieval` metadata filtering when multiple AND
+conditions are used and the first condition matches no documents.
+
+Closes #15360
+
+## Test plan
+- [x] `pytest test/unit_test/common/test_metadata_filter_operators.py
+-v` (19/19 passed)
+
+- fix(go): resolve custom base_url for empty default region (#15043)
+
+### What problem does this PR solve?
+
+Fixes custom `base_url` resolution when a model instance has no
+configured region.
+
+Some drivers read custom base URLs from `BaseURL[&#34;&#34;]` when
+`apiConfig.Region` is empty, while others normalize empty region to
+`&#34;default&#34;` and read `BaseURL[&#34;default&#34;]`. This PR adds the `&#34;default&#34;`
+alias only for empty-region custom base URLs while preserving the
+existing empty-region key.
+
+Closes #15042
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+- feat[Go]: implement /system/stats and refactor /system/config/log (#15407)
+
+### What problem does this PR solve?
+
+As title
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+- [x] Refactoring
+
+- fix: persist logout access token invalidation (#15397)
+
+### What this PR fixes
+
+This PR fixes an issue in the Python backend where user logout did not
+reliably persist the invalidated access_token to the database.
+Although the logout endpoint returned success and logged that the token
+had been invalidated, the user.access_token value could remain
+unchanged in the database, which meant the previous login token could
+stay valid longer than expected.
+
+  ### What changed
+
+  - Resolve the real user object before updating the token
+  - Persist the invalidated access_token before calling logout_user()
+- Return a server error if the token update is not written successfully
+
+  ### Impact
+
+- Logging out now correctly replaces the stored access_token with an
+INVALID_... value
+  - The previous login session is properly invalidated
+- The change is limited to the logout flow and is intentionally small in
+scope
+
+- feat: add Go MCP server delete API (#15262)
+
+## What
+
+#15240
+Implementation for DELETE /api/v1/mcp/servers/:mcp_id
+
+- Fix user registration initialization in Go API (#15349)
+
+### What problem does this PR solve?
+
+This PR fixes several behavior gaps in the Go implementation of the user
+registration API.
+
+### Type of change
+
+- Make `nickname` required for user registration.
+- Align registration error messages and response data with expected API
+behavior.
+- Handle password decryption errors for registration more consistently.
+- Generate UUID v1-style IDs for new users, access tokens, tenants,
+user-tenant records, and root files.
+- Initialize default user fields during registration, including:
+  - language
+  - color schema
+  - timezone
+  - last login time
+- Create user, tenant, user-tenant relation, tenant LLM records, and
+root folder in a single DB transaction.
+- Initialize default tenant LLM records from configured default models.
+- Avoid partial registration data when one creation step fails.
+- Use locale-based default language fallback for user profile responses.
+
+- feat: add 4 new models for siliconflow (#15383)
+
+### What problem does this PR solve?
+
+Added 4 new models:
+deepseek-ai/DeepSeek-V4-Pro
+deepseek-ai/DeepSeek-V4-Flash
+Pro/moonshotai/Kimi-K2.6
+Pro/zai-org/GLM-5.1
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+
+- feat(connector): implement OneDrive data source connector (issue #15330) (#15331)
+
+### What problem does this PR solve?
+
+Closes #15330.
+
+RAGFlow had no connector for OneDrive / OneDrive for Business. Users who
+store working documents in OneDrive could not index them into a
+knowledge base without manually downloading and re-uploading files.
+
+This PR adds a net-new OneDrive data source that:
+
+- Authenticates against Microsoft Graph with the same MSAL
+client-credentials flow already used by the SharePoint and Teams
+connectors (no new auth primitives).
+- Enumerates every drive visible to the service principal and pages
+through `/drives/{id}/root/delta`, persisting `@odata.deltaLink` values
+per drive so subsequent syncs only fetch changed items.
+- Optionally narrows ingestion to a sub-folder (`folder_path`) without
+needing a separate code path.
+- Surfaces typed errors on the validation probe (`GET /drives?$top=1`):
+401 → `ConnectorMissingCredentialError`, 403 →
+`InsufficientPermissionsError` (with a `Files.Read.All` hint), 5xx →
+`UnexpectedValidationError`.
+- Filters folders, soft-deleted items, and unsupported extensions (`.pdf
+.docx .doc .xlsx .xls .pptx .ppt .txt .md .csv`).
+
+#### Files
+
+| File | Change |
+|------|--------|
+| `common/data_source/onedrive_connector.py` | **New** —
+`OneDriveConnector` + `OneDriveCheckpoint`. |
+| `common/data_source/config.py` | `DocumentSource.ONEDRIVE =
+&#34;onedrive&#34;`. |
+| `common/constants.py` | `FileSource.ONEDRIVE = &#34;onedrive&#34;`. |
+| `common/data_source/__init__.py` | Export `OneDriveConnector`. |
+| `rag/svr/sync_data_source.py` | `OneDrive(SyncBase)` with `batch_size`
+normalisation; registered in `func_factory`. |
+| `web/src/pages/user-setting/data-source/constant/index.tsx` |
+`DataSourceKey.ONEDRIVE`, visibility map (`syncDeletedFiles: true`),
+info entry, form fields (tenant_id, client_id, client_secret,
+folder_path, batch_size), default values. |
+| `web/src/locales/en.ts`, `web/src/locales/zh.ts` |
+`onedriveDescription` + 4 tooltip keys (EN + ZH). |
+| `test/unit_test/data_source/test_onedrive_connector_unit.py` | **New**
+— 13 unit tests (`p1`/`p2`) covering auth, validation, checkpoint
+helpers, and document filtering. |
+
+#### Required Azure AD permission
+
+`Files.Read.All` (Application, admin-granted).
+
+#### Out of scope
+
+- Interactive end-user OAuth (delegated permissions) — the connector
+uses app-only credentials, consistent with the SharePoint / Teams
+precedent.
+- Binary download of file contents — the sync layer emits `Document`s
+carrying `webUrl` + metadata; bytes are hydrated downstream by the parse
+pipeline.
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+
+- Fix: default OpenAI chat completions to non-stream (#15394)
+
+### What problem does this PR solve?
+
+default OpenAI chat completions to non-stream when `stream` is omitted
+https://github.com/infiniflow/ragflow/issues/15356
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+- Feat: tenant llm provider (#14595)
+
+### What problem does this PR solve?
+
+Python implementation of the Go-based model_provider API suite.
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+
+---------
+
+Co-authored-by: bill &lt;yibie_jingnian@163.com&gt;
+
+- fix(go-models): harden Novita default transport handling (#15350)
+
+## Summary
+- Harden `NewNovitaModel` to avoid panics when `http.DefaultTransport`
+is a custom non-`*http.Transport` RoundTripper.
+- Fallback to a safe transport (`ProxyFromEnvironment`) while preserving
+existing pooling/timeout settings.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- fix: validate custom model inputs (#15200)
+
+### What problem does this PR solve?
+
+Closes #15199.
+
+The add-custom-model endpoint is routed through
+`/api/v1/providers/:provider_name/instances/:instance_name/models`, but
+the handler previously trusted `provider_name` and `instance_name` from
+the JSON body instead of the path target. A request could therefore hit
+one provider/instance URL while operating on a different body
+provider/instance.
+
+The same handler only rejected `model_types` when the slice was nil. An
+empty array passed validation and reached
+`ModelProviderService.AddCustomModel`, where `request.ModelTypes[0]`
+could panic.
+
+This PR makes the path provider/instance authoritative, rejects
+mismatched body values, rejects missing or empty `model_types`, and adds
+a service-level guard so direct service callers cannot hit the same
+panic path.
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+- feat(go-api): implement tenant member management (issue #15294) (#15295)
+
+## Summary
+
+Ports the Python `tenant_api` team/member management endpoints to Go,
+adding 4 endpoints under `/api/v1/tenants/:tenant_id/`:
+
+- `GET /tenants/:tenant_id/users` — list non-owner members with user
+details (owner only)
+- `POST /tenants/:tenant_id/users` — invite a user by email; creates
+invite-role join record (owner only)
+- `DELETE /tenants/:tenant_id/users` — remove a member by `user_id`;
+owner can remove anyone, members can remove themselves
+- `PATCH /tenants/:tenant_id` — accept a pending invitation,
+transitioning role `invite → normal`
+
+Closes #15294
+
+- feat[Go]: implement /api/v1/system/status GET (#15348)
+
+### What problem does this PR solve?
+
+As title
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+- [x] New Feature (non-breaking change which adds functionality)
+- [x] Refactoring
+
+- fix(go-models): harden JieKouAI driver requests (#15337)
+
+## Summary
+- Harden JieKouAI request validation before outbound provider calls
+- Force non-streaming and streaming chat methods to use their expected
+stream modes
+- Make model listing use a bodyless GET and parse model responses
+without panics
+
+Closes #14736
+
+---------
+
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Fix(kb): enforce tenant authorization on UpdateMetadataSetting (#15268) (#15270)
+
+## Summary
+
+Closes #15268.
+
+The `UpdateMetadataSetting` handler at `internal/handler/kb.go:126`
+retrieved the authenticated user via `GetUser(c)` but discarded the user
+object (`_, errorCode, errorMessage := GetUser(c)`), then forwarded the
+caller-supplied `kb_id` straight to the service layer with no ownership
+check. Any authenticated user could mutate the `parser_config` /
+metadata of any knowledge base in the system by guessing or harvesting a
+`kb_id` — a classic IDOR (CWE-284, OWASP A01).
+
+This is the only handler in `internal/handler/kb.go` missing the check;
+every sibling (`ListTags`, `ListTagsFromKbs`, `RenameTag`,
+`KnowledgeGraph`, `DeleteKnowledgeGraph`, `GetMeta`, `GetBasicInfo`)
+already calls `h.kbService.Accessible(kbID, user.ID)`. The same
+defensive check on the document preview endpoint was added in PR #14625
+— this PR closes the matching gap on the KB metadata endpoint.
+
+---------
+
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- fix(go-models): harden ModelScope default transport handling (#15339)
+
+## Summary
+- Harden `NewModelScopeModel` to avoid panics when
+`http.DefaultTransport` is a custom non-`*http.Transport` RoundTripper.
+- Fallback to a safe transport (`ProxyFromEnvironment`) while preserving
+existing pooling/timeout settings.
+- Add `TestModelScopeNewModelWithCustomDefaultTransport` regression
+coverage.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- feat(go-api): implement GET /api/v1/agents list endpoint (issue #15328) (#15329)
+
+## Summary
+
+Closes: #15328 
+- Implements `GET /api/v1/agents` — the agent/canvas listing endpoint
+needed to complete the Home dashboard tile in `web/src/pages/home/`.
+- Mirrors Python `api/apps/restful_apis/agent_api.py::list_agents`
+exactly: tenant-join auth, optional `owner_ids` guard, keyword filter,
+pagination, ordering, and `canvas_category` filter (default:
+`agent_canvas`).
+- **Scope:** read-only list only. Full agent CRUD and canvas runtime are
+explicitly out of scope (separate slice of #15240).
+
+- feat(go-api): implement connector (data source) management endpoints (#15274)
+
+## Summary
+
+Ports the connector (data source) management endpoints that power
+`web/src/pages/user-setting/data-source/` from Python
+(`api/apps/restful_apis/connector_api.py`) to Go. Previously only `GET
+/connectors` (list) was implemented in Go; this adds the rest of the
+lifecycle.
+
+Closes #15273 (subtask of #15240).
+
+## Endpoints implemented
+
+All under base path `/api/v1` (mirrors the Python routes):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/connectors/{connector_id}/test` | Validate stored credentials
+|
+
+`GET /connectors` (list) was already present and is unchanged.
+
+---------
+
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- feat: implement Microsoft Teams data source connector (#15193)
+
+### What problem does this PR solve?
+
+Closes #15191.
+
+RAGFlow shipped a Microsoft Teams connector stub
+(`common/data_source/teams_connector.py`) whose document-loading methods
+all returned `[]`, `Teams._generate()` was a `pass`, and Teams was
+commented out of the data-source settings UI. As a result there was no
+way to index Teams channel conversations into a knowledge base.
+
+This PR implements the connector end to end on top of Microsoft Graph
+(Office365-REST-Python-Client). It shares the MSAL client-credentials
+auth shape with the SharePoint connector.
+
+**Backend**
+
+- `common/data_source/teams_connector.py`
+- `load_credentials()` now builds the Graph client using an MSAL
+client-credentials **token callback** — the form `GraphClient` actually
+expects. (The previous stub passed a raw access-token string to
+`GraphClient(...)`, which is not how that client is driven.) Token
+acquisition is lazy, so credential loading performs no network call.
+  - `validate_connector_settings()` lists teams via Graph.
+- `load_from_checkpoint()` is now a generator that pages teams →
+channels → messages, flattens each top-level post together with its
+replies into one blob-based `Document` (`extension` `.txt`/`.html`,
+`blob`, `size_bytes`, `doc_updated_at`). Incremental syncs are bounded
+by message `lastModifiedDateTime` (falling back to `createdDateTime`).
+Per-message errors surface as `ConnectorFailure` instead of aborting the
+run.
+- `retrieve_all_slim_docs_perm_sync()` yields id-only `SlimDocument`
+batches and the checkpoint helpers return proper `TeamsCheckpoint`s.
+- ACL → `ExternalAccess` mapping is intentionally left best-effort
+(`load_from_checkpoint_with_perm_sync` delegates to the standard load)
+because the sync pipeline does not currently persist `ExternalAccess`.
+- `rag/svr/sync_data_source.py`
+- Implemented `Teams._generate()` using the existing
+`CheckpointOutputWrapper` pattern (same shape as Confluence/Jira/Google
+Drive), supporting full reindex and incremental polling from
+`poll_range_start`.
+- `TeamsConnector` is already exported from
+`common/data_source/__init__.py`.
+
+**Frontend (`web/`)**
+
+- Enabled the `TEAMS` data-source enum and added its form fields
+(`tenant_id`, `client_id`, `client_secret`), default values, display
+metadata, and a Teams icon.
+- Added `teamsDescription` / `teamsTenantIdTip` to `en.ts` and `zh.ts`.
+
+**Tests**
+
+- `test/unit_test/data_source/test_teams_connector_unit.py`: mock-based
+unit tests covering credential loading (incomplete creds raise, happy
+path sets the Graph client, fetch-without-creds raises), post/reply
+flattening (incl. the HTML vs text extension), incremental
+`lastModifiedDateTime` filtering, and slim-doc listing. All 6 pass;
+`ruff check` is clean.
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+
+- fix(go-models): harden Voyage default transport handling (#15341)
+
+## Summary
+- Harden `NewVoyageModel` to avoid panics when `http.DefaultTransport`
+is a custom non-`*http.Transport` RoundTripper.
+- Fallback to a safe transport (`ProxyFromEnvironment`) while preserving
+existing pooling/timeout settings.
+- Add `TestVoyageNewModelWithCustomDefaultTransport` regression
+coverage.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- fix(go-models): harden LongCat default transport handling (#15340)
+
+## Summary
+- Harden `NewLongCatModel` to avoid panics when `http.DefaultTransport`
+is a custom non-`*http.Transport` RoundTripper.
+- Fallback to a safe transport (`ProxyFromEnvironment`) while preserving
+existing pooling/timeout settings.
+- Add `TestLongCatNewModelWithCustomDefaultTransport` regression
+coverage.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- feat[Go]: implement delete/ rebuild/ listlog api for connector (#15300)
+
+### What problem does this PR solve?
+
+implement delete, rebuild api for connector
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+
+- feat: add Go MCP server create API (#15260)
+
+## What
+Implementation for POST /api/v1/mcp/servers
+#15240
+
+- Update developer doc (#15336)
+
+### What problem does this PR solve?
+
+update developer doc
+
+### Type of change
+
+- [x] Documentation Update
+
+- feat: implement Slack data source connector (#15188)
+
+### What problem does this PR solve?
+
+Closes #15187.
+
+RAGFlow shipped a Slack connector
+(`common/data_source/slack_connector.py`) but it was never usable:
+`Slack._generate()` in the sync worker was a `pass` stub, the
+connector&#39;s document-generating code was incompatible with the current
+data model,
+and Slack was commented out of the data-source settings UI. As a result,
+teams had no way to index Slack channels/threads into a knowledge base.
+
+This PR completes the connector end to end.
+
+**Backend**
+
+- `common/data_source/slack_connector.py`
+- Rewrote `thread_to_doc` to produce a blob-based `Document`
+(`extension`/`blob`/`size_bytes`). The previous implementation built the
+doc with a `sections=[...]` argument and omitted the now-required
+`blob`/`extension`/ `size_bytes` fields, so it raised a validation error
+against the current `Document` model. Thread messages are now cleaned
+and flattened into a single UTF-8 text blob.
+- Added `load_from_state()` / `poll_source(start, end)` generators. The
+connector&#39;s checkpoint interface is a no-op stub, so both full and
+incremental syncs run through a single channel-iterating generator built
+on the existing module helpers (`get_channels`, `filter_channels`,
+`get_channel_messages`, `_process_message`), with per-channel thread
+de-duplication.
+- `rag/svr/sync_data_source.py`
+- Implemented `Slack._generate()`. Credentials are loaded via
+`StaticCredentialsProvider` (the connector requires `slack_bot_token`
+and does not support `load_credentials`). Supports full reindex and
+incremental polling from `poll_range_start`, plus the optional channel
+filter. Modeled on the Confluence/Dropbox wrappers.
+- `SlackConnector` was already exported from
+`common/data_source/__init__.py`.
+
+**Frontend (`web/`)**
+
+- Enabled the `SLACK` data-source enum and added its form fields (Slack
+bot token + optional channel filter), default values, display metadata,
+and a Slack icon.
+- Added `slackDescription` / `slackBotTokenTip` / `slackChannelsTip`
+strings to `en.ts` and `zh.ts`.
+
+**Tests**
+
+- `test/unit_test/data_source/test_slack_connector_unit.py`: unit tests
+covering credential loading (`load_credentials` raises,
+`set_credentials_provider` initializes clients, missing credentials
+raises) and document generation (standalone message + flattened thread,
+blob/extension/size_bytes/metadata, and the incremental poll time
+window). All 5 pass; `ruff check` is clean.
+
+Required Slack scopes: `channels:read`, `channels:history`,
+`users:read`.
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+
+- Fix: Clustering method echo error (#15322)
+
+### What problem does this PR solve?
+
+Fix: Clustering method echo error
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+- fix(go-models): harden 302.AI driver requests (#15289)
+
+## Summary
+- Harden the 302.AI model driver request validation and response parsing
+paths.
+- Add focused tests for chat request mode, model listing, malformed
+provider responses, and input validation.
+
+## What changed
+- Validate API keys, model names, rerank queries, ASR file paths, OCR
+inputs, parse URLs, task IDs, and model-list IDs before use.
+- Keep chat and streaming methods from accepting conflicting `stream`
+values in request payloads.
+- Send `ListModels` as a bodyless GET and parse the response with typed
+JSON structs instead of unchecked assertions.
+- Remove raw SSE event logging from stream handling.
+
+## Why
+The driver could panic or send inconsistent requests when optional
+config fields were nil, empty, malformed, or contradicted the method
+path. This keeps provider-driver behavior explicit while preserving the
+existing supported 302.AI flows.
+
+Closes #14736
+
+- fix: include user model settings in /user/me response (#15320)
+
+### What problem does this PR solve?
+
+Fixes the `/user/me` response so it returns the current user&#39;s model
+settings correctly.
+
+### Type of change
+
+- Added model settings data to the `/user/me` response.
+- Kept the response structure compatible with existing user profile
+fields.
+- Avoided changing unrelated user/session behavior.
+
+- Go: implement system healthz API (#15307)
+
+## Summary
+- Add Go REST support for `GET /api/v1/system/healthz`.
+- Return Python-compatible `ok`/`nok` dependency fields for DB, Redis,
+document engine, and storage.
+- Return HTTP 200 only when all checks pass; otherwise return HTTP 500
+with `_meta` failure details.
+- Add focused service coverage for the unhealthy dependency response
+when Go dependencies are not initialized.
+
+## Scope
+This is a small, isolated slice of #15240. It avoids current open
+connector PRs (#15274, #15300, #15265, #15264), tenant/member PRs
+(#15295, #15301, #15276), MCP PRs (#15281, #15253, #15254, #15260,
+#15261, #15262), and the memory-message PR (#15256).
+
+Refs #15240
+
+- feat: implement SharePoint data source connector (#15190)
+
+### What problem does this PR solve?
+
+Closes #15189.
+
+RAGFlow shipped a SharePoint connector stub
+(`common/data_source/sharepoint_connector.py`) whose document-loading
+methods all returned `[]`, `SharePoint._generate()` was a `pass`, and
+SharePoint was commented out of the data-source settings UI. As a result
+there was no way to index files stored in SharePoint document libraries.
+
+This PR implements the connector end to end on top of Microsoft Graph
+(Office365-REST-Python-Client).
+
+**Backend**
+
+- `common/data_source/sharepoint_connector.py`
+- `load_credentials()` now builds the Graph client using an MSAL
+client-credentials **token callback** — the form `GraphClient` actually
+expects. (The previous stub passed a raw access-token string to
+`GraphClient(...)`, which is not how that client is driven.) Token
+acquisition is lazy, so credential loading does no network call.
+- `validate_connector_settings()` resolves the configured site via
+Graph.
+- `load_from_checkpoint()` is now a generator that enumerates every
+document library under the site, walks folders depth-first, downloads
+each file, and yields blob-based `Document` objects (`extension` /
+`blob` / `size_bytes` / `doc_updated_at`). Incremental syncs are bounded
+by file `lastModifiedDateTime`. Per-file errors are surfaced as
+`ConnectorFailure` rather than aborting the run.
+- `retrieve_all_slim_docs_perm_sync()` yields id-only `SlimDocument`
+batches (no downloads) and the checkpoint helpers return proper
+checkpoints.
+- ACL → `ExternalAccess` mapping is intentionally left best-effort
+(`load_from_checkpoint_with_perm_sync` delegates to the standard load)
+because the sync pipeline does not currently persist `ExternalAccess`;
+this can be extended once that plumbing exists.
+- `rag/svr/sync_data_source.py`
+- Implemented `SharePoint._generate()` using the existing
+`CheckpointOutputWrapper` pattern (same shape as Confluence/Jira/Google
+Drive), supporting full reindex and incremental polling from
+`poll_range_start`.
+- `SharePointConnector` is already exported from
+`common/data_source/__init__.py`.
+
+**Frontend (`web/`)**
+
+- Enabled the `SHAREPOINT` data-source enum and added its form fields
+`site_url`, `tenant_id`, `client_id`, `client_secret`), default values,
+display metadata, and a SharePoint icon.
+- Added `sharepointDescription` / `sharepointSiteUrlTip` to `en.ts` and
+`zh.ts`.
+
+**Tests**
+
+- `test/unit_test/data_source/test_sharepoint_connector_unit.py`:
+mock-based unit tests covering credential loading (incomplete creds
+raise, happy path sets the Graph client, fetch-without-creds raises),
+drive traversal + file download, incremental `lastModifiedDateTime`
+filtering, and slim-doc listing. All 6 pass; `ruff check` is clean.
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+
+- Feature: Allow page_size max value 100 (#15292)
+
+Feature: Allow page_size max value 100
+
+- Feat: add new tests and tescases for restful api suite (#15299)
+
+### What problem does this PR solve?
+
+extend restful api suite
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+- [x] Other (please describe): test
+
+- go: add PATCH /api/v1/users/me user settings update (#15297)
+
+### What problem does this PR solve?
+
+- Add Go implementation parity for `PATCH /api/v1/users/me`.
+
+- This updates the Go user settings endpoint to match the Python
+behavior for updating the current user&#39;s profile settings.
+
+### Changes
+
+- Route `PATCH /api/v1/users/me` through the authenticated current user
+from middleware.
+- Add `password` and `new_password` support to `UpdateSettingsRequest`.
+- Prevent `email` from being updated through this endpoint, matching the
+Python blacklist behavior.
+  - Support updating:
+    - `nickname`
+    - `avatar`
+    - `language`
+    - `color_schema`
+    - `timezone`
+    - `password`
+  - Align password handling with Python:
+    - invalid plaintext password payload returns `CodeExceptionError`
+    - wrong old password returns `Password error!`
+- successful update returns `{ code: 0, data: true, message: &#34;success&#34;
+}`
+
+### Test
+
+Tested manually with Python and Go backends using the same request
+bodies:
+
+  - `PATCH /api/v1/users/me` with nickname/timezone update
+- plaintext password payload returns Python-compatible `Incorrect
+padding`
+  - wrong old password returns `Password error!`
+
+- Refactor: Task Executor (#15154)
+
+### What problem does this PR solve?
+
+1. Break huge function into smaller pieces
+2. Add unit test for the smaller pieces function
+3. Layer-ed design
+a. infra layer - task_context.py, recording_context.py,
+write_operation_interceptor.py, ...
+    b. service layer - *_service.py
+    c. business layer - task_handler.py
+4. Default behavior: use &#34;refactor-ed version&#34; - can switch to original
+version by change env variable
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+- [x] Refactoring
+- [x] Performance Improvement
+
+---------
+
+Co-authored-by: Liu An &lt;asiro@qq.com&gt;
+Co-authored-by: Zhichang Yu &lt;yuzhichang@gmail.com&gt;
+
+- Docs: Finalized v0.25.6 release notes. (#15305)
+
+### What problem does this PR solve?
+
+Finalized v0.25.6 release notes.
+
+### Type of change
+
+- [x] Documentation Update
+
+- Docs: Updated converse with agent API reference. (#15257)
+
+### What problem does this PR solve?
+
+API reference updates based on #14542.
+
+### Type of change
+
+
+- [x] Documentation Update
+
+- Fix: ExeSQL node continues on per-statement SQL errors (#15140)
+
+Wrap per-statement execution in both the generic and IBM DB2 loops so a
+failing statement reports a friendly &#34;SQL Execution Failed&#34; message and
+continues, instead of letting a raw driver exception abort the node and
+discard results from statements that already succeeded.
+
+Rolls back after a failure so PostgreSQL&#39;s aborted-transaction state
+does not cascade into every subsequent statement in the batch.
+
+### What problem does this PR solve?
+
+Closes #14737
+
+The **ExeSQL** agent node splits its input on `;` and runs each
+statement in a loop. Both execution loops — the generic one
+(`cursor.execute`) and the IBM DB2 one (`ibm_db.exec_immediate`) — were
+wrapped only in a `try/finally` for resource cleanup, with **no
+`except`** around statement execution.
+
+As a result, when any single statement failed (e.g. the reporter&#39;s MSSQL
+`(&#39;42S02&#39;, &#34;[42S02] ... 对象名 &#39;ASSET_AUDIT&#39; 无效&#34;)`):
+- The raw, unformatted driver exception bubbled up and the node failed
+with an ugly `_ERROR` instead of friendly information.
+- **The whole node aborted** — results from statements that had already
+succeeded were discarded, and the remaining statements in the batch
+never ran. The reporter confirmed this was the real pain point: *&#34;after
+reporting an exception, the previous normal query cannot be executed
+properly … Do not interrupt the workflow for any issues.&#34;*
+
+Connection-level failures were already wrapped with a friendly
+`&#34;Database Connection Failed!&#34;` prefix — only per-statement execution
+errors were missed.
+
+**This PR** wraps per-statement execution in `try/except` in both loops.
+A failing statement now:
+- records a friendly `SQL Execution Failed: &lt;sql&gt;\n&lt;error&gt;` entry into
+the `json` and `formalized_content` outputs (the actual DB error is kept
+so the user can see *what* failed), and
+- `continue`s to the next statement — so earlier results survive and
+later statements still run.
+
+After a failure in the generic loop, the connection is rolled back so
+PostgreSQL&#39;s aborted-transaction state does not cascade into every
+subsequent statement in the batch. The node returns normally (no
+`_ERROR` raised), so the agent workflow proceeds instead of halting.
+
+Connection failures remain fatal (correct — nothing can run without a
+connection). The pre-existing `break` on `cursor.rowcount == 0` is
+intentionally left unchanged; it is out of scope for this fix.
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+- feat[Go]: implement create_connector API (#15285)
+
+### What problem does this PR solve?
+
+implement create_connector API
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+
+- Fix: Uploading TSV format documents to the knowledge base did not generate any error messages. (#15284)
+
+### What problem does this PR solve?
+
+Fix: Uploading TSV format documents to the knowledge base did not
+generate any error messages.
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+- fix(go-models): validate TokenHub chat requests (#15283)
+
+## Summary
+- centralize TokenHub chat request validation for chat and streaming
+calls
+- reject blank TokenHub model names before sending provider requests
+- send TokenHub model listing requests as bodyless GET requests
+
+## What changed
+- Added shared TokenHub chat request validation for API key, model name,
+and messages.
+- Updated `ListModels` to call `GET /models` without a request body.
+- Added focused tests for blank model names and accidental GET request
+bodies.
+- Replaced an httptest handler callback `t.Fatalf` with `t.Errorf` plus
+an HTTP error and return.
+
+## Why
+TokenHub chat requests should fail locally for invalid model names
+instead of sending avoidable malformed requests upstream. Model listing
+should also match normal GET semantics and avoid sending an empty JSON
+body.
+
+Closes #14736
+
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Go: implement TTS and ASR for X.AI (#15247)
+
+### What problem does this PR solve?
+
+As title
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+- [x] New Feature (non-breaking change which adds functionality)
+- [x] Refactoring
+
+- Go: implement connector get API (#15259)
+
+## Summary
+- Add Go REST support for `GET /api/v1/connectors/:connector_id`.
+- Reuse the Python API behavior by returning the connector only when the
+current user can access its tenant.
+- Add focused handler coverage for success and unauthorized responses.
+
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Go: implement Rerank in Replicate driver (#15278)
+
+### What problem does this PR solve?
+
+`ReplicateModel.Rerank` in `internal/entity/models/replicate.go` was a
+`&#34;replicate, no such method&#34;` stub. The chat path landed in #14958 and
+the embed path in #15073; rerank is the last major retrieval surface
+still missing on this provider.
+
+Until this PR, a tenant who selected a Replicate reranker model got the
+sentinel error on every rerank call.
+
+Co-authored-by: sxxtony &lt;sxxtony@users.noreply.github.com&gt;
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- feat: add GiteeAI provider support to Go API server (#15131)
+
+### What problem does this PR solve?
+
+Closes #15090.
+
+Adds GiteeAI support to the Go model-provider layer so GiteeAI chat
+models can be routed through the Go API server using the same
+OpenAI-compatible chat, streaming, model listing, and connection-check
+flow used by other SaaS providers.
+
+GiteeAI is implemented as a separate provider from the existing `gitee`
+provider.
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+
+## Summary
+
+- Added a GiteeAI Go model driver.
+- Added the GiteeAI provider catalog with default base URL
+`https://ai.gitee.com/v1`.
+- Registered `giteeai` in the model factory separately from `gitee`.
+- Added focused provider tests for sync chat, streaming chat, model
+listing, connection checks, base URL override, SSE parsing, `[DONE]`
+handling, and unsupported methods.
+
+## What changed
+
+- Implemented `ChatWithMessages` for `POST /chat/completions`.
+- Implemented `ChatStreamlyWithSender` with SSE parsing, `delta`
+extraction, `finish_reason`, `[DONE]`, and `&lt;think&gt;` tag handling.
+- Implemented `ListModels` for `GET /models`.
+- Implemented `CheckConnection` by delegating to `ListModels`.
+- Returned standard `no such method` errors for unsupported embedding,
+rerank, image-to-text, ASR, and TTS paths.
+
+## Tests
+
+```bash
+go test -vet=off ./internal/entity/models -run &#39;TestGiteeAI&#39; -count=1
+go test -vet=off ./internal/entity -run &#39;Test.*Provider|Test.*Model&#39; -count=1
+```
+
+---------
+
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- go: add Qiniu model provider (#15280)
+
+### What problem does this PR solve?
+
+This PR adds Qiniu provider integration for the Go model driver layer in
+RAGFlow.
+
+  Supported capabilities:
+
+  - [X] Chat
+  - [X] Think Chat
+  - [X] Stream Chat
+  - [X] Stream Think Chat
+  - [X] Model listing
+  - [X] Provider configuration and factory registration
+
+  Verified examples from the CLI:
+
+  ```
+  login user &#39;***&#39; password &#39;***&#39;;
+
+  ADD PROVIDER &#39;qiniu&#39;;
+
+  CREATE PROVIDER &#39;qiniu&#39; INSTANCE &#39;test&#39; KEY &#39;***&#39;;
+
+chat with &#39;deepseek/deepseek-v3.1-terminus-thinking@test@qiniu&#39; message
+&#39;hello&#39;;
+
+think chat with &#39;deepseek/deepseek-v3.1-terminus-thinking@test@qiniu&#39;
+message &#39;hello&#39;;
+
+stream chat with &#39;deepseek/deepseek-v3.1-terminus-thinking@test@qiniu&#39;
+message &#39;hello, what are you&#39;;
+
+stream think chat with
+&#39;deepseek/deepseek-v3.1-terminus-thinking@test@qiniu&#39; message &#39;hello,
+what are you&#39;;
+
+stream think chat with &#39;qwen3-max-2026-01-23@test@qiniu&#39; message &#39;hello,
+what are you&#39;;
+
+  LIST MODELS FROM &#39;qiniu&#39; &#39;test&#39;;
+
+```
+
+  ### Type of change
+
+  - [X] New Feature
+  - [X] Provider integration
+
+- fix(go-models): add VolcEngine model listing suffix (#15234)
+
+## Summary
+- add the VolcEngine `models` URL suffix used by the existing Go
+`ListModels` implementation
+- return a clear error when the VolcEngine models suffix is missing
+- add focused VolcEngine model-listing regression tests
+
+## What changed
+- Added `url_suffix.models` to `conf/models/volcengine.json`.
+- Normalized the configured models suffix before building the request
+URL.
+- Covered config loading, successful model listing, upstream errors, and
+missing suffix handling.
+
+## Why
+`VolcEngine.ListModels` already builds requests from `URLSuffix.Models`,
+but the bundled VolcEngine config did not define that suffix. That left
+the model-listing path unable to call the documented `/models` endpoint
+from the existing provider config.
+
+Fixes #14701
+
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Feat: add new tests and tescases for restful api suite (#15277)
+
+### What problem does this PR solve?
+
+extend restful api suite
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+- [x] Other (please describe): test
+
+- Fix: The Creativity parameter of chat was not saved. (#15243)
+
+### What problem does this PR solve?
+
+Fix: The Creativity parameter of chat was not saved.
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+- Docs: v0.25.6 release notes draft (#15255)
+
+### What problem does this PR solve?
+
+v0.25.6 release notes draft updated.
+
+### Type of change
+
+- [x] Documentation Update
+
+- fix(go-models): route hosted OCR providers through drivers (#15233)
+
+## Summary
+- route hosted MinerU.Net and PaddleOCR.Net provider names to their
+existing Go drivers
+- add regression coverage for loading the hosted OCR provider configs
+through ProviderManager
+
+## What changed
+- Added canonical provider-name aliases for the hosted OCR provider
+display names.
+- Covered both bundled configs with a focused provider-manager test.
+
+## Why
+The hosted provider configs use display names with `.Net`, while model
+factory dispatch lowercases the provider name. Without aliases, those
+configs fall through to `DummyModel` instead of using the existing
+MinerU and PaddleOCR drivers.
+
+---------
+
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Fix: show tag list for chunk (#15251)
+
+- feat(go-models): list LongCat models (#15241)
+
+## Summary
+- Add LongCat model-list support through the documented
+OpenAI-compatible models endpoint.
+
+## What changed
+- Add the LongCat `models` URL suffix for `/openai/v1/models`.
+- Implement `ListModels` for the LongCat Go driver.
+- Delegate `CheckConnection` to the lightweight model-list request.
+- Add focused regression coverage for successful, malformed, oversized,
+and missing-key responses.
+
+## Why
+LongCat documents a models endpoint under the OpenAI-compatible API
+surface, but the Go driver still returned `no such method` for model
+listing and connection checks.
+
+## Validation
+- `go test ./internal/entity/models -run TestLongCat -count=1`
+- `go test -race ./internal/entity/models -run TestLongCat -count=1`
+- `go test ./internal/entity -count=1`
+- `git diff --check`
+
+## Notes
+- Related to the broader Go model provider tracking in #14736, but this
+PR only handles LongCat model listing.
+- `go test ./internal/entity/models -count=1` is currently blocked by an
+unrelated Astraflow test panic outside this LongCat change.
+
+---------
+
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- fix(go-models): add xAI model listing suffix (#15236)
+
+## Summary
+- add the xAI `models` URL suffix used by the existing Go `ListModels`
+implementation
+- return a clear error when the xAI models suffix is missing
+- add focused xAI model-listing and connection-check regression tests
+
+## What changed
+- Added `url_suffix.models` to `conf/models/xai.json`.
+- Normalized the configured models suffix before building the request
+URL.
+- Covered config loading, successful model listing, upstream errors,
+API-key validation, missing suffix handling, and `CheckConnection`
+delegation.
+
+## Why
+`XAIModel.ListModels` already builds requests from `URLSuffix.Models`,
+and `CheckConnection` delegates to that method. The bundled xAI config
+did not define that suffix, which left the model-listing path unable to
+call the provider `/models` endpoint from the existing provider config.
+
+## Validation
+- `go test ./internal/entity/models -run TestXAI -count=1`
+- `go test ./internal/entity -count=1`
+- `git diff HEAD~1..HEAD --check`
+
+## Notes
+- `go test ./internal/entity/models -count=1` currently fails in
+unchanged Astraflow coverage: `TestAstraflowEmbedReturnsNoSuchMethod`
+panics before reaching any xAI assertions.
+
+---------
+
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Docs: Initial draft for v0.25.6 release notes. (#15250)
+
+### What problem does this PR solve?
+
+Initial draft: v0.25.6 release notes.
+
+### Type of change
+
+- [x] Documentation Update
+
+- Docs: Update version references to v0.25.6 in READMEs and docs (#15248)
+
+### What problem does this PR solve?
+
+- Update version tags in README files (including translations) from
+v0.25.5 to v0.25.6
+- Modify Docker image references and documentation to reflect new
+version
+- Update version badges and image descriptions
+- Maintain consistency across all language variants of README files
+
+### Type of change
+
+- [x] Documentation Update
+
+- Go: implement provider: OrcaRouter (#15235)
+
+### What problem does this PR solve?
+
+implement provider `OrcaRouter`
+**The following functionalities are now supported:**
+
+**Cohere:**
+- [x] Chat / Think Chat / Stream Chat / Stream Think Chat
+- [x] Model listing
+- [x] TTS
+- [ ] Balance
+
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+
+---------
+
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Go: implement provider: ModelScope (#15041)
+
+Closes #15040.
+
+ModelScope was listed unchecked in the Go-rewrite tracker #14736 and
+already had an llm_factories.json entry (tags: LLM) but no Go driver, so
+the new Go API server could not route ModelScope instances. The Python
+side has supported it through the OpenAI-compatible base at
+rag/llm/chat_model.py:618 (ModelScopeChat), which requires a
+user-supplied base URL and appends /v1.
+
+This adds:
+- internal/entity/models/modelscope.go: self-hosted OpenAI-compatible
+driver with chat (sync + SSE stream with idle-timeout cancellation),
+list_models, and check_connection. Auth header is optional, matching the
+xinference pattern, so deployments without auth and auth-enabled
+deployments both work. Base URL is normalized so users can configure
+either the root endpoint or the /v1 endpoint.
+- internal/entity/models/modelscope_test.go: 12 tests covering name, URL
+normalization, factory routing, chat happy path / auth header /
+reasoning_content extraction, stream happy path / stream=false rejection
+/ idle cancellation, list_models + check_connection, missing-base-URL
+clear error, and the no-such-method sentinels.
+- conf/models/modelscope.json: shipped config (class: &#34;local&#34;,
+url_suffix v1/chat/completions and v1/models).
+- internal/entity/models/factory.go: case &#34;modelscope&#34; →
+ModelScopeModel.
+- internal/service/llm.go: ModelScope added to the selfDeployed map
+alongside Ollama, Xinference, LocalAI, LM-Studio, GPUStack — the Python
+side requires user-supplied URL with no default, so the Go side
+classifies it the same way.
+
+Follow-on issues will add Embed and Rerank, in line with how Novita,
+NVIDIA, TogetherAI, and other providers landed method-by-method.
+
+---------
+
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Add HuaweiCloud model provider (#15237)
+
+### What problem does this PR solve?
+
+  This PR adds HuaweiCloud provider integration in RAGFlow.
+
+  Supported capabilities:
+
+  - [x] Chat / Think Chat / Stream Chat / Stream Think Chat
+  - [x] Embedding
+  - [x] Rerank
+  - [x] Model listing
+  - [x] Provider connection checking
+
+  Verified examples from the CLI:
+
+  ```
+  check instance &#39;test&#39; from &#39;HuaweiCloud&#39;;
+
+  chat with &#39;deepseek-v4-flash@test@HuaweiCloud&#39; message &#39;hello&#39;;
+
+  think chat with &#39;deepseek-v4-flash@test@HuaweiCloud&#39; message &#39;hello&#39;;
+
+  stream chat with &#39;deepseek-v4-flash@test@HuaweiCloud&#39; message &#39;hello&#39;;
+
+stream think chat with &#39;deepseek-v4-flash@test@HuaweiCloud&#39; message
+&#39;hello&#39;;
+
+embed text &#39;what is rag&#39; &#39;who are you&#39; with &#39;bge-m3@test@HuaweiCloud&#39;
+dimension 1024;
+
+rerank query &#39;what is rag&#39; document &#39;rag is retrieval augmented
+generation&#39; &#39;rag need llm&#39; &#39;famous rag
+project includes ragflow&#39; with &#39;bge-reranker-v2-m3@test@HuaweiCloud&#39; top
+3;
+
+  list supported models from &#39;HuaweiCloud&#39; &#39;test&#39;;
+
+  LIST MODELS FROM &#39;HuaweiCloud&#39; &#39;test&#39;;
+```
+  ### Type of change
+
+  - [x] New Feature
+  - [x] Provider integration
+
+- fix(tokenhub): wire Go driver and harden requests (#15224)
+
+## Summary
+- Wire the Go TokenHub provider through the model factory.
+- Harden TokenHub request handling for chat, streaming, embeddings, and
+model listing.
+- Add focused TokenHub unit coverage for factory wiring and provider
+behavior.
+
+## Notes
+- Refs #14736.
+- Follows up #15159.
+
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- feat(go-models): add AWS Bedrock provider driver (#15166)
+
+## Summary
+
+Closes #15165.
+
+Implements the AWS Bedrock model provider for the Go API server, tracked
+under #14736. Adds Converse + Converse-Stream chat and foundation-model
+listing, with SigV4 signing over a hand-rolled `net/http` path that
+matches the established pattern in `internal/entity/models/` (no new
+direct `go.mod` deps).
+
+## Linked tracker
+
+Tracked under #14736 (Implement model providers of RAGFlow API server in
+Go). Closes #15165.
+
+- Feat: add new tests and tescases for restful api suite (#15230)
+
+### What problem does this PR solve?
+
+extend restful api suite
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+- [x] Other (please describe): test
+
+- Fix: Fixed metadata issue (#15226)
+
+### What problem does this PR solve?
+
+Fix: Fixed metadata issue
+
+- The dataset&#39;s built-in metadata is now active, but it appears to be
+disabled in the individual file configuration.
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+- Fix: empty file with better message (#15232)
+
+Fix: empty file with better message
+
+- fix(api): allow canvas_type in agent create and update APIs (#15201)
+
+### What problem does this PR solve?
+
+Creating or updating an agent via `POST /api/v1/agents` and `PUT
+/api/v1/agents/{agent_id}` did not persist `canvas_type` because the
+handler `req` dict never assigned the field before
+`UserCanvasService.save` / `update_by_id`.
+
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+- [ ] New Feature (non-breaking change which adds functionality)
+- [ ] Documentation Update
+- [ ] Refactoring
+- [ ] Performance Improvement
+- [ ] Other (please describe):
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- Go: implement Rerank in DeepInfra driver (#15185)
+
+### What problem does this PR solve?
+
+The Go DeepInfra driver returned a stub error for `Rerank()` even though
+DeepInfra serves reranker models at `POST /v1/inference/{model}` with
+`query`, `documents`, and a `scores[]` response.
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- Go: implement provider: FuturMix (#15013)
+
+### What problem does this PR solve?
+
+Add a Go driver for **FuturMix** (https://futurmix.ai/docs), one of the
+unchecked providers on the umbrella tracking issue #14736. FuturMix is
+documented as an &#34;OpenAI-compatible API&#34; aggregator over Claude / GPT /
+Gemini / DeepSeek (~22 models per their `/models` page).
+
+Until this PR, a tenant who configured `futurmix` as a model provider in
+the Go layer fell through to the default branch of
+`internal/entity/models/factory.go` and got the dummy driver.
+
+---------
+
+Co-authored-by: sxxtony &lt;sxxtony@users.noreply.github.com&gt;
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Go: validate Baidu OCR inputs (#15168)
+
+### What problem does this PR solve?
+
+Closes #15167.
+
+The Baidu Go provider advertises OCR support through
+`paddleocr-vl-0.9b`, but `BaiduModel.OCRFile` dereferenced required
+inputs before validating them. Calling OCR with a missing API config,
+API key, or model name could panic instead of returning a normal error.
+
+This PR adds explicit input validation for those required values.
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+---------
+
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Go: implement OCR in ZhipuAI driver (#15143)
+
+### What problem does this PR solve?
+
+Closes #15142.
+
+ZhipuAI lists `glm-ocr` as an OCR model, but the Go driver still
+returned `no such method` from `OCRFile`. This wires the advertised
+model to Z.AI&#39;s documented `layout_parsing` endpoint and returns the
+`md_results` Markdown output through the existing `OCRFileResponse.Text`
+field.
+
+This PR also adds focused tests for URL input, raw file-content base64
+input, and validation errors.
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+- [ ] New Feature (non-breaking change which adds functionality)
+- [ ] Documentation Update
+- [ ] Refactoring
+- [ ] Performance Improvement
+- [ ] Other (please describe):
+
+### Test
+
+- [x] `go test -vet=off ./internal/entity/models -run
+&#39;TestZhipuAIOCRFile&#39;`
+
+- Feat: add new tests and tescases for restful api suite (#15223)
+
+### What problem does this PR solve?
+
+extend restful api suite
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+- [x] Other (please describe): test
+
+- Fix [Bug]: Save parser configs in dataset configuration page is not working #15175 (#15177)
+
+### What problem does this PR solve?
+
+Fix [Bug]: Save parser configs in dataset configuration page is not
+working #15175
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+- fix: resolve asyncio correctness issues (fire-and-forget tasks, event loop nesting) (#14761)
+
+## Summary
+
+Fixes the confirmed asyncio anti-patterns from #14755. Only the three
+verified bugs are addressed; patterns already correctly using
+`asyncio.new_event_loop()` in a fresh thread are left untouched.
+
+### Changes
+
+**`api/apps/restful_apis/tenant_api.py` — fire-and-forget
+`send_invite_email`**
+
+`asyncio.create_task()` was called without storing the `Task` reference.
+CPython&#39;s GC can collect an unfinished task, silently cancelling it and
+swallowing exceptions. Fixed by storing the task in a module-level
+`_background_tasks: set[Task]` with a `done_callback` to discard it on
+completion — the standard Python idiom for safe background tasks.
+
+**`api/apps/restful_apis/agent_api.py` — fire-and-forget
+`background_run`**
+
+Same root cause in the webhook &#34;Immediately&#34; execution path. Same fix
+applied.
+
+**`rag/llm/chat_model.py` (`LocalLLM._stream_response`) —
+`asyncio.get_event_loop()` on running loop**
+
+`asyncio.get_event_loop()` returns Quart&#39;s running event loop when
+called from an async context.
+Calling `loop.run_until_complete()` on it raises `RuntimeError`.
+Replaced with `asyncio.new_event_loop()` so the generator
+uses a dedicated fresh loop, closed in a `finally` block.
+
+## What was NOT changed
+
+- `llm_service._sync_from_async_stream` and
+`evaluation_service._sync_from_async_gen`: both already correctly use
+`asyncio.new_event_loop()` inside a fresh thread.
+- `llm_service._run_coroutine_sync`: only caller is `rag/app/resume.py`
+(sync context), so `thread.join()` is correct there.
+- `requests` in agent tools: sync methods dispatched through thread
+pools; httpx migration is a separate, larger refactor.
+
+## Test plan
+
+- [ ] Invite a team member and confirm the email is sent with no task
+warnings in logs.
+- [ ] Trigger a webhook agent in &#34;Immediately&#34; mode; confirm canvas
+state is persisted after background run.
+- [ ] Verify `LocalLLM` (Jina backend) chat and streaming work
+end-to-end.
+
+Closes #14755
+
+---------
+
+Co-authored-by: Zhichang Yu &lt;yuzhichang@gmail.com&gt;
+
+- Fix: The prompt variable for the agent operator disappears after input. (#15218)
+
+### What problem does this PR solve?
+
+Fix: The prompt variable for the agent operator disappears after input.
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+- Docs: Minimum required Python version increased to 3.13. (#15219)
+
+### What problem does this PR solve?
+
+Minimum Python version increased to 3.13.
+
+### Type of change
+
+
+- [x] Documentation Update
+
+- Implement Elasticsearch functions in GO (#15160)
+
+### What problem does this PR solve?
+
+Implement Elasticsearch functions in GO (except for Search)
+
+### Type of change
+
+- [x] Refactoring
+
+- Feat: add new tests and tescases for restful api suite (#15208)
+
+### What problem does this PR solve?
+
+extend restful api suite
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+- [x] Other (please describe): test
+
+- Feat: Enable agent messages to display base64 images (#15212)
+
+### What problem does this PR solve?
+
+Feat: Enable agent messages to display base64 images
+
+### Type of change
+
+
+- [x] New Feature (non-breaking change which adds functionality)
+
+- Fix #15170 cannot filter document status (#15216)
+
+Fix #15170 cannot filter document status
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+- fix(Go): rewrite chat, listmodels, embed for Ollama (#15213)
+
+### What problem does this PR solve?
+
+IDK how to implement **`Ollama`** on #14580 but it&#39;s totally wrong.
+This is the rewrite version for **`Ollama`**
+
+**Verified from CLI**
+```
+# Embed
+RAGFlow(user)&gt; embed text &#39;what is rag&#39; &#39;who are you&#39; with &#39;nomic-embed-text:latest@test12@ollama&#39; dimension 1024;
++-----------+-------+
+| dimension | index |
++-----------+-------+
+| 768       | 0     |
+| 768       | 1     |
++-----------+-------+
+
+# Chat
+RAGFlow(user)&gt; think chat with &#39;qwen3:0.6b@test12@ollama&#39; message &#39;who r u&#39;
+Thinking: Okay, the user asked, &#34;Who r u?&#34; I need to respond appropriately. First, I should acknowledge their question. Since I&#39;m an AI, I don&#39;t have a physical form, but I can confirm that I&#39;m a large language model. I should keep the response friendly and offer help. Let me make sure I&#39;m not making up any information and that the response is natural. Also, I should check for any typos and ensure clarity. Alright, that should cover it.
+
+Answer: I&#39;m an AI language model, and I don&#39;t have a physical form. However, I can tell you that I&#39;m designed to assist with questions and tasks. How can I help you today?
+Time: 2.914285
+
+
+RAGFlow(user)&gt; stream think chat with &#39;qwen3:0.6b@test12@ollama&#39; message &#39;who r u&#39;
+Thinking: , the user asked, &#34;Who are you?&#34; I need to respond appropriately. Since I&#39;m an AI assistant, I should mention that I don&#39;t have a physical form or a mind. I should also clarify that I can help with various tasks like answering questions or providing information. It&#39;s important to keep the response friendly and informative while maintaining the correct tone.
+Answer:  don&#39;t have a physical form or a mind, but I&#39;m here to help with your questions or tasks! What can I do for you today?
+Time: 1.740047
+
+# LisyModels
+RAGFlow(user)&gt; list supported models from &#39;ollama&#39; &#39;test12&#39;
++-------------------------+
+| model_name              |
++-------------------------+
+| nomic-embed-text:latest |
+| qwen3:0.6b              |
++-------------------------+
+```
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+- [x] Refactoring
+
+- Fix: Replace the red highlight at the top of the PDF document with yellow. (#15203)
+
+### What problem does this PR solve?
+
+Fix: Replace the red highlight at the top of the PDF document with
+yellow.
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+- Fix: Correct the API path (#15204)
+
+Follow on PR #15146 to reslove the backwad compatability issue.
+
+1. /agents/&lt;attachment_id&gt;/download -&gt;
+/agents/attachments/&lt;attachment_id&gt;/download
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+- fix: The output of the parser in the ingestion pipeline contains HTML tags (#14920)
+
+## Summary
+This change fixes ingestion quality issues where MinerU parser output
+may contain HTML fragments (for example, table-related tags like `&lt;tr&gt;`,
+`&lt;td&gt;`, `&lt;br&gt;`), which were previously passed directly into
+chunking/tokenization and degraded chunk quality.
+
+The fix adds a sanitization step in the MinerU parser path so parsed
+sections are normalized to clean text before chunking.
+
+## Change Type (select all)
+- [x] Bug fix
+- [x] Ingestion pipeline improvement
+- [x] Parser/chunking quality fix
+
+## Related Issue
+- https://github.com/infiniflow/ragflow/issues/14831
+
+- Fix: table parser metadata (#15127)
+
+### What problem does this PR solve?
+
+This PR improves the table upload flow for CSV/Excel files by allowing
+table column role configuration at upload time.
+
+Previously, users had to:
+1. Upload and parse a table file.
+2. Open parser settings and manually set table column roles.
+3. Re-parse the file for the roles to take effect.
+
+This was inefficient and required an unnecessary second parse.
+
+With this change:
+1. When the knowledge base uses table parsing, the upload dialog
+extracts CSV/Excel headers client-side.
+2. Users can choose Auto mode or Manual mode.
+3. In Manual mode, users can assign per-column roles before upload.
+4. The selected parser config is sent with the upload request and
+applied server-side during document creation.
+
+Result: configured table column roles are applied from the first parse.
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+
+Co-authored-by: Ahmad Intisar &lt;ahmadintisar@Ahmads-MacBook-M4-Pro.local&gt;
+
+- Feat: Expose Doc Generator file metadata as discrete outputs (#15080)
+
+Declare doc_id, filename, mime_type, and size as separate outputs on the
+Document Generation component so downstream nodes (e.g., the Code
+component) can consume them via the variable picker. The existing
+download JSON blob is preserved unchanged for the Message component&#39;s
+download-chip rendering.
+
+### What problem does this PR solve?
+
+The Document Generation component previously exposed only a single
+`download` output —
+a JSON-encoded blob containing the file&#39;s `doc_id`, `filename`,
+`mime_type`, `size`,
+and base64 payload. On top of that, the variable picker actively hides
+this `download`
+entry from every consumer except the Message component (because the
+embedded base64 is
+  too heavy to splat into arbitrary downstream nodes).
+
+The combined effect: users wiring the Doc Generator&#39;s output into a Code
+component had
+no way to retrieve basic file info such as `file_name` or `doc_id` from
+the picker,
+blocking workflows that need to post-process the generated file (e.g.,
+registering it
+  elsewhere, custom delivery, follow-up API calls).
+
+This PR declares `doc_id`, `filename`, `mime_type`, and `size` as
+**discrete outputs**
+on the Document Generation component, alongside the existing `download`
+blob. The new
+  fields:
+
+- Appear in the variable picker for **all** downstream nodes, including
+the Code
+  component, so users can bind them directly to script arguments.
+- Are cheap scalars only — no base64 payload leaks into other
+components.
+- Leave the existing `download` JSON blob completely untouched, so the
+Message
+component&#39;s download-chip rendering (which parses that blob via
+`_is_download_info`)
+  keeps working with no behavior change.
+
+  Changes:
+- `agent/component/docs_generator.py` — declare the four new outputs in
+  `DocGeneratorParam` and emit them via `set_output(...)` in `_invoke`.
+- `web/src/pages/agent/constant/index.tsx` — extend
+`initialDocGeneratorValues.outputs`
+   with the new keys.
+- `web/src/pages/agent/form/doc-generator-form/index.tsx` — mirror the
+new outputs in
+  the zod schema so the form is valid.
+
+No changes needed to the picker&#39;s existing `download`-hiding filter — it
+matches only
+on the literal output name `download`, so the new metadata entries fall
+through
+  naturally.
+
+  Reported in: https://github.com/infiniflow/ragflow/issues/14461.
+  ### Type of change
+
+  - [x] New Feature (non-breaking change which adds functionality)
+
+- Go: implement embed for Tencent Hunyuan (#15207)
+
+### What problem does this PR solve?
+
+Implement embed for Tencent Hunyuan
+
+**Verified from CLI**
+```
+RAGFlow(user)&gt; embed text &#39;what is rag&#39; &#39;who are you&#39; with &#39;hunyuan-embedding@test1@hunyuan&#39; dimension 16;
++-----------+-------+
+| dimension | index |
++-----------+-------+
+| 1024      | 0     |
+| 1024      | 1     |
++-----------+-------+
+```
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+- [x] Refactoring
+
+- feat[go]: implement provider: TokenHub (#15159)
+
+### What problem does this PR solve?
+
+implement provider TokenHub
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+
+- Fix /chat/completions to allow send only the latest message (#15197)
+
+### What problem does this PR solve?
+
+1. Fix /chat/completions to send only the latest message
+2. Allo chat stream=False
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+
+- Revert &#34;Fix: /openai/&lt;chat_id&gt;/chat/completions not aware of session_id&#34; (#15205)
+
+Reverts infiniflow/ragflow#15155 because this is never supported, keep
+it as it is.
+
+- Go: add ingestion server (#15094)
+
+### What problem does this PR solve?
+
+1. Go ingestion server will connected with admin server with gRPC stream
+2. Go ingestion server will be responsible for ingestion tasks
+```
+
+RAGFlow(admin)&gt; list ingestors;
++-----------------+-----------+----------------------------------+---------------------------+----------+------------+--------------+--------+------------+---------------+
+| address         | cpu_usage | id                               | last_heartbeat            | name     | process_id | rss_usage    | status | task_count | vms_usage     |
++-----------------+-----------+----------------------------------+---------------------------+----------+------------+--------------+--------+------------+---------------+
+| 127.0.0.1:58564 | 0         | bdd1870eea2646e0aacb8a2cd3307aa2 | 2026-05-24T18:16:17+08:00 | ingestor | 680152     | 212.72265625 | active | 0          | 2589.12109375 |
++-----------------+-----------+----------------------------------+---------------------------+----------+------------+--------------+--------+------------+---------------+
+
+RAGFlow(admin)&gt; start ingestion &#39;abc&#39;;
++----------------------------------+
+| task_id                          |
++----------------------------------+
+| e714777639ca4760ab427b5f211e81ad |
++----------------------------------+
+
+RAGFlow(admin)&gt; stop ingestion &#39;f7bd39d0a724457eb5fdce6d81699776&#39;;
++----------------------------------+
+| task_id                          |
++----------------------------------+
+| f7bd39d0a724457eb5fdce6d81699776 |
++----------------------------------+
+
+RAGFlow(admin)&gt; list tasks;
++-----+----------------------------------+-------+------+----------------------------------+---------------------------+------------+------------+
+| ETA | assign_to                        | error | from | id                               | last_update               | start_time | status     |
++-----+----------------------------------+-------+------+----------------------------------+---------------------------+------------+------------+
+| 0   | 17937da188b84f23a5c10bb87588944b |       | CLI  | eae6431da72a40e796cff3a03008091b | 2026-05-24T19:46:03+08:00 |            | COMPLETED  |
+| 0   | 17937da188b84f23a5c10bb87588944b |       | CLI  | 6cccdd174bd049ecb05a774bbb47593f | 2026-05-24T19:46:03+08:00 |            | COMPLETED  |
+| 0   | 17937da188b84f23a5c10bb87588944b |       | CLI  | ef360d777e57485799adb96b30f2b4b8 | 2026-05-24T19:46:03+08:00 |            | CANCELED   |
+| 0   | 17937da188b84f23a5c10bb87588944b |       | CLI  | bcc5c5448cb64de48b6b6171c36fb790 | 2026-05-24T19:46:03+08:00 |            | CANCELED   |
+| 0   | 17937da188b84f23a5c10bb87588944b |       | CLI  | bfc25384c43a443294fe2da979a38ac2 | 2026-05-24T19:46:03+08:00 |            | DISPATCHED |
+| 0   | 17937da188b84f23a5c10bb87588944b |       | CLI  | 84960537b85d413b8990a9efd5952d67 | 2026-05-24T19:46:04+08:00 |            | DISPATCHED |
+| 0   | 17937da188b84f23a5c10bb87588944b |       | CLI  | 3d223c1b51e24b36861a3bfb2f1d58d4 | 2026-05-24T19:46:03+08:00 |            | CANCELED   |
+| 0   | 17937da188b84f23a5c10bb87588944b |       | CLI  | e433b0e356b846c89c301621a3c54494 | 2026-05-24T19:46:03+08:00 |            | COMPLETED  |
+| 0   | 17937da188b84f23a5c10bb87588944b |       | CLI  | 7c93a3880f074ebd8eca14e6b51bb7ef | 2026-05-24T19:46:03+08:00 |            | COMPLETED  |
+| 0   | 17937da188b84f23a5c10bb87588944b |       | CLI  | df2e4ef51aaf4390bff9a23f2692486e | 2026-05-24T19:46:04+08:00 |            | DISPATCHED |
+| 0   | 17937da188b84f23a5c10bb87588944b |       | CLI  | 7377c53010194ef7a83aa206698d66ff | 2026-05-24T19:46:05+08:00 |            | DISPATCHED |
+| 0   | 17937da188b84f23a5c10bb87588944b |       | CLI  | df64d1a1f9d348e3a2f174c4d7d69e73 | 2026-05-24T19:46:05+08:00 |            | DISPATCHED |
+| 0   | 17937da188b84f23a5c10bb87588944b |       | CLI  | b59834512e2847e1bdf13ace04b8a456 | 2026-05-24T19:46:06+08:00 |            | DISPATCHED |
+| 0   | 17937da188b84f23a5c10bb87588944b |       | CLI  | 0064bb0ab69344028d1ecfda053826f4 | 2026-05-24T19:46:03+08:00 |            | QUEUED     |
++-----+----------------------------------+-------+------+----------------------------------+---------------------------+------------+------------+
+
+
+```
+
+
+### Type of change
+
+- [x] New Feature (non-breaking change which adds functionality)
+
+---------
+
+Signed-off-by: Jin Hai &lt;haijin.chn@gmail.com&gt;</div>
+</div>
+
+<a href="../project/infiniflow_ragflow.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

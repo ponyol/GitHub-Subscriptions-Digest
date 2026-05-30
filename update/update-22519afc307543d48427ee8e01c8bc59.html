@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (5 commits) - cuga-project/cuga-agent - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (5 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/cuga-project_cuga-agent.html">cuga-project/cuga-agent</a> /
+    Updates in main (5 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/cuga-project_cuga-agent.html">cuga-project/cuga-agent</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-27 08:01 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/cuga-project/cuga-agent/commits/main" target="_blank">https://github.com/cuga-project/cuga-agent/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление значительно улучшает пользовательский опыт, отображая индикатор загрузки при ожидании первого ответа от LLM. Оно повышает надежность системы, ограничивая количество инструментов, передаваемых языковым моделям, и использует шорт-лист LLM для выбора наиболее релевантных при превышении лимита, предотвращая сбои. Кроме того, система теперь корректно извлекает сгенерированные LLM блоки кода даже при отсутствии или усечении их закрывающих ограждений.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix(ui): show Carbon loading indicator during pre-stream window (#188) (#265)
+
+Before the first SSE event arrives from the backend, the chat thread
+showed no indicator — leaving users staring at a blank screen with slow
+LLMs. Fix defers the shell message creation until the first event
+arrives and uses updateIsMessageLoadingCounter to show Carbon&#39;s built-in
+loading indicator during the gap.
+
+- fix(cuga_lite): cap bind_tools count and shortlist over the limit (#203)
+
+* fix(cuga_lite): cap bind_tools count and shortlist over the limit (#202)
+
+`resolve_model_with_bind_tools` blindly passed every candidate tool to
+`LLM.bind_tools()`, which fails hard on Groq/OpenAI (max 128 tools) for
+benchmarks like m3-hockey (206 tools).
+
+Add `cuga_lite_bind_tools_max_count` (default 128). When the candidate list
+exceeds the cap, run the existing LLM shortlister against the first user
+message and bind the top-K most relevant tools (reserving 1 slot for
+find_tools when `include_find_tools=True`). When shortlisting is impossible
+(no query / shortlister failure / empty ranking), raise an actionable
+RuntimeError naming the count, cap, and remedy — silent truncation would
+corrupt research comparing native tool-calling against text-mode.
+
+WatsonX / LiteLLM-to-Anthropic users on permissive backends can disable the
+cap via `DYNACONF_ADVANCED_FEATURES__CUGA_LITE_BIND_TOOLS_MAX_COUNT=0`.
+
+Closes #202
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(cuga_lite): make bind_tools cap pad opt-in and fix loguru formatting
+
+Two follow-ups discovered while exercising the cap path on the m3 hockey
+benchmark (206 tools, Groq llama-3, mode=all):
+
+1. Loguru log strings used %-style placeholders so the cap exceeded /
+   shortlisted-to messages printed literal &#34;%s&#34; / &#34;%d&#34;. Switch to {}.
+
+2. The existing shortlister LLM system prompt is biased toward &#34;the most
+   relevant&#34; tools and typically returns 1-4 entries even when asked for
+   K=128. Padding the result with the remaining tools (provider order) does
+   fill the cap, but binding ~128 native tools pushes the Groq llama model
+   into native tool_calls mode, which cuga_lite&#39;s code-execution flow does
+   not fully exercise — measured regression from 5-7 tool calls / pass to
+   0 tool calls / fail on the same task.
+
+   Add `cuga_lite_bind_tools_pad_to_cap` (default False) and keep the
+   shortlister&#39;s natural ranked prefix as the bound set. Result on the m3
+   hockey task: 0/1 to 1/1 pass, 17s, 4 tool calls in code-mode.
+
+Users explicitly chasing &#34;bind every slot the provider allows&#34; can flip the
+setting on for that experiment.
+
+* fix(cuga_lite): count find_tools correctly when applying bind_tools cap
+
+Per coderabbit review on #203: the under-cap fast path and the over-cap
+reserve logic treated find_tools inconsistently.
+
+- When len(bound) == max_count and include_find_tools=True with a
+  non-overlapping find_tools, the fast path returned max_count+1 tools and
+  the provider rejected the request.
+- When the overlay path had already placed find_tools into bound and
+  include_find_tools=True, reserve=1 dropped a real shortlist slot even
+  though find_tools was already counted in bound.
+
+Track whether find_tools is already in bound, compute an effective_count
+for the under-cap check, and only set reserve=1 when find_tools genuinely
+needs to be appended.
+
+Add two regression tests for the boundary cases.
+
+* refactor(prompt_utils): share shortlister payload builder
+
+Per coderabbit nitpick on #203: shortlist_tool_names duplicated the tool
+serialization from find_tools but dropped _response_schemas and
+_param_constraints, so bind-time ranking could diverge from runtime find_tools
+ranking on the same tool set.
+
+Extract PromptUtils._build_shortlister_payload as the single source of truth
+for serializing (all_tools, all_apps) into the prompt-friendly dicts. Both
+callers now produce identical payloads including the response-schema and
+param-constraint fields the LLM uses to rank.
+
+* fix(cuga_lite): address all open coderabbit findings on #203
+
+Four findings addressed in one commit:
+
+1. (major) include_find_tools=True did not guarantee find_tools survived
+   shortlisting when the overlay had already placed it into bound. The
+   shortlister LLM is free to drop any tool from its ranking input. Fix:
+   pull find_tools out of the ranking pool when present, always reserve a
+   cap slot when include_find_tools=True, and append find_tools back after
+   ranking. As a bonus, max_count=1 + include_find_tools=True now binds
+   just find_tools instead of raising.
+
+2. (minor) logger.warning(&#34;...get_apps() failed: %s&#34;, e) used printf-style
+   formatting, which loguru does not interpolate — the actual error reason
+   was lost. Switch to &#34;{}&#34;.
+
+3. (minor) shortlist_tool_names did not guard whitespace-only queries; the
+   guard at the top only checked top_k and all_tools. A whitespace query
+   would still hit the LLM and produce arbitrary rankings, bypassing the
+   &#34;no query&#34; failure path in the caller. Add `if not query.strip(): return []`.
+
+4. (nit) _build_shortlister_payload caught blind Exception when
+   serializing args_schema, masking unexpected bugs. Narrow to
+   (AttributeError, TypeError, ValueError).
+
+New regression tests:
+- find_tools survives shortlisting when in overlay bound (cap path)
+- max_count=1 + include_find_tools=True binds only find_tools
+
+* fix(cuga_lite): two more bind_tools cap edge cases (coderabbit on #203)
+
+A. Overlay-injected find_tools must respect include_find_tools=False.
+   `_indexed_tools_for_native_bind` can place find_tools into `bound`
+   independently of config. Previously, when `include_find_tools=False`,
+   the code never even *read* the find_tools candidate from
+   tools_context_ref, so the overlay-injected copy slipped through —
+   consuming a capped slot, leaking through the shortlister, and
+   defeating the user&#39;s explicit opt-out. Fix: resolve the find_tools
+   candidate unconditionally; if `include_find_tools=False` and it&#39;s
+   already in `bound`, strip it before any cap math runs.
+
+B. LLM-hallucinated shortlist names must fail loudly.
+   The existing guard catches `ranked_names == []` but not the case
+   where the LLM returns names that don&#39;t exist in `ranking_pool` (zero
+   matches after the dictionary lookup). Without the new check, we&#39;d
+   silently pad with arbitrary `ranking_pool` prefix or return just
+   find_tools — recreating exactly the silent degradation this cap path
+   exists to prevent. Fix: raise RuntimeError when `shortlisted` is
+   empty after the lookup loop, with diagnostic context.
+
+Two regression tests added:
+- overlay-injected find_tools stripped when include_find_tools=False
+- shortlister returning hallucinated names raises before pad / append
+
+16/16 tests pass.
+
+* fix(cuga_lite): clamp shortlisted output to target_k (coderabbit on #203)
+
+Defense-in-depth: the build-shortlisted loop in _apply_bind_tools_cap_and_merge
+trusted PromptUtils.shortlist_tool_names to truncate its own output at top_k.
+That trust is fragile — a custom shortlister, a future refactor, or a mocked
+path could return more names than requested, in which case shortlisted grew
+past target_k, the pad block was skipped (len already ≥ target_k), and the
+final bound list exceeded max_count, re-triggering the provider 400 the cap
+exists to prevent.
+
+Add an explicit `if len(shortlisted) &gt;= target_k: break` so the call site
+enforces its own cap contract regardless of the shortlister&#39;s compliance.
+
+Two regression tests added:
+- overlong shortlister output clamped to target_k (mode=all, no find_tools)
+- same clamp with include_find_tools=True reserving 1 slot
+
+* refactor(cuga_lite): extract bind_tools cap/shortlist to subpackage (#203)
+
+Addresses Sami&#39;s review on #203 (modularity + DRY + docs).
+
+- New subpackage src/cuga/backend/cuga_graph/nodes/cuga_lite/bind_tools/
+  - cap.py: holds bind_tools_max_count_from_settings,
+    bind_tools_pad_to_cap_from_settings, apply_bind_tools_cap_and_merge,
+    plus small private helpers (_resolve_find_tools_overlay,
+    _build_ranking_pool, _run_shortlister, _materialize_shortlist,
+    _maybe_pad_to_cap).
+  - __init__.py: re-exports only what cuga_lite_graph.py needs.
+- cuga_lite_graph.py: resolve_model_with_bind_tools stays as orchestration.
+  The four mode={all,apps,tools,apps_and_tools} branches now share a local
+  _cap_merge_bound(bound) closure (DRY ask), and import the helpers from
+  bind_tools/.
+- Docstring on resolve_model_with_bind_tools now documents
+  cuga_lite_bind_tools_pad_to_cap and adds an Operational cost paragraph
+  (one extra LLM round-trip per call_model when cap exceeded; intentional
+  RuntimeError when shortlisting cannot run safely).
+- settings.toml: documents both cuga_lite_bind_tools_max_count and
+  cuga_lite_bind_tools_pad_to_cap inline with the other bind_tools_* knobs
+  (env overrides + latency/RuntimeError semantics).
+- Tests: patch paths updated for the new module layout; pad_to_cap patches
+  now target bind_tools.cap directly since the call site moved with the
+  function. 18 tests pass.
+
+* fix(cuga_lite): address sami&#39;s review comments on #203
+
+- run_tests.sh: include tests/unit/test_cuga_lite_bind_tools.py in unit run
+- settings.toml: trim verbose comments around bind_tools cap/pad flags
+
+* fix(merge): restore files lost during merge resolution
+
+The previous merge commit (97b03f7a) accidentally omitted 109 files that
+landed on main via #250 — including the entire cuga_lite/providers/
+package, cuga_agent_core/ tests, and docs/examples/knowledge_demo/ and
+travel_agent/ trees. The omission broke CI&#39;s stability test at import:
+
+  ModuleNotFoundError: No module named
+    &#39;cuga.backend.cuga_graph.nodes.cuga_lite.providers&#39;
+
+Restore the missing files from origin/main and re-apply this branch&#39;s
+own port of the bind_tools cap changes to helpers/bind_tools.py and
+adapter/graph_adapter.py (which the file restore overwrote).
+
+* trigger ci
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(cuga_lite): recover code from unclosed ```python fence (#252)
+
+* fix(cuga_lite): recover code from unclosed ```python fence
+
+`extract_and_combine_codeblocks` relied on a strict `\`\`\`python ... \`\`\``
+regex with a non-optional closing fence. When the LLM emitted a Python
+code block whose closing fence was missing or truncated, the regex
+returned no matches and `call_model` fell through into the
+&#34;no-code&#34; branch — terminating the subgraph with the raw response as
+`final_answer`. `sdk_callback_node` then routed the unexecuted source
+straight to FinalAnswerAgent, and the user received Python source as
+the chat reply (issue #204).
+
+Add a recovery path that searches for an unclosed `\`\`\`python` fence,
+strips any partial trailing fence, and only returns the candidate when
+it compiles. Guarding on `compile()` keeps prose that happens to live
+after a stray opening fence from being mis-classified as code.
+
+Closes #204
+
+* fix(cuga_lite): strip partial trailing fences in code-block recovery
+
+The recovery path stripped only a full \`\`\` (three-backtick) trailing
+fence, so streamed responses truncated mid-fence (one or two trailing
+backticks) still failed `compile()` and dropped otherwise-valid code.
+Match 1–3 trailing backticks instead.
+
+Addresses CodeRabbit feedback on PR #252.
+
+* refactor(code_extraction): extract fence recovery helper, handle same-line/trailing prose
+
+- Extract _recover_non_closing_python_fence() helper at module bottom.
+- Same-line ```python fences (no newline after `python`) now recover via \s*
+  in place of \s*\n.
+- Trailing prose after otherwise-valid code is salvaged by walking the
+  candidate line-by-line until compile() succeeds.
+- Drop unused _reflection_current_task (and HumanMessage import) from
+  cuga_lite_graph.py — live caller uses adapter/response_utils.reflection_current_task.
+- Trim multi-paragraph comments in code_extraction.py to one line each.
+- Trim test docstrings to single-line summaries.
+- Add regression tests for trailing-prose and same-line-fence shapes.
+
+- refactor(agent-core): extract shared agent logic into cuga_agent_core module (#250)
+
+- docs(examples): add knowledge demo and fix SDK knowledge tool kwargs
+
+- Sample agent-level policy docs (handbook, insurance, PTO, 401k)
+- Session-level employee PDFs for Sarah Chen (enrollment, PTO balance, pay stub)
+- Runnable SDK example (main.py) and UI path (cuga start demo_knowledge)
+- Demo prompts covering single-scope and cross-scope retrieval
+- README updates: Knowledge in Why CUGA? table, Key Features, and Knowledge Base
+Fix KnowledgeClient LangChain tool wrappers to accept **kwargs injected by
+cuga_lite (thread_id, agent_id), preventing TypeError when knowledge is
+enabled in SDK mode.</div>
+</div>
+
+<a href="../project/cuga-project_cuga-agent.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

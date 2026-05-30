@@ -1,0 +1,2744 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (100 commits) - vectorize-io/hindsight - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (100 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/vectorize-io_hindsight.html">vectorize-io/hindsight</a> /
+    Updates in main (100 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/vectorize-io_hindsight.html">vectorize-io/hindsight</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-05-29 15:45 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/vectorize-io/hindsight/commits/main" target="_blank">https://github.com/vectorize-io/hindsight/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обширное обновление в первую очередь повышает производительность и надежность, в частности, за счет введения параллельной LLM-диспетчеризации для задач консолидации с блокировкой по области видимости, улучшения механизмов повторных попыток для временных ошибок и оптимизации целостности и хранения данных. Ключевые улучшения также включают усовершенствованное взаимодействие с LLM с улучшенным временным рассуждением и контролем языка вывода, а также новые функции, такие как целевая консолидация, приоритетное планирование и интернационализация для панели управления.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix(consolidation): scope-locked parallel dispatch (alternative to #1843) (#1853)
+
+* feat(consolidation): scope-locked parallel LLM dispatch
+
+Adds opt-in HINDSIGHT_API_CONSOLIDATION_LLM_PARALLELISM (default 1, sequential).
+Parallel groups acquire per-scope asyncio.Locks computed from each memory&#39;s
+observation_scopes setting, so two tag groups whose write-scope sets overlap
+serialise on the overlapping scope rather than racing on the same observation
+row. Locks acquired in tuple(sorted(scope)) order across all groups for
+deadlock-freedom. Covers combined / per_tag / all_combinations / explicit-list
+scopes uniformly with no operator opt-in.
+
+Refactor extracts the per-memory observation_scopes resolver into module-level
+helpers (_resolve_obs_tags_list, _resolve_write_scopes, _parse_observation_scopes,
+_scope_sort_key) so the dispatcher and the lock layer share one source of truth.
+Per-batch stats deltas now return as _BatchDeltas and merge serially after
+dispatch — no lost-update race on shared counters/tag set.
+
+* feat(consolidation): per-batch perf log + default parallelism=4
+
+- Per-batch log uses a batch-local ConsolidationPerfLog so timings,
+  llm_calls, and input_tokens reflect only that batch&#39;s work — no
+  delta-from-shared-snapshot bleed under parallelism &gt; 1. Local perf
+  merges into the job-level perf at end-of-batch so the final flush
+  still totals everything.
+- Restore the cumulative processed=N/total progress indicator. The
+  counter increments + snapshots atomically between awaits in
+  single-threaded asyncio, no lock needed.
+- Bump DEFAULT_CONSOLIDATION_LLM_PARALLELISM from 1 to 4 to match
+  retain_max_concurrent and let combined-mode banks pick up the
+  throughput win out of the box. Lock-on-overlap makes this safe by
+  construction; per_tag / all_combinations banks degrade to serial
+  automatically.
+- New regression test test_per_batch_log_line_attributes_only_own_work
+  asserts per-batch log fields are isolated (llm calls / memories /
+  created / timing) and cumulative processed indicator is monotonic.
+
+* chore: regenerate docs-skill + merge two alembic heads to unblock CI
+
+- skills/hindsight-docs/references/developer/configuration.md: regenerated via
+  ./scripts/generate-docs-skill.sh to pick up the new
+  HINDSIGHT_API_CONSOLIDATION_LLM_PARALLELISM entry from the source
+  configuration.md edited in the previous commit.
+- alembic/versions/mrgvchgraf01_*: empty merge revision unifying main&#39;s two
+  open heads (b5a4c3e2f1d8 add_graph_maintenance_queue and b8c9d0e1f2a3
+  vchord_cosine_opclass). test_alembic_dag.py::test_single_head catches the
+  divergence and recommends `alembic merge heads`; this is that. Pre-existing
+  on main — only surfaced because this PR touches API code and trips the
+  path-filtered test-api job.
+
+* ci: cap every job in test.yml at 30 minutes
+
+Adds timeout-minutes: 30 to all 60 jobs. Without it each job inherits
+GitHub Actions&#39; 6-hour default, so a hung worker or a flaky LLM call can
+keep the whole suite &#34;running&#34; for hours before someone notices.
+
+30 min is ~2x headroom over the slowest current job (test-api shards
+~13 min, test-doc-examples ~14 min, test-python-client-oracle ~13 min).
+If a specific job legitimately needs more later, bump just that one.
+
+* chore: drop redundant alembic merge migration
+
+Main shipped its own merge revision c1d2e3f4a5b6 for the same two heads
+(b5a4c3e2f1d8 and b8c9d0e1f2a3) in #1854/#1857&#39;s neighbourhood, so my
+mrgvchgraf01 became redundant after rebase. Keeping only main&#39;s version
+to avoid a fresh divergent-heads situation.
+
+* test: bump pool_max_size from 5 to 30 in memory fixtures
+
+The 4 MemoryEngine fixtures in conftest were sized for sequential
+consolidation; with consolidation_llm_parallelism now defaulting to 4
+(and other parallel knobs like retain_max_concurrent=4 already active),
+a pool of 5 connections can be exhausted when an HTTP integration test
+triggers multiple async retains that each fan consolidation across
+several concurrent tag groups.
+
+CI surfaced this as test_async_retain_parallel hanging on test-api
+shard 2 — 5 parallel retains × 4-way intra-op consolidation parallelism
++ the test&#39;s own polling HTTP calls all competed for 5 connections
+under xdist&#39;s worker concurrency. Bumping to 30 keeps tests bounded
+but matches a more realistic deployment pool size (default prod cap
+is 100) and removes the head-of-line stall.
+
+* test: bump pg0 max_connections to 300, pool to 15, fix configurable counter
+
+CI surfaced two real failures from the previous bump:
+
+- shard 2: tests/test_hierarchical_config.py::test_hierarchical_fields_categorization
+  hardcoded `assert len(configurable) == 36`. Adding consolidation_llm_parallelism
+  to _CONFIGURABLE_FIELDS made it 37. Bumped and added an explicit
+  membership assertion so a future drop of the flag fails loudly.
+
+- shard 3: asyncpg.TooManyConnectionsError. With pool_max_size=30 and
+  8 xdist workers, peak demand was ~240 connections against postgres&#39;s
+  default cap of 100. Two related changes:
+
+  * EmbeddedPostgres now accepts a ``config: dict[str, str]`` and
+    forwards it to Pg0 (which has been a documented Pg0 kwarg). The
+    pg0_db_url fixture passes ``{&#34;max_connections&#34;: &#34;300&#34;}`` so 8
+    workers × pool=15 fits comfortably.
+
+  * Pool back to 15 (from 30 in the previous commit). 15 still
+    accommodates default consolidation_llm_parallelism=4 +
+    retain_max_concurrent=4 + the test&#39;s own queries without
+    head-of-line stalls, but caps total connections at a sane
+    fraction of the 300 max.
+
+- docs(blog): 15k stars milestone post (#1835)
+
+* docs(blog): add 15k stars milestone post
+
+- docs(faq): explain Hindsight&#39;s event-centric graph vs. traditional KGs (#1837)
+
+* docs(faq): explain Hindsight&#39;s event-centric graph vs. traditional KGs
+
+Add a new FAQ section answering how Hindsight&#39;s graph differs from
+traditional knowledge graphs (Neo4j-style). Uses the map-vs-scrapbook
+analogy to make the event-centric, temporal bipartite hypergraph model
+intuitive for users coming from a property-graph background.
+
+Covers the questions customers commonly ask: how change/history is
+preserved without rewriting edges, where &#34;stickers&#34; (entities and
+labels) come from, why entities don&#39;t link to each other directly,
+and how shared entity-anchoring drives connection discovery.
+
+Slots into the contents list right after the RAG comparison since it&#39;s
+the natural follow-up: &#34;OK it&#39;s not RAG and it&#39;s a graph — but what
+kind of graph?&#34;
+
+skills/hindsight-docs/references/faq.md is the pre-commit-regenerated
+mirror of the source MDX, included so the docs skill stays in sync.
+
+* docs(faq): move event-centric graph entry to end + note free-form disable
+
+Two follow-up tweaks based on review:
+
+1. Move the &#34;How is Hindsight&#39;s graph different from a traditional
+   knowledge graph?&#34; entry to the bottom of the FAQ (and the contents
+   list). It&#39;s the most technical entry in the page; basic onboarding
+   questions about Hindsight, hosting, and the three core operations
+   should reach the reader first.
+
+2. Mention that open-world entity extraction can be disabled. In the
+   &#34;Where do the stickers come from?&#34; subsection, note that setting
+   `entities_allow_free_form: false` on the bank config locks
+   extraction to the configured `entity_labels` vocabulary and skips
+   free-form named entities entirely.
+
+Includes the pre-commit-regenerated skills/hindsight-docs/references/faq.md
+mirror so the docs skill stays in sync with source.
+
+* docs(faq): move free-form disable note to developer-control bullet
+
+Reorder follow-up: the open-world automation bullet referenced
+`entities_allow_free_form` before `entity_labels` had been introduced
+to the reader. Move the disable mention into the developer-control
+bullet where the schema concept it depends on has just been defined,
+and frame it as &#34;lock to *only* your configured labels&#34; — the action
+the reader is naturally considering at that point.
+
+Includes the pre-commit-regenerated skills/hindsight-docs/references/faq.md
+mirror so the docs skill stays in sync.
+
+* docs(faq): note that recall seeds graph traversal with semantic search
+
+Add a short high-level line in the connections subsection explaining
+that recall starts with semantic search to pick the seed memories,
+then expands along shared-sticker connections from those seeds.
+Kept brief on purpose — the FAQ entry&#39;s job is conceptual orientation,
+not implementation depth; the full retrieval pipeline is documented in
+the developer guides.
+
+Includes the pre-commit-regenerated skills/hindsight-docs/references/faq.md
+mirror so the docs skill stays in sync.
+
+* docs(faq): add a brief note on how graph structure helps with hallucination
+
+Add a final subsection to the event-centric graph FAQ entry explaining
+how the scrapbook model gives the consuming LLM better-grounded context
+to work from. Three high-level properties: preserved history (no
+overwritten edges), shared-entity connections (the link appears in the
+retrieved context so the model doesn&#39;t have to invent one), and
+convergent evidence from multiple memories anchoring to the same entity.
+
+Carefully framed throughout as Hindsight feeding the model — never as
+Hindsight itself being the thing that hallucinates.
+
+Includes the pre-commit-regenerated skills/hindsight-docs/references/faq.md
+mirror so the docs skill stays in sync.
+
+* docs(faq): correct graph description and list all three expansion signals
+
+Drop the &#34;temporal bipartite hypergraph&#34; label — memory↔memory edges
+(semantic kNN, causal) mean the structure isn&#39;t strictly bipartite. Replace
+with a plain event-centric description that flags memory-to-memory links
+upfront so the rest of the section is consistent.
+
+Expand the connection-discovery section to cover all three signals from
+link_expansion_retrieval.py: shared entities, precomputed semantic neighbors,
+and explicit causal edges — the previous version implied shared entities
+were the only mechanism.
+
+---------
+
+Co-authored-by: Nicolò Boschi &lt;boschi1997@gmail.com&gt;
+
+- fix: wait for daemon health before reclaiming port (#1858)
+
+- fix(worker): wire HINDSIGHT_API_WORKER_MAX_RETRIES into task retry decision
+
+The HINDSIGHT_API_WORKER_MAX_RETRIES env var has been declared at
+config.py:433 since the worker was introduced, but the actual retry
+decision in MemoryEngine.execute_task hardcoded `if retry_count &lt; 3`
+and ignored the knob. Operators setting the env var saw no effect.
+
+Wire the existing knob into the retry check and add a sibling
+HINDSIGHT_API_WORKER_TASK_RETRY_BACKOFF_SECONDS (default 60) for the
+hardcoded 60-second backoff interval at the same site.
+
+Both env vars are read on each retry decision (not cached at process
+start) so operators can tune the policy during an active provider
+outage without restarting workers. Defaults preserve existing
+behavior (3 retries x 60s).
+
+Tests: 4 new regression tests covering each knob and the unchanged
+default path.
+
+- ci(test-api): shard pytest 3 ways + cache resolved .venv (#1856)
+
+test-api was the critical-path job at ~22 min on core changes: the
+`pytest -m &#34;not hs_llm_mat and not hs_llm_core&#34;` step alone took 18:48
+even with `-n 8 --dist loadgroup`. Splitting it across 3 jobs via
+pytest-split brings each shard down to ~7-8 min and drops the workflow
+critical path to whichever job is next (test-python-client-oracle at
+~15 min).
+
+The shards run identical setup, so without a venv cache we&#39;d triple the
+~3-min `uv sync --all-extras` cost. Adding actions/cache@v5 on
+hindsight-api-slim/.venv keyed on uv.lock + the API pyproject + the
+pinned Python version lets shards 2+ skip the expensive resolve/link
+on the first run after a lock change, and all three shards hit on
+re-runs. `uv sync --frozen` still runs after restore — it&#39;s a fast link
+check when the venv matches.
+
+pytest-split is added via `uv run --with pytest-split` so the managed
+uv.lock stays untouched; --splits/--group filter at collection, before
+xdist takes over, so they compose with the existing addopts.
+
+Out of scope: applying the same venv-cache pattern to the other ~9 jobs
+that also run `uv sync --all-extras` (test-python-client-oracle,
+test-doc-examples (×4), test-rust-cli, test-typescript-client*,
+test-integration, Core LLM tests). That&#39;s a follow-up — each adds risk
+of cache-key drift and the savings only matter once test-api stops
+being the critical path.
+
+- fix(consolidation): shorten retry backoff base from 60s to 5s (#1854)
+
+Issue #1842 reports banks sitting idle on transient LLM errors (a 5xx that
+clears in seconds). The current schedule (60, 120, 240, 480, 960, 1800-cap)
+treats every failure like a multi-minute outage, so a one-second blip parks
+a bank for at least 60s before the worker tries again.
+
+Drop the base to 5s. New schedule: 5, 10, 20, 40, 80, 160, 320, 640, 1280,
+1800-cap. Transient errors clear in seconds; the 1800s cap is preserved so a
+genuine multi-hour outage still doesn&#39;t hammer the upstream.
+
+Dedup-by-bank and indefinite-retry semantics are unchanged.
+
+- fix(retain): preserve full document body when splitter chunks oversized input (#1855)
+
+When a single retain content item exceeded HINDSIGHT_API_RETAIN_BATCH_TOKENS
+(~40 KB), `retain_batch_async` chunked it across multiple sub-batches and
+each sub-batch passed only its own slice to `handle_document_tracking`,
+which unconditionally upserts `documents.original_text`. The last sub-batch
+overwrote the body with its slice, so the persisted document body became a
+fragment of the input.
+
+Thread a `document_body_override` parameter from
+`_split_contents_into_sub_batches` through `_retain_batch_async_internal`,
+`retain_batch`, `_streaming_retain_batch`, `_try_delta_retain` and
+`_delta_metadata_only`. When set, the orchestrator uses it as
+`combined_content` for the doc-row write so every sub-batch persists the
+same full body (and computes the same `content_hash`, so the FOR-UPDATE
+takeover check still passes). The override is a reference to the splitter&#39;s
+source string — no extra copies, no extra RAM.
+
+Fixes #1838.
+
+- fix(consolidation): propagate round-limit re-queue failure to worker retry (#1857)
+
+Issue #1842 root cause for the &#34;banks finish a round but have no pending
+follow-up&#34; symptom. The consolidator wrapped its round-limit re-queue in a
+permissive try/except that swallowed any failure with a warning log. When
+submit_async_consolidation raised (DB hiccup, validator rejection, anything),
+the consolidator returned &#34;completed&#34; anyway, execute_task marked the op
+completed, and the bank ended up with backlog and zero queued work — silent
+stuck. Workaround was an external loop re-POSTing /consolidate; the symptom
+recurred whenever the re-queue failed.
+
+Drop the try/except. The work this round already did is durable
+(consolidator commits `consolidated_at` per batch in its own transaction at
+consolidator.py:524-534) so re-running is safe — the `consolidated_at IS
+NULL` filter skips done rows on the retry. The exception now reaches
+execute_task&#39;s retry handler, which raises RetryTaskAt with the standard
+backoff. The poller reschedules the op; on retry the consolidator picks up
+the remaining backlog.
+
+Webhook semantics: the failed-re-queue case fires a &#34;failed&#34; webhook for
+the op (existing path in execute_task), then a &#34;completed&#34; webhook when
+the retry drains the rest. That&#39;s a small regression for consumers reading
+status semantically as a single-shot outcome, but the alternative is silent
+correctness loss, which is worse.
+
+- fix(retain): apply batching to Oracle entity resolution + guarantee pg_trgm RESET (#1847)
+
+* fix(retain): apply batching to Oracle entity resolution + guarantee pg_trgm RESET
+
+Follow-up to #1841.
+
+- Batch the Oracle UTL_MATCH fuzzy candidate query with the same
+  retain_entity_resolution_batch_size knob as PG. The Oracle path had the
+  identical single JSON_TABLE-join risk on banks with many entities.
+- Convert the PG trigram `try/except…else + raise` to `try/finally` so
+  RESET pg_trgm.similarity_threshold is unconditionally issued. Without
+  RESET, the lowered threshold leaks back to the pooled connection for
+  whoever borrows it next.
+- Add a test that exercises the RESET path when conn.fetch raises mid-batch.
+- Add a test for Oracle batching that mirrors the PG batching test.
+- Document HINDSIGHT_API_RETAIN_ENTITY_RESOLUTION_BATCH_SIZE in
+  configuration.md (the table next to HINDSIGHT_API_RETAIN_ENTITY_LOOKUP).
+
+* chore: regenerate hindsight-docs skill after configuration.md edit
+
+The generate-docs-skill.sh mirror under skills/hindsight-docs/references/
+needed to be rebuilt after the new env var was added to the developer
+configuration table. Caught by the verify-generated-files CI job.
+
+* chore(alembic): merge graph_maintenance_queue and vchord_cosine_opclass heads
+
+PRs #1668 (vchord cosine opclass) and #1772 (async link recompute) both
+branched off the same parent and were merged onto main without rebasing,
+leaving two parallel Alembic heads:
+
+  b5a4c3e2f1d8 (graph_maintenance_queue, parent: e9b2c7d1f3a4)
+  b8c9d0e1f2a3 (vchord_cosine_opclass,   parent: 86f7a033d372)
+
+tests/test_alembic_dag::test_single_head fails on every PR until they&#39;re
+unified. This is a structural merge revision with no schema changes —
+its only job is to make `alembic upgrade head` unambiguous again.
+
+Bundled into this follow-up PR rather than split out because the same CI
+job blocks both and the merge is a one-line topology fix.
+
+- fix(retain): never silently drop memory on a fact-extraction failure (#1833) (#1852)
+
+Two paths silently committed a document with 0 facts (op marked
+`completed`, no error, no retry, no alert), permanently losing the memory:
+
+1. extract_facts_from_contents ran per-content extractions with
+   asyncio.gather(..., return_exceptions=True) and converted *every*
+   exception — including the RuntimeError that extract_facts_from_text
+   deliberately raises to trigger a retry — into an empty
+   ([], [], TokenUsage()) result. The streaming producer never saw an
+   error and the worker&#39;s RetryTaskAt machinery never fired.
+
+2. _extract_facts_from_chunk returned [] (instead of raising) when the
+   LLM returned non-dict JSON after exhausting all retries.
+
+Fix: never swallow. Any extraction failure now propagates so the worker
+retries the task and ultimately fails it *loudly* if the problem
+persists, instead of committing with 0 facts. This is provider-agnostic
+— it does not depend on recognizing a specific provider&#39;s exception
+types (OpenAI vs Anthropic vs Gemini vs LiteLLM all raise different
+ones). gather keeps return_exceptions=True only so a failing item
+doesn&#39;t cancel its still-running siblings; we await them all, then raise.
+
+A legitimately empty extraction ({&#34;facts&#34;: []} from gibberish content)
+is unchanged — that&#39;s a valid 0-fact result, not a failure.
+
+Tests:
+- Full worker-level regression (real WorkerPoller + MemoryEngine.execute_task,
+  mock LLM failing only on retain_extract_facts) parametrized over a
+  rate-limit error, a non-OpenAI provider 5xx, and a ValueError — each must
+  end up retried (pending, retry_count bumped), never silently completed.
+- Updated the non-dict-JSON unit tests to assert a RuntimeError is raised
+  (was: asserts []), preserving the original raise-None TypeError guard.
+
+- chore(control-plane): move tests out of src/ into tests/ (#1850)
+
+Vitest test files lived next to the modules they covered (src/**/*.test.ts),
+which mixes test code into the source tree that ships in the standalone build.
+Move them to a sibling tests/ directory mirroring the src/ layout and update
+the vitest include glob accordingly.
+
+Relative imports inside the moved files (./base-path, ./session, ./route, etc.)
+are switched to the existing @/ alias so the tests don&#39;t have to know their own
+depth. The messages test resolves its catalog dir relative to src/messages.
+
+- fix(control-plane): validate login returnTo to prevent open redirect (#1848)
+
+The login page used `searchParams.get(&#34;returnTo&#34;)` directly as a `router.push`
+target, with no check that it pointed to a same-origin app path. A crafted link
+like `/login?returnTo=//evil.com` or `?returnTo=javascript:...` could redirect
+users off-origin after a successful sign-in.
+
+Add `sanitizeReturnTo` in `lib/base-path.ts` and use it on the login page. The
+helper rejects protocol-relative URLs, absolute URLs (any scheme), backslash
+variants, schemeless paths, and leading C0-control/whitespace bypasses, falling
+back to `/dashboard` when the input isn&#39;t a safe same-origin path. The basePath
+is still stripped for accepted values so client navigation works under subpath
+deployments.
+
+- fix(control-plane): honor basePath for auth redirects (#1845)
+
+- fix(retain): batch trigram entity resolution (#1841)
+
+Co-authored-by: Reese &lt;reesevader@hotmail.co.uk&gt;
+
+- test(reflect): regression test that tag_groups reaches internal recall (#1828)
+
+Drives the reflect agent via the mock LLM through recall →
+search_observations → done, spies on recall_async, and asserts that:
+
+1. Both internal recall_async invocations received the tag_groups list
+   passed to reflect_async (closure-capture works end-to-end).
+2. The tool-result messages the LLM saw contain only the tagged memory
+   text — catching any future SQL-level regression where the filter
+   stops being applied even though kwargs still flow through.
+
+Adds a regression guard for issue #1820, which alleged that the
+reflection agent silently drops tag_groups when calling its internal
+recall/search_observations tools.
+
+- fix: preserve raw reranker scores for calibrated [0,1] providers (#1846)
+
+Replace rank-based normalization with passthrough for reranker scores
+already in [0, 1]. Calibrated rerankers (Cohere, Jina, llama.cpp/Qwen)
+return meaningful absolute confidence — rank normalization was inflating
+weak candidates (e.g. 0.007) to 1.0 simply for being top-ranked.
+
+Closes #1823
+
+- chore(deps): bump the uv group across 1 directory with 2 updates (#1836)
+
+Bumps the uv group with 2 updates in the /hindsight-integrations/vapi directory: [urllib3](https://github.com/urllib3/urllib3) and [idna](https://github.com/kjd/idna).
+
+
+Updates `urllib3` from 2.6.3 to 2.7.0
+- [Release notes](https://github.com/urllib3/urllib3/releases)
+- [Changelog](https://github.com/urllib3/urllib3/blob/main/CHANGES.rst)
+- [Commits](https://github.com/urllib3/urllib3/compare/2.6.3...2.7.0)
+
+Updates `idna` from 3.11 to 3.15
+- [Release notes](https://github.com/kjd/idna/releases)
+- [Changelog](https://github.com/kjd/idna/blob/master/HISTORY.md)
+- [Commits](https://github.com/kjd/idna/compare/v3.11...v3.15)
+
+---
+updated-dependencies:
+- dependency-name: urllib3
+  dependency-version: 2.7.0
+  dependency-type: indirect
+  dependency-group: uv
+- dependency-name: idna
+  dependency-version: &#39;3.15&#39;
+  dependency-type: indirect
+  dependency-group: uv
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+
+- docs(mcp): document sync_retain tool and correct tool counts (26/29 -&gt; 27/30) (#1834)
+
+* docs(mcp): document sync_retain tool and correct tool counts (26/29 -&gt; 27/30)
+
+* docs(skills/hindsight-docs): regenerate mcp-server mirror (sync_retain + tool counts)
+
+- docs(models): list openrouter, google, and jina-mlx in Cross-Encoder Supported Providers table (#1832)
+
+* docs(models): list openrouter, google, jina-mlx in Cross-Encoder Supported Providers
+
+* docs(models): skills mirror — Cross-Encoder providers openrouter/google/jina-mlx
+
+- fix(directives): honor tag_groups in list_directives and reflect (#1831)
+
+list_directives() accepted flat tags + tags_match but not tag_groups,
+so a reflect call scoped via tag_groups got no tagged directives at
+all — only untagged ones could match (isolation_mode=True). Tagged
+directives meant to apply to the same tag scope were silently dropped.
+
+- Add tag_groups parameter to list_directives, applying the same
+  OR-with-untagged scoping rule already used for flat tags. When both
+  tags and tag_groups are supplied (engine-level callers only — the
+  public API rejects the combo) each filter is applied independently
+  and AND-ed together.
+- Pass tag_groups through from reflect_async&#39;s list_directives call.
+- Add a regression test covering tag_groups scoping, isolation mode
+  with tag_groups, and the no-filter+isolation case to ensure that
+  branch isn&#39;t accidentally short-circuited.
+
+Fixes #1829.
+
+- feat(roo-code): add Roo Code integration with MCP + rules (#920)
+
+* feat(roo-code): add Roo Code integration with MCP + rules
+
+Adds hindsight-integrations/roo-code — persistent long-term memory for
+Roo Code via Hindsight MCP. One-command installer sets up .roo/mcp.json
+and injects a rules file that auto-recalls before tasks and auto-retains
+after.
+
+- release(vapi): v0.1.0
+
+- chore: register vapi in changelog generator
+
+- chore: ignore hindsight-integrations/_drafts/
+
+- feat(vapi): add Vapi voice AI webhook memory integration (#923)
+
+* feat(vapi): add Vapi voice AI webhook memory integration
+
+- fix(api): vchord ANN — use cosine opclass and dispatch tuning GUCs per backend (#1668)
+
+* fix(api): vchord ANN — use cosine opclass and dispatch tuning GUCs per backend
+
+Closes #1667.
+
+vchordrq operator classes are bound 1:1 to operators: vector_l2_ops only
+matches `&lt;-&gt;`, while every Hindsight ANN query uses `&lt;=&gt;` (cosine distance).
+The previous vchord mapping used vector_l2_ops, so the planner ignored the
+index entirely and fell back to a sequential scan + per-row cosine
+computation. Separately, `SET LOCAL hnsw.ef_search = 60` (retain) and
+`SET hnsw.ef_search = 200` (pool init) only exist in pgvector and silently
+no-op&#39;d under vchord, so the recall-vs-latency trade-off had never been
+applied to vchord deployments at all.
+
+This switches the vchord opclass to vector_cosine_ops (matching the
+engine&#39;s `&lt;=&gt;` queries), updates the four historical migrations that
+create vchord indexes inline so fresh installs land on cosine ops, and
+adds an online migration that rebuilds any existing L2-ops vchordrq
+indexes via CREATE INDEX CONCURRENTLY + drop + rename. Also introduces an
+ann_search_tuning_settings dispatcher so link_utils and the pool init
+pick the right GUC per backend (hnsw.ef_search for pgvector,
+vchordrq.probes for vchord).
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor: route HINDSIGHT_API_VECTOR_EXTENSION through a shared helper
+
+Per review on #1668: the env-var lookup that decides which vector backend
+is configured was duplicated in three places (the new migration plus the
+two runtime call sites in engine/retain/link_utils.py and
+engine/memory_engine.py). Centralize the read + validation in
+hindsight_api._vector_index.configured_vector_extension() so the default
+value and the access mechanism live in one spot.
+
+The new migration b8c9d0e1f2a3_vchord_cosine_opclass now imports the
+shared helper instead of inlining its own. The four legacy vchord
+migrations stay frozen (they keep their inline helpers); the frozen-state
+test is narrowed to that legacy set so future vchord migrations can opt
+into the shared helper on a per-migration basis.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(api): address vchord migration review feedback
+
+- Wrap DROP canonical + RENAME temp in a server-side DO block so the swap
+  is atomic; a crash between the two would otherwise leave the temp index
+  as a valid orphan and the canonical name missing, with no recovery path
+  on retry.
+- Drop the temp index at the top of each rebuild loop and assert
+  pg_index.indisvalid after CREATE INDEX CONCURRENTLY, so a leftover
+  INVALID index from a prior failed run can&#39;t be promoted into the
+  canonical name.
+- Align the migration with the _pg_schema_prefix() convention used by
+  other PG migrations, and normalize empty-string target_schema to NULL
+  so COALESCE falls back to current_schema() instead of filtering on &#39;&#39;.
+- Narrow _init_connection&#39;s except Exception to asyncpg.PostgresError so
+  real pool/connection bugs surface instead of being silently logged.
+- Document the vchordrq.probes 10/30 starting defaults and the
+  indexdef.replace first-occurrence assumption.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(api): honor explicit daemon host and port (#1821)
+
+Daemon mode previously inferred whether --host or --port was supplied by
+comparing parsed values with the loaded config. If a CLI value matched an
+env-derived default, such as HINDSIGHT_API_PORT=9555 with --port 9555,
+the daemon treated the port as implicit and fell back to
+DEFAULT_DAEMON_PORT.
+
+Track explicit host/port through argparse itself using SUPPRESS defaults,
+so argparse-accepted long-option abbreviations such as --po and --ho
+follow the same path. Return a named dataclass from the resolver and cover
+the daemon parsing edge cases in tests.
+
+Fixes #1786.
+
+- chore: regenerate docs skill changelog index after v0.7.1 (#1827)
+
+The v0.7.1 release commit (#1781) added entries to
+hindsight-docs/src/pages/changelog/index.md but did not run
+generate-docs-skill.sh, so the generated skill mirror at
+skills/hindsight-docs/references/changelog/index.md drifted.
+
+This unblocks verify-generated-files for all open PRs.
+
+- fix(api): isolate claude-code provider subprocess from user plugins (#1751) (#1825)
+
+The claude-code LLM provider spawns the `claude` CLI via the Claude
+Agent SDK. The subprocess inherits the host&#39;s CLAUDE_CONFIG_DIR and
+loads any operator-installed plugins (e.g. hindsight-memory), whose
+Stop hooks then retain the subprocess&#39;s own transcript back into the
+same bank — a recursive feedback loop that produced ~5M tokens/day on
+a single active bank.
+
+Redirect each spawned CLI to a per-process isolated config dir via
+CLAUDE_CONFIG_DIR; pair it with CLAUDE_SECURESTORAGE_CONFIG_DIR=&#34;&#34;
+so the keychain service name stays canonical and OAuth keeps working.
+Requires bundled CLI &gt;= 2.1.150, hence the claude-agent-sdk bump to
+&gt;=0.2.82.
+
+- feat(gemini-spark): add Hindsight integration for Gemini Spark via MCP (#1779)
+
+* feat(gemini-spark): add Hindsight integration for Gemini Spark via MCP
+
+Config-only integration with example Antigravity 2.0 manifest and MCP
+config, prioritizing Hindsight Cloud. Includes 14 pytest tests validating
+config structure, CI job, and release script entry.
+
+- docs(grok-build): add Grok Build integration page (#1793)
+
+* docs(grok-build): add Grok Build integration page
+
+- docs(multilingual): add pg_search backend to BM25 selector and comparison table (#1824)
+
+* docs(multilingual): add pg_search backend to selector and comparison table
+
+* docs(multilingual): add pg_search backend to selector and comparison table
+
+- chore: regenerate docs-skill references after v0.7.1 (#1822)
+
+Output of ./scripts/generate-docs-skill.sh - picks up the API
+version bump (0.7.0 -&gt; 0.7.1) in openapi.json. CI&#39;s
+verify-generated-files gate flags this as out-of-sync on every new
+branch off main; this commit clears the gate without affecting API
+behaviour.
+
+Also folds in the ./scripts/hooks/lint.sh formatter output for the
+priority parser so the lint hook stays clean.
+
+- docs: add 0.7.1 changelog and release blog post (#1818)
+
+* docs: add 0.7.1 changelog and release blog post
+
+* docs: correct 0.7.1 oversized retain bug description and trim sections
+
+The previous wording undersold the bug — it was data corruption from
+concurrent siblings cascade-deleting each other&#39;s memory_units for the
+same document, not just an FK race. Also drop the Recall Recency and
+Codex OAuth Embeddings sections from the blog (moved into Other Notable
+Changes).
+
+* docs: simplify 0.7.1 oversized retain section — user impact, not internals
+
+- Release v0.7.1
+
+- Update version to 0.7.1 in all components
+- Regenerate OpenAPI spec and client SDKs
+- Python packages: hindsight-api, hindsight-dev, hindsight-all, hindsight-embed
+- Python client: hindsight-clients/python
+- TypeScript client: hindsight-clients/typescript
+- hindsight-all npm wrapper: hindsight-all-npm
+- Rust CLI: hindsight-cli
+- Control Plane: hindsight-control-plane
+- Helm chart
+- Sync documentation to version-0.7
+
+- docs(models): list openai-codex and openrouter in embeddings Supported Providers table (#1792)
+
+* docs(models): list openai-codex and openrouter in embeddings Supported Providers table
+
+* docs(models): list openai-codex and openrouter in embeddings Supported Providers table
+
+- fix(consolidation): indefinite retry with backoff + dedup-by-bank guard (#1811)
+
+* fix(consolidation): skip task retry when peer consolidation already pending
+
+When a consolidation task hits a transient error, execute_task raises
+RetryTaskAt to re-queue the same operation. During a long upstream outage
+(LLM provider down, DB flapping), every successful retain on the same bank
+also enqueues a fresh consolidation op via submit_async_consolidation, so
+each op independently consumes its own 3-retry budget — a retry storm
+against the same broken dependency.
+
+Add a per-bank dedup check before raising RetryTaskAt: if another
+consolidation op is already in &#39;pending&#39; for the same bank, the current op
+is failed instead of retried. The pending peer will process the same
+unconsolidated rows when the worker picks it up.
+
+The check fails open: a DB hiccup during the dedup lookup returns False so
+the normal retry path runs rather than swallowing a real failure.
+
+* fix(consolidation): retry transient failures indefinitely with capped backoff
+
+Replace the inherited 60s × 3 generic retry for consolidation tasks with a
+consolidation-specific schedule: exponential backoff (60, 120, 240, 480,
+960, then pinned at 1800s cap) with no attempt cap.
+
+Capping retries silently dead-letters a bank&#39;s unconsolidated rows whenever
+an upstream outage (LLM provider down, DB flapping) lasts longer than the
+budget — exactly the failure mode the dedup-by-bank guard was meant to
+contain. The guard already prevents retry storms by collapsing duplicate
+ops to a single retrying op per bank, so indefinite retry on that single op
+is safe: the dependency comes back, the next scheduled attempt succeeds.
+
+Deterministic failures (integrity violations, embedding dimension errors)
+are still filtered upstream by `_is_non_retryable_task_error` and marked
+failed immediately. Only generic transient errors reach the indefinite
+retry path. Other task types (batch_retain, refresh_mental_model,
+webhook_delivery) keep their existing 60s × 3 generic schedule.
+
+- feat(worker): add priority-based consolidation bank scheduling (#1813)
+
+* feat(worker): add priority-based consolidation bank scheduling (#1715)
+
+Add HINDSIGHT_API_WORKER_CONSOLIDATION_BANK_PRIORITY env var to control
+which banks&#39; consolidation tasks are claimed first when a slot opens.
+This prevents large banks from being starved by many small banks cycling
+through limited global consolidation slots.
+
+Format: comma-separated bank-pattern:priority pairs (higher = claimed first).
+Patterns support * wildcards; bare * is the catch-all default.
+Example: &#34;shadow-*:10,staging-*:5,*:1&#34;
+
+Implementation uses tiered claiming — each priority level is a separate
+index-friendly query, no JOINs or computed ORDER BY. Bank serialization
+(max 1 concurrent consolidation per bank) is preserved.
+
+* fix: suppress chained exception in _parse_bank_priority
+
+- fix(retain): keep oversized items in one async child to stop FK race (#1795) (#1805)
+
+* fix(retain): keep oversized items in one async child to stop FK race (#1795)
+
+submit_async_retain split oversized retain payloads into N independent
+async_operations rows that all shared one document_id. Workers have no
+per-document gate for retain (claim_tasks only guards consolidation),
+so siblings ran concurrently — each entered handle_document_tracking
+with is_first_batch=True, cascade-deleting the previous winner&#39;s
+memory_units. The loser&#39;s final ANN pass then inserted memory_links
+referencing now-deleted units, tripping
+fk_memory_links_from_unit_id_memory_units. Concurrent siblings also
+exhausted OS thread budgets via per-child sentence-transformer pools
+(libgomp resource-unavailable failures) and left partial document
+state visible to dry-run skip checks.
+
+Add _split_contents_into_async_children for the async submit path: it
+packs items into children by token budget but never fragments a single
+item across children. Oversized items go into their own one-item child
+holding the full un-chunked content; the worker&#39;s existing in-process
+splitter (retain_batch_async → _split_contents_into_sub_batches)
+re-chunks them sequentially inside one worker slot with correct
+is_first_batch=(i==1) semantics — the same path that already enforces
+SELECT … FOR UPDATE + content-hash gating between batches of one call.
+
+Small items still pack together so genuinely independent inputs keep
+cross-worker parallelism. Metadata field names (num_sub_batches,
+sub_batch_index, total_sub_batches) are unchanged.
+
+Tests:
+- 8 pure-Python tests for the new helper covering single oversized,
+  metadata preservation, packing by budget, mixed inputs, multiple
+  oversized, boundary positioning, empty input.
+- 3 integration tests against the real DB:
+  - test_oversized_single_item_creates_one_child_not_many asserts the
+    async_operations table has exactly one retain row with the
+    un-chunked content (fails on pre-fix code: &#34;got 7&#34; children).
+  - test_oversized_single_item_drains_without_fk_violation drives a
+    worker drain and asserts no memory_links rows have orphan FKs in
+    either direction — the exact invariant pre-fix code violated.
+  - test_oversized_item_among_small_items_keeps_small_items_packed
+    confirms the parallelism optimization isn&#39;t lost.
+
+* test(retain): no-op worker dispatch in structural tests for #1795
+
+The two structural assertions (test_oversized_single_item_creates_one_child_not_many
+and test_oversized_item_among_small_items_keeps_small_items_packed) only need to
+verify the async_operations rows that submit_async_retain inserts — those rows
+commit before submit_task is called. The previous version let SyncTaskBackend
+drive the full LLM-based retain pipeline synchronously, which timed out at
+CI&#39;s 300s per-test limit even though it ran in ~5s locally.
+
+Monkeypatch _task_backend.submit_task to a no-op so the structural assertions
+fire in ~30ms without running the worker.
+
+Also slim the drain test&#39;s payload from ~3x to ~1.2x the per-batch token budget.
+That still triggers in-process splitting (~2 sub-batches → the path that
+exercises is_first_batch=(i==1) sequencing) but cuts LLM extraction work from
+~5 chunks to ~2, keeping wall time comfortably under 300s on slower runners.
+
+The structural regression assertions still fail without the engine fix —
+verified by temporarily reverting hindsight_api/engine/memory_engine.py and
+re-running: &#34;Expected 1 child for an oversized single item, got 7. Issue #1795:
+per-chunk children race on the shared document_id.&#34;
+
+* test(retain): drop end-to-end drain test for #1795 — too CI-flaky
+
+test_oversized_single_item_drains_without_fk_violation drives the full
+retain pipeline (LLM extraction + embeddings + ANN + consolidation)
+synchronously through SyncTaskBackend. Even with the payload trimmed
+to ~1.2x the batch budget (~2 sub-batches), Gemini API latency in CI
+varies enough that the 300s per-test timeout fires intermittently.
+
+The fix is already covered without it:
+- test_oversized_single_item_creates_one_child_not_many is the direct
+  regression test for #1795. It asserts on the async_operations rows
+  submit_async_retain inserts and was empirically shown to fail on
+  the pre-fix engine (&#34;Expected 1 child for an oversized single item,
+  got 7&#34;). No worker execution needed.
+- test_oversized_item_among_small_items_keeps_small_items_packed
+  covers the mixed-batch case structurally.
+- 8 unit tests in test_batch_chunking.py cover the helper directly.
+- The FK constraint fk_memory_links_from_unit_id_memory_units is
+  enforced by Postgres itself; any orphan write would error at insert
+  time, so the engine cannot silently regress without other tests
+  noticing.
+
+- docs(integrations): default recallTypes to [&#34;observation&#34;] for openclaw + claude-code (#1808) (#1812)
+
+* docs(integrations): default recallTypes to [&#34;observation&#34;] for openclaw (#1808)
+
+* docs(integrations): default recallTypes to [&#34;observation&#34;] for claude-code (#1808)
+
+- feat(api): configure LLM reasoning effort via env (#1815)
+
+- docs(docker): add docker-compose example for local llama.cpp sidecar (#1814)
+
+Hindsight&#39;s published image deliberately omits llama-cpp-python to keep
+the image small, so setting HINDSIGHT_API_LLM_PROVIDER=llamacpp directly
+against ghcr.io/vectorize-io/hindsight fails with ModuleNotFoundError.
+
+Adds a docker-compose recipe that runs the official llama.cpp server
+container as a sidecar and points Hindsight&#39;s openai provider at it via
+HINDSIGHT_API_LLM_BASE_URL. Verified end-to-end against
+ghcr.io/ggml-org/llama.cpp:server pulling Gemma 4 E2B from HuggingFace.
+
+The named volume is mounted at /root/.cache/huggingface (where
+llama-server actually caches downloads) so the GGUF survives stack
+recreation. README documents the CPU perf reality and how to flip the
+relevant blocks for NVIDIA GPU acceleration.
+
+Also links the recipe from the &#34;Built-in llama.cpp&#34; tip in the models
+docs so users following the docs find the Docker setup.
+
+- fix(embeddings): clean up CodexOAuthEmbeddings token-refresh follow-up (#1809)
+
+- Drop unused CodexRefreshExpiredError import in CodexOAuthEmbeddings.encode
+- Make CodexAuthManager.load_refresh_token_from_file a staticmethod taking
+  the auth_file path, so CodexLLM._load_codex_refresh_token no longer needs
+  a duplicate file-read branch for the pre-_auth_manager init path
+- Patch Path.home() in the embeddings tests instead of monkeypatching HOME
+  and manually overriding _auth_manager._auth_file post-construction; the
+  prior shape worked on CI but could read the developer&#39;s real ~/.codex on
+  local runs
+
+- feat(reranker): per-provider HTTP timeout env vars (#1810)
+
+Closes #1807. The HTTP-based rerankers (cohere, openrouter, zeroentropy,
+siliconflow, alibaba, litellm proxy/SDK, google) all hardcoded a 60s
+timeout, forcing users with slower self-hosted models or large batches
+to patch the source. Each provider now reads its own
+HINDSIGHT_API_RERANKER_&lt;PROVIDER&gt;_TIMEOUT env var (default 60.0s, so
+unset envs keep current behavior). TEI already had its own knob.
+
+- release(claude-code): v0.7.0
+
+- release(openclaw): v0.8.0
+
+- feat(integrations): default recallTypes to [&#39;observation&#39;] for openclaw + claude-code (#1808)
+
+Observations are the consolidated, deduplicated view that Hindsight builds
+from raw world/experience facts. When the recall default surfaces all
+three types, the same answer often appears multiple times because many
+raw memories restate the same belief. Switching the default to
+&#39;observation&#39; avoids those duplicates by design while keeping the option
+to opt back in to raw facts via explicit `recallTypes` config.
+
+OpenClaw:
+- `getPluginConfig` default → [&#39;observation&#39;]
+- types.ts comment, openclaw.plugin.json schema/uiHints, README config table
+
+Claude Code:
+- `DEFAULTS[&#34;recallTypes&#34;]` → [&#39;observation&#39;]
+- settings.json template, README config table
+
+Server-side recall and reflect defaults are intentionally unchanged — this
+PR scopes the switch to the two integrations that drive the most
+duplicate-noise complaints.
+
+- docs(models): add claude-code Docker recipe with host Max Plan auth (#1526)
+
+* docs(models): add claude-code Docker recipe with host Max Plan auth
+
+Adds a &#39;Running with host Max Plan auth in Docker (Linux)&#39; subsection
+under the existing Claude Code Setup docs. Documents the bind-mount
+surface required to run HINDSIGHT_API_LLM_PROVIDER=claude-code inside
+the standalone image: host claude CLI, single-file credential mounts,
+the v2.1.128+ binary override for the bundled-binary protocol issue,
+and the post-run chown/symlink steps.
+
+Restates the personal-use-only constraint inline so the Docker recipe
+isn&#39;t read as a production pattern. Verified on linux/amd64 per the
+contributor&#39;s report; macOS and Windows paths are noted as not yet
+covered.
+
+Closes #1480
+
+* refactor: move claude-code Docker recipe from docs to docker/docker-compose/
+
+Instead of documenting the Docker recipe inline in models.mdx, create a
+dedicated docker/docker-compose/claude-code/ setup following the existing
+pattern (custom-models, external-pg, etc.).
+
+- docker-compose.yaml: converts the docker run command into a Compose service
+  with all bind mounts, env vars, and ports
+- README.md: full documentation including prerequisites, quick start,
+  post-setup steps, and detailed notes on every bind mount
+- Reverts the models.mdx addition per review feedback
+
+- feat(control-plane): add Chinese locale variants (#1784)
+
+* feat(control-plane): add Chinese locale variants
+
+* fix(control-plane): refine Chinese locale catalogs
+
+* fix(control-plane): translate api errors across locales
+
+* fix(control-plane): refine Taiwan and Cantonese locales
+
+* fix(control-plane): address observation error copy
+
+* fix(control-plane): address webhook and file error localization
+
+* fix(control-plane): address Chinese locale review feedback
+
+- feat(embeddings): add CodexAuthManager and token refresh to CodexOAuthEmbeddings (#1712)
+
+Extract Codex OAuth auth management into a shared CodexAuthManager class
+(codex_auth.py) used by both CodexLLM and CodexOAuthEmbeddings. This gives
+CodexOAuthEmbeddings the same token-refresh capability that CodexLLM already
+has: proactive refresh (JWT expiry detection before each encode call) and
+reactive refresh (401 retry with rotated token).
+
+Also fix the openrouter branch in create_embeddings_from_env() which was
+silently ignoring HINDSIGHT_API_EMBEDDINGS_OPENAI_DIMENSIONS.
+
+Co-authored-by: DK09876 &lt;dk09876@DK09876s-MacBook-Pro.local&gt;
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+Co-authored-by: Nicolò Boschi &lt;boschi1997@gmail.com&gt;
+
+- fix(openclaw): flush un-retained turns on session_end (#1726) (#1806)
+
+When `retainEveryNTurns &gt; 1` and a conversation ended before the next
+cadence boundary, the `agent_end` handler skipped retain on every turn
+and the un-retained tail was silently dropped on session close. Short
+conversations (fewer turns than the cadence) produced zero retains.
+
+Refactor the `agent_end` retain body into a shared `runRetain` helper
+that takes a `force` flag, and register a `session_end` hook that calls
+it with `force: true`. When forced:
+  - retainEveryNTurns === 1 → no-op (every turn already retained)
+  - turnCount === 0 or at the cadence boundary → no-op (nothing pending)
+  - otherwise → slice the last `turnCount % retainEveryN` un-retained
+    turns (+ configured overlap) and retain them as a window scope, then
+    reset the per-session counter so a re-emitted session_end can&#39;t
+    duplicate the flush
+
+The non-force agent_end path is functionally unchanged.
+
+Closes #1726
+
+- fix(api): anchor recall recency to query timestamp (#1788)
+
+Use recall question_date/query_timestamp as the reference time for combined
+scoring instead of always using server utcnow(). This keeps historical replay
+and offline evaluations from penalizing memories that were recent at query
+time.
+
+Normalize naive query timestamps to UTC before scoring, update
+API/client/OpenAPI/docs/MCP descriptions, and add recall-level coverage proving
+combined scoring receives the query-time anchor.
+
+- feat(openclaw): label &#34;Current time&#34; as UTC in injected memory context (#1804)
+
+Append ` UTC` to the `Current time -` header injected above recalled
+memories. Without the label the LLM read the timestamp as local time and
+made wrong recency judgments. This is the same fix that landed for the
+Claude Code integration in #1568 — the OpenClaw integration was overlooked.
+
+Closes #1789
+
+- docs(retrieval): note pg_search configurable tokenizer in BM25 backends table (#1790)
+
+* docs(retrieval): note pg_search configurable tokenizer in BM25 backends table
+
+* docs(retrieval): note pg_search configurable tokenizer in BM25 backends table
+
+- fix markdown tables in mental models and cosmetic issues in mental model config (#1800)
+
+- fix(openclaw): stop silently skipping dispatch on synthetic-main + static-banking setups (#1802)
+
+* fix(openclaw): stop silently skipping dispatch on synthetic-main and static-banking setups
+
+The dispatch-surface gate in `resolveAndCacheIdentity` skipped recall + retain
+whenever `parseSessionKey(...).provider` did not string-equal the live
+`dispatchChannel`. That tripped three legitimate shapes:
+
+- Default `agent:&lt;id&gt;:main` sessions dispatched via any real surface
+  (telegram, webchat, qqbot, …). The parsed provider `&#34;main&#34;` is synthetic
+  and should not gate against the real dispatcher.
+- Statically-banked setups (`dynamicBankId: false + bankId`) where the
+  user pinned a single bank — surface routing is moot.
+- Granularities that don&#39;t include `&#34;channel&#34;` or `&#34;provider&#34;` — bank IDs
+  don&#39;t depend on the dispatch surface, so a mismatch can&#39;t pollute routing.
+
+The gate now only fires when the session carries a real (non-synthetic)
+provider, bank routing actually depends on the surface, and no static bank
+is configured. Real-provider mismatches under default granularity (e.g. a
+`qqbot` session dispatched via `webchat`) still get the gate as before.
+
+Closes #1541
+
+* chore: regenerate docs-skill references
+
+Output of ./scripts/generate-docs-skill.sh — picks up an in-tree link
+update in the consolidation row of configuration.md and the API version
+bump (0.6.2 → 0.7.0) in openapi.json. CI&#39;s verify-generated-files gate
+flagged these as out-of-sync on every new branch off main; this commit
+clears the gate without affecting code.
+
+- docs(blog): OpenClaw agent that remembers your codebase (#1768)
+
+* docs(blog): add OpenClaw codebase memory post
+
+- fix(control-plane): polish zh translation for naturalness (#1791)
+
+Polish 18 Chinese (zh) translation strings introduced in #1775 to
+improve fluency and reduce translation artifacts (passive voice,
+literal renderings, redundant connectives), while preserving the
+upstream policy of keeping product operation names (Retain / Recall /
+Reflect / Webhooks) untranslated across all locales.
+
+No structural / framework changes. Locale parity tests pass.
+
+- fix(control-plane): add graph_maintenance to operations type filter dropdown (#1785)
+
+The graph_maintenance operation type was added in cc3ba4a3 but the
+control plane operations view dropdown was not updated to include it.
+
+- docs: add 0.7.0 changelog and release blog post (#1781)
+
+* docs: add 0.7.0 changelog and release blog post
+
+Documents the 0.7.0 release: ParadeDB pg_search BM25 backend
+(Citus-compatible), PGroonga + configurable BM25 language for
+multilingual/CJK search, async link recompute that fixes outgoing-link
+staleness after deletes, Control Plane i18n in 8 locales, targeted
+consolidation by observation scope, an observation-consolidation prompt
+rewrite, a clear-mental-model endpoint, ZeroEntropy + Codex OAuth
+embeddings, and a long tail of bug fixes.
+
+Also fixes release.sh to refresh the root package-lock.json after
+workspace version bumps. Without this, npm ci in CI fails because the
+lock pins the previous workspace versions and the publish + docs-deploy
+jobs break (which is what happened to the initial v0.7.0 tag).
+
+* docs(blog): tighten 0.7.0 release post
+
+- Merge entity-edge-derivation (#1766), unused-index drops (#1762), and
+  async link recompute into a single &#34;Graph Storage &amp; Maintenance&#34;
+  section that leads with the ~50% storage reduction.
+- Merge &#34;Targeted Consolidation by Scope&#34; and &#34;Consolidation Quality
+  Rewrite&#34; into one &#34;Consolidation Improvements&#34; section; drop prompt
+  internals.
+- Rewrite the multilingual section at a higher level (concepts, not env
+  vars) and link out to /developer/multilingual.
+
+* docs(blog): rewrite 0.7.0 release post in announcement tone
+
+Rewrite each section in the same voice as prior major-release posts
+(0.5.0, 0.6.0): lead with what the user gets and why it matters,
+drop implementation internals (queue tables, FK cascades, JSON
+predicates, AST walkers), keep concrete config knobs and code
+examples where they help, and link out to docs for deep dives.
+
+* docs(blog): move ParadeDB section to last; reorder intro to match
+
+* docs(blog): demote Clear Mental Model from feature section to Other Notable Changes
+
+- docs(retrieval): add pgroonga to the BM25 backends table (#1783)
+
+* docs(retrieval): add pgroonga to the BM25 backends table
+
+* docs(retrieval): add pgroonga to the BM25 backends table (skills mirror)
+
+- fix(release): regenerate package-lock.json after 0.7.0 version bumps
+
+scripts/release.sh bumps each workspace package.json via sed but never
+re-runs `npm install`, so the root package-lock.json stays pinned to the
+old workspace versions. `npm ci` in CI then fails with &#34;Missing
+@vectorize-io/hindsight-client@&lt;old-version&gt; from lock file&#34;, breaking
+the npm publish jobs and the docs deploy.
+
+Re-run `npm install --ignore-scripts` to refresh the lock to 0.7.0 for
+hindsight-all-npm, hindsight-clients/typescript, and
+hindsight-control-plane workspaces. A follow-up will update release.sh
+itself so future releases stay in sync.
+
+- Release v0.7.0
+
+- Update version to 0.7.0 in all components
+- Regenerate OpenAPI spec and client SDKs
+- Python packages: hindsight-api, hindsight-dev, hindsight-all, hindsight-embed
+- Python client: hindsight-clients/python
+- TypeScript client: hindsight-clients/typescript
+- hindsight-all npm wrapper: hindsight-all-npm
+- Rust CLI: hindsight-cli
+- Control Plane: hindsight-control-plane
+- Helm chart
+- Create documentation version-0.7
+- Fix broken link to consolidate endpoint in configuration docs
+
+- feat(api): async link recompute to fix outgoing-link staleness after deletes (#1772)
+
+* feat(api): async link recompute to fix outgoing-link staleness after deletes
+
+When a memory_unit is deleted (via delete_document, delete_memory_unit, or
+document re-ingest via handle_document_tracking), the FK cascade removes its
+incoming temporal/semantic links. Other units that had this unit in their
+top-K neighbours therefore lose links and stay permanently under-capped —
+retain only generates links for newly-inserted units, never re-evaluates
+surviving ones.
+
+This adds a reactive top-up:
+
+* Inside the delete transaction, capture from_unit_ids that pointed at the
+  doomed units and write them to a new link_recompute_queue table (PG: ON
+  CONFLICT DO NOTHING, Oracle: IGNORE_ROW_ON_DUPKEY_INDEX hint for dedup).
+* After commit, submit_async_link_recompute schedules a new task type
+  (&#34;link_recompute&#34;), deduplicating per bank.
+* Worker drains the queue in batches of 50; for each victim it counts
+  current outgoing temporal/semantic links and, if below cap, runs the
+  same probes used at retain time (fetch_temporal_neighbours,
+  compute_semantic_links_ann) to find replacements. bulk_insert_links has
+  ON CONFLICT DO NOTHING, so re-probing freely is safe.
+
+submit_async_link_recompute is also called after every retain, where it
+short-circuits with no_work=True when the queue is empty — that lets the
+upsert path (handle_document_tracking) enqueue victims inline without
+needing a return-value plumbing change.
+
+Worker slot is opt-in (default 0) via HINDSIGHT_API_WORKER_LINK_RECOMPUTE_MAX_SLOTS.
+
+Tests cover enqueue correctness (cross-doc, self-exclude, entity-link
+skip, dedup), worker behaviour (empty drain, missing-victim no-op,
+top-up to cap, no-op at cap), and a cap-parity guard against retain-side
+constants drifting.
+
+* docs: revamp /developer/api/operations with all 6 operation types
+
+The page previously listed only batch_retain + consolidate. Rewritten to
+cover every async task type Hindsight runs: retain, file_convert_retain,
+consolidation, refresh_mental_model, link_recompute (new), and
+webhook_delivery — with triggers, lifecycle states, bank-dedup notes, and
+the full list/status/cancel/retry endpoint surface.
+
+Also adds HINDSIGHT_API_WORKER_LINK_RECOMPUTE_MAX_SLOTS to the worker
+configuration table.
+
+* refactor(api): rename link_recompute → graph_maintenance + kind discriminator
+
+Generalize the queue and worker so future post-mutation cleanups (orphan
+entity pruning, stale cooccurrence removal, etc.) can ride on the same
+async surface without spawning their own task types.
+
+Schema (alembic b5a4c3e2f1d8): table renamed to graph_maintenance_queue
+with shape (bank_id, kind, target_id, enqueued_at) and PK on
+(bank_id, kind, target_id). Today the only kind is &#39;relink_unit&#39;, which
+holds the same payload as the previous link_recompute_queue.
+
+Renames (mechanical):
+* task_type and operation_type: link_recompute → graph_maintenance
+* env var: HINDSIGHT_API_WORKER_LINK_RECOMPUTE_MAX_SLOTS →
+           HINDSIGHT_API_WORKER_GRAPH_MAINTENANCE_MAX_SLOTS
+* module hindsight_api/engine/link_recompute.py →
+         hindsight_api/engine/graph_maintenance.py
+* engine helpers: enqueue_link_recompute_victims → enqueue_relink_victims;
+                  run_link_recompute_job → run_graph_maintenance_job;
+                  submit_async_link_recompute → submit_async_graph_maintenance;
+                  _handle_link_recompute → _handle_graph_maintenance
+* ops methods: enqueue_link_recompute_victims → enqueue_graph_maintenance
+               (now takes kind + target_ids);
+               claim_link_recompute_batch → claim_graph_maintenance_batch
+               (now returns (kind, target_id) tuples)
+* worker job result keys: victims_processed → targets_processed,
+                          links_added → relink_links_added
+
+Worker now groups each claimed batch by kind and dispatches to a per-kind
+handler; unknown kinds are dequeued and logged without crashing (added
+test_skips_unknown_kind_without_failing). The &#39;relink_unit&#39; handler is
+the same code that previously lived inline in run_link_recompute_job.
+
+Docs updated: operations.md reframes the section around graph_maintenance
+as a framework with kinds, with relink_unit documented as the first one;
+configuration.md gets the new env var name.
+
+Revision ID bumped from d8f1e2c3a4b5 to b5a4c3e2f1d8 since the table
+schema changed shape — dev/staging DBs that already applied the previous
+revision get a fresh migration instead of a silent no-op.
+
+* docs(operations): rework per review — trim, link out, multi-language tabs
+
+- Drop the unsupported Kafka note and the type-summary table; the
+  per-section headings carry the same info without duplication.
+- Add a parent-op section for retain_batch explaining how Hindsight splits
+  large submissions into a parent + N children and how exclude_parents
+  hides the parent rows.
+- file_convert_retain: point at Configuration → File Processing for which
+  converter runs (markitdown / Docling / LlamaParse).
+- consolidation: shorten to a one-liner pointing at the Observations page
+  instead of restating it.
+- refresh_mental_model: mention the auto-refresh trigger and drop the
+  LLM-provider gate caveat (the model-level check covers it).
+- graph_maintenance: shorter why/what framing without the algorithm walk,
+  drop the PG/Oracle asymmetry note (matches retain-time semantic behaviour
+  and isn&#39;t operations-doc material).
+- Convert curl examples to &lt;Tabs&gt;/&lt;CodeSnippet&gt; with Python, Node.js, CLI,
+  and Go variants, matching the pattern used by recall/retain/documents.
+  Added examples/api/operations.{py,mjs,sh,go} with sections wired into
+  the Tabs blocks.
+
+Page renamed .md → .mdx so the Tabs/CodeSnippet imports work.
+
+* docs(operations): correct file-parser list
+
+Hindsight ships three parsers: markitdown (default), iris (Vectorize Iris
+cloud), and llama_parse. Docling was never wired up — drop it from the
+file_convert_retain note and name the actual options + the
+HINDSIGHT_API_FILE_PARSER env var that selects between them.
+
+* refactor(api): drop kind discriminator; add entity + cooccurrence prune passes
+
+graph_maintenance is one job now, not a dispatcher of subtypes. Every
+invocation runs three passes:
+
+1. Link top-up — drains graph_maintenance_queue (the only queued work) and
+   tops up each victim unit&#39;s outgoing temporal/semantic links via the same
+   probes retain uses.
+2. Orphan entity prune (NEW) — deletes entities in the bank that no longer
+   have any unit_entities references. FK ON DELETE CASCADE on
+   entity_cooccurrences cleans up cooccurrences pointing at pruned entities
+   automatically.
+3. Stale cooccurrence prune (NEW) — defensive sweep for cooccurrence rows
+   where both endpoints still exist but no current memory_unit references
+   both of them (the cooccurrence was real when recorded, but every unit
+   witnessing it has since been deleted).
+
+Schema change: graph_maintenance_queue loses the kind column. It&#39;s now just
+(bank_id, unit_id, enqueued_at) with PK (bank_id, unit_id). Renamed
+target_id → unit_id to make intent obvious. The bank-wide sweeps in passes
+2 and 3 don&#39;t need per-target queueing — they&#39;re backed by entities(bank_id)
+and unit_entities(entity_id) indexes.
+
+Ops surface: enqueue_graph_maintenance / claim_graph_maintenance_batch lose
+the kind parameter and return unit-id-only payloads. Added
+prune_orphan_entities and prune_stale_cooccurrences as ops methods with PG
+and Oracle implementations.
+
+Triggers: delete_document and delete_memory_unit now submit
+graph_maintenance whenever any unit is removed (not gated on whether relink
+victims were enqueued), so the entity/cooccurrence sweeps fire even when a
+deleted unit had no incoming links.
+
+Test surface: dropped the unknown-kind test and the cross-kind enqueue
+test. Added TestOrphanEntityPrune (scoped sweep, doesn&#39;t cross banks) and
+TestStaleCooccurrencePrune (prunes when no shared unit, keeps when shared).
+All 14 tests in tests/test_graph_maintenance.py pass.
+
+Docs: operations.mdx graph_maintenance section drops the kinds framing and
+describes the three passes directly.
+
+* docs(ops_oracle): correct misleading rowcount comment
+
+The Oracle DatabaseConnection wrapper reshapes cursor.rowcount into a
+PG-compatible &#34;DELETE N&#34; status string before returning, so the shared
+parsing in prune_orphan_entities works on both dialects. The previous
+comment claimed the opposite.
+
+* fix(ci): test/example bugs surfaced by CI run
+
+* test_graph_maintenance: _insert_cooccurrence now sorts the two entity
+  IDs before insert. entity_cooccurrences has a CHECK constraint
+  entity_id_1 &lt; entity_id_2 (canonical ordering to dedupe (A,B) vs (B,A))
+  which my helper ignored. asyncpg surfaced this as a CheckViolationError
+  in test_keeps_cooccurrence_with_shared_unit.
+
+* examples/api/operations.py: collapsed two top-level asyncio.run() calls
+  into a single asyncio.run(main()). Multiple event loops on the same
+  Hindsight client broke the SDK&#39;s async HTTP context (&#34;Timeout context
+  manager should be used inside a task&#34;). The doc snippets also use a
+  real operation_id pulled from list_operations rather than a hardcoded
+  one that doesn&#39;t exist.
+
+* examples/api/operations.sh: was using a hardcoded UUID, so cancel/retry
+  returned 404 against the live API. Now creates a real pending op via
+  --async retain, exercises get/cancel on it, then creates a second op
+  and cancels it so retry has something to re-queue.
+
+* operations.mdx: added the CLI tab to the async-retain Tabs block —
+  code-parity check requires all four language tabs and was rejecting
+  the build.
+
+* fix(ci): cooccurrence assertions + python example loop reuse
+
+* tests/test_graph_maintenance.py: both stale-cooccurrence assertions
+  now query (entity_id_1, entity_id_2) with the same canonical sort the
+  insert helper applies. The test_keeps_cooccurrence_with_shared_unit
+  failure (&#34;None == 5&#34;) was caused by inserting (sorted_a, sorted_b)
+  but reading (ent_a, ent_b) — the SELECT just missed the row.
+
+* examples/api/operations.py: dropped the sync client.retain() seed call
+  in favour of aretain_batch inside the async main(). Mixing sync
+  (client.retain → _run_async → its own event loop) with the async
+  operations API (asyncio.run(main) → fresh loop) left the underlying
+  HTTP client bound to a dead loop, surfacing as
+  &#34;Timeout context manager should be used inside a task&#34;.
+
+* skills/hindsight-docs/references/developer/api/operations.md: regenerated
+  to match the .mdx — verify-generated-files caught the drift from the
+  previous CLI-tab edit.
+
+- chore: improve hindsight maintenance path (#1777)
+
+Co-authored-by: Noa Levi &lt;275430404+lphuc2250gma@users.noreply.github.com&gt;
+
+- feat(api): add pg_search tokenizer configuration (#1776)
+
+Allow ParadeDB pg_search BM25 indexes to be created with a configured
+tokenizer via HINDSIGHT_API_TEXT_SEARCH_EXTENSION_PG_SEARCH_TOKENIZER.
+
+Validate supported tokenizer values and thread the setting through
+startup reconciliation, Alembic index creation paths, Docker examples,
+docs, generated docs, and tests.
+
+The default remains unset so existing pg_search deployments continue to
+use ParadeDB&#39;s default tokenizer unless explicitly configured. Changing
+the value for an existing database still requires rebuilding the
+pg_search indexes or recreating the database.
+
+- feat(control-plane): add i18n support with 8 locales (#1775)
+
+* feat(control-plane): add i18n support with 8 locales
+
+Internationalize the control plane UI using next-intl. Pages move under
+[locale] segment with locale-prefixed routing (default English has no
+prefix). Adds en/es/fr/de/pt/ja/ko/zh catalogs, a Globe language switcher,
+and combines i18n routing with the existing auth middleware. The matcher
+uses an explicit file-extension allowlist so bank IDs with dots
+(e.g. SX.Products.GovComply.Build) still get the locale rewrite.
+
+Adds a locale parity test (vitest) and a static finder
+(scripts/find-untranslated.ts, exposed as npm run i18n:check) that walks
+the TSX AST to flag hardcoded user-facing strings — both wired into CI
+via the build-control-plane job so future drift fails the build.
+
+* style(control-plane): apply prettier formatting
+
+Run scripts/hooks/lint.sh to normalize formatting on the i18n changes
+so verify-generated-files passes.
+
+- chore(api): clean up zeroentropy embeddings, dedup base URL with reranker (#1773)
+
+* chore(api): clean up zeroentropy embeddings, dedup base URL with reranker
+
+Follow-up to #1770:
+
+- Hoist the ZeroEntropy host out of cross_encoder.py into a shared
+  DEFAULT_ZEROENTROPY_BASE_URL constant in config.py; reranker and
+  embeddings now both reference it (was duplicated as an inline literal).
+- Drop ZeroEntropyEmbeddings._embed_url() fuzzy matching; compute
+  self.embed_url once in __init__ via f&#34;{base_url}{EMBED_PATH}&#34;, matching
+  the ZeroEntropyCrossEncoder pattern.
+- Remove the duplicated dimension allowlist check from
+  HindsightConfig.validate() - ZeroEntropyEmbeddings.__init__ already
+  validates with the same set and a clearer error that includes the
+  offending value.
+- Drop the dead &#34;or DEFAULT_...&#34; fallback after _parse_optional_choice for
+  encoding_format; the helper never returned None in the surrounding code.
+- Drop the unused _ZeroEntropyEmbedUsage / response usage field.
+- Simplify _encode_with_input_type in embedding_utils.py to a direct
+  encode_query / encode_documents dispatch; the base Embeddings ABC already
+  supplies defaults, so the getattr-on-type defensive check is moot.
+- Add a regression test that latency=None is omitted from the outbound
+  payload (relies on exclude_none=True).
+- Regenerate skills/hindsight-docs/ references to match canonical sources.
+
+* test(zeroentropy): add gated live API tests for embeddings + reranker
+
+Three integration tests that hit the real ZeroEntropy API. Skipped unless
+ZEROENTROPY_LIVE_API_KEY is set, so default and CI runs are unaffected.
+
+- Embeddings: encode_documents + encode_query against zembed-1 (1280-dim),
+  verifies the same text yields different vectors for document vs query input
+  type (asymmetric encoder).
+- Embeddings transport parity: base64 and float encoding_format decode to
+  the same vector within float32 tolerance.
+- Reranker: zerank-2 ranks a relevant passage above unrelated ones,
+  exercising the base_url wiring fixed in #1770.
+
+Placed in a dedicated test file so the autouse env-clearing fixture in
+test_zeroentropy_embeddings.py does not interfere with the live key gate.
+
+* test: stub encode_documents on the alignment-guard mocks
+
+The TestEmbeddingsBatchLengthGuarantee tests stubbed `encode` on a
+MagicMock, but after the embedding_utils.generate_embeddings_batch dispatch
+was simplified to call encode_documents()/encode_query() directly (no
+getattr fallback to encode), the stub on `encode` no longer satisfies the
+default input_type=&#34;document&#34; path. The Mock&#39;s unstubbed encode_documents
+returned a fresh Mock whose len() is 0, which then tripped the alignment
+guard with &#34;returned 0 vectors&#34; instead of the expected mismatched length.
+
+Stub `encode_documents` to match the method the function actually invokes.
+The tests still exercise the same code (the length-mismatch guard in
+generate_embeddings_batch), just through the correct mock attribute.
+
+- test: stabilize two LLM-flake tests surfaced after PR #1469 (#1774)
+
+* test: stabilize two LLM-flake tests surfaced after PR #1469
+
+1. test_high_skepticism_response_is_more_hedged_than_low (hs_llm_core):
+   The source claim was &#34;Sam is *supposedly* the most productive engineer
+   ...&#34;. The built-in hedge (&#34;supposedly&#34;) primes both low- and
+   high-skepticism reflects to echo it, shrinking the gap the judge has
+   to detect. Rephrasing the claim as a direct assertion gives the
+   disposition room to matter — high-skepticism should now hedge while
+   low-skepticism states it directly.
+
+2. test_comprehensive_multi_dimension (was hs_llm_mat):
+   Module-level marker is hs_llm_core; this method was overriding to
+   hs_llm_mat, which sent it through the bedrock/nova-2-lite weak model.
+   That model consistently drops one of the two required dimensions
+   (emotional or preferential) and fails the judge. This is a quality
+   assertion, not a provider-compatibility check, so it belongs in the
+   single-strong-provider tier (matching the pattern PR #1469 used).
+
+* test: give skepticism test something to actually be skeptical of
+
+CI on the first fix attempt still failed identically — both low- and
+high-skepticism reflects produced &#34;Sam is considered the most productive
+engineer...&#34; on gemini-2.5-flash-lite. Root cause: with a single
+assertive claim and no contradicting signal, skepticism has nothing to
+express. The disposition trait can only show up when there&#39;s tension
+between facts to weigh differently.
+
+Add one piece of contradicting evidence (&#34;Sam&#39;s manager noted Sam had
+missed two deadlines last quarter.&#34;). Now skepticism=5 should
+acknowledge the tension while skepticism=1 should defer to the headline
+claim. Updated the judge criteria and context accordingly.
+
+- Split test suite into deterministic mock and real LLM buckets (#1469)
+
+* Split test suite into deterministic (mock LLM) and real LLM buckets
+
+Organize tests into two clear CI buckets:
+- Mock LLM (deterministic): exercises full pipeline plumbing with structurally
+  valid mock responses. Tests run fast and never flake on LLM non-determinism.
+- Real LLM (hs_llm_mat marker): verifies LLM output quality — entity separation,
+  language compliance, structured schema adherence, semantic correctness.
+
+Key changes:
+- Enhanced MockLLM with scope-aware responses: fact extraction splits text into
+  sentence-level facts with entity extraction; consolidation creates one observation
+  per fact preserving entity separation; reflect returns plausible text; tool calls
+  return non-zero token usage.
+- Default `memory` fixture now uses mock provider; new `memory_real_llm` fixture
+  for tests that genuinely need real LLM intelligence.
+- Removed hollow `if observations:` guards — mock tests now assert observation
+  creation directly so regressions are caught immediately.
+- Moved pipeline-mechanics tests (tag routing, hierarchical retrieval, endpoint
+  plumbing, token usage aggregation) back to mock bucket.
+
+1903 tests pass deterministically; 0 failures.
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* Separate hs_llm_core from hs_llm_mat for distinct CI jobs
+
+New hs_llm_core marker for core pipeline tests that need a real LLM but
+only one provider. hs_llm_mat stays reserved for provider matrix acceptance
+tests that run across 5 providers.
+
+- test-api: deterministic mock tests (excludes both markers)
+- test-api-llm-core: core LLM tests with single provider (vertexai)
+- test-api-llm-acceptance: provider matrix tests (unchanged)
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* Fix review issues: hollow guard, fixture mismatch, undefined var, dead code
+
+- test_observations.py: Replace CamelCase entity names with simple names
+  the mock can extract; remove hollow if-guard with direct assertions
+- test_retain.py: Remove hs_llm_mat from test_retain_with_chunks (uses
+  mock fixture, tests plumbing not LLM quality)
+- test_temporal_ranges.py: Fix undefined `memory` variable → `memory_real_llm`
+- test_http_api_integration.py: Remove unused api_client_real_llm fixture
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* Add hs_llm_core tests for weakened HTTP integration assertions
+
+The mock versions of test_full_api_workflow and test_reflect_structured_output
+had their LLM-quality assertions relaxed. Add hs_llm_core counterparts that
+verify with a real LLM:
+- reflect mentions stored entities (was: assert &#34;alice&#34; in answer)
+- structured output contains schema-required keys (was: assert team_members/summary)
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* Add LLM-as-a-judge for hs_llm_core test assertions
+
+Replace brittle string matching (assert &#34;alice&#34; in answer) with semantic
+evaluation via a judge LLM. The judge uses the same provider configured
+for tests by default, with dedicated overrides via HINDSIGHT_TEST_JUDGE_*
+env vars.
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* Fix LLM judge in CI: normalize vertexai to gemini provider
+
+vertexai requires service account credentials that create_llm_provider()
+doesn&#39;t handle standalone. Normalize to gemini provider (same models,
+API-key auth via GEMINI_API_KEY which is set in CI).
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* Fix judge model name: strip google/ prefix for gemini API key auth
+
+The vertexai provider uses &#34;google/gemini-2.5-flash-lite&#34; but the gemini
+provider (API key auth) expects bare model names without the prefix.
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* Convert flaky LLM assertions to use LLM judge
+
+Replace brittle string matching with semantic LLM judge evaluation in 7 tests:
+- test_horse_farm_observation_history: horse names + events in mental model
+- test_comprehensive_multi_dimension: emotional/preferential dimensions
+- test_debugging_session_classified_as_experience: experience vs world classification
+- test_reflect_follows_language_directive: French language check
+- test_refresh_with_tags_only_accesses_same_tagged_models: tag security
+- test_trigger_tags_match_any_includes_untagged_content: tag match any
+- test_trigger_tags_match_default_preserves_strict_isolation: strict isolation
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* Fix judge to always use Gemini independent of test provider
+
+The judge must work across all hs_llm_mat provider jobs (openai, groq,
+bedrock, etc.). Hardcode gemini as the default judge provider since
+GEMINI_API_KEY is available in all CI jobs.
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* Relax judge criteria for multi-dimension test to accept semantic equivalents
+
+The judge was too strict — facts containing &#34;positive feedback&#34; and
+&#34;enthusiastic&#34; satisfy the emotional dimension even without the word
+&#34;thrilled&#34;.
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* Clean up review findings: duplicate decorator, dead fixture, misplaced docstring
+
+Co-Authored-By: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+* fix(tests): review fixes and port flakiness patches from #1500
+
+- mock_llm: clear_mock_calls() now resets _mock_response and
+  _response_callback so callers using set_mock_response() get a clean
+  slate without needing to call set_mock_response(None) explicitly
+- retrieval: guard tz-naive timestamps from Oracle before subtracting
+  against UTC-aware mid_date — fixes TypeError on Oracle temporal recall
+- test_async_batch_retain: mark test_large_async_batch_auto_splits
+  timeout=600 (processes large content through real LLM inline)
+- test_observations: mark test_entity_mention_ranking timeout=600
+  (same reason — large payload via SyncTaskBackend)
+- test_none_llm_provider: increase poll iterations 50→100 to absorb
+  DB commit latency under load
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* fix(tests): wire memory_real_llm into TestReflectUsesMentalModels
+
+The class was marked hs_llm_mat (5-provider acceptance job) but used
+the mock memory fixture, which returns no tool calls from call_with_tools.
+This meant search_mental_models was never invoked and the tool-call
+assertion failed on every run — the @flaky(reruns=2) mark was masking
+the root cause rather than fixing it.
+
+Add a class-level memory fixture override (same pattern as
+TestMentalModelTriggerTagsConfig) and replace the brittle keyword
+assertion on the response text with an LLM judge call.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* fix(tests): move entity-label integration tests to hs_llm_core tier
+
+MockLLM does not simulate structured entity label extraction (map-type and
+multi-values labels), so tests relying on that path always got an empty entity
+set and failed.  Mark the three affected tests hs_llm_core and switch them to
+memory_real_llm so they run in the single-provider quality CI job where a real
+LLM is available.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* test(quality): add real-LLM quality tests for retain, consolidation, and reflect
+
+Addresses the gap identified in the testing philosophy review: ~80% of tests
+were &#34;did it not crash?&#34; checks using MockLLM, with almost no assertions on
+whether the LLM pipeline produces correct output.
+
+Changes:
+- test_retain.py: add TestFactExtractionQuality class (5 hs_llm_core tests)
+  verifying multi-dimension extraction, recall relevance ranking, person
+  isolation, negation preservation, and technical detail survival
+
+- test_consolidation.py: add test_consolidation_reduces_count_for_near_duplicate_facts
+  — the first test that asserts consolidation actually *merges* redundant facts
+  rather than just creating observations (MockLLM always produces 1:1, masking
+  whether real merging occurs)
+
+- test_quality_integration.py: new file with end-to-end and disposition tests
+  - TestEndToEndPipeline: retain→recall→reflect roundtrip, specific factual
+    query, and graceful handling of queries with no relevant context
+  - TestDispositionInfluence: first-ever tests for the skepticism disposition
+    trait — verifies high skepticism hedges uncertain claims and that
+    skepticism=1 vs skepticism=5 produce different responses
+
+All new tests are marked hs_llm_core, use memory_real_llm, and assert with
+the LLM judge rather than brittle string matching.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* test(quality): migrate three pre-existing consolidation tests to LLM judge
+
+These hs_llm_core / hs_llm_mat tests predated the judge and were still using
+brittle string matching against LLM-produced text — the exact pattern the
+judge was introduced to replace.
+
+- test_consolidation_merges_contradictions: replaced
+  &#34;hate&#34; in all_texts checks with a judge call that semantically evaluates
+  whether the observations reflect Alex&#39;s sentiment change.  Paraphrases like
+  &#34;no longer enjoys&#34; or &#34;switched away from&#34; now satisfy the criteria.
+
+- test_consolidation_merges_only_redundant_facts: replaced the weak
+  obs[&#34;text&#34;] non-empty existence check with a judge call that verifies
+  location facts and work facts stay separately represented.
+
+- test_consolidation_keeps_different_people_separate: kept the cheap
+  proper-noun structural check as a fast first pass, added a judge call as
+  a semantic backup that catches pronoun-based conflation the substring
+  check would miss.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* test(quality): tier and migrate fact extraction tests to hs_llm_core + judge
+
+These 21 tests were unmarked and ran in the mock CI job, where MockLLM echoes
+input text verbatim — substring assertions like `&#34;thrilled&#34; in all_facts_text`
+passed trivially because the input text contained the words being checked,
+not because the LLM actually preserved the dimension.  False confidence.
+
+Changes:
+- Add module-level `pytestmark = pytest.mark.hs_llm_core` so every test in the
+  file runs in the single-provider quality CI job, where extraction behaviour
+  is actually exercised.
+- Migrate 14 tests from substring matching to llm_judge.assert_meets_criteria,
+  letting paraphrases satisfy the criteria (e.g. &#34;elated&#34; satisfies the
+  emotional-dimension test instead of failing because it isn&#39;t literally
+  &#34;thrilled&#34;).
+- Leave 7 structural assertions in place (date-field checks, fact_count, the
+  prohibited-vague-terms absence check) — these don&#39;t depend on phrasing.
+
+The mock suite count drops from 2184 to 2164, matching the 20 tests now
+correctly deferred to the hs_llm_core job.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* test(audit): fix three issues from PR self-audit
+
+1. test_reflect_tool_trace_includes_reason (test_reflections.py): added the
+   missing hs_llm_core marker.  The class fixture override aliases memory to
+   memory_real_llm, so the test was making real LLM calls inside the mock CI
+   job — consuming API quota and running in the wrong tier.
+
+2. test_consolidation_reduces_count_for_near_duplicate_facts
+   (test_consolidation.py): added @pytest.mark.flaky(reruns=2, reruns_delay=2).
+   The assertion `obs_count &lt; 5` depends on the LLM actually merging the three
+   near-duplicate email facts.  A conservative model might merge only two of
+   three, which still satisfies the assertion, but a more conservative result
+   (no merges) would fail intermittently without the rerun.
+
+3. test_low_vs_high_skepticism_produces_different_responses → renamed
+   test_high_skepticism_response_is_more_hedged_than_low.  The old assertion
+   `low.text.strip() != high.text.strip()` would pass purely from LLM sampling
+   variance even if the disposition trait wasn&#39;t wired into the prompt at all.
+   Replaced with a judge call that compares the two responses for relative
+   hedging — the judge must affirmatively conclude A is more skeptical than B.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* test(quality): fix three failures surfaced by local hs_llm_core run
+
+Ran the full hs_llm_core suite end-to-end against a real LLM with an OpenAI
+judge override.  85/87 passed.  Three legit failures and one pre-existing
+flake.  Fixes:
+
+1. test_consolidation_keeps_different_people_separate — extraction was correct
+   (three separate observations, one per person) but the judge misread the
+   &#34; | &#34; pipe-separated join as a single conflated statement.  Switched to a
+   numbered list (&#34;Observation 1: ... Observation 2: ...&#34;) and clarified the
+   criterion so the judge evaluates each entry independently.
+
+2. test_logical_inference_pronoun_resolution — facts correctly resolved &#34;it&#34;
+   to &#34;the machine learning project&#34; (no standalone &#34;it&#34; remained), but the
+   judge hallucinated about pronouns that weren&#39;t there.  Reverted to a
+   deterministic structural check: each fact mentioning a quality word
+   (challenging/rewarding/learn/...) must also mention an anchor noun
+   (project/work/ML).  Pronoun resolution is structural, not semantic — the
+   judge is the wrong tool for this case.
+
+3. test_high_skepticism_hedges_unverifiable_claims — REMOVED.  The strict
+   absolute-hedging assertion caught a real disposition-wiring weakness
+   (skepticism=5 produces near-zero explicit hedging on confident-sounding
+   claims), but fixing the wiring is out of scope for this PR.  The
+   comparative test (test_high_skepticism_response_is_more_hedged_than_low)
+   already verifies disposition has an effect and is more robust to LLM
+   idiosyncrasies, so it stays as the canonical disposition test.
+
+The pre-existing flake (test_refresh_with_tags_only_accesses_same_tagged_models
+in test_mental_models.py) is not from this PR — verified by `git log
+origin/main..HEAD -- test_mental_models.py` returning empty, and the test
+passing cleanly on rerun.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* test(quality): fix pipe-format judge confusion in two more consolidation tests
+
+CI run on openai/gpt-4.1-nano exposed the same judge-parsing failure pattern
+I already fixed for test_consolidation_keeps_different_people_separate.
+The weaker provider&#39;s judge calls read &#34; | &#34;-joined observations as a single
+combined statement and missed middle items.
+
+Changes:
+- test_consolidation_merges_only_redundant_facts: switch from pipe-join to
+  numbered list. Also add @pytest.mark.flaky(reruns=2) because the matrix
+  test runs against weak models that occasionally drop facts during
+  consolidation — flakies survive transient drops while still catching
+  real persistent issues.
+
+- test_consolidation_merges_contradictions: same pipe-to-numbered-list fix
+  for consistency.  This test passed in CI but had the same fragile pattern.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* ci(oracle): expand HINDSIGHT_TS tablespace so client tests don&#39;t exhaust it
+
+The Python client test suite (test-python-client-oracle) was failing with
+ORA-01659: unable to allocate MINEXTENTS beyond 1 in tablespace HINDSIGHT_TS
+around 66% through its tests.  The TypeScript client suite passed against
+the same Oracle DB — TS tests are lighter, but Python tests create more
+banks/segments and overran the configured tablespace.
+
+Original setup: SIZE 200M AUTOEXTEND ON NEXT 50M with no explicit MAXSIZE.
+On Linux datafiles the implicit limit can be hit during heavy test loads.
+
+Updated to: SIZE 1G AUTOEXTEND ON NEXT 200M MAXSIZE UNLIMITED, applied
+consistently across all three Oracle test jobs (test-api-oracle,
+test-python-client-oracle, test-typescript-client-oracle).  Larger initial
+allocation reduces autoextend frequency, bigger autoextend increments
+amortise the cost, and the explicit UNLIMITED removes any ambiguity about
+the upper bound.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* ci(oracle): switch to BIGFILE tablespace with 2G initial allocation
+
+Previous fix (SIZE 1G AUTOEXTEND ON NEXT 200M MAXSIZE UNLIMITED) still hit
+ORA-01659 in test-python-client-oracle.  Verified the new settings were
+applied (Oracle log shows the CREATE TABLESPACE was executed with the new
+values), so autoextend isn&#39;t being honoured to the unlimited cap — most
+likely the implicit SMALLFILE limit (~32GB per datafile) or runner disk
+pressure is blocking further extension before any single test run is done.
+
+Switching to BIGFILE TABLESPACE: a single datafile that can grow up to
+128TB, designed exactly for high-volume workloads where SMALLFILE&#39;s
+multi-file management runs into limits.  Also bumping initial to 2G and
+autoextend increment to 500M so the bulk of the test run never needs to
+extend.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* test: fix three CI failures surfaced by full matrix run
+
+1. test_logical_inference_identity_connection (Core LLM tests):
+   The judge was confused by run-on text — f.fact embeds pipe-separated
+   metadata (&#34;| When: ... | Involving: ...&#34;) and a plain space-join
+   produces one blob the judge misreads.  Switched to a numbered list
+   (&#34;Fact 1: ...\nFact 2: ...&#34;) matching the pattern used in the
+   consolidation tests.
+
+2. test_consolidation_merges_only_redundant_facts (LLM acceptance matrix):
+   Moved from hs_llm_mat to hs_llm_core.  Bedrock/Nova (the weakest
+   matrix provider) consistently merges all three input facts into a
+   single observation, losing both work info and Italy nuance — failed
+   all 3 flaky reruns.  This is a real model limitation, not a code
+   bug.  Quality assertions belong in hs_llm_core with a fixed strong
+   model; matrix tier verifies provider compatibility, not output
+   quality.
+
+3. test_high_fanout_entity_returns_results (test-api):
+   Pre-existing test timing out at the 300s default while inserting a
+   high-fanout entity dataset.  Added @pytest.mark.timeout(600), same
+   pattern used previously for test_large_async_batch_auto_splits.
+   Not from this PR but blocking CI green.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* test: stabilize two more pre-existing flakes in the mock suite
+
+These were exposed by the latest CI run; neither is from this PR (git log
+on each file shows no changes in this branch&#39;s range).
+
+- test_per_entity_limit_caps_expansion: sibling of the high-fanout test
+  I already added @pytest.mark.timeout(600) to, hits the same 300s
+  default while populating the test data set.  Same fix.
+
+- test_concurrent_upserts_no_duplicates: a 20-thread concurrent retain
+  stress test.  Passed locally on first try, failed once in CI.  The
+  underlying behaviour may or may not have a real consistency bug, but
+  the test is inherently non-deterministic by design (concurrent writes
+  with version racing).  @pytest.mark.flaky(reruns=2, reruns_delay=2)
+  handles the transient failure without masking a persistent one.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* test: fix root cause of Oracle exhaustion + simplify identity_connection
+
+Two unrelated fixes addressing the remaining CI failures.
+
+1. hindsight-clients/python/tests/test_main_operations.py:
+   The bank_id fixture creates a unique bank per test (function scope) but
+   never cleaned up.  With ~50 tests, that&#39;s ~50 banks of accumulating
+   data — embeddings, memory_units, entities, links, LOB segments — never
+   released.  No tablespace size fixes that.
+
+   Added a yield teardown that calls client.delete_bank() best-effort
+   after each test.  This is the actual root cause of the ORA-01658 /
+   ORA-01659 cascade we&#39;ve been chasing on this PR.  Earlier tablespace
+   bumps (200M→1G→BIGFILE 2G) treated the symptom; this addresses the
+   cause.  Belt-and-suspenders: keeping the BIGFILE change since it&#39;s
+   a reasonable Oracle setup regardless.
+
+2. test_fact_extraction_quality.py::test_logical_inference_identity_connection:
+   Even with the numbered-list fix, the judge (gemini-2.5-flash-lite)
+   kept reading the criterion too strictly — it would see facts that
+   mention &#34;Karlie from a hike last summer&#34; and refuse to call that
+   &#34;Karlie was someone Deborah hiked with last summer&#34;.  Reverted to
+   a structural substring check (similar shape to the pre-migration
+   assertion) since the assertion is fundamentally about whether two
+   specific tokens appear in the extracted facts — pronoun resolution
+   was the same pattern.  The judge isn&#39;t the right tool for &#34;is this
+   noun in the output&#34; checks.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* test: add @pytest.mark.flaky to trigger_tags_match_any test
+
+Gemini 2.5 Flash Lite occasionally bails out of the reflect loop with a
+curt &#34;I don&#39;t have information.&#34; instead of synthesizing the retrieved
+memories — observed once in CI, the same setup passed locally.  Retry
+twice to ride out the flake; the judge assertion still catches a
+persistent break.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* test: promote flaky decorator to class scope in TestMentalModelTriggerTagsConfig
+
+Two more tests in the same class hit the same Gemini bailout pattern
+(&#34;I don&#39;t have information.&#34; / &#34;I cannot provide a general overview&#34;)
+in CI after I&#39;d only marked the original failing test flaky.  Moving
+the decorator to class scope so every reflect-driven test in the class
+gets the same retry budget — the underlying brittleness is shared
+(reflect on Gemini 2.5 Flash Lite vs. tag-scoped retrieval), so the
+mitigation should be too.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* test: bump graph/observation timeouts to 1200s and mark worker race flaky
+
+Three pre-existing slow/flaky tests in the mock suite kept blocking CI green.
+None are from this PR; all were marked appropriately in earlier commits but
+the chosen budgets weren&#39;t enough.
+
+- test_high_fanout_entity_returns_results and test_per_entity_limit_caps_expansion
+  in test_graph_entity_fanout_cap.py: bumped timeout 600s → 1200s.  These
+  populate a high-fanout graph dataset whose insert phase routinely runs
+  past 10 minutes on the GitHub runner under load.
+
+- test_entity_mention_ranking in test_observations.py: same bump, same
+  cause (data setup phase).
+
+- test_claim_batch_allows_non_consolidation_when_consolidation_processing
+  in test_worker.py: failed with `assert 2 == 1` — claimed both a
+  batch_retain and a consolidation task when expecting only one.  The
+  worker poller has inherent race-condition surface area; added
+  @pytest.mark.flaky(reruns=2, reruns_delay=2) so transient races don&#39;t
+  block CI while still surfacing persistent regressions.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* test: mark test_llm_api_methods flaky for tool-call sampling
+
+Matrix test failed on vertexai/gemini-2.5-flash-lite with &#34;Expected at
+least 1 tool call, got 0&#34;.  The test asserts tool-calling capability,
+but tool-call generation is sampled output — some providers occasionally
+return zero tool calls even when the prompt clearly requests one.
+@pytest.mark.flaky(reruns=2, reruns_delay=2) rides out the sampling
+miss while still surfacing a persistent capability break.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* test: hoist inline tests.llm_judge imports to top of file
+
+Move 34 inline `from tests.llm_judge import assert_meets_criteria` (and
+one `evaluate`) imports from inside test bodies up to the module-level
+import block in 9 test files. Makes usage of the judge visible from each
+file&#39;s import list and avoids re-importing on every call.
+
+Also pulls in the auto-regenerated skills/hindsight-docs/ refresh that
+the pre-commit hook surfaced.
+
+---------
+
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+Co-authored-by: DK09876 &lt;dk09876@DK09876s-MacBook-Pro.local&gt;
+Co-authored-by: Nicolò Boschi &lt;boschi1997@gmail.com&gt;
+
+- add zeroentropy embeddings provider (#1770)
+
+- docs(config): note litellm-sdk embeddings API key is optional for ambient credentials (#1747)
+
+* docs(config): note litellm-sdk embeddings api key is optional for ambient credentials
+
+* docs(config): note litellm-sdk embeddings api key is optional for ambient credentials
+
+- fix: improve observation consolidation and reflect temporal reasoning (#1759)
+
+* fix: improve observation consolidation and reflect temporal reasoning
+
+Addresses issue #1566 (observation consolidation creating near-duplicate
+sibling observations) and a cluster of related reflect-side temporal
+reasoning issues surfaced while validating the consolidation work.
+
+## Observation consolidation (issue #1566)
+
+- Rewrite consolidation prompt with markdown structure (`## MISSION`,
+  `## PROCESSING RULES`, `## INPUT`, `## DECISION GUIDE`, `## OUTPUT
+  FORMAT`). New rule 1 PREFER UPDATE OVER CREATE makes the merge bias
+  explicit, addressing the root cause of duplicate sibling observations.
+- Default mission decoupled from consolidation behaviour. Mission =
+  what to track; PROCESSING RULES = how to consolidate. Mission-priority
+  note tells the LLM the mission overrides the rules when they conflict,
+  so per-bank `observations_mission` cleanly cascades.
+- Two worked examples in the prompt (merging recurring claim → UPDATE
+  only; state change + unrelated CREATE) replace the previous single
+  create-heavy example.
+- New field rule &#34;AT MOST ONE UPDATE PER `observation_id`&#34; + defensive
+  `_dedupe_updates` guard in the consolidator. The LLM occasionally
+  emits multiple updates for the same observation in one batch; without
+  dedup the later write silently overwrites the earlier. We now collapse
+  duplicates (keep last text, union source_fact_ids) and log a warning.
+
+## Reflect temporal reasoning
+
+- New `## Temporal Reasoning` section documents `mentioned_at`,
+  `occurred_start`, `occurred_end` and the supersession rule (latest
+  `mentioned_at` wins for contested facets).
+- New `## Conflicts and Ambiguity` section gives the LLM explicit
+  permission to surface unresolvable conflicts instead of fabricating a
+  confident answer.
+- New `## Showing Your Reasoning` section requires step-by-step work
+  for conflict resolution, with a Step-4 sanity-check forcing function
+  that prevents double-counting events that pre-date the authoritative
+  fact (the specific failure mode caught in the horse test).
+- `## How to Reason` bullet softened from unconditional &#34;give the best
+  answer&#34; to &#34;give a best-effort answer AND surface any uncertainty&#34;.
+- Truthful &#34;tool result ordering&#34; note: results come back sorted by
+  semantic relevance, not time — direct the LLM to read `mentioned_at`
+  for temporal reasoning instead of relying on position.
+- `_prune_nulls` in `tool_recall` / `tool_search_observations` strips
+  null/empty fields from serialized memories before they go to the LLM.
+
+## Mental-model refresh fail-loud
+
+- New `MentalModelRefreshError`. When `reflect_async` returns empty
+  text (provider hiccup, post-cleaning strip-to-empty, agentic-loop
+  exhaustion), `refresh_mental_model` now persists the
+  `reflect_response.refresh_skipped = &#34;empty_candidate&#34;` audit + the
+  existing content, then RAISES instead of silently returning the
+  unchanged model. Existing test updated to expect the raise.
+
+## Test scaffolding
+
+- Horse-test (`test_horse_farm_observation_history`) now spaces
+  retains one week apart via explicit `event_date` so the temporal
+  rule has real signal (previous version landed all retains within
+  2-5 seconds, making supersession indistinguishable from noise).
+- New `TestFullAssembledConsolidationPrompt` exercises the full
+  prompt substitution path with realistic observations + facts.
+- New `TestDedupeUpdates` covers the dedup helper&#39;s collision cases.
+- New prompt-injection tests pin the Temporal Reasoning,
+  Conflicts/Ambiguity, and Showing Your Reasoning sections so future
+  edits can&#39;t silently drop them.
+
+Verified end-to-end on the horse test: across 3× runs of the full
+retain → consolidate → reflect → mental-model pipeline, the LLM now
+reliably picks 4 (correct: latest count 5 minus Shadow&#39;s death after)
+where the baseline picked 3 (double-counting Buttercup&#39;s pre-dating
+sale) or even 1 (mis-identifying which count was latest).
+
+* style(consolidation): apply ruff format to prompt builder
+
+* fix(ci): align reflect prompt golden tests + drop too-aggressive null pruning
+
+Two CI regressions from the temporal-reasoning changes:
+
+1. `tests/test_reflect_prompt_builder.py` is a byte-for-byte snapshot of
+   `build_system_prompt_for_tools`. The new Temporal Reasoning, Conflicts
+   and Ambiguity, and Showing Your Reasoning sections shifted the
+   structure, and the &#34;Tool result ordering&#34; note got added to the
+   MM+OBS and OBS-only retrieval branches. Update the golden constants
+   to match.
+
+2. `_prune_nulls` in `tool_recall` / `tool_search_observations` stripped
+   too aggressively: `model_dump()` emits every MemoryFact field
+   including `source_fact_ids: None`, and `test_search_observations_returns_source_memory_ids`
+   asserts the key is present on returned observations. Conflating
+   &#34;present but None&#34; with &#34;absent&#34; broke the drill-down contract for
+   callers that gate behavior on `if &#34;source_fact_ids&#34; in obs`. Removed
+   the helper entirely; token-cost win wasn&#39;t worth the API breakage.
+
+* test: remove obsolete fine-grained-observations test
+
+test_consolidation_merges_only_redundant_facts asserted a &#39;fine-grained,
+almost 1:1&#39; consolidation philosophy that is the opposite of the new
+&#39;PREFER UPDATE OVER CREATE&#39; rule shipped in the consolidation prompt
+rewrite. The actual assertions (&gt;= 1 observation, non-empty text) are
+loose enough that the test usually passes, but under LLM variance the
+new prompt occasionally produces 0 observations for an isolated
+first-ever fact, making CI flaky. Remove the test rather than chase
+the variance — its design intent no longer matches the system.
+
+* feat(reflect): restore _prune_nulls and fix the test that relied on None keys
+
+Bring back _prune_nulls (strips None / &#34;&#34; / [] / {}) on tool_recall and
+tool_search_observations output. The previous CI failure on
+test_search_observations_returns_source_memory_ids was because that test
+called tool_search_observations without source_facts_max_tokens, so
+source_facts was disabled in recall, source_fact_ids stayed None on the
+returned observation, and _prune_nulls (correctly) stripped the empty
+key.
+
+The right fix is on the test side: pass source_facts_max_tokens=5000 so
+recall actually populates source_fact_ids. The drill-down assertion then
+operates on a real list, the way the tool contract is designed to work.
+
+Net effect: tool responses to the reflect LLM lose the wall of &#34;context:
+null, occurred_start: null, metadata: null, tags: null, source_fact_ids:
+null, ...&#34; noise that model_dump() emits for facts where most fields
+default to None. Material token savings on long recall responses.
+
+* fix(consolidation): make CREATE the obvious default when nothing exists to merge with
+
+Rule 1 of the consolidation prompt (&#39;PREFER UPDATE OVER CREATE&#39;) was
+sometimes interpreted too literally by the LLM: on retains where the
+existing-observations list is empty (no candidates to merge with),
+the LLM occasionally returned empty creates/updates/deletes — refusing
+to record durable knowledge because the &#39;merge aggressively&#39; framing
+overshadowed the &#39;CREATE structurally distinct&#39; clause.
+
+Tighten rule 1 with an explicit clarifier: when EXISTING OBSERVATIONS
+is empty, or no existing observation covers the same facet as a new
+fact, CREATE. The rule is about preventing duplicates, not about
+refusing to record. This unblocks the &#39;isolated first-ever fact&#39;
+failure mode that previously caused
+TestConsolidationTagRouting::test_no_match_creates_with_fact_tags
+(and the now-deleted test_consolidation_merges_only_redundant_facts)
+to flake under LLM variance.
+
+* test(horse): tolerate one missing horse name in mental-model assertion
+
+The mental-model synthesis step is a real LLM call (Gemini). Across CI
+runs we&#39;ve seen it occasionally drop one horse name from the summary —
+typically Daisy, who&#39;s mentioned exactly once with no follow-up events
+and gets de-emphasized when the LLM optimizes for the question asked
+(horse count + status). The existing @flaky reruns=2 was getting
+exhausted on this specific drop.
+
+Relax the per-name presence check to require &gt;= 4 of 5 names instead
+of all 5. Buttercup (sold) and Shadow (died) are still required as
+hard checks since the timeline section depends on them. The
+&#39;sold&#39;/&#39;died&#39; assertions are unchanged.
+
+The test&#39;s value is end-to-end pipeline verification (retain →
+consolidate → reflect → mental model), not perfect recall of every
+named entity. The relaxed check captures that intent without fighting
+LLM-side variance on a single low-salience name.
+
+- perf(api): derive entity edges from unit_entities instead of materializing them (#1766)
+
+* chore: regenerate docs skill (sync Tigris S3 config notes)
+
+Drift picked up by the generate-docs-skill pre-commit hook — keeps
+skills/hindsight-docs/ in sync with the upstream hindsight-docs/ sources.
+
+* perf(api): derive entity edges from unit_entities instead of materializing them
+
+Stop writing link_type=&#39;entity&#39; rows to memory_links and derive entity edges
+on demand in the /graph endpoint (from the unit_entities self-join recall
+already uses) and in /stats (by replicating the historical writer cap).
+
+Why: on the recall-perf-medium bench bank (10k units), entity rows were 53%
+of all memory_links — 345k rows, ~190 MB of table+index — and recall never
+read them (entity expansion in link_expansion_retrieval.py uses unit_entities,
+not memory_links). Retain was running a synchronous pairwise loop per shared
+entity to write rows nothing read; per-unit entity degree was uncapped (max
+326 outgoing on a single unit), and overall per-unit total degree averaged
+130 with a p99 of 462.
+
+Changes:
+- Drop Phase 3 entity-link build/insert from retain orchestrator. Keep
+  entity_resolver.flush_pending_stats() so entity_cooccurrences (which feeds
+  /entities/graph) still updates.
+- Delete build_entity_links_from_resolved, insert_entity_links_batch,
+  MAX_LINKS_PER_ENTITY, EntityLink, Phase3Context, and the now-dead
+  fetch_entity_unit_fanout op (PG + Oracle).
+- /graph: filter memory_links query to link_type &lt;&gt; &#39;entity&#39;; broaden the
+  existing observation-inferred entity-pair loop to cover all visible units;
+  cap at 10 units per entity to bound hot entities.
+- /stats: split link_breakdown into a memory_links query (non-entity) and a
+  unit_entities-based derivation for entity, sized to the historical writer
+  cap so link_counts.entity stays in the same magnitude.
+- Migration e9b2c7d1f3a4: drop idx_memory_links_entity_covering and
+  chunk-delete existing entity rows (PG + Oracle paths).
+- Tests: rewrite test_entity_links_creation and test_all_link_types_together
+  to assert via /graph + /stats; assert no entity rows in memory_links.
+
+API response shapes (graph edges, stats link_counts/links_breakdown) are
+unchanged at the boundary, so SDKs and the control plane do not need to be
+regenerated.
+
+* fix(graph): cap entity edges per unit, not per entity list
+
+The previous derivation kept only the first 10 units per entity before
+pairing, so any unit beyond #10 for a hot entity had zero entity edges in
+/graph — even though it shared the entity with many visible units.
+
+Switch to a sliding window: each unit links to its next N neighbors in the
+per-entity list. Every unit that shares an entity with another visible unit
+gets edges (its successors directly, predecessors via their pairs), and
+total edges stay bounded at ~N * cap per entity instead of N².
+
+Adds a regression test that retains 15 facts mentioning the same person and
+asserts every retained unit appears in at least one entity edge in /graph.
+
+* fix(migration): re-parent entity-link drop after e1b2c3d4f5a6 landed on main
+
+#1762 landed e1b2c3d4f5a6_drop_unused_indexes between this PR opening and
+CI run, which also drops idx_memory_links_entity_covering. Our migration&#39;s
+down_revision still pointed at the prior head, leaving Alembic with two
+heads and tripping test_alembic_dag.test_single_head.
+
+Re-parent to e1b2c3d4f5a6 to unify the head. The DROP INDEX IF EXISTS line
+becomes a defensive no-op (since #1762 already dropped it), but is retained
+in case this migration runs against a snapshot taken before #1762.
+
+- feat(api): add HINDSIGHT_API_ACCESS_LOG env var to enable uvicorn access log (#1765)
+
+Allow enabling uvicorn access log via environment variable, so Docker/k8s
+users can turn it on declaratively without modifying start-all.sh.
+
+Closes #1752
+
+- docs(blog): Paperclip persistent memory integration (#1763)
+
+* docs(blog): add Paperclip persistent memory integration post
+
+Covers the Hindsight plugin for Paperclip: event-driven lifecycle
+(recall on run start, retain on comment), agent tools, bank
+granularity options, and install/config walkthrough.
+
+- add tigris data (#1760)
+
+- feat(api): add ParadeDB pg_search as Citus-compatible BM25 backend (#1755)
+
+* feat(api): add ParadeDB pg_search as Citus-compatible BM25 backend
+
+Adds a fourth value (`pg_search`) for `HINDSIGHT_API_TEXT_SEARCH_EXTENSION`
+alongside the existing `native`, `vchord`, and `pg_textsearch`. ParadeDB
+pg_search is the only true-BM25 backend that works on a Citus distributed
+Postgres cluster, so this unblocks horizontally scaled deployments.
+
+The retrieval arm builds the @@@ predicate via paradedb.boolean(should =&gt;
+ARRAY[paradedb.match(&#39;text&#39;, $4), ...]) since @@@ on the key_field requires
+field-qualified terms; this preserves multi-field coverage (text + context
++ text_signals) without needing query string interpolation.
+
+Includes a docker-compose example under docker/docker-compose/pg_search/
+based on the official paradedb/paradedb:latest-pg17 image.
+
+Closes #1754
+
+* fix: accept pgroonga in n9i0 migration; clarify consolidator search_vector comment
+
+- n9i0 (learnings + pinned_reflections) validation now permits &#39;pgroonga&#39;,
+  treating it as native at this migration stage. ensure_text_search_extension()
+  at startup converts the reflections table (renamed from pinned_reflections in
+  p1k2l3m4n5o6) to pgroonga structures; the learnings table is dropped in the
+  same later migration so its transient native column never reaches steady state.
+  Without this, pgroonga users hit ValueError on a fresh install.
+
+- consolidator.py single-observation INSERT: the previous comment claimed
+  search_vector was GENERATED ALWAYS, but migration p4q5r6s7t8u9 dropped that
+  expression. Updated to reflect current behavior and flag the resulting gap
+  for native (observations land with NULL search_vector and are not BM25-
+  searchable until reflected/re-ingested) so a follow-up can address it.
+
+* chore: regenerate hindsight-docs skill after rebase
+
+Rebasing onto main pulled in hindsight-docs/ changes from #1704
+(Codex OAuth embeddings) and #1538 (pgroonga). Re-run the
+generate-docs-skill.sh generator so the cached
+skills/hindsight-docs/references/developer/configuration.md mirror
+matches the current developer docs and verify-generated-files passes.
+
+- release(paperclip): v0.2.3
+
+- feat(paperclip): add per-user memory isolation via bankGranularity (#1761)
+
+* feat(paperclip): add per-user memory isolation via bankGranularity
+
+Add &#39;user&#39; as a bankGranularity option so each user gets their own
+isolated memory bank. User identity is extracted from the specific
+issue being worked on (via originId email or creatorEmail), not from
+an arbitrary issue list query.
+
+- bank.ts: add userId to BankContext, extractUserFromIssue() helper
+- worker.ts: pass userId through all 4 bank-derivation sites, cache
+  userId in plugin state so tool calls derive the same bank ID
+- manifest.ts: add &#39;user&#39; to bankGranularity enum
+- tests: 6 new tests covering derivation, extraction, and integration
+
+Inspired by #1561 — thanks @amirhmoradi for the original concept and
+initial implementation.
+
+* feat(paperclip): add bankId/dynamicBankId for static shared banks
+
+Add bankId and dynamicBankId config fields matching the pattern used
+by openclaw, claude-code, and opencode. When bankId is set and
+dynamicBankId is not true, all agents share the same bank — useful
+for multi-agent cohorts that need collaborative memory.
+
+- bank.ts: static override check before dynamic derivation
+- manifest.ts: add dynamicBankId (boolean) and bankId (string) fields
+- worker.ts: add fields to PluginConfig type
+- tests: 5 new tests (static override, trimming, whitespace fallthrough,
+  dynamicBankId=true bypass, integration routing)
+
+Inspired by #1589 — thanks @SeBru1 for the original concept.
+Closes #1589.
+
+* test(paperclip): add edge-case tests for bank feature interactions
+
+19 additional tests covering:
+- Feature interaction: static bankId vs user granularity precedence
+- Static bankId edge cases: special chars, tabs/newlines, empty string
+- Dynamic derivation edge cases: empty granularity, user-only, duplicates
+- extractUserFromIssue: null fields, empty strings, multiple emails
+
+* style(paperclip): fix lint formatting drift
+
+- feat(control-plane): surface clear_mental_model in UI (#1764)
+
+* feat(control-plane): surface clear_mental_model in UI
+
+Add clear_mental_model to the per-bank MCP tool toggle catalogue and
+expose a &#34;Clear Content&#34; action in the mental model row dropdown and
+detail-modal dropdown. The MCP tool and HTTP endpoint were added in
+#1706 but the UI side was missed.
+
+* chore: regenerate docs-skill configuration reference
+
+Picks up the openai-codex embeddings provider added in #1704. The
+generation script wasn&#39;t re-run as part of that PR, so verify-generated-files
+fails on every subsequent PR until the regenerated file lands.
+
+- chore(db): drop indexes that are unused or redundant with composite indexes (#1762)
+
+Code audit identified 9 indexes on memory_links, entities, documents, and
+unit_entities that are either dead (no code path exercises them) or fully
+covered by composite indexes the planner already prefers. See the migration
+docstring for the per-index rationale.
+
+Also fixes two stale comments that referenced indexes which no longer
+match the code paths:
+
+- link_expansion_retrieval.py claimed entity expansion uses
+  idx_memory_links_entity_covering, but the CTE traverses unit_entities,
+  not memory_links — that&#39;s why the covering index has no code path
+  exercising it.
+- memory_engine.py referenced idx_memory_links_bank_link_type, which
+  was never created on PostgreSQL (only the bank_id column exists).
+
+The skills/hindsight-docs/ regen is a drive-by from the pre-commit hook
+catching up with embeddings-provider docs that landed on main earlier.
+
+- fix(ci): align config field count and CLI consolidation call with #1746 (#1757)
+
+PR #1746 added enable_auto_consolidation to _CONFIGURABLE_FIELDS and
+introduced a ConsolidationRequest body on the /consolidate endpoint, but
+didn&#39;t update test_hierarchical_fields_categorization (still expects 35
+fields) or the CLI&#39;s trigger_consolidation wrapper (still calls the
+generated client with 2 args), so CI on this branch breaks on test-api,
+test-rust-cli, test-embed-windows, and test-doc-examples (cli).
+
+Bump the expected count to 36, add enable_auto_consolidation to the
+explicit assertions, and pass a default ConsolidationRequest to the
+generated client so the no-scope CLI invocation keeps consolidating all
+unconsolidated memories.
+
+- feat: support Codex OAuth embeddings (#1704)
+
+Add openai-codex embeddings provider using the existing Codex OAuth token, support OpenAI output dimension overrides, and document the 384-dimension configuration path. Also redacts the example Telegram bot token in docs.\n\nTests:\n- uv run pytest tests/test_embeddings_openai_batch_size.py -q\n- uv run pytest tests/test_embeddings_openai_batch_size.py tests/test_custom_embedding_dimension.py tests/test_gemini_embeddings.py tests/test_litellm_sdk_embeddings.py -q\n- HINDSIGHT_API_LLM_PROVIDER=mock HINDSIGHT_API_EMBEDDINGS_PROVIDER=openai-codex HINDSIGHT_API_EMBEDDINGS_OPENAI_MODEL=text-embedding-3-small HINDSIGHT_API_EMBEDDINGS_OPENAI_DIMENSIONS=384 HINDSIGHT_API_EMBEDDINGS_OPENAI_BATCH_SIZE=2 uv run python - &lt;&lt;&#39;PY&#39; ... create_embeddings_from_env/encode smoke
+
+Co-authored-by: Irgendwer &lt;irgendwer@MacBook-Pro-von-Irgendwer.local&gt;
+
+- feat(bm25): configurable native language + opt-in pgroonga backend (#1538)
+
+* feat(bm25): make native language configurable + opt-in pgroonga backend
+
+Adds two new env-level config knobs and a new opt-in BM25 backend so users
+can serve non-English banks (especially CJK) out of the box.
+
+- HINDSIGHT_API_BM25_LANGUAGE drives the PostgreSQL text search dictionary
+  used by the native tsvector backend (default: english). Validated as a
+  PG identifier so it can be safely embedded in to_tsvector(&#39;&lt;lang&gt;&#39;, ...).
+- HINDSIGHT_API_RETAIN_OUTPUT_LANGUAGE forces the fact extractor to emit
+  facts in the specified language regardless of source content&#39;s language.
+  Independent from bm25_language so users can mix indexing/extraction
+  languages deliberately.
+- New &#39;pgroonga&#39; option for HINDSIGHT_API_TEXT_SEARCH_EXTENSION. Uses
+  TokenBigram + NormalizerNFKC150 — single polyglot index handles English,
+  CJK, etc. simultaneously. Ships with a docker-compose recipe.
+
+To support a per-deployment language, the GENERATED ALWAYS expression on
+memory_units.search_vector (and reflections.search_vector) is dropped via
+new alembic migration p4q5r6s7t8u9. The application now populates these
+columns at INSERT time using the configured bm25_language.
+
+* docs(bm25): rename env var to scope it to native; move multilingual content to dedicated page
+
+- Rename HINDSIGHT_API_BM25_LANGUAGE → HINDSIGHT_API_TEXT_SEARCH_EXTENSION_NATIVE_LANGUAGE.
+  The setting only applies to the &#34;native&#34; backend (vchord/pg_textsearch/pgroonga
+  use their own tokenizers), so the env var name now reflects that scope. Field
+  renamed to text_search_extension_native_language.
+- Trim configuration.md back to a brief env-var table + link. The expanded
+  multilingual / CJK / pgroonga content moves to the dedicated multilingual.md
+  page, alongside the existing LLM / embedding / reranker multilingual guidance.
+
+* feat(llm-output-language): rename and broaden to cover retain + consolidation + reflect
+
+Renames HINDSIGHT_API_RETAIN_OUTPUT_LANGUAGE → HINDSIGHT_API_LLM_OUTPUT_LANGUAGE
+(field llm_output_language) and applies the same &#34;respond exclusively in {lang}&#34;
+directive across every LLM-generated artifact:
+
+- retain (fact extraction) — already wired, just renamed.
+- consolidation (observations / mental models) — appended to the batch
+  consolidation prompt via a new llm_output_language parameter.
+- reflect (response synthesis) — appended to the final-system prompt via a
+  new parameter threaded through run_reflect_agent and memory_engine.
+
+The shared directive lives in engine/prompt_utils.output_language_directive
+so all three pipelines build the same instruction from a single source.
+
+* docs(multilingual): drop the backfill-after-language-change section
+
+- fix(api): stop sending temperature param to Anthropic API (#1753)
+
+* feat(api): add targeted consolidation by observation scopes (#1625)
+
+Add `observation_scopes` parameter to the consolidate endpoint to run
+consolidation only on memories matching specific tag scopes, and add
+`enable_auto_consolidation` config flag to disable automatic
+post-retain consolidation.
+
+* docs: add targeted consolidation and auto-consolidation config docs
+
+Update observations docs with targeted consolidation section,
+trigger consolidation endpoint reference, and auto-consolidation
+disable flag. Regenerate OpenAPI spec and client SDKs.
+
+* docs: add enable_auto_consolidation to banks API docs
+
+* fix(api): stop sending temperature param to Anthropic API (#1749)
+
+Anthropic deprecated the `temperature` parameter for newer models
+(Opus 4.x+), causing all LLM calls to fail with a 400 error.
+Drop temperature from Anthropic provider requests entirely.
+
+- fix(webhooks): avoid duplicate retain batch deliveries (#1683)
+
+- fix(api): ignore inherited v1 base URL for Codex (#1718)
+
+- docs(mcp): document clear_mental_model tool (#1750)
+
+* docs(mcp): document clear_mental_model tool (docs)
+
+* docs(mcp): document clear_mental_model tool (references)
+
+- fix(api): release glibc heap pages after local reranker batches (#1745)
+
+* fix(api): release glibc heap pages after local reranker batches
+
+Local CPU rerankers (FlashRank/ONNX, SentenceTransformers) allocate large
+transient numpy/tensor buffers per call. With glibc malloc, freed pages are
+held as a high-water mark and never returned to the OS, so RSS grows
+monotonically across recalls and eventually trips OOM (see #1717: ~50-100MB
+per recall, multi-GB after ~30 recalls).
+
+Resolve `malloc_trim` once at import via `ctypes.util.find_library(&#34;c&#34;)`,
+gated to Linux. Other platforms (macOS, musl, Windows) get a no-op. Invoke
+in a `finally` block at the end of each `_predict_sync` so it runs even on
+exceptions, with no per-call ctypes lookup overhead.
+
+No `gc.collect()`: the relevant Python refs are already dropped by the time
+`_predict_sync` returns, and a full collection on the hot path is not worth
+the latency without evidence it&#39;s needed.
+
+* test(api): add unit tests for local cross-encoders + malloc_trim
+
+There were no dedicated unit tests for LocalSTCrossEncoder or
+FlashRankCrossEncoder — only conftest fixtures and a couple of error-path
+tests. Backfill them and add coverage for the new malloc_trim release hook.
+
+LocalSTCrossEncoder:
+- provider name, scores returned in input order, plain-list fallback,
+  configured batch size, bucket_batching order restoration, predict-before-
+  initialize raising, trim called on success and on exception.
+
+FlashRankCrossEncoder:
+- provider name, empty-pairs short-circuit (no rerank call, no trim), single-
+  query order mapping, multi-query grouping, trim called on success and on
+  exception.
+
+_resolve_malloc_trim:
+- returns a callable, return value is None or int (never raises), non-Linux
+  platforms short-circuit to a no-op, module-level _malloc_trim is cached.
+
+All tests mock the underlying flashrank/sentence-transformers model so they
+run fast in CI without network or weight downloads.
+
+- feat(api): add targeted consolidation by observation scopes (#1746)
+
+* feat(api): add targeted consolidation by observation scopes (#1625)
+
+Add `observation_scopes` parameter to the consolidate endpoint to run
+consolidation only on memories matching specific tag scopes, and add
+`enable_auto_consolidation` config flag to disable automatic
+post-retain consolidation.
+
+* docs: add targeted consolidation and auto-consolidation config docs
+
+Update observations docs with targeted consolidation section,
+trigger consolidation endpoint reference, and auto-consolidation
+disable flag. Regenerate OpenAPI spec and client SDKs.
+
+* docs: add enable_auto_consolidation to banks API docs
+
+- fix(ollama): add ollama-cloud provider and fix native API auth for cloud endpoints (#1734)
+
+The Ollama provider&#39;s native API path (_call_ollama_native) used raw httpx
+without passing authentication headers, causing 401 errors when connecting
+to Ollama Cloud endpoints. The verify_connection call succeeded because it
+uses the OpenAI-compatible path (AsyncOpenAI client) which includes the
+API key, but structured output calls failed.
+
+- Pass Authorization Bearer header in native Ollama httpx calls when a
+  real API key is provided (not the &#34;local&#34; dummy fallback)
+- Add ollama-cloud as a first-class provider that uses the OpenAI-compatible
+  path exclusively (no native /api/chat fallback), requires an API key,
+  and defaults to https://ollama.com/v1
+
+Closes #1559
+
+- fix(reflect): hide disabled tools from the agent&#39;s system prompt (#1740)
+
+Setting `trigger.fact_types=[&#34;experience&#34;]` (or any value without
+&#34;observation&#34;) on a mental model flips `include_observations=False`, so
+`get_reflect_tools` omits `search_observations` from the tool list. The
+system prompt was built independently and still told the LLM to &#34;try
+search_observations first&#34;. Weaker LLMs followed that instruction, the
+agent rejected the hallucinated call as unavailable, and the loop bailed
+with empty content even though the bank had matching experience facts
+that direct `recall` would happily return.
+
+`build_system_prompt_for_tools` now takes `include_observations` /
+`include_recall` and builds the HIERARCHICAL RETRIEVAL STRATEGY section
+and Workflow steps from the tools actually exposed — same gating as
+`get_reflect_tools`. The &#34;MANDATORY: call recall if upstream returns 0&#34;
+line adapts to whichever upstream tools are present.
+
+Adds two regression tests: a deterministic MockLLM-driven end-to-end
+refresh that proves the wiring grounds on experience facts, and a
+contract test that the prompt never advertises a tool absent from
+`get_reflect_tools` output for the same configuration.
+
+Fixes #1724
+
+- fix(api): make litellm-sdk embeddings api_key optional for Bedrock IAM auth (#1744)
+
+LiteLLMSDKEmbeddings unconditionally required an API key and always
+passed it to litellm, which broke AWS Bedrock models that use IAM
+credentials (e.g. ECS task role). litellm interprets the api_key kwarg
+as aws_access_key_id, overriding ambient IAM auth.
+
+Now api_key is optional and only forwarded when set, matching the
+pattern already used by the LLM provider in litellm_llm.py.
+
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- test: stabilize pre-existing CI flakes (#1742)
+
+* test(batch-api): assert hard error on unsupported provider
+
+PR #1463 replaced the silent sync-mode fallback in
+extract_facts_from_contents_batch_api with a hard RuntimeError when the
+configured provider does not support the batch API (to break a mutual-
+recursion path between the sync and batch extractors). The test still
+asserted the old fallback behavior and broke on main.
+
+Update the test to assert the RuntimeError is raised and that no batch
+submission happens, and rename it to reflect the new contract.
+
+* test: stabilize pre-existing CI flakes
+
+Three independent fixes for tests that have been broken on main:
+
+* test_embed_manager: the npx test only mocked Path.exists, not
+  shutil.which. On any runner with npx installed the production code
+  returns the resolved absolute path, so the literal &#34;npx&#34; assertion
+  fails (Linux and Windows alike). Split into two tests covering both
+  branches (npx absent vs. resolved).
+
+* test_reflect_searches_mental_models_when_available: reflect doesn&#39;t
+  pin a tool-call temperature, so weaker models in the LLM acceptance
+  matrix occasionally route to recall/search_observations on a single
+  run. Mark @flaky(reruns=2) to absorb transient nondeterminism — the
+  steady-state contract still holds across the matrix.
+
+* test_mental_model_with_trigger_is_refreshed_after_consolidation:
+  full retain→consolidation→refresh chain hits real LLM calls and
+  retain_batch_async swallows rate-limited consolidation errors as
+  non-critical, leaving last_refreshed_at unchanged. Mark @flaky on
+  the same rationale.
+
+- feat(api): add clear endpoint for mental model content (#1706)
+
+* feat(api): add clear endpoint for mental model content (#1706)
+
+Add POST /mental-models/{id}/clear that resets content to empty so the
+next refresh performs a full re-synthesis regardless of trigger mode.
+Useful for periodic compaction of delta-mode models that accumulate
+drift over many incremental refreshes.
+
+* docs: add SDK code examples for clear_mental_model
+
+Add clear_mental_model to Python and TypeScript wrapper clients, and
+add code snippets (Python, Node.js, CLI, Go) to the mental models
+docs page using the same CodeSnippet pattern as other operations.
+
+* ci: add clear_mental_model to CLI coverage skip list
+
+* fix: update MCP tool count assertion for clear_mental_model
+
+- fix(retain): split oversized single items in batch retain (#1571) (#1736)
+
+* fix(retain): split oversized single items in batch retain (#1571)
+
+The batch-retain splitter packed contents by token count but never
+chunked an individual item that already exceeded the per-batch budget.
+A single 1.17M-token retain went through as `1/1` sub-batches holding
+the entire payload, contradicting the &#34;splitting into ~10K-token
+sub-batches&#34; log and OOM-killing the orchestrator under realistic
+memory limits (issue #1571).
+
+Add a shared `_split_contents_into_sub_batches` helper that chunks
+oversized single items via `fact_extraction.chunk_text` (paragraph /
+sentence-aware, or conversation-turn-aware for JSON arrays) and emits
+each chunk as its own single-item sub-batch. Returns a `_SubBatchSplit`
+dataclass carrying `origin_indices` so `retain_batch_async` can merge
+results from chunked sub-batches back into a single per-input result
+list, preserving the public contract.
+
+Add regression tests asserting `len(sub_batches) &gt; 1` for a single
+oversize item, plus metadata preservation and mixed-batch behavior.
+
+* fix(retain): update cancellation test for new per-input result contract
+
+`retain_batch_async` now always returns one result slot per input
+content; un-processed inputs (because of cancellation between
+sub-batches) come back as empty lists rather than being omitted from
+the result, so the `len(result) &lt; len(contents)` check no longer
+holds. Assert the early-stop signal by counting non-empty results
+instead.
+
+Also pick up an unrelated ruff reformat of cross_encoder.py that the
+CI lint hook produces (verify-generated-files was failing on this
+drift).
+
+- docs(blog): Hermes coding assistant codebase memory (#1710)
+
+* docs(blog): add Hermes coding assistant codebase memory post
+
+Workflow-focused tutorial on using Hermes Agent with Hindsight for
+persistent codebase memory — covering what gets extracted from sessions,
+the three highest-leverage workflows (session resumption, recurring bug
+patterns, onboarding), and shared team banks.
+
+- fix(api): wire up per-operation LLM concurrency caps (#1738)
+
+* fix(api): wire up per-operation LLM concurrency caps
+
+HINDSIGHT_API_RETAIN_LLM_MAX_CONCURRENT,
+HINDSIGHT_API_REFLECT_LLM_MAX_CONCURRENT, and
+HINDSIGHT_API_CONSOLIDATION_LLM_MAX_CONCURRENT were parsed into config but
+never read — every LLM call shared the single global semaphore. Users on
+rate-limited providers who set these to reserve per-operation capacity
+silently got the global cap instead.
+
+Add per-operation semaphores in llm_wrapper, dispatched by call scope
+prefix (retain*/reflect*/consolidation*). Each per-op cap composes with
+the global cap rather than replacing it: a retain call must acquire both
+the retain semaphore and the global semaphore. Scopes without a tracked
+operation (bank_mission, memory_think, mental_model_delta_ops,
+verification) keep the global-only behavior.
+
+Fixes #1574.
+
+* chore: apply ruff format to cross_encoder.py
+
+CI&#39;s verify-generated-files job fails on main because this line drifted
+out of the ruff-format style. Folding the auto-format into this PR so the
+job goes green.</div>
+</div>
+
+<a href="../project/vectorize-io_hindsight.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
