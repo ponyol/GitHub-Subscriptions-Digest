@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (20 commits) - facebookresearch/faiss - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (20 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a> /
+    Updates in main (20 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-05 03:28 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/facebookresearch/faiss/commits/main" target="_blank">https://github.com/facebookresearch/faiss/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление для Faiss вносит значительные оптимизации производительности для различных типов индексов, используя архитектурно-специфичные SIMD-инструкции (например, AVX512-BF16, AVX512_SPR, NEON) для ускорения вычислений расстояний и декодирования. Оно также расширяет возможности GPU, добавляя поддержку индекса `MetalIndexIVFFlat` для бэкенда Apple Metal. Ключевые исправления включают устранение проблем сборки для Windows ARM64, повышение безопасности десериализации, а также общие улучшения кода и расширение гибкости системы сборки.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Fix Windows ARM64 (MSVC) build broken by NEON SIMD templatization (#5274)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5274
+
+D95392150 (templatize simdlib types on SIMDLevel) added an unconditional CMake block that compiles `${FAISS_SIMD_NEON_SRC}` and defines `COMPILE_SIMD_ARM_NEON` for any ARM64 build target. Those TUs include `simdlib_neon.h`, which uses GCC/Clang-style patterns that MSVC&#39;s `&lt;arm_neon.h&gt;` cannot compile — most notably taking the address of NEON intrinsics as non-type template parameters (e.g. `.call&lt;&amp;vmulq_u16&gt;()`, `.call&lt;&amp;detail::simdlib::vdupq_n_u16&gt;()`). MSVC implements many of those intrinsics as macros/compiler builtins, so their addresses are not usable. AArch64-only intrinsics like `vmovn_high_u16` and `vsraq_n_*` further widen the gap.
+
+Before D95392150, `simdlib.h` dispatched via `#elif defined(__aarch64__)`. MSVC on Windows ARM64 defines `_M_ARM64` (not `__aarch64__`), so the ARM64/MSVC build silently fell through to `simdlib_emulated.h` and worked. This diff restores that behavior for the new CMake gate.
+
+Fixes the OSS Windows ARM64 build break reported on facebookresearch/faiss issue 4993.
+
+Reviewed By: junjieqi
+
+Differential Revision: D107447785
+
+fbshipit-source-id: e4ebea7f2b22e4a9b4dc7d3ae1633c14738af7f7
+
+- Validate bool fields during deserialization (#5279)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5279
+
+READ1(bool) reads a single byte directly from the serialized stream
+into a bool&#39;s storage. The set of valid byte values for a bool is
+implementation-defined - on every C++ ABI any byte outside the
+implementation&#39;s canonical encoding is undefined behavior, and UBSan&#39;s
+invalid-bool-load check aborts on it.
+
+FAISS itself only ever writes the canonical encoding via WRITE1(bool),
+so well-formed indices roundtrip cleanly. Corrupt or attacker-controlled
+input that places a non-canonical byte at a bool-field offset, however,
+can introduce UB-inducing data instead of being rejected as a
+deserialization error.
+
+Add a READ1_BOOL helper to faiss/impl/io_macros.h that reads one byte,
+assigns it to the destination bool via the language-defined conversion
+(b != 0) - which is well-defined for any input byte - and then compares
+the resulting bool&#39;s storage byte back against the byte we read. The
+roundtrip succeeds iff the input byte was already the platform&#39;s
+canonical bool encoding. This stays ABI-portable: no assumption that 0
+and 1 are the only valid encodings is baked into the source. A
+static_assert(sizeof(bool) == 1) makes the existing implicit FAISS
+assumption (WRITE1/READ1 of bool transfers exactly one byte) explicit
+at the one call site that depends on it for the byte compare.
+
+Apply READ1_BOOL to every READ1 call in faiss/impl/index_read.cpp whose
+destination is a bool - covering the local SVS variables (initialized,
+trained, has_vt) and bool fields across IVF, PQ, HNSW, NSG, NNDescent,
+SVS, additive-quantizer, lattice, scalar-quantizer, refine, residual,
+and binary index types.
+
+Reviewed By: mnorris11
+
+Differential Revision: D107454749
+
+fbshipit-source-id: bc550083a83e9bd5fe09a58a9b698e9380ef9cc1
+
+- Add MetalIndexIVFFlat with IVF scan/merge kernels and expanded top-k support (#5202)
+
+Summary:
+## Summary
+Adds IVFFlat index support to the Metal GPU backend
+
+- Add `MetalIndexIVFFlat` with full train/add/search/reset/copyFrom/copyTo support
+- Add IVF scan/merge MSL kernels (`ivf_scan_list`, `ivf_scan_list_small`, `ivf_scan_list_interleaved`, `ivf_merge_lists`) to `MetalDistance.metal`
+- Add `MetalDistance.h/.mm` orchestration layer for IVF search dispatch (coarse quantization + scan + merge in a single command buffer)
+- Add `compute_norms` and `l2_with_norms` kernels for efficient L2 coarse quantization
+- Expand top-k support from k &lt;= 256 to k &lt;= 2048 (`topk_threadgroup_{512,1024,2048}`)
+- Raise dimension limit from d &lt;= 512 to d &lt;= 2048 (supports 768, 1024, 1536 embeddings)
+- Update `MetalCloner` to support IVFFlat in `index_cpu_to_metal_gpu` / `index_metal_gpu_to_cpu`
+- Rename `nil` parameter to `n_il` in `InvertedLists.h/.cpp` to fix Objective-C++ keyword conflict
+
+## Changes
+- **New:** `MetalIndexIVFFlat.h/.mm` - IVFFlat index class (train, add, search, reset, cloner support)
+- **New:** `impl/MetalIVFFlat.h/.mm` - GPU-resident IVF list storage with segment allocator
+- **New:** `MetalDistance.h/.mm` - IVF search dispatch (scan + merge orchestration)
+- **New:** `test/TestMetalIndexIVFFlat.mm` - 4 tests (L2, IP, reset, cpu to gpu round trip)
+- **Modified:** `MetalDistance.metal` - IVF kernels, compute_norms, l2_with_norms, topk 512/1024/2048
+- **Modified:** `MetalKernels.h/.mm` - IVF encode methods, expanded topk variants, kMaxK=2048
+- **Modified:** `MetalIndex.h` - added IVF config fields (indicesOptions, interleavedLayout, useFloat16CoarseQuantizer)
+- **Modified:** `MetalCloner.mm` - IVFFlat support in cpu &lt;-&gt; gpu cloning
+- **Modified:** `CMakeLists.txt` - added new source files
+- **Modified:** `.github/actions/build_cmake/action.yml` - added TestMetalIndexIVFFlat to CI
+- **Modified:** `faiss/invlists/InvertedLists.h/.cpp` - renamed `nil` parameter to `n_il` (Objective-C++ keyword conflict)
+
+## Differences from CUDA IVFFlat
+
+**Training:** Delegates to CPU (`IndexIVFFlat::train`). CUDA can train on GPU via k-means or cuVS. GPU training is possible with Metal but low priority since training is a one-time cost.
+
+**Add path:** Coarse quantization runs on CPU, then vectors are copied to GPU storage. CUDA does both on GPU. Moving coarse assignment to Metal is doable using the existing flat search kernels; planned for a future optimization.
+
+**Reconstruct:** Reads from CPU host mirror rather than GPU buffers. On Apple Silicon with unified memory, CPU and GPU see the same physical memory, so this is functionally equivalent.
+
+**IVF list storage:** Uses a single contiguous buffer with a segment allocator, rather than CUDA&#39;s per-list `DeviceVector` allocations. This avoids managing thousands of small `MTLBuffer` objects and reduces fragmentation; a better fit for Apple Silicon&#39;s unified memory pool.
+
+## Notes on other changes
+**`nil` → `n_il` rename in `InvertedLists.h/.cpp`:** ObjC++ treats `nil` as a keyword (equivalent to `nullptr` for Objective-C objects). Any `.mm` file that transitively includes `InvertedLists.h` fails to compile because the parameter name `int nil` conflicts with the keyword. This is a declaration only rename, no behavior, ABI, or API change. Does not affect CUDA, CPU, or any other build.
+
+**`centroidsAreFP16` parameter in `runMetalIVFFlatFullSearch`:** The Metal-backend branch passes a `useFloat16CoarseQuantizer` config flag through the search dispatch chain. CUDA handles this differently, FP16 centroid storage is a property of the coarse quantizer object (`GpuIndexFlatConfig::useFloat16`), not a function parameter. The parameter is currently a no-op but is included to maintain the correct function signature and avoid a parameter alignment bug where a trailing `bool` would be misinterpreted as `waitForCompletion`.
+
+## Build and test
+```bash
+cmake -B build \
+  -DFAISS_ENABLE_METAL=ON \
+  -DFAISS_ENABLE_GPU=OFF \
+  -DFAISS_ENABLE_PYTHON=OFF \
+  -DBUILD_TESTING=ON \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH=&#34;$(brew --prefix libomp)&#34; \
+  .
+cmake --build build --target faiss_metal TestMetalIndexFlat TestMetalIndexIVFFlat -j$(sysctl -n hw.logicalcpu)
+cd build &amp;&amp; ctest -R TestMetalIndex --output-on-failure
+```
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5202
+
+Reviewed By: mdouze
+
+Differential Revision: D107120463
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 75a33d233d4844bec046818418ba75c85abb0402
+
+- TurboQuant in ScalarQuantizer: full Algorithm 2 (QJL stage) with SIMD and optimizations (#5170)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5170
+
+Adds the complete TurboQuant implementation (paper Algorithm 2, &#34;TurboQuant_prod&#34;) as a standalone TurboQuantizer class alongside the MSE-only ScalarQuantizer integration from D102195204.
+
+Benchmark results
+-
+TLDR: TQ has a similar operating point to RaBitQ in terms of memory savings, but it never hit RaBitQ levels of recall. We do not really recommend TurboQuant for most ranking scenarios.
+
+We implemented and compared TurboQuant to our existing implementation of RaBitQ across 20+ datasets. Some were internal, 18 were open source (from https://vector-index-bench.github.io/datasets.html, a nice collection)
+- RaBitQ had 4% to 53% higher recall than TurboQuant at equivalent bit widths (i.e. TurboQuant2 vs RaBitQ2), for every single parameter swept. 2 bit is one of the most interesting operating points. TurboQuant recall was notably coupled with dataset characteristics: recall correlates heavily with dataset effective dimensions.
+- TurboQuant had ~1.7x faster scoring than non-FastScan RaBitQ at equivalent bit widths for practical qb values. But RaBitQFS is faster and has the same recall as non-FS RaBitQ for reasonable datasets.
+- Fast Walsh Hadamard Transform rather than Gaussian in the QJL step improved TurboQuant recall 7-15%. Random rotation was also better than Gaussian, and even better than FWHT on 5/18 datasets. So we just dropped Gaussian here and kept RR and FWHT.
+- TurboQuant may have some recall benefit on datasets with very high effective dimensions, e.g. after applying heavy PCA, but in these cases recall is pretty degenerate anyway (50% ish).
+- TurboQuant adaptive bit lengths (2.5, 3.5) raised recall only marginally over 2 and 3 respectively, 2-4%. However there is no reason this can&#39;t also be applied to RaBitQ for additional operating points. We plan to investigate this sometime soon.
+
+Description
+-
+**Core algorithm:**
+- TurboQuantizer: two-stage quantizer (Lloyd-Max MSE + QJL sign bits)
+- IndexIVFTurboQ: IVF index with by_residual=false
+- Bit-plane encoding layout for MSE codes
+- Per-vector factors (norm, gamma) for distance computation
+- FWHT and Random Rotation QJL projection options
+- Custom distance computer with direct MSE+QJL scoring
+
+**SIMD and pre-screening:**
+- turboq::masked_sum SIMD kernel (AVX2/AVX512) for 1-bit MSE and QJL dot products
+- Public TurboQDistanceComputer with pre-computed query state
+- MSE-first pre-screening with worst-case L1 QJL error bound
+- Adaptive bit width (TurboQ2.5, TurboQ3.5 factory strings)
+
+**Integer popcount paths:**
+- Integer popcount MSE path (qb parameter) reusing rabitq::bitwise_and_dot_product — 1.2-2.2x QPS with &lt;1% recall loss
+- Integer QJL path (int_qjl) — additional 1.3x QPS on top of qb
+
+**Random Rotation QJL:**
+- QJLProjectionType enum (FWHT, RANDOM_ROTATION)
+- QR-orthogonalized Gaussian matrix for exact orthogonality
+- TurboQ{n}r factory string
+
+**Removed after benchmarking (not useful):**
+- Gaussian QJL (TurboQ{n}g): strictly worse recall AND QPS than FWHT on all 26 datasets
+- Statistical bound (stat_bound): catastrophic recall loss on real data (mean -0.20 R@10) due to CLT assumption failing on real embedding distributions
+- Two-pass batch screening (two_pass_c): no benefit with practical IVF settings (candidate count &gt; list size makes it a no-op)
+
+Factory strings: TurboQ, TurboQ{1-5}, TurboQ{n}r, TurboQ2.5, TurboQ3.5
+All work standalone or with IVF prefix (e.g., IVF100,TurboQ2).
+
+Reviewed By: mdouze
+
+Differential Revision: D102408184
+
+fbshipit-source-id: b985e9c4327169a95c5bb9042a5ca3a093bcc405
+
+- Add Python HNSW tutorial (#5260)
+
+Summary:
+This PR adds a Python HNSW tutorial corresponding to the existing C++ HNSW tutorial.
+
+The example creates synthetic vectors, builds an IndexHNSWFlat index, runs a search, and prints the nearest-neighbor IDs and distances for the final queries.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5260
+
+Reviewed By: mnorris11
+
+Differential Revision: D107272616
+
+Pulled By: alibeklfc
+
+fbshipit-source-id: 721d7a1a95aa79150d6cb9653bd803065c82dcd7
+
+- Type imbalance_factor and wire the .pyi stub into the buck build (#5269)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5269
+
+`faiss.imbalance_factor` is exported by SWIG and exists at runtime, but it is
+missing from the faiss Python type stub, so callers must suppress
+pyre-fixme[16] or wrap it in a Protocol (e.g.
+fbcode/laser/py/knn/balance_checker.py). This diff fixes the typing for all
+fbcode faiss users:
+
+1. Add imbalance_factor to fbcode/faiss/python/__init__.pyi, cross-checked
+   against the C++ source:
+   - free function (faiss/utils/utils.cpp), both overloads:
+       def imbalance_factor(k: int, hist: int) -&gt; float
+       def imbalance_factor(n: int, k: int, assign: int) -&gt; float
+   - InvertedLists method (faiss/invlists/InvertedLists.h):
+       def imbalance_factor(self) -&gt; float
+
+2. Add __init__.pyi to the //faiss/python:pyfaiss python_library `srcs`.
+   The PEP 561 stub (added in D94139717 / GH facebookresearch/faiss#4840)
+   shipped only to OSS via setup.py and was never part of the buck target, so
+   buck reported &#34;no owner&#34; for it and fbcode Pyre derived faiss types from
+   the SWIG codegen, ignoring the curated stub. Adding it to `srcs` makes Pyre
+   consume it under buck too.
+
+Reviewed By: mdouze, limqiying
+
+Differential Revision: D107274305
+
+fbshipit-source-id: f548a2933d35c7a0f5c016edda7b8a74697b96dc
+
+- Install missing InvertedListScannerStats.h header (#5268)
+
+Summary:
+Fixes https://github.com/facebookresearch/faiss/issues/5267
+
+`faiss/impl/InvertedListScannerStats.h` is included by installed public headers (`impl/AuxIndexStructures.h` and `impl/ResultHandler.h`) but is itself missing from the `FAISS_HEADERS` install list, so building against an installed faiss fails to find it (for example COLMAP, as reported in the issue).
+
+This adds `impl/InvertedListScannerStats.h` to `FAISS_HEADERS`. There is no code change; the header is already part of the public include graph.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5268
+
+Reviewed By: mnorris11
+
+Differential Revision: D107271556
+
+Pulled By: alibeklfc
+
+fbshipit-source-id: 25f9671df5e475e13f595fe30ab9ff56abd0582e
+
+- Templatize search_from_candidate_unbounded for VisitedTable devirtualization (#5270)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5270
+
+Apply the VisitedTable templatization pattern to search_from_candidate_unbounded
+in HNSW.cpp, following the same approach already used for
+search_from_candidates_fixVT and search_neighbors_to_add_fixVT.
+
+Changes:
+- Renamed search_from_candidate_unbounded_impl&lt;C&gt; to
+  search_from_candidate_unbounded_fixVT&lt;VTType, C&gt;
+- Changed VT parameter from VisitedTable* to VTType&amp; reference
+- Changed vt-&gt;set() and vt-&gt;prefetch() to vt.set() and vt.prefetch()
+  for inlining via template instantiation
+- Merged the dispatch logic directly into hnsw_detail::search_from_candidate_unbounded
+  and inlined the dispatch pattern in search_impl&lt;C&gt; for similarity mode
+- This eliminates the intermediate search_from_candidate_unbounded_dispatch
+  template function, keeping the dispatch logic local to each call site
+
+This eliminates virtual dispatch overhead in the hot HNSW graph-traversal
+loop for Unicorn&#39;s IVF-HNSW coarse-quantizer search path, addressing the
++9.5% regression identified in P2359940488.
+
+Differential Revision: D107365487
+
+fbshipit-source-id: eba7e461c4831616ae6500c4696930705cde9dbe
+
+- Add Sapphire Rapids optimizations for ScalarQuantizer (L2, IP) (#5173)
+
+Summary:
+This PR specializes the byte-vector distance path for `AVX512_SPR` on `QT_8bit_direct` and `QT_8bit_direct_signed`, achieving speedups of up to **2.3x** on distance benchmarks and up to **1.21x** on search (`IndexIVFScalarQuantizer`) compared to the existing SPR implementation.
+
+**Inner product:** A 64-byte VNNI loop using `_mm512_dpbusd_epi32` replaces the 16-byte `cvtepu8_epi32` + `mullo_epi32` path. For the unsigned×unsigned case, the operand is biased by −128; a closed-form correction using `sum(a)` and `sum(b)` (accumulated via `_mm512_sad_epu8`) restores the exact result. The signed variant applies the same correction terms.
+
+**L2 distance:** A 64-byte widened-multiply-add loop via `_mm512_cvtepu8_epi16` + `_mm512_madd_epi16` replaces the narrower path. The signed variant is bit-exact because the −128 bias cancels in the difference.
+
+*Improves upon and supersedes https://github.com/facebookresearch/faiss/issues/5067.*
+
+### Distance benchmark
+
+```
+bench_scalar_quantizer_distance --d=&lt;128|256|768&gt; --n=2000 --iterations=20
+```
+
+| Quantizer | d | Baseline (ms) | This PR (ms) | Speedup |
+|---|--:|--:|--:|--:|
+| `QT_8bit_direct` | 128 | 40.8 | 22.9 | **1.78×** |
+| `QT_8bit_direct_signed` | 128 | 35.0 | 23.0 | **1.52×** |
+| `QT_8bit_direct` | 256 | 75.3 | 35.7 | **2.11×** |
+| `QT_8bit_direct_signed` | 256 | 69.1 | 35.7 | **1.94×** |
+| `QT_8bit_direct` | 768 | 215.5 | 92.3 | **2.33×** |
+| `QT_8bit_direct_signed` | 768 | 206.4 | 91.0 | **2.27×** |
+
+Raw performance data: https://gist.github.com/mulugetam/72c0960e47bc640f99aa346f363e56fe
+
+### End-to-end search (`IndexIVFScalarQuantizer`)
+
+```
+python benchs/bench_scalar_quantizer.py
+```
+
+| Range stat | `QT_8bit_direct` | `QT_8bit_direct_signed` |
+|---|--:|--:|
+| RS_minmax | 1.10× | 1.12× |
+| RS_minmax | 1.09× | 1.15× |
+| RS_minmax | 1.14× | 1.13× |
+| RS_minmax | 1.15× | 1.07× |
+| RS_minmax | 1.06× | 1.17× |
+| RS_minmax | 1.09× | 1.02× |
+| RS_minmax | 1.09× | 1.11× |
+| RS_meanstd | 1.21× | 1.13× |
+| RS_meanstd | 1.14× | 1.06× |
+| RS_meanstd | 1.11× | 1.07× |
+| RS_meanstd | 1.12× | 1.07× |
+| RS_meanstd | 1.15× | 1.10× |
+| RS_meanstd | 1.13× | 1.04× |
+| RS_meanstd | 1.04× | 1.07× |
+| RS_quantiles | 1.11× | 1.03× |
+| RS_quantiles | 1.12× | 1.11× |
+| RS_quantiles | 1.11× | 0.98× |
+| RS_quantiles | 1.14× | 1.17× |
+| RS_optim | 1.06× | 1.07× |
+
+Raw performance data: https://gist.github.com/mulugetam/632e2e08c9358b2184cbaa3397a6c73f
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5173
+
+Test Plan: Ran `bench_scalar_quantizer_distance --d=&lt;128|256|768&gt; --n=2000 --iterations=20` on SPR to validate distance speedups for `QT_8bit_direct` and `QT_8bit_direct_signed` (see summary tables). Ran `python benchs/bench_scalar_quantizer.py` for end-to-end `IndexIVFScalarQuantizer` search validation. Ran `pytest tests/test_index_accuracy.py` to verify correctness is preserved.
+
+Reviewed By: mdouze
+
+Differential Revision: D106148661
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 0fdddd1a022d0fb53c69d95ee6c69cf21d6fc5b0
+
+- Accelerate ScalarQuantizer::QT_bf16 with AVX512-BF16. (#4889)
+
+Summary:
+This PR accelerates `ScalarQuantizer::QT_bf16` by vectorizing the BF16 encode/decode path with AVX-512 BF16 and integer instructions, targeting Intel® Sapphire Rapids and newer processors.
+
+Distance computations are also optimized to operate directly on BF16 data, avoiding the overhead of FP32 conversion:
+- **Inner product:** The query is encoded to BF16 once, and dot products are computed natively in BF16.
+- **L2 distance:** Leverages the norm expansion identity, with all terms evaluated using the native BF16 dot-product instruction.
+
+Scalar quantizer benchmarks demonstrate speedups of **1.42×** for encoding, **1.32×** for decoding, and **1.16×** for distance computation.
+
+ ---
+
+`perf_tests/bench_scalar_quantizer_encode --d=768 --n=2000 --iterations=20 --benchmark_filter=&#34;QT_bf16&#34;`
+
+```
+Existing impl:
+--------------------------------------------------------------------------------
+Benchmark                      Time             CPU   Iterations UserCounters...
+--------------------------------------------------------------------------------
+QT_bf16/iterations:20     689149 ns       689010 ns           20 code_size=1.536k
+
+This PR:
+--------------------------------------------------------------------------------
+Benchmark                      Time             CPU   Iterations UserCounters...
+--------------------------------------------------------------------------------
+QT_bf16/iterations:20     485337 ns       484511 ns           20 code_size=1.536k
+```
+
+`perf_tests/bench_scalar_quantizer_decode --d=768 --n=2000 --iterations=20 --benchmark_filter=&#34;QT_bf16&#34;`
+
+```
+Existing impl:
+--------------------------------------------------------------------------------
+Benchmark                      Time             CPU   Iterations UserCounters...
+--------------------------------------------------------------------------------
+QT_bf16/iterations:20     498607 ns       498539 ns           20 code_size=1.536k
+
+This PR:
+--------------------------------------------------------------------------------
+Benchmark                      Time             CPU   Iterations UserCounters...
+--------------------------------------------------------------------------------
+QT_bf16/iterations:20     376614 ns       374200 ns           20 code_size=1.536k
+```
+
+`perf_tests/bench_scalar_quantizer_distance --d=768 --n=2000 --iterations=20 --benchmark_filter=&#34;QT_bf16&#34;`
+
+```
+Existing impl:
+-----------------------------------------------------------------------------------
+Benchmark                         Time             CPU   Iterations UserCounters...
+-----------------------------------------------------------------------------------
+QT_bf16/L2/iterations:20  254155481 ns    253585062 ns           20 code_size=1.536k
+QT_bf16/IP/iterations:20  221556582 ns    221156894 ns           20 code_size=1.536k
+
+This PR:
+-----------------------------------------------------------------------------------
+Benchmark                         Time             CPU   Iterations UserCounters...
+-----------------------------------------------------------------------------------
+QT_bf16/L2/iterations:20  226742244 ns    226270273 ns           20 code_size=1.536k
+QT_bf16/IP/iterations:20  190916826 ns    190591678 ns           20 code_size=1.536k
+```
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4889
+
+Reviewed By: mdouze
+
+Differential Revision: D106149331
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 114097d0597028c43c19727b677dcc494250be41
+
+- Support IndexIDMap/IndexIDMap2 in reverse_index_factory (#5266)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5266
+
+`reverse_index_factory` in `contrib/factory_tools.py` raised `NotImplementedError` for `IndexIDMap` and `IndexIDMap2`, even though both simply wrap an inner index. This adds handling for both: an `IndexIDMap` is described as `IDMap,&lt;inner&gt;` and an `IndexIDMap2` as `IDMap2,&lt;inner&gt;`, recursing into the wrapped index. `IndexIDMap2` is checked first because it subclasses `IndexIDMap`. This matches the C++ `reverse_index_factory` in `faiss/factory_tools.cpp`, which already handles `IDMap`, and round-trips with `index_factory` for IDMap-wrapped indexes such as `IDMap,Flat` and `IDMap,IVF100,Flat`.
+
+Reviewed By: mnorris11
+
+Differential Revision: D107159123
+
+fbshipit-source-id: 40dca17a78743bf53373ec3077fd640e0fff76d4
+
+- Upgrade CUVS Version to 26.06 (#5240)
+
+Summary:
+Apply patches to make this compatible + update install docs to document new 13.2 pkg
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5240
+
+Reviewed By: mnorris11
+
+Differential Revision: D107156965
+
+Pulled By: alibeklfc
+
+fbshipit-source-id: 4eb201a3b15edaecb61957e11d867db8478dff71
+
+- Add VPOPCNTDQ-based HammingComputer for Sapphire Rapids+ (#5183)
+
+Summary:
+This PR adds `SIMDLevel::AVX512_SPR` specializations for `HammingComputer32`, `HammingComputer64`, and `HammingComputerDefault` that unconditionally use `_mm512_popcnt_epi64` and `_mm256_popcnt_epi64` (VPOPCNTDQ + VL). End-to-end benchmarking with `benchs/bench_hamming_knn.py` shows up to a **1.91x** speedup over AVX512.
+
+The existing AVX512 specializations had dead `#ifdef __AVX512VPOPCNTDQ__` blocks (the macro is never defined in the AVX512 TU). We remove them and leave only the scalar `popcount` path for the AVX512 level; the native vector popcount now lives exclusively in the AVX512_SPR specializations.
+
+A new per-ISA TU (`hamming_avx512_spr.cpp`) compiled with `-mavx512vpopcntdq` provides the SPR specializations. The hamming dispatch is updated to route through `with_simd_level_a0_spr()`, which includes `AVX512_SPR` in its available-levels mask.
+
+Also update `benchs/bench_hamming_computer.cpp` to use `SINGLE_SIMD_LEVEL` so it benchmarks the compiled-in SIMD specialization rather than hardcoded NONE.
+
+Changes:
+- hamming_computer-avx512.h: remove dead `VPOPCNTDQ` ifdefs
+- New hamming_computer-avx512_spr.h with SPR specializations
+- New hamming_avx512_spr.cpp TU (`COMPILE_SIMD_AVX512_SPR` guard)
+- FAISS_SIMD_AVX512_SPR_SRC list in CMakeLists.txt
+- Per-file `VPOPCNTDQ` flags for DD and MSVC builds
+- `AVAILABLE_SIMD_LEVELS_A0_SPR mask + with_simd_level_a0_spr()` helper
+- hamming.cpp dispatch updated to use the new helper
+- bench_hamming_computer.cpp uses `SINGLE_SIMD_LEVEL`
+- benchs/bench_hamming_knn.py uses dimensions 4, 8, 16, 32, 64, etc.
+
+**Speedup of AVX512_SPR (VPOPCNTDQ) over AVX512 (scalar POPCNT), k=1:**
+
+| Code size (bytes) | Bits | hc speedup | mc speedup |
+|:-:|:-:|:-:|:-:|
+| 4 | 32 | 1.00x | 1.05x |
+| 8 | 64 | 0.93x | 1.01x |
+| 16 | 128 | **1.25x** | **1.17x** |
+| 32 | 256 | **1.26x** | **1.21x** |
+| 64 | 512 | **1.37x** | **1.57x** |
+| 128 | 1024 | **1.62x** | **1.91x** |
+| 256 | 2048 | **1.60x** | **1.60x** |
+| 512 | 4096 | **1.58x** | **1.74x** |
+| 1024 | 8192 | **1.49x** | **1.73x** |
+
+**Complete results:** https://gist.github.com/mulugetam/cf6d51ef730df969ce03fb35e3f43228
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5183
+
+Test Plan: buck test -c faiss.dynamic_dispatch=true //faiss/tests/:test_index_accuracy
+
+Reviewed By: mnorris11
+
+Differential Revision: D105817541
+
+Pulled By: mdouze
+
+fbshipit-source-id: 7e338ace003f059824e8550c11f779692e4a1e37
+
+- Implement NEON-based FINE_SIZE=2 specializations for Index2LevelDecoderImpl and IndexPQDecoder (#5262)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5262
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5255
+
+Implement NEON-based FINE_SIZE=2 specializations for `Index2LevelDecoderImpl` and `IndexPQDecoder`, previously being compiled from AVX2 code through aarch64 compat layers.
+
+Remove usage of aarch64 compatibility layers, as they are not needed anymore.
+
+Reviewed By: YifanYuan3
+
+Differential Revision: D107106407
+
+fbshipit-source-id: 39a71fe11e6f4344f339fc31878d37c1adfcf736
+
+- Support user provided blas library (#5189)
+
+Summary:
+Hello Faiss community,
+
+  I am using Faiss as the vector search engine in Apache Doris, where Faiss is integrated as a git submodule. In our
+build, both OpenBLAS and Faiss are compiled from source, and I found that it is currently inconvenient to pass a
+BLAS/LAPACK implementation maintained by the parent project into Faiss.
+
+  I modified `faiss/CMakeLists.txt` so that a superbuild can directly provide `BLAS_LIBRARIES` and `LAPACK_LIBRARIES`.
+When these variables are already set by the parent project, Faiss uses them directly instead of continuing with its own
+BLAS/LAPACK autodetection logic.
+
+  This helps in cases where:
+  - OpenBLAS is built in the same build system or provided by the parent project
+  - the parent project wants deterministic dependency selection
+  - `find_package(BLAS)` / `find_package(LAPACK)` may pick a different implementation than the one intended by the
+integrator
+
+  The change does not affect the default standalone build behavior: if `BLAS_LIBRARIES` and `LAPACK_LIBRARIES` are not
+provided, Faiss still follows the existing logic.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5189
+
+Reviewed By: alibeklfc
+
+Differential Revision: D107121692
+
+Pulled By: mnorris11
+
+fbshipit-source-id: d9d8d7ebfde7d8b0fddd54d8263606ab2b135b1a
+
+- facebook-unused-include-check in IndexBinaryIVF.cpp (#5263)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5263
+
+Reviewed By: limqiying
+
+Differential Revision: D106785928
+
+fbshipit-source-id: 81faa16a9be9a7833c6a07e01faa91aec6f04bea
+
+- facebook-unused-include-check in distances_simd.cpp (#5264)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5264
+
+Reviewed By: limqiying
+
+Differential Revision: D106786462
+
+fbshipit-source-id: ccba5a855169442d63d252b2176dd813fdff40cf
+
+- facebook-unused-include-check in hamming_avx2.cpp (#5265)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5265
+
+Reviewed By: limqiying
+
+Differential Revision: D106787199
+
+fbshipit-source-id: 4aacf6733f28fb07d6f3b258bab24aad13a71627
+
+- SVS static vamana support (#5224)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5224
+
+Reviewed By: alibeklfc
+
+Differential Revision: D106684059
+
+Pulled By: mnorris11
+
+fbshipit-source-id: b0430f17798ef8737835892a505d19be21e06630
+
+- Remove unused include of platform_macros.h in partitioning.cpp
+
+Summary:
+Remove the unused `#include &lt;faiss/impl/platform_macros.h&gt;` from `fbcode/faiss/utils/partitioning.cpp`. None of the macros defined in that header (`FAISS_API`, `FAISS_PRAGMA_IMPRECISE_*`, `FAISS_ALWAYS_INLINE`, `FAISS_PACKED`, `FAISS_RESTRICT`, `FAISS_MAYBE_UNUSED`, `ALIGNED`, `FAISS_DEPRECATED`, `FAISS_BIG_ENDIAN`, `Swap2Bytes`, etc.) are referenced in this translation unit, so the include is dead.
+
+Removing it reduces preprocessor work, trims the dependency graph, and addresses the `facebook-unused-include-check` finding. No behavioral change.
+
+Reviewed By: mdouze
+
+Differential Revision: D106760253
+
+fbshipit-source-id: 61ae1ce8ba9ca5bcece30cd745541c73ae319035</div>
+</div>
+
+<a href="../project/facebookresearch_faiss.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

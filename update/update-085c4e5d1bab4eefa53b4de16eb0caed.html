@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (35 commits) - asternic/wuzapi - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (35 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/asternic_wuzapi.html">asternic/wuzapi</a> /
+    Updates in main (35 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/asternic_wuzapi.html">asternic/wuzapi</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-05 02:28 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/asternic/wuzapi/commits/main" target="_blank">https://github.com/asternic/wuzapi/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление вводит новые конечные точки API для управления настройками конфиденциальности пользователя и просмотра заблокированных пользователей. Оно значительно повышает стабильность системы и управление ресурсами, устраняя многочисленные состояния гонки данных, исправляя утечку временных файлов и улучшая обработку конфигурации S3. Кроме того, обновление обеспечивает более плавный пользовательский опыт, сохраняя подписки на события при переподключениях и предотвращая ошибки дублирования при синхронизации истории сообщений.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Merge pull request #332 from ThiagoBauken/feat/privacy-settings
+
+feat: add GET/POST /user/privacy to read and set privacy settings
+
+- Merge branch &#39;main&#39; into feat/privacy-settings
+
+- Merge pull request #331 from ThiagoBauken/fix/s3-config-race
+
+fix: data race and nil deref reading S3 bucket config
+
+- Merge branch &#39;main&#39; into fix/s3-config-race
+
+- Merge pull request #330 from ThiagoBauken/fix/sendimage-temp-leak
+
+fix: stop leaking a temp file on every image send
+
+- feat: add GET/POST /user/privacy to read and set privacy settings
+
+Exposes whatsmeow&#39;s privacy settings through two endpoints:
+
+  GET  /user/privacy                  returns the account&#39;s current settings
+  POST /user/privacy {Name,Value}     updates a single setting
+
+Both follow the existing handler pattern: per-token auth, &#34;no session&#34; when the
+client isn&#39;t connected, and a request-scoped context with a 30s timeout.
+
+Input is validated before it reaches the server. validatePrivacySetting checks
+that the name is supported and the value is allowed for that name, using the
+matrix documented in whatsmeow&#39;s types. The exposed set is deliberately the
+seven settings that whatsmeow&#39;s (*Client).SetPrivacySetting round-trips into the
+returned/cached PrivacySettings. The protocol also defines messages/defense/
+stickers, but whatsmeow&#39;s setter has no switch case for them (the change is sent
+to the server yet not reflected back), so they are intentionally rejected and a
+test locks that boundary.
+
+Purely additive: two new routes, no change to existing behavior. Covered by unit
+tests for the validation matrix and an integration test that drives both routes
+through the real router and auth middleware. Docs added to API.md and the
+OpenAPI spec.
+
+- test: verify jpegThumbnail on a real image, byte-identical to the old path
+
+Adds TestJpegThumbnailRealImage: decodes the real static/images/background_image.png
+(1536x1024) exactly like SendImage does, runs jpegThumbnail, and asserts the output
+is byte-for-byte identical to the previous resize+encode (so the temp-file removal
+changed nothing but the mechanism) and is a valid, bounded JPEG.
+
+- review: reuse GetClient for the locked S3 bucket read (#331)
+
+Addresses Gemini review: instead of a new bucketFor helper, ProcessMediaForS3
+now reads the config through the existing GetClient, which already takes the
+read lock and returns ok=false when there is no config. Drops the duplicated
+locking; the concurrent test now targets GetClient (TestGetClientConcurrent).
+
+- review: guard jpegThumbnail against a nil image (#330)
+
+Addresses Gemini review: resize.Thumbnail dereferences the image bounds, so a
+nil image would panic. jpegThumbnail now returns an error for nil instead.
+Test: TestJpegThumbnailNil (fails — panics — without the guard, passes with it).
+
+- fix: data race and nil deref reading S3 bucket config
+
+ProcessMediaForS3 read m.configs[userID].Bucket without holding m.mu while the
+configs map is written under the lock from SetS3Config/InitializeS3Client/
+RemoveClient. That is a data race, and if the config was removed between the
+upload and the metadata build it nil-dereferenced and crashed. Reads now go
+through bucketFor, which takes the RLock and returns an empty string when there
+is no config.
+
+Tests: TestBucketFor (nil-safe, red-&gt;green) and TestBucketForConcurrent (guards
+the read under go test -race). go build/vet/test pass on host.
+
+- fix: stop leaking a temp file on every image send
+
+SendImage created a temp file (os.CreateTemp) to hold the resized thumbnail,
+read it back, and only deferred Close() — never Remove() — so every image send
+left a file behind in TMPDIR, eventually exhausting disk on busy servers.
+
+The thumbnail is now resized and JPEG-encoded entirely in memory via the new
+jpegThumbnail helper (no temp file, two fewer filesystem ops). Test:
+TestJpegThumbnail (red-&gt;green). go build/vet/test pass on host and cross-compile
+for linux/amd64.
+
+- Merge pull request #329 from asternic/update/contributors-list
+
+docs: Update contributors list
+
+- docs(README): update contributors
+
+- Merge pull request #328 from ThiagoBauken/feat/get-blocklist
+
+feat: add GET /user/blocklist to list blocked users
+
+- Merge branch &#39;main&#39; into feat/get-blocklist
+
+- Merge pull request #327 from ThiagoBauken/fix/preserve-event-subscriptions-305
+
+fix: preserve event subscriptions on disconnect and reconnect (#305)
+
+- docs: document the disconnect clear=true parameter (#305)
+
+The #305 change made /session/disconnect preserve event subscriptions by
+default and added an optional ?clear=true to reset them. Document the new query
+parameter and the preserve-by-default behavior in the OpenAPI spec
+(static/api/spec.yml) and API.md so the Swagger page and docs reflect it.
+
+- review: address Gemini feedback on #328
+
+- formatBlocklist: pre-allocate the slice to its exact size and assign by index
+  (drops the throwaway empty init); keeps the empty-not-null behavior.
+- GetBlocklist: derive the timeout from r.Context() so a client disconnect
+  cancels the whatsmeow query.
+- GetBlocklist: use fmt.Errorf(&#34;...%w&#34;, err) instead of errors.New(fmt.Sprintf).
+
+- review: address Gemini feedback on #305
+
+- resolveConnectEvents: report changed only when the resolved string differs
+  from the existing one, so an identical reconnect skips the redundant DB write
+  and cache update.
+- Connect &amp; Disconnect: update the in-memory cache only when the DB write
+  succeeds, so a failed write can&#39;t leave the cache out of sync with the DB.
+
+Added TestResolveConnectEvents cases for subscribe == existing (changed=false),
+proven red-&gt;green. go build/vet/test pass on host.
+
+- fix: stop wiping event subscriptions on disconnect/reconnect (#305)
+
+Two compounding bugs silently cleared a user&#39;s event subscriptions:
+
+1. Disconnect ran UPDATE users SET events=&#39;&#39; on every call, so any disconnect
+   dropped all subscriptions. Now subscriptions are preserved by default and
+   only reset when the caller passes ?clear=true (the maintainer&#39;s proposed
+   design in #305). Extracted into setDisconnectedState.
+
+2. Connect with no &#34;subscribe&#34; field overwrote events with an empty string,
+   so reconnecting without re-listing events wiped them too. Now an absent
+   subscribe list preserves the existing subscriptions (no DB write); a present
+   list still replaces them. Extracted into resolveConnectEvents.
+
+Tests: TestResolveConnectEvents (pure, table-driven) and TestSetDisconnectedState
+(real in-memory DB) — both fail on the old behavior, pass on the fix.
+
+Closes #305.
+
+- test: add HTTP integration test for GET /user/blocklist
+
+TestGetBlocklistEndpoint drives the endpoint through the real router and auth
+middleware (token header -&gt; userinfo), asserting the route is wired (not 404)
+and auth passes for a valid token (not 401). With no client connected it returns
+the &#39;no session&#39; 500 — proving the full HTTP path works without a live session.
+
+- feat: add GET /user/blocklist to list blocked users
+
+wuzapi can block/unblock users but had no way to list who is currently
+blocked. Adds GET /user/blocklist, wrapping whatsmeow&#39;s GetBlocklist, returning
+the blocked JIDs plus the blocklist dhash — mirroring the response shape already
+used by /user/block and /user/unblock.
+
+Response shaping is factored into formatBlocklist (a nil blocklist yields an
+empty list, never null) and covered by TestFormatBlocklist (fails on a broken
+formatter, passes on the fix). Route, OpenAPI spec (static/api/spec.yml) and
+API.md updated.
+
+go build/vet/test pass on host and cross-compile clean for linux/amd64.
+
+- Merge pull request #326 from asternic/update/contributors-list
+
+docs: Update contributors list
+
+- docs(README): update contributors
+
+- Merge pull request #325 from ThiagoBauken/fix/data-races
+
+fix: data races that can crash the process under load
+
+- Merge branch &#39;main&#39; into fix/data-races
+
+- Merge pull request #311 from ThiagoBauken/fix/historysync-duplicate-key-292
+
+fix: idempotent message-history insert to stop HistorySync duplicate-key ERROR spam
+
+- refactor: pass kill channel to startClient as an explicit parameter
+
+Each startClient goroutine now receives the channel its caller registered
+instead of looking it up from the global map at startup. This removes a
+lookup-ownership race (a concurrent reconnect could replace the map entry
+between setKillChannel and the goroutine&#39;s getKillChannel, so two sessions
+could end up blocked on the same buffered channel and one would leak). The
+goroutine now deterministically owns its own channel, which also pairs with
+the compare-and-delete in deleteKillChannel.
+
+Addresses the remaining Gemini review items on #325.
+
+- fix: compare-and-delete in deleteKillChannel to avoid stale-session delete
+
+A slow-cleanup goroutine from an old session could delete the kill channel
+of a newer session for the same user (reconnect), leaving the new session
+unkillable. deleteKillChannel now takes the channel the caller owns and
+removes the entry only if the map still holds that exact channel.
+
+Addresses Gemini review on #325. New test TestDeleteKillChannelStaleSession
+fails (unkillable session) on the old unconditional delete, passes now.
+
+- refactor: remove write-only MyClient.subscriptions field (data race)
+
+- fix: serialize killchannel map access with a mutex; block instead of polling
+
+- fix: copy-on-write in updateUserInfo to avoid shared-map data race
+
+- review: use sqlx Rebind in saveMessageToHistory
+
+Define the insert once with ? placeholders and let s.db.Rebind adapt them to
+the active driver ($1.. on Postgres), removing the manual DriverName check and
+the duplicate query string. Addresses Gemini Code Assist review on #311.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- test: cover HistorySync duplicate-key idempotency (#292)
+
+Add TestSaveMessageToHistoryIdempotent: inserting the same (user_id,
+message_id) twice must be a silent no-op (no error, no duplicate row),
+while a distinct message_id still inserts normally. Verified red/green —
+the test fails against the previous plain INSERT with the unique-constraint
+error and passes with the ON CONFLICT DO NOTHING fix.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- fix: make message-history insert idempotent to stop HistorySync error spam
+
+saveMessageToHistory used a plain INSERT, so every message redelivered by a
+HistorySync batch (or on reconnect/multi-device sync) that was already stored
+via the live Message event violated the (user_id, message_id) unique constraint
+and was logged at ERROR. A single syncType=3 batch can emit 200+ ERROR lines in
+under a second, drowning real errors and inflating log storage — even though
+webhooks still fire correctly and no data is lost.
+
+Add `ON CONFLICT (user_id, message_id) DO NOTHING` to both the Postgres and
+SQLite insert paths so already-stored messages are skipped silently. Genuine
+write failures still propagate. The clause is valid in PostgreSQL and in modern
+SQLite (modernc.org/sqlite).
+
+Fixes #292
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;</div>
+</div>
+
+<a href="../project/asternic_wuzapi.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

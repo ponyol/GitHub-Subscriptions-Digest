@@ -1,0 +1,1751 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (99 commits) - ruvnet/RuView - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (99 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/ruvnet_RuView.html">ruvnet/RuView</a> /
+    Updates in main (99 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/ruvnet_RuView.html">ruvnet/RuView</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-04 06:17 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/ruvnet/RuView/commits/main" target="_blank">https://github.com/ruvnet/RuView/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление содержит важные исправления и новые функции. Среди ключевых исправлений — совместимость коллбэков ESP-NOW, закрепление базового уровня шума для оценки занятости и критическое исправление безопасности, предотвращающее ошибочное определение выживших с сердцебиением как погибших. Введены такие крупные функции, как эталонный тест пространственного интеллекта ADR-149 Aether-Arena и система управления роем дронов ADR-148 RuView с расширенными возможностями машинного обучения и калибровки. Также повышена надежность CI, обновлена документация с реалистичными метриками производительности и добавлен сервис калибровки LoRA для улучшения оценки позы.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix: IDF v6.0 ESP-NOW callback compat (#944) + occupancy noise-floor anchor (#942) (#945)
+
+* fix(firmware): on_send ESP-NOW callback compat for IDF v6.0 (closes #944)
+
+ESP-IDF v6.0 changed `esp_now_send_cb_t` from
+  void (*)(const uint8_t *mac, esp_now_send_status_t status)
+to
+  void (*)(const esp_now_send_info_t *tx_info, esp_now_send_status_t status)
+
+The C6 sync ESP-NOW path&#39;s `on_recv` was already version-guarded with
+`#if ESP_IDF_VERSION &gt;= ESP_IDF_VERSION_VAL(5, 0, 0)` (lines 102-112)
+but the `on_send` sibling missed the equivalent guard. CI runs against
+IDF v5.4 so the regression slipped through; the reporter on IDF v6.0.1
+with xtensa-esp-elf esp-15.2.0_20251204 hit:
+
+  c6_sync_espnow.c:182:30: error: passing argument 1 of
+  &#39;esp_now_register_send_cb&#39; from incompatible pointer type
+  [-Wincompatible-pointer-types]
+
+Fix: mirror the recv guard with `#if ESP_IDF_VERSION_MAJOR &gt;= 6` since
+the send-callback signature change happened at IDF v6.0 (not v5.x like
+the recv-callback). Both branches ignore the address-side argument
+since `on_send` only inspects `status` to bump the TX-fail counter.
+
+Adds `#include &#34;esp_idf_version.h&#34;` so the macro is in scope.
+
+Closes #944
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+* fix(signal): anchor estimate_occupancy noise floor to calibration (closes #942)
+
+`test_estimate_occupancy_noise_only` asserts that 20 noise-only frames
+fed through a 50-frame calibrated `FieldModel` yield 0 occupancy.
+Failure reported on the upstream Linux + BLAS build.
+
+Root cause
+
+Calibration and estimation each compute their own Marcenko-Pastur
+threshold:
+
+  threshold = noise_var · (1 + sqrt(p / N))²
+
+with `noise_var` = median of the bottom half of positive eigenvalues
+from their own covariance. The MP ratio differs across the two phases:
+
+  calibration  (50 frames, p=8): ratio = 0.16, factor ≈ 1.96
+  estimation   (20 frames, p=8): ratio = 0.40, factor ≈ 2.66
+
+On a small estimation window the local `noise_var` estimate can also
+be smaller than the calibration&#39;s (fewer samples → bottom-half median
+hits lower-magnitude eigenvalues). The combination of a smaller
+noise_var on estimation and the larger MP factor can flip eigenvalues
+on/off the &#34;significant&#34; line in a sample-size-dependent way, so an
+identical-distribution test window scores `significant &gt;
+baseline_eigenvalue_count` and reports phantom persons.
+
+Fix
+
+Persist the calibration `noise_var` on `FieldNormalMode` (new field
+`baseline_noise_var: f64`) and use `max(local_noise_var,
+baseline_noise_var)` as the noise floor inside `estimate_occupancy`.
+This anchors the threshold to the calibration scale and prevents the
+short-window collapse without changing behavior when the local
+window&#39;s own noise dominates (the real-motion case).
+
+`baseline_noise_var` defaults to 0.0 in the diagonal-fallback paths;
+the estimation code treats 0.0 as &#34;no anchored floor available&#34; and
+preserves the pre-#942 single-window behavior — so older `FieldNormalMode`
+instances deserialised from disk continue to work unchanged.
+
+Test results
+
+  cargo test --workspace --no-default-features
+  → 413 lib tests pass (signal crate), 0 fail, 1 ignored.
+
+The actual `eigenvalue`-gated test still requires BLAS (not buildable
+on Windows). Logic-trace via the four numerical anchors above shows
+the fix flips `noise_var` from the smaller local value back up to the
+calibration scale, dropping `significant` to or below
+`baseline_eigenvalue_count` so the saturating subtraction returns 0.
+
+Closes #942
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix(protocol): resolve 0xC511_0004 magic collision (closes #928) (#931)
+
+* fix(ci): SAST actually scans the code + drop deprecated flaky semgrep action
+
+Two real problems in the Static Application Security Testing job:
+
+1. **It scanned a path that no longer exists.** `bandit -r src/` and
+   `semgrep … src/` pointed at the repo-root `src/`, but the Python code
+   moved to `archive/v1/src/` (64 .py files) when the runtime was rewritten
+   in Rust. So the SAST scan matched nothing — a silent no-op (this is also
+   why `bandit-results.sarif` was &#34;Path does not exist&#34; on recent runs).
+   Fixed both to `archive/v1/src/`.
+
+2. **Deprecated + redundant + flaky semgrep step.** The
+   `returntocorp/semgrep-action@v1` step pulled `returntocorp/semgrep-agent:v1`
+   from Docker Hub every run (intermittently timing out → red check, e.g. on
+   #929) and is EOL. It was redundant: the pip `semgrep --sarif` step is what
+   feeds GitHub Security; the action only pushed to the Semgrep cloud app via
+   SEMGREP_APP_TOKEN. Removed it and folded its `p/docker` + `p/kubernetes`
+   rulesets into the pip semgrep command, so coverage is preserved with no
+   Docker pull.
+
+The job stays `continue-on-error: true` (non-gating). YAML validated.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+* fix(protocol): resolve 0xC511_0004 magic collision (closes #928)
+
+Background
+
+`0xC511_0004` was assigned to two different packet formats in firmware
+— `EDGE_FUSED_MAGIC` (ADR-063, 48-byte `edge_fused_vitals_pkt_t`) and
+`WASM_OUTPUT_MAGIC` (ADR-040, variable-length `wasm_output_pkt_t`).
+Both were transmitted. The sensing-server only had a WASM parser for
+that magic and no fused-vitals parser, so on the ESP32-C6 + MR60BHA2
+mmWave configuration the fused-vitals packet was silently misparsed
+as a malformed WASM output — `breathing_rate` was read as
+`event_count`, mmWave-fused vitals were lost, and spurious WASM events
+were emitted to subscribers.
+
+Fix
+
+1. Reassign `WASM_OUTPUT_MAGIC` to `0xC511_0007` (next free slot per
+   the registry in `rv_feature_state.h`). Smaller blast radius than
+   moving fused-vitals — the registry already treats `0xC511_0004` as
+   fused-vitals canonical and several years of deployed feature
+   tracking depends on that assignment.
+
+2. Add `parse_edge_fused_vitals` + `EdgeFusedVitalsPacket` in
+   `wifi-densepose-sensing-server::main`. Byte layout taken directly
+   from `edge_processing.h:129`, mirroring the firmware&#39;s
+   `_Static_assert(sizeof(edge_fused_vitals_pkt_t) == 48)` so future
+   firmware changes that grow the packet will break this parser
+   loudly instead of silently.
+
+3. Add a dispatch arm in the UDP receive loop. Fused-vitals is tried
+   BEFORE WASM so a stale firmware (still emitting 0xC511_0004 with
+   the WASM payload) fails to parse as fused-vitals (size mismatch),
+   then fails to parse as WASM (magic mismatch on the new 0x...0007),
+   and gets dropped — a deliberate &#34;fail loud&#34; outcome rather than the
+   pre-fix silent garbage.
+
+4. Update the registry comment in `rv_feature_state.h` to add the new
+   0x...0007 row.
+
+5. Add five tests in a new `issue_928_magic_collision_tests` mod:
+   - `parse_edge_fused_vitals_extracts_fields_correctly`
+   - `parse_edge_fused_vitals_rejects_short_buffer`
+   - `parse_edge_fused_vitals_rejects_wrong_magic`
+   - `parse_wasm_output_rejects_legacy_0004_magic`
+   - `parse_wasm_output_accepts_new_0007_magic`
+
+WebSocket payload
+
+Fused-vitals now broadcasts as `{&#34;type&#34;: &#34;edge_fused_vitals&#34;, ...}`
+with the mmWave-specific block nested under `mmwave`. Schema is
+additive — existing subscribers that only inspect `type` are
+unaffected; subscribers that switch on `type` gain a new branch.
+
+Deployment note
+
+This is a wire-protocol change. Firmware older than this commit that
+emits WASM output on 0xC511_0004 will lose its WASM event stream
+against an updated host (host expects 0xC511_0007). Per the issue
+discussion, &#34;fail loud&#34; is preferred to silent misparsing. Operators
+running C6+mmWave should reflash firmware concurrent with the host
+upgrade.
+
+Test results
+  cargo test -p wifi-densepose-sensing-server --no-default-features
+  --bin sensing-server
+  → 122 passed / 0 failed (5 new + 117 existing, unchanged)
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(changelog): record this cycle&#39;s behavior-changing fixes (#932)
+
+Per the CLAUDE.md pre-merge checklist (item 5, &#34;Add entry under
+[Unreleased]&#34;), several recently-merged PRs landed without CHANGELOG
+entries. Backfilling the user/operator-facing ones — most importantly the
+MAT triage safety fix:
+
+- #926 (Security/safety): survivor with a heartbeat never triaged Deceased
+- #918: per-node HA devices report each node&#39;s own presence/motion
+- #919: actionable --model load diagnostic (refs #894)
+- #920: --export-rvf no longer silently produces a placeholder model
+- #929 (Security): bearer scheme matched case-insensitively (RFC 6750)
+
+CI-internal fixes (#925 rust-cache, #930 SAST) are intentionally omitted —
+they don&#39;t change product behavior. Docs-only.
+
+- fix(ci): SAST actually scans the code + drop deprecated flaky semgrep action (#930)
+
+Two real problems in the Static Application Security Testing job:
+
+1. **It scanned a path that no longer exists.** `bandit -r src/` and
+   `semgrep … src/` pointed at the repo-root `src/`, but the Python code
+   moved to `archive/v1/src/` (64 .py files) when the runtime was rewritten
+   in Rust. So the SAST scan matched nothing — a silent no-op (this is also
+   why `bandit-results.sarif` was &#34;Path does not exist&#34; on recent runs).
+   Fixed both to `archive/v1/src/`.
+
+2. **Deprecated + redundant + flaky semgrep step.** The
+   `returntocorp/semgrep-action@v1` step pulled `returntocorp/semgrep-agent:v1`
+   from Docker Hub every run (intermittently timing out → red check, e.g. on
+   #929) and is EOL. It was redundant: the pip `semgrep --sarif` step is what
+   feeds GitHub Security; the action only pushed to the Semgrep cloud app via
+   SEMGREP_APP_TOKEN. Removed it and folded its `p/docker` + `p/kubernetes`
+   rulesets into the pip semgrep command, so coverage is preserved with no
+   Docker pull.
+
+The job stays `continue-on-error: true` (non-gating). YAML validated.
+
+- fix(auth): match the Bearer scheme case-insensitively (RFC 6750) (#929)
+
+`require_bearer` parsed the Authorization header with
+`strip_prefix(&#34;Bearer &#34;)`, which is case-sensitive. Per RFC 6750 §2.1 /
+RFC 7235 §2.1 the auth-scheme is case-insensitive, so a correct token sent
+as `Authorization: bearer &lt;token&gt;` (or `BEARER`, or with extra whitespace)
+was rejected with a confusing &#34;invalid bearer token&#34; 401 — needless friction
+when setting up `RUVIEW_API_TOKEN` (the active #864/#924 theme).
+
+Now the scheme is matched with `eq_ignore_ascii_case` and leading token
+whitespace trimmed. The token comparison itself is unchanged — still exact
+and constant-time (`ct_eq`) — so this does not weaken auth: a wrong token or
+a non-Bearer scheme (`Basic …`) still returns 401.
+
+New test `accepts_case_insensitive_bearer_scheme` covers `bearer`/`BEARER`/
+extra-space (accept) and wrong-token/`Basic` (still reject). bearer_auth
+suite: 9 passed.
+
+- fix(mat): never triage a survivor with a heartbeat as Deceased (safety) (#926)
+
+Both triage paths in the Mass Casualty Assessment tool classified a
+survivor as Deceased (Black) on &#34;no breathing + no movement&#34; while
+completely ignoring the heartbeat signal:
+
+- domain `TriageCalculator::calculate` → `combine_assessments(Absent, None)`
+  returned Deceased. That branch is in fact only reachable *because* a
+  heartbeat makes `has_vitals()` true (breathing+movement absent alone →
+  Unknown) — so every &#34;Deceased&#34; was a live person with a pulse.
+- detection `EnsembleClassifier::determine_triage` (the path used by
+  `classify()`) returned Deceased on `!has_breathing &amp;&amp; !has_movement`,
+  also ignoring `reading.heartbeat`.
+
+A survivor with a detectable pulse but no sensed breathing/movement is in
+respiratory arrest — the most time-critical *savable* state. Reporting them
+Deceased would deprioritize a rescuable person. WiFi-CSI also cannot confirm
+death (no airway-repositioning step), so a pulse must override.
+
+Fix: in both paths, if the result would be Deceased but a heartbeat is
+present, return Immediate. Total absence of breathing, movement AND heartbeat
+is unchanged (domain → Unknown, ensemble → Deceased).
+
+2 safety regression tests added. Full MAT suite: 168 + 6 + 3 passed, 0 failed
+(existing test_no_vitals_is_deceased still green — no heartbeat → Deceased).
+
+- ci: use Swatinem/rust-cache for the Rust workspace job (reliability) (#925)
+
+The Rust Workspace Tests job manually cached the whole `v2/target` via
+actions/cache@v4. For a 38-crate workspace that dir is multi-GB, and several
+CI runs this cycle intermittently died at the cache/setup step (after
+toolchain install, before &#34;Run Rust tests&#34;), each needing a rerun.
+
+Swatinem/rust-cache@v2 is the de-facto standard Rust CI cache: it caches the
+cargo registry/git + a pruned target, evicts stale dependencies, and restores
+large workspaces far more reliably and faster than a naive whole-target cache.
+`workspaces: v2` points it at the v2/ cargo workspace.
+
+Reliability/speed change — verified by observing subsequent main runs.
+
+- fix: --export-rvf no longer silently produces a placeholder model (#920)
+
+The --export-rvf handler ran *before* the --train/--pretrain handlers and
+unconditionally wrote placeholder sine-wave weights, then returned. So the
+documented `--train --dataset … --export-rvf &lt;path&gt;` workflow
+(user-guide.md) short-circuited to a PLACEHOLDER model and never trained —
+printing &#34;exported successfully&#34; for a non-functional model. Given the
+project&#39;s anti-&#34;is it fake&#34; stance, silently emitting a fake model is the
+wrong default.
+
+Fix:
+- Only emit the placeholder container-format demo when --export-rvf is used
+  *standalone* (new `export_emits_placeholder_demo` guard). With
+  --train/--pretrain, fall through so the real training pipeline runs and
+  exports calibrated weights.
+- The standalone path now prints a clear WARNING that it writes a
+  container-format demo with placeholder weights — not a trained model —
+  pointing to --train / a pretrained encoder (#894).
+- Docs: flag --export-rvf as a placeholder demo in the flag table, and fix
+  the Docker training example to use --save-rvf (consistent with the
+  from-source example) instead of the placeholder --export-rvf.
+
+3 unit tests for the guard. Full crate unit suite: 429 + 117 passed, 0 failed.
+
+- fix(#894): actionable diagnostic when --model gets a non-RVF file (#919)
+
+Users who downloaded ruvnet/wifi-densepose-pretrained and passed
+model.safetensors / model-q4.bin / model.rvf.jsonl to --model hit a bare
+&#34;Progressive loader init failed: invalid magic at offset 0: expected
+0x52564653, got 0x77455735&#34; and were stuck — the server then silently fell
+back to signal heuristics (which over-count, feeding &#34;is it fake&#34; reports).
+
+The HF files are a different *format* and encoder architecture than the RVF
+binary container the progressive loader expects, so they can&#39;t load directly.
+Now the load-failure path detects the common cases (safetensors header,
+JSONL manifest, quantized .bin blob) and emits a plain explanation naming the
+format, what --model actually expects (RVF `RVFS` container from
+wifi-densepose-train), and that it&#39;s continuing with heuristics — with a
+pointer to #894.
+
+Pure, testable `diagnose_model_load_error()` + 4 unit tests (run under the
+default `--no-default-features` CI). Full crate unit suite: 429 + 114 passed,
+0 failed.
+
+- fix(mqtt): per-node HA devices use each node&#39;s own presence/motion (#872) (#918)
+
+The MQTT bridge fanned out one Home-Assistant device per node (#898) but
+applied the *room-level aggregate* classification to every node — so in a
+multi-node setup a node in an empty corner inherited another node&#39;s
+&#34;present&#34;, and `motion_level: &#34;absent&#34;` was mis-mapped to full motion
+(the aggregate match fell through `Some(_) =&gt; 1.0`).
+
+Each node in the sensing broadcast&#39;s `nodes` array already carries its own
+`classification` (`motion_level`/`presence`/`confidence`, see
+PerNodeFeatureInfo) and RSSI. Now each per-node snapshot reads that node&#39;s
+own classification, deferring to the room aggregate only for fields a node
+omits. Vitals (breathing/heart rate) and person count stay room-level.
+
+Extracted the JSON→VitalsSnapshot mapping into a pure, testable function
+(`vitals_snapshots_from_sensing_json`) and added 4 unit tests covering
+per-node divergence, partial-field fallback, the no-nodes aggregate path,
+and the absent→zero-motion fix.
+
+Supersedes #899, which targeted the right bug but read non-existent fields
+(`node[&#34;motion_level&#34;]` / `node[&#34;status&#34;]` instead of the nested
+`node[&#34;classification&#34;]` + `stale`).
+
+Verified: builds with `--features mqtt`; new tests pass; full crate unit
+suite 432 + 114 passed, 0 failed.
+
+- perf(ci): drop dead uvicorn start from perf job (#917)
+
+Since #915 the perf job gates only on test_frame_budget.py, which drives
+the CSIProcessor pipeline in-process and makes no HTTP calls. The
+&#34;Start application&#34; step (uvicorn + `sleep 10`) was therefore dead weight:
+it existed only for the now-excluded api_throughput/inference_speed tests,
+wasted ~10-15 s per main-push run, and dumped ~50 misleading
+&#34;router requires hardware setup&#34; ERROR lines into every CI log for a
+server no test touched. MOCK_POSE_DATA is server-only, unused here.
+
+Removed the step and the vestigial env. The gated test is unchanged and
+passes (verified locally, 3/3).
+
+- docs(#882): complete the &#34;100% presence&#34; retraction across all docs (#916)
+
+The v1 &#34;100% presence accuracy&#34; headline was already retracted in the
+README / user-guide intro / proof-of-capabilities — but 6 secondary
+spots still flatly claimed &#34;100% accuracy, never false alarms&#34;, which
+made proof-of-capabilities.md&#39;s &#34;replaced everywhere&#34; assertion untrue.
+
+Completed the retraction in-place with the honest label-free metric
+(82.3% held-out temporal-triplet; v1 was a single-class recording where
+a constant &#34;yes&#34; scores ~99.98%):
+
+- docs/readme-details.md — 2 benchmark tables + the pre-trained-model row
+- docs/user-guide.md — capability table, model-file comment, applications list
+- CHANGELOG.md — annotated the historical entry in-place (kept as public
+  record per built-in-public ethos, not rewritten)
+
+Verified: no remaining flat &#34;100% presence/accuracy&#34; claim lacks a
+retraction marker; proof-of-capabilities.md &#34;replaced everywhere&#34; is now
+accurate.
+
+- fix(ci): perf job gates on the real frame-budget guard, not TDD stubs (#915)
+
+After #914 fixed collection, the perf job actually ran the suite and
+exposed that test_api_throughput.py / test_inference_speed.py are TDD
+red-phase stubs (every test suffixed `_should_fail_initially`) that time
+a *mock that sleeps* — not a real perf signal. They carry machine-
+dependent wall-clock asserts (actual_rps &gt;= 40, batch_time &lt; individual_time)
+that are inherently flaky on shared CI runners, plus a cross-class
+fixture-scope bug (`fixture &#39;standard_model&#39; not found`). Result: 3 failed,
+10 errored — by design, not a regression.
+
+Forcing those green would manufacture a false signal. Instead, gate only
+on test_frame_budget.py, which times the *real* CSIProcessor pipeline
+against the ADR 50 ms per-frame budget (single-frame, p95/100-frames,
++Doppler) — a genuine regression guard. Verified locally: 3 passed.
+
+The stub files remain in-repo for local TDD; they re-enter CI when their
+features are implemented and the mock-timing asserts are made deterministic.
+
+- fix(ci): perf tests — use `python -m pytest` so `src` import resolves (#914)
+
+The Performance Tests job collected 26 items then aborted with
+`ModuleNotFoundError: No module named &#39;src&#39;` on test_frame_budget.py,
+which does `from src.core.csi_processor import CSIProcessor`. The bare
+`pytest` console script does not put the cwd (archive/v1) on sys.path;
+`python -m pytest` does. pytest aborts the whole session on a collection
+error, so this one import masked the entire (otherwise mock-based,
+self-contained) perf suite.
+
+Verified locally: bare-script path reproduces the exact error; `-m`
+resolves it and test_frame_budget.py passes 3/3. The other two files
+(test_api_throughput.py mock server, test_inference_speed.py MockPoseModel
++psutil) are fully self-contained — no test hits the running server.
+
+Closes the last red job in the v1-API CI chain (#910/#911/#913).
+
+- Merge pull request #913 from ruvnet/fix/ci-v1-api-perms-locust
+
+ci(v1-api): fix gh-pages 403 + run real pytest perf suite
+
+- ci(v1-api): install pytest, drop root --cov addopts for perf suite, ascii comment
+
+- ci(v1-api): fix gh-pages 403 + run real perf suite — green main CI
+
+Two more latent v1-API CI bugs surfaced once #910/#911 let the jobs reach
+their later steps:
+
+- API Documentation: openapi generation now succeeds (psutil fix), but the
+  gh-pages deploy failed with HTTP 403 — the job had no `permissions` block
+  and GITHUB_TOKEN is read-only by default. Add `permissions: contents:
+  write`, and make the deploy `continue-on-error` (the openapi generation is
+  the real validation; Pages may be disabled).
+- Performance Tests: ran `locust -f tests/performance/locustfile.py`, but
+  there is no locustfile — the suite is pytest (test_api_throughput.py,
+  test_frame_budget.py, test_inference_speed.py). Run pytest instead, with
+  working-directory: archive/v1 and MOCK_POSE_DATA=true.
+
+ci.yml validated as well-formed YAML.
+
+- Merge pull request #911 from ruvnet/fix/ci-v1-api-mock-mode
+
+ci(v1-api): MOCK_POSE_DATA + declare psutil — green Performance Tests &amp; API Docs
+
+- fix(deps): declare psutil in requirements.txt — green API Documentation CI
+
+The API Documentation job (and any env without locust) failed with
+`ModuleNotFoundError: No module named &#39;psutil&#39;` when importing the app:
+psutil is imported by src/api/routers/health.py, services/metrics.py,
+commands/status.py, and tasks/monitoring.py, but was never declared as a
+dependency — it only happened to be present where locust (Performance
+Tests) pulled it in transitively. Declare it explicitly (psutil&gt;=5.9.0).
+
+Verified locally: `from src.api.main import app; app.openapi()` (the exact
+docs-job operation) now succeeds.
+
+- ci(v1-api): run Performance Tests + API Docs with MOCK_POSE_DATA=true
+
+After the DensePoseHead startup fix (#910), the v1 API starts, but the
+Performance Tests load-hit the pose endpoints which error &#34;requires real
+CSI data&#34; (no hardware in CI, mock_pose_data defaults False), and the
+API-docs job imports the app the same way. Set MOCK_POSE_DATA=true on both
+jobs so they exercise the mock path. Verified: the env var maps to
+settings.mock_pose_data=True (pydantic, no env_prefix).
+
+(Note: Performance Tests is continue-on-error so this is cleanup, not a
+run-blocker; the run-level red on main has been transient Docker Hub pull
+timeouts on Tests/docker-build, which are infra flakes that pass on re-run.)
+
+- Merge pull request #910 from ruvnet/fix/v1-pose-service-densepose-config
+
+fix(v1-api): pass required config to DensePoseHead — green main CI
+
+- fix(v1-api): pass required config to DensePoseHead — green main CI
+
+The &#34;Continuous Integration&#34; workflow (Performance Tests + API
+Documentation jobs) has failed on every main commit since the API start
+path was exercised: pose_service._initialize_models() called
+`DensePoseHead()` with no args, but DensePoseHead.__init__ requires a
+config dict → &#34;TypeError: DensePoseHead.__init__() missing 1 required
+positional argument: &#39;config&#39;&#34; → uvicorn &#34;Application startup failed&#34;.
+
+Pass a config: input_channels=256 (matches the modality translator&#39;s
+output), num_body_parts=24 (DensePose standard), num_uv_coordinates=2.
+Both call sites (with/without pose_model_path) fixed.
+
+Verified locally: DensePoseHead(config) + ModalityTranslationNetwork(config)
+both construct + eval, clearing the startup TypeError.
+
+- Merge pull request #908 from ruvnet/fix/893-release-bins-refresh
+
+release(firmware): refresh release_bins with the #893 CSI fix → v0.6.7
+
+- release(firmware): refresh release_bins with the #893 CSI fix → v0.6.7
+
+The pre-built binaries in release_bins/ were v0.6.6 (May 21) and shipped
+the MGMT-only promiscuous filter, so display-less boards flashed from them
+got yield=0pps (#893/#866/#897 — the root cause of the &#34;can&#39;t reproduce /
+it&#39;s fake&#34; reports). Rebuilt every flashable variant from main (which has
+the #893 display-gated DATA-frame fix) and refreshed the binaries:
+
+- top-level ESP32-S3 8MB (sdkconfig.defaults) — esp32-csi-node.bin +
+  bootloader (partition-table/ota_data unchanged — code-only fix)
+- esp32-csi-node-4mb.bin (ESP32-S3 4MB, sdkconfig.defaults.4mb)
+- c6-adr110/ (ESP32-C6, sdkconfig.defaults.esp32c6) — the exact firmware
+  hardware-verified on COM6 (CSI yield 0→27 pps, presence/motion alive,
+  no #396 crash)
+- s3-adr110/ (same production S3 8MB config)
+
+Left untouched: s3-fair-adr110/ (a non-production size-comparison build,
+features stripped — not a board anyone flashes for sensing).
+
+version.txt → 0.6.7; SHA256SUMS regenerated for the changed variant dirs.
+Display boards keep MGMT-only (preserves the #396 crash protection);
+display-less boards now capture DATA frames and stream CSI.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- Merge pull request #907 from ruvnet/fix/894-occupancy-cap
+
+fix(occupancy): bound eigenvalue person-count to single-link max — #894
+
+- Merge remote-tracking branch &#39;origin/main&#39; into fix/894-occupancy-cap
+
+# Conflicts:
+#	CHANGELOG.md
+
+- Merge pull request #904 from ruvnet/fix/898-mqtt-per-node-devices
+
+fix(mqtt): one Home-Assistant device per node — closes #898
+
+- fix(occupancy): bound eigenvalue person-count to single-link max — #894
+
+field_bridge::occupancy_or_fallback returned FieldModel::estimate_occupancy
+unbounded (internal ceiling 10), while the perturbation fallback below it
+and score_to_person_count both cap at 3 (&#34;1-3 for single ESP32&#34;). On noisy
+or under-calibrated CSI the eigenvalue count inflated → &#34;10 persons when 1
+present&#34; (#894, seen when --model fails to load → heuristic mode). Bound the
+eigenvalue path to a shared MAX_SINGLE_LINK_OCCUPANCY const (3) so every
+single-link estimator agrees. Genuine higher counts come from the
+multistatic fusion path. Build clean, field_bridge tests pass.
+
+- test(mqtt): drive per-node snapshots in discovery integration tests — #898
+
+After the per-node discovery change, discovery configs are published the
+first time a snapshot for a node_id arrives (not eagerly at startup). The
+two discovery integration tests (discovery_topics_appear_on_broker,
+privacy_mode_suppresses_biometric_discovery) spawned the publisher with an
+empty broadcast channel and never sent a snapshot, so they collected []
+and failed (&#34;missing presence discovery topic in []&#34;).
+
+Drive snapshots for the test node_id throughout the capture window (same
+pattern as state_messages_published_on_snapshot_broadcast) so the per-node
+device&#39;s discovery lands. Verified against a local mosquitto: 3 passed.
+
+- Merge pull request #906 from ruvnet/fix/893-csi-data-frame-capture
+
+fix(firmware): capture DATA frames on display-less boards — #893/#866/#897 (yield=0pps root cause)
+
+- fix(firmware): capture DATA frames on display-less boards — #893/#866/#897
+
+The pre-built binaries set a MGMT-only promiscuous filter
+(WIFI_PROMIS_FILTER_MASK_MGMT) as the #396 workaround — DATA-frame
+interrupt load races the QSPI display&#39;s SPI traffic against the SPI-flash
+cache and crashes Core 0 in wDev_ProcessFiq. But MGMT-only fires the CSI
+callback only on sparse management frames, so on the common DISPLAY-LESS
+boards (DevKitC-1, T7-S3, N8R8) CSI yield collapses to 0 pps under real
+traffic (#521) — the node looks dead despite being on the network, which
+is the root cause of most &#34;can&#39;t reproduce / it&#39;s fake&#34; reports (#804/#37).
+
+A board with no AMOLED panel has no QSPI/SPI-flash contention, so it can
+safely capture DATA frames. After the boot-time display probe runs:
+  - display present  -&gt; keep MGMT-only (preserve #396 crash protection)
+  - no display       -&gt; upgrade filter to MGMT|DATA (restore CSI yield)
+
+Implementation (runtime-gated, no boot reorder):
+  - display_task.c: s_display_active flag + display_is_active() accessor,
+    set true only when the panel is detected and the display task starts.
+  - csi_collector.c: csi_collector_enable_data_capture() re-sets the
+    promiscuous filter to MGMT|DATA.
+  - main.c: after display_task_start(), if !display_is_active() (or display
+    support not compiled in), upgrade the filter.
+
+Build-verified on BOTH targets: esp32c6 (headless path) and esp32s3
+(display path, display_task.c compiled) — Project build complete, RC 0.
+Needs on-hardware confirmation that yield recovers and no #396 crash.
+
+- fix(mqtt): one HA device per node — closes #898
+
+After the #872 MQTT wiring, the JSON-&gt;VitalsSnapshot bridge hard-coded a
+single node_id (the MQTT client id) and the publisher used one
+OwnedDiscoveryBuilder, so every physical node collapsed into a single
+Home-Assistant device (identifiers:[&#34;wifi_densepose_wifi-densepose-1&#34;]),
+contradicting the one-device-per-node docs.
+
+- Bridge (main.rs): emit one VitalsSnapshot per node in the sensing
+  update&#39;s nodes[] (each carries its own node_id + RSSI; shared aggregate
+  presence/vitals), falling back to a single aggregate snapshot when
+  there is no per-node data (wifi/simulate sources).
+- Publisher (publisher.rs): add OwnedDiscoveryBuilder::for_node(), and
+  publish discovery + availability lazily on first sight of each node_id,
+  routing state to per-node topics. Heartbeat/refresh/offline-LWT iterate
+  all known nodes. Result: N distinct HA devices, one per node.
+
+3 new unit tests (distinct nodes -&gt; distinct wifi_densepose_&lt;node&gt;
+identifiers); full MQTT suite 71 passed, example builds.
+
+- Merge pull request #886 from ruvnet/fix/proof-determinism-numpy-lock
+
+fix(proof): pin determinism lock to numpy 2.4.2 (match published hash)
+
+- docs(proof): update hash + note cross-platform determinism gate
+
+verify.py&#39;s published hash is now f8e76f21 (doppler excluded). Document
+that the proof reproduces bit-for-bit across Windows / two Linux hosts /
+the Azure CI runner, that the peak-normalized Doppler is excluded due to
+its cross-microarch argmax instability, and that a relative-tolerance
+check against a committed reference vector backs the five stable features.
+
+- fix(proof): exclude argmax-unstable doppler from determinism comparison
+
+CI divergence profile was decisive: 6089/36800 elements (≈95% of doppler
+values) diverged with O(1) magnitude (ref 0.15 vs CI 1.0), and ALL of it
+was the doppler feature — the other 5 features reproduced within tolerance.
+
+Root cause: csi_processor._extract_doppler_features peak-normalizes the
+spectrum (`spectrum / max(spectrum)`). When the raw spectrum has near-tied
+peaks, the argmax flips under cross-microarchitecture pocketfft/BLAS FP
+reordering (Azure CI runner vs dev boxes), renormalizing the whole array —
+an O(1) divergence no tolerance can absorb. This is a real *production*
+reproducibility bug (models consuming doppler_shift get different values on
+different CPUs); it&#39;s flagged for a separate, impact-analyzed source fix.
+
+Scoped proof fix: exclude doppler_shift from both the SHA-256 and the
+tolerance vector. The remaining five features — amplitude mean/variance,
+phase difference, correlation matrix, and the FFT-based PSD (30,400
+elements) — reproduce deterministically and provide the proof. Regenerated
+hash + reference. Local: VERDICT PASS.
+
+- diag(proof): characterize cross-microarch divergence on FAIL
+
+Add a divergence report (count + fraction outside tolerance, per-feature
+breakdown, worst offenders) so we can tell a few branch-flip elements
+from a pervasive regression. The CI tolerance gate failed with max|d|=0.85
+/ maxrel=345 — far beyond FP rounding — so we need to see WHICH feature
+elements diverge structurally on the Azure runner.
+
+- fix(proof): cross-platform tolerance gate for verify.py determinism
+
+Definitive root cause of the failing determinism gate: the SHA-256 of
+fixed-decimal-rounded features is bit-exact only WITHIN one CPU
+microarchitecture. Windows and a second Linux box (ruvultra, identical
+numpy 2.4.2/scipy 1.17.1) produce the same hash at every precision
+(ca58956c), but the GitHub Azure runner diverges at EVERY precision
+including 2 decimals (667eb054) — because pocketfft/BLAS reorders FP
+reductions per-microarch and the ~1e-6 *relative* drift lands on
+large-magnitude PSD bins as an absolute difference no fixed-decimal grid
+can absorb. So no quantization can fix it; the primitive was wrong.
+
+Fix: keep the bit-exact SHA-256 as the strong same-platform proof, and
+add a relative-tolerance fallback (np.allclose, rtol=1e-4/atol=1e-6)
+against a committed reference feature vector (expected_features_reference.npz,
+36,800 float64 values). A run PASSES on either; tolerances sit ~100x over
+the observed microarch drift and ~10x under any signal-meaningful change,
+so real regressions still fail. Verified locally: bit-exact MATCH -&gt; PASS,
+and a corrupted hash falls through to TOLERANCE MATCH -&gt; PASS. CI (Azure,
+different hash) now passes via the tolerance path. Removes the temporary
+sweep diagnostic.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- diag(proof): make hash precision configurable + CI cross-microarch sweep
+
+verify.py&#39;s HASH_QUANTIZATION_DECIMALS is now overridable via
+PROOF_HASH_DECIMALS. Finding: the determinism divergence is NOT
+Windows-vs-Linux — Windows and a second Linux box (ruvultra, same
+numpy/scipy) produce identical hashes at every precision, including
+ca58956c at 6 decimals. Only the GitHub Azure CI runner diverges
+(667eb054), i.e. a CPU-microarchitecture pocketfft/BLAS reordering
+(the #560 Skylake-vs-Cascade-Lake class).
+
+Temporary diagnostic sweep step prints the CI runner&#39;s hash at decimals
+6..2 so we can pick the coarsest precision that collapses the
+microarch divergence to the common hash. Both the sweep step and the
+PROOF_HASH_DECIMALS plumbing are removed/finalized in the follow-up.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- ci(verify-pipeline): re-run determinism gate on lock changes
+
+The determinism gate is path-filtered, but requirements-lock.txt (which
+pins the numpy/scipy versions that *produce* the proof hash) was not in
+the filter — so a dependency bump could silently drift the hash without
+re-running the gate. That&#39;s how the 1.26.4 pin diverged from the
+published ca58956c hash unnoticed. Add requirements-lock.txt to both the
+push and pull_request path filters so this PR (and any future lock
+change) actually re-runs verify.py.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix(proof): pin lock to numpy 2.4.2 to match the published proof hash
+
+Verify Pipeline Determinism has been failing (on main too) because
+requirements-lock.txt pinned numpy 1.26.4 / scipy 1.14.1 (→ hash
+667eb054…) while the committed/published expected_features.sha256
+(ca58956c…) was generated with modern numpy 2.x — the version a fresh
+`pip install numpy`, the maintainers, and the proof-of-capabilities.md
+skeptic path all use today.
+
+Bump the lock to numpy 2.4.2 / scipy 1.17.1 so the determinism gate
+matches its own published proof. verify.py prints VERDICT: PASS with
+these versions locally. The lock is consumed *only* by
+verify-pipeline.yml (the Tests jobs use requirements.txt), so this is
+scoped to the determinism gate.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- Merge pull request #874 from ruvnet/feat/adr-149-aether-arena
+
+feat(aether-arena): ADR-149 Spatial-Intelligence Benchmark — scorer + CI harness gate
+
+- fix(proof): regenerate ADR-134 CIR witness hash after CIR fixes
+
+Rust Workspace Tests failed the CIR determinism guard: expected
+120bd7b1… (from the original ADR-134, #837) vs actual 304d5469…. The
+later CIR fixes on this branch (windowed dominant-tap ratio, λ tuning,
+causal-delay-window rms — ADR-134 P2) intentionally changed the
+CirEstimator output but never regenerated the witness hash.
+
+The new output is bit-deterministic and cross-platform stable: the Rust
+cir_proof_runner produces 304d5469… on both Linux CI and local Windows.
+Regenerated via the sanctioned `--generate-hash` path; verify-cir-proof.sh
+now prints &#34;VERDICT: PASS (CIR hash matches)&#34;.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- ci(ruview-swarm): install clippy on the pinned 1.89 toolchain
+
+The clippy job failed with &#34;cargo-clippy is not installed for the
+toolchain &#39;1.89&#39;&#34;. v2/rust-toolchain.toml pins channel &#34;1.89&#34; (profile
+&#34;minimal&#34;, no clippy); dtolnay@stable installed clippy on the floating
+&#34;stable&#34; toolchain, but the override makes cargo use the separate &#34;1.89&#34;
+toolchain in working-directory v2. Pin the toolchain input to &#34;1.89&#34; so
+clippy lands on the toolchain cargo actually runs.
+
+(The real clippy lint it then catches — manual_is_multiple_of — was fixed
+in 29e698a05.)
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix(bfld): gate PrivacyAttestationProof::compute behind std
+
+CI `cargo test --no-default-features (baseline regression)` failed with
+`error: associated function compute is never used` under -D warnings.
+compute() is only reachable via PrivacyModeRegistry (#[cfg(feature =
+&#34;std&#34;)]); without std there is no caller. Gate the impl to match its only
+callers. Verified clean under --no-default-features, default, and
+--features mqtt with RUSTFLAGS=-D warnings.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix(ruview-swarm): clippy manual_is_multiple_of in lawnmower planner
+
+CI `clippy (-D warnings, --no-deps)` failed on patterns.rs:131 —
+`row % 2 == 0` is flagged by clippy::manual_is_multiple_of. Use
+`row.is_multiple_of(2)` (identical even-row check). Both CI clippy
+variants (--no-default-features and --features full,train) now pass.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- Merge remote-tracking branch &#39;origin/main&#39; into feat/adr-149-aether-arena
+
+# Conflicts:
+#	CHANGELOG.md
+
+- chore(gitignore): exclude MM-Fi dataset archives (assets/MM-Fi/*.zip)
+
+The MM-Fi benchmark environment archives (E01-E04.zip) are large data
+files fetched separately for evaluation — they must never be committed.
+Also keeps the existing aether-arena/staging/ private-staging exclusion.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs: results+proof links, capabilities-proof rebuttal, fix stale claims
+
+- README: replace retracted &#34;100% presence&#34; claim with honest 82.3%
+  held-out temporal-triplet; correct stale &#34;pose model not in this
+  release&#34; (now live at ruvnet/wifi-densepose-mmfi-pose, 82.69%
+  torso-PCK@20 SOTA); add a Results &amp; proof table (HF models,
+  AetherArena, benchmark study, deterministic verify.py proof, witness).
+- user-guide: same 100%-&gt;82.3% correction in two places; add Results &amp;
+  proof pointers and the SOTA pose model + AetherArena links.
+- docs/proof-of-capabilities.md (new): evidence-first rebuttal to the
+  &#34;fake / misleading&#34; claims. Concedes what was fair (over-stated early
+  metrics, AI-doc tone), refutes the category errors (simulate-mode
+  mistaken for fraud; missing weights mistaken for missing pipeline),
+  and gives copy-paste &#34;prove it yourself&#34; steps (verify.py VERDICT:
+  PASS + published SHA-256, cargo test, HF model pull, ESP32 CSI).
+  Emphasizes built-in-public history (git, 96 ADRs, CHANGELOG, issues
+  incl. #803/#872 bug-&gt;fix arcs) as the anti-facade evidence.
+- aether-arena/VERIFY.md: cross-link the whole-platform proof doc.
+
+Verified: python archive/v1/data/proof/verify.py -&gt; VERDICT: PASS
+(hash ca58956c...9199 matches published expected_features.sha256).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix(sensing-server): fix CSI per-node count clamp — #803 (part 2)
+
+The pure-CSI per-node path clamped its own occupancy estimate before the
+aggregator could read it. estimate_persons_from_correlation (DynamicMinCut)
+returns 0-3, but it was mapped to a score via `corr_persons / 3.0`, putting
+2 people at 0.667 — just under the 0.70 up-threshold of
+score_to_person_count — so the per-node count never climbed past 1, leaving
+node_max stuck at 1 for CSI-only nodes even when the min-cut cleanly
+separated two people.
+
+Replace the lossy /3.0 mapping with a threshold-aligned corr_persons_to_score
+(1-&gt;0.40, 2-&gt;0.74, 3-&gt;0.96) whose steady state round-trips back to the same
+count through the EMA + hysteresis bands, while still gating transient noise.
+
+A convergence test replays the exact CSI-loop EMA and asserts min-cut=2 now
+reports 2 / 3 reports 3 / 1 reports 1, plus a regression test documenting
+that the old /3.0 mapping pinned two people to 1.
+
+Full suite: 586 passed, 0 failed.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix(sensing-server): surface count-aware per-node estimates — #803
+
+Person count was pinned to 1 because the aggregate was derived from
+`smoothed_person_score`, an EMA-smoothed *activity* score (amplitude
+variance / motion / spectral energy) that saturates near a single
+occupant and cannot discriminate count. The count-aware per-node
+estimates the ESP32 paths already compute (firmware n_persons, mincut
+corr_persons) were stored in NodeState::prev_person_count then discarded
+by the aggregator — the same dead-wiring class as #872.
+
+Add `aggregate_person_count(activity_count, node_states)` = max(activity,
+node_max) and use it at both ESP32 aggregation sites (edge-vitals + CSI
+loop, Some + fallback arms). It can only raise the count when a node
+positively reports more occupants, so the lone-occupant case is provably
+never inflated (regression-guarded).
+
+5 new unit tests + full suite: 582 passed, 0 failed.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(changelog): #872 MQTT publisher wiring fix
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix(sensing-server): wire MQTT publisher into the binary — closes #872
+
+#872 reported &#39;--mqtt: unexpected argument&#39; on the Docker image; prior
+attempts chased a Docker *rebuild*, but the real cause was disconnected
+*code*: the --mqtt* flags lived only in cli::Args (dead code — referenced
+nowhere), while the binary parses a separate main::Args with no mqtt fields,
+and main.rs never declared/started the mqtt:: publisher. So MQTT was fully
+unwired: flags didn&#39;t parse, and the publisher never ran.
+
+Fix:
+- Extract the mqtt + privacy flags into a shared
+  (#[derive(clap::Args)]); retarget mqtt::config::{from_args,build_tls} to it.
+- #[command(flatten)] MqttArgs into the binary&#39;s main::Args (using the *lib*
+  crate&#39;s type so it matches from_args), so --mqtt* now parse.
+- Spawn the publisher on --mqtt: build MqttConfig, validate, and bridge the
+  existing JSON sensing broadcast into the typed VitalsSnapshot stream the
+  publisher consumes (defensive serde_json::Value mapping — absent fields
+  default, never wrong values). #[cfg(feature=mqtt)]-gated; without the
+  feature --mqtt WARNs and no-ops (documented contract). Fix the
+  mqtt_publisher example for the new signature.
+
+Verified end-to-end against local mosquitto: publisher connects and emits
+20 HA auto-discovery entities + live state (presence ON, person_count, …).
+Tests: 577 pass default / 580 pass --features mqtt / 0 fail; both configs
+build.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix(signal/cir): un-ignore end-to-end CIR pipeline test — ADR-134 P2 fully resolved
+
+The cir_pipeline end-to-end test was gated on the same dominant_tap_ratio
+floor; the windowed-ratio fix resolves it. All 6 ADR-134 P2 CIR tests
+(cir_synthetic 5 + cir_pipeline 1) now pass. signal+cir: 472 pass / 0 fail.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix(signal/cir): causal-delay-window rms spread — resolves last ADR-134 P2 cir test
+
+Found the principled fix for the rms-delay-spread inflation (superseding my
+prior &#39;needs ISTA work&#39; note): the spurious ~15-20% tap at ~bin 150 is an
+ALIAS of the near-zero dominant tap — the ISTA delay grid is circular (Φ is
+DFT-like), so bins &gt;= G/2 are non-causal negative delays. Computing the delay
+spread over only the causal half [0, G/2) drops rms from 389ns to 65ns (true
+value), cleanly and robustly (no fragile magnitude threshold). Un-ignores
+should_produce_positive_rms_delay_spread.
+
+ADR-134 P2 cir_synthetic now FULLY resolved: all 5 previously-ignored tests
+pass via two physics-justified fixes (windowed dominant-ratio for super-
+resolution leakage + causal-window rms for circular-grid aliasing). signal+cir:
+471 pass / 0 fail / 0 ignored in cir_synthetic.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(signal/cir): precise diagnosis of remaining ADR-134 P2 rms-spread failure
+
+Diagnosed the one still-ignored CIR test: ISTA emits a spurious ~15-20%-of-
+dominant tap at an implausible far delay (~bin 150 / ~3us) that inflates
+rms_delay_spread to ~390ns (vs ~53ns true). It sits too close to the real
+weakest tap (~30% of dominant) for a safe magnitude cutoff, so the proper fix
+is ISTA recovery-quality work (grid de-aliasing / far-tap suppression), not a
+band-aid threshold. Sharpened the #[ignore] note accordingly. signal+cir:
+470 pass / 0 fail.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix(signal/cir): resolve ADR-134 P2 dominant-tap-ratio — un-ignore 4 CIR tests
+
+The CIR estimator&#39;s dominant_tap_ratio measured a single grid bin, but on the
+3x super-resolved ISTA grid a single physical tap leaks across ~3 adjacent
+bins — so the ratio under-counted the dominant tap and sat far below the
+per-tier floors (HT20 0.158&lt;0.30, HT40 0.133&lt;0.35, HE20 0.102&lt;0.40), forcing
+the 3-tap recovery + 40MHz-ToF tests to be #[ignore]d.
+
+Fix (data-backed via a lambda sweep): (1) compute dominant_tap_ratio over a
++/-1-bin window around the peak — the physical tap&#39;s true footprint; (2) tune
+L1 lambda for sparse multipath (HT20 .05-&gt;.08, HT40 .03-&gt;.08, HE20 .03-&gt;.18).
+Result: ratios 0.367/0.406/0.474, comfortably above floors with all 3 taps
+preserved. Un-ignores should_recover_3tap_channel_{ht20,ht40,he20} and
+should_return_tof_at_40mhz. signal crate: 470 pass / 0 fail; change isolated
+to CIR (no external consumers). The rms-delay-spread test stays ignored with a
+re-scoped note (far-tap robustness is separate remaining work).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(changelog): reflect cog producer, cross-language test, Windows fixes
+
+Update the Unreleased entry: calibration service is now complete across both
+model paths (transformer .npz + cog safetensors via cog_calibrate.py) with
+cross-language Python-&gt;Rust integration test; add the Windows cross-platform
+build fixes (worldmodel cfg(unix), bfld CRLF) — 2682 workspace tests green/0
+fail on Windows.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- test(cog-pose): cross-language adapter integration (Python producer -&gt; Rust engine)
+
+Closes the last verification gap in the calibration feature: previously the
+Python producer and Rust consumer were proven compatible only by format
+matching. Now a real ~11KB adapter fitted by cog_calibrate.py on the in-repo
+pose_v1.safetensors is committed as a fixture, and a Rust test loads it via
+the engine and asserts is_calibrated() + that it changes inference output.
+The full Python-&gt;Rust calibration contract is verified with a real artifact.
+7/7 cog-pose tests pass.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- feat(calibration): cog adapter producer — completes the cog --adapter feature
+
+I&#39;d shipped the Rust cog-pose --adapter *consumer* (+test) but there was no
+*producer* for cog-format adapters, leaving it a half-feature. cog_calibrate.py
+fits a rank-r LoRA on the cog conv+MLP head (pose_v1.safetensors, 56x20) from a
+labeled in-room capture and writes a safetensors with fc1.a/fc1.b/fc2.a/fc2.b
+(scale baked into b) — exactly what the Rust engine loads. Verified against the
+in-repo pose_v1.safetensors: correct keys/shapes, reduces fit error, active
+adapter, ~2.6KB. Adds test_cog_calibration.py (passes) + README documenting the
+two non-interchangeable producers (transformer .npz vs cog safetensors).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(cog-pose): correct misleading adapter cross-reference
+
+The --adapter docs claimed the adapter is produced by
+aether-arena/calibration/calibrate.py, but that reference tool targets the
+MM-Fi *transformer* model and emits .npz with proj/head LoRA keys, while
+this cog runs a *conv+MLP* model expecting safetensors with fc1.a/fc1.b/
+fc2.a/fc2.b. Same LoRA mechanism, different model -&gt; adapters are
+model-specific and NOT interchangeable. Clarify the expected key layout and
+that the Python tool is a mechanism reference, not a drop-in producer.
+6/6 tests pass.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- test(calibration): self-contained end-to-end regression test
+
+The committed calibration service (model.py/calibrate.py/infer.py) had no
+automated test — only ad-hoc verification. Adds a CPU-only, no-real-checkpoint
+test that exercises the CLI end-to-end on synthetic data: build base -&gt;
+calibrate.py fits adapter -&gt; infer.py runs base+adapter, asserting adapter
+size (&lt;200KB), keypoint shape [N,17,2], finiteness, [0,1] range, and that the
+adapter actually changes the output. Passes on Windows CPU (torch 2.11).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix(bfld): make README quickstart test robust to CRLF line endings
+
+readme_quickstart_uses_canonical_public_api checked a multi-line needle
+&#39;pipeline\n    .process&#39; against the include_str! README. On a CRLF
+checkout (Windows / core.autocrlf) the content is &#39;pipeline\r\n    .process&#39;,
+so the LF needle never matched and the test failed deterministically (only
+surfaced once the worldmodel fix let cargo test --workspace run on Windows;
+the test is #[cfg(feature=std)]-gated, enabled via workspace feature
+unification). Normalize CRLF-&gt;LF before the check. Full workspace now green
+3/3 runs on Windows.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix(worldmodel): compile on non-unix targets (Windows workspace build)
+
+bridge.rs imported tokio::net::UnixStream unconditionally, so the whole
+workspace failed to build on Windows (E0432) — blocking cargo test
+--workspace and the pre-merge gate there. The OccWorld Unix-socket bridge
+is a Linux-appliance feature (Python inference server on the GPU host), so
+gate it #[cfg(unix)] and add a #[cfg(not(unix))] send_recv that fails fast
+with a clear &#39;unsupported on this target&#39; Protocol error. Workspace now
+builds on Windows; worldmodel 12 tests pass.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(study): sharpest finding — the encoder barely matters for CSI pose
+
+Random frozen encoder + trained head matches a fully-trained encoder to
+within 2-4pts (cross-subject &lt;2pts). WiFi-CSI sensing is largely a
+random-features + target-readout problem: barely a learned representation
+to transfer, which unifies the zero-shot collapse, no-transfer results,
+foundation-encoder failure, and why per-room calibration works. Practical:
+invest in readout + calibration, not encoder pretraining.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(study): cross-dataset confirmed on harder NTU-Fi-HumanID task
+
+Re-ran transfer on 14-class person-ID (harder than 6-activity HAR): same
+null-transfer result (MM-Fi pretrain 91.7% = random 92.8%). Unified root
+cause: CSI in-domain classification lives in the target-trained readout
+(random projection already separable); learned reps don&#39;t transfer across
+subjects/rooms/datasets. WiFi-CSI is distribution-locked. Addresses the
+&#39;HAR too easy&#39; caveat.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(study): cross-dataset transfer tested (MM-Fi -&gt; NTU-Fi, honest negative)
+
+Tested the cross-dataset frontier: MM-Fi-trained CSI representation does NOT
+transfer beneficially to NTU-Fi HAR (frozen probe 91.5% = random features
+93%; full fine-tune 75% &lt; probe). CSI reps are distribution-locked, same
+root cause as within-MM-Fi cross-subject/-env collapse. Caveat: NTU-Fi 6
+coarse activities are an easy target (random-&gt;93%). Updates the study&#39;s
+cross-dataset limitation from &#39;untested&#39; to this measured result.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs: complete MM-Fi WiFi-sensing study (pose + action, the honest picture)
+
+Consolidates the full campaign into one committed, citable artifact (the
+detailed log was in a gitignored staging report): pose SOTA 83.6% + 20KB
+int4 edge model; action recognition 88% (a WiFi task MM-Fi never
+benchmarked); the generalization story (zero-shot collapse, few-shot
+calibration rescue, task-general across pose+action); all honest negatives
+(CORAL/DANN/instance-norm/SupCon/distillation/subject-scaling); the 11KB
+calibration-adapter deployment recipe; honest limitations (cross-dataset
+untested, ARM latency pending).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(adr-150): calibration thesis is task-general (action recognition)
+
+Verified on a 2nd MM-Fi task: 27-class action recognition (which MM-Fi
+never benchmarked for WiFi; only published baseline WiDistill 34%). In-domain
+88% (leaky); cross-subject zero-shot collapses to ~10%; few-shot calibration
+rescues 10-&gt;76% (1000 samples). Same mechanism as pose -&gt; few-shot in-room
+calibration is the universal WiFi-sensing generalization answer, not a pose
+quirk.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(changelog): WiFi-CSI efficiency frontier + per-room calibration service
+
+Document the beyond-SOTA efficiency frontier (75K params beats SOTA, int4
+edge model 20KB@74%), few-shot calibration resolving generalization
+(cross-env 10-&gt;73%), and the calibration service (Python ref + Rust
+cog-pose --adapter integration).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- feat(cog-pose): --adapter CLI flag for per-room calibration
+
+Completes the end-to-end product path: cog-pose-estimation run --config
+&lt;cfg&gt; --adapter &lt;room.safetensors&gt; loads the shared base + a per-room LoRA
+adapter for calibrated inference. Adds InferenceEngine::with_adapter()
+(default weights + adapter) and logs when a calibration adapter is active.
+6/6 tests pass.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- feat(cog-pose): per-room LoRA calibration adapter in the Rust inference path
+
+Ports the calibration mechanism (ADR-150 §3.5-3.6, reference impl in
+aether-arena/calibration/) into the real product pose engine. The Candle
+InferenceEngine now loads an optional per-room adapter safetensors and
+applies low-rank deltas (y + (x.A).B) on the fc1/fc2 head at inference.
+Architecture-agnostic LoRA; base behaviour unchanged when no adapter.
+New API: with_weights_and_adapter(), is_calibrated(). Tested: adapter
+detection + output-change integration test (6/6 pass).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- feat(calibration): RuView per-room calibration service (reference impl)
+
+Operationalizes the campaign&#39;s central finding (ADR-150 §3.3-3.6): a frozen
+shared base + a ~11KB per-room LoRA adapter from ~100-200 labeled samples
+recovers SOTA-level pose in any new room/person. Verified end-to-end:
+source-only base zero-shot 3.09% on unseen room -&gt; 74.29% after 200-sample
+calibration. Files: model.py (PoseNet+LoRA), calibrate.py, infer.py, README
+with measured calibration budget.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(adr-150): cross-env few-shot — no unsolved deployment case
+
+Decisive capstone: cross-environment (unseen room+people) zero-shot
+10.6%, but 5 calibration samples/person -&gt; 60%, 200 -&gt; 73%. The hard
+frontier is calibration-soluble, MORE dramatically than cross-subject
+(+62.5 vs +12 at K=200). The unsolved-frontier framing was a zero-shot
+artifact. Reframes generalization: ship few-shot calibration, not
+zero-shot invariance. Recommend accepting ADR-150 re-scoped around the
+calibration mechanism.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(adr-150): LoRA calibration data requirement — completes calibration spec
+
+11KB adapter needs ~100-200 labeled samples/room for ~72% (knee ~50-&gt;70%);
+below ~20 it hurts. Evidence-complete calibration-service spec: base +
+~100-200 samples -&gt; 11KB LoRA -&gt; ~72% cross-subject. Encoder goal now
+precisely posed: cut the sample requirement / lift the per-budget ceiling.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(adr-150): deployable adapter calibration — 11KB LoRA = calibration service
+
+Compared per-room calibration methods at K=200: LoRA rank-8 recovers
+63.6-&gt;72.5% (SOTA-level) with just 11K params (~11KB), 0.5% the model
+size. Validates the ship-base-once + tiny-per-room-adapter mechanism for
+the RuView calibration service. Accuracy/size knob documented.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(adr-150): few-shot adaptation resolves the cross-subject frontier
+
+Decisive result: 50 labeled frames/subject of in-room calibration -&gt;
+72.2% (reaches SOTA), 200 -&gt; 76.1%, 1000 -&gt; 78.3%. Few-shot target
+adaptation dominates source volume (+24 subjects bought +6pt; 200 target
+frames bought +12.4pt). Re-scopes the deployment story: ship a ~30s on-site
+calibration, not a mass corpus. Foundation encoder&#39;s role shifts to making
+that calibration cheaper. Supersedes the earlier data-bound pessimism.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(adr-150): subject-scaling study — capture diversity, not volume
+
+Measured cross-subject PCK vs N training subjects: 4-&gt;8 = +21pts, but
+24-&gt;32 = +0.45pt. Saturates ~64%, ~19pt below in-domain. Correction to
+&#39;more data&#39;: subject-count returns vanish past ~16-20; the residual is
+device/room/protocol shift. Re-scope phase-1 capture around DIVERSITY
+(rooms/devices/protocols) + few-shot target adaptation, not headcount.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- bench: ship int4 edge artifact + CPU latency
+
+Published deployable int4-QAT micro (verified 74.08%, ~20KB) at
+ruvnet/wifi-densepose-mmfi-pose/edge. Runs 0.135ms single-thread x86 CPU
+(no GPU) - real-time pose without an accelerator. ARM on-device validation
+pending fleet availability.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- bench: deployed quantized accuracy + QAT for micro edge model
+
+int8 PTQ lossless (74.70%, 73.5KB); int4 naive PTQ drops below SOTA
+(70.21%) but QAT recovers to 74.46% (36.7KB) - still beats MultiFormer.
+A SOTA-beating WiFi-pose model genuinely runs in ~37KB int4 (QAT) /
+73KB int8. Distillation negative noted.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- bench: add quantized footprint — SOTA-beating WiFi pose in 37KB int4
+
+micro (74.87%, beats MultiFormer 72.25%) = 36.7KB int4 / 73.5KB int8;
+nano (~72%) = 19.5KB int4. Distillation tested, no gain (direct training
+wins). A SOTA-beating pose model fits on the sensing node itself.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- bench: WiFi-CSI pose efficiency frontier — 75K-param model beats SOTA
+
+Swept model size on MM-Fi random_split: every config from micro (75,237
+params, 0.22ms, 74.30%) up beats MultiFormer (72.25%); nano (40K, 0.13ms)
+within 0.5pt. Pareto-dominant (smaller AND more accurate than prior SOTA).
+Orthogonal to the data-bound accuracy frontier (ADR-150).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(adr-150): empirical cross-subject findings — pose-contrastive pretrain refuted
+
+Measured all near-term levers on the official MM-Fi cross-subject split:
+- mixup+TTA+ensemble = best at 64.92% (+0.9 over doc 64.04)
+- pose-contrastive foundation pretrain: estimated +5..+12, MEASURED -2.3
+  (SupCon loss pinned at ln(B) across K/BS/seeds -&gt; same-pose CSI is not
+  contrastively alignable across subjects)
+- instance-norm+SpecAugment -4.6; CORAL/DANN ~0
+
+Conclusion: the 18-pt in-domain&lt;-&gt;cross-subject gap is fundamental subject
+shift, not algorithmic. Promotes multi-subject data collection to the primary
+lever; recommends re-scoping ADR-150 phase 1 around capture.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(readme): honest re-benchmark of ESP32 presence model (retract single-class 100%)
+
+v1 &#39;100% presence accuracy&#39; was on a single-class overnight recording
+(6062/6063 &#39;present&#39;). Replaced with v2 encoder&#39;s honest label-free
+held-out temporal-triplet accuracy (66.4% raw -&gt; 82.3% trained).
+Models published to HF; tracking ruvnet/RuView#882.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- bench: HOMECORE vs Home Assistant — measured perf + capability matrix
+
+Head-to-head on the wire-compatible HA API surface:
+- Cold start 0.55s vs 9.7s (18x), idle RSS 10.1MB vs 359MB (35x),
+  binary 4.7MB vs 610MB image (130x), throughput 1599 vs 716 rps.
+- Honest caveats: latency endpoints differ (auth /api/states vs
+  unauth /manifest.json); HA wins integration breadth + UI maturity.
+- Repro harnesses in aether-arena/staging/.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(readme): link SOTA MM-Fi pose model (82.69% torso-PCK@20) on HF
+
+Published ruvnet/wifi-densepose-mmfi-pose — beats MultiFormer (72.25%)
+and CSI2Pose (68.41%) on matched MM-Fi random_split torso-PCK@20.
+Tracking: ruvnet/RuView#880
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- publish: best MM-Fi benchmark set (in-domain 83.59, x-subject 64.0, x-env 17.5 CORAL)
+
+Append best witness rows to ledger (seq 2-4) + update HF Space leaderboard banner.
+In-domain 83.59% torso-PCK@20 (graph+ensemble+TTA) supersedes the 81.63 single-model entry,
++11.34 over MultiFormer 72.25. Cross-subject 64.04% (official split). Cross-environment 17.51%
+(CORAL domain alignment, the cross-room DG win). Gist + issue #876 updated with frontier map.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- reframe(aether-arena): vendor-neutral industry benchmark, RuView is one entrant
+
+- feat(aether-arena): publish RuView MM-Fi SOTA result + ADR-150 RF Foundation Encoder
+
+- Ledger witness row (seq 1, Gold): RuView CSI-Transformer 81.63% torso-PCK@20 on
+  MM-Fi random_split, exceeding MultiFormer 72.25% (CSI2Pose 68.41%) — protocol- and
+  metric-matched, self-corrected from inflated 91.86% bbox. Hash-chained, verifiable.
+- HF Space updated with the controlled SOTA claim + caveat (cross-subject is the frontier).
+- Proof/replay/witness gist: gist.github.com/ruvnet/af2fbc1c7674dddf09c15509b3c7f785
+- Tracking issue #876 (result + Generalization Track roadmap).
+- ADR-150: RuView RF Foundation Encoder — pose-preserving, subject/room/device-invariant
+  SSL embedding (masked CSI + pose-contrast-across-subjects + coherence head); the
+  principled attack on the cross-subject frontier. DANN failed; this is the corrected design.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- feat(swarm): ADR-149 evaluation harness — GDOP, IQM+bootstrap CI, noise sweep (#875)
+
+Stage-1 kinematic evaluator per ADR-149 (peer-reviewed). Pure Rust, no new deps.
+
+evals/:
+- gdop.rs: 2D Geometric Dilution of Precision ((HᵀH)⁻¹ trace-sqrt); None for
+  &lt;2 observers or collinear/singular geometry
+- stats.rs: IQM (Agarwal 2021) + 95% stratified-bootstrap CI (deterministic LCG)
+  + probability_of_improvement
+- metrics.rs: EpisodeMetrics + AggregateMetrics::from_strata (IQM±CI, seed-stratified)
+- runner.rs: seeded kinematic rollout (FlightPattern-driven), seed×episode matrix,
+  3σ×3κ default noise sweep (Gaussian amplitude × von Mises phase)
+- report.rs + eval_swarm bin: generates evals/RESULTS.md leaderboard
+
+RESULTS.md surfaces the real coverage-vs-localization-precision trade-off via GDOP:
+partitioned wins coverage (100%) but single-drone sightings (GDOP 0 → 7.0m);
+pheromone gets multistatic fusion (GDOP 1.6 → 4.1m). Wi2SAR 5m paper-baseline row included.
+
+Stage-2 (Gazebo/PX4 SITL false-alarm + collision on median seeds) is documented follow-on.
+
+Tests: 116 default / 133 full+train (+13 eval tests), 0 failed. Clippy clean (-D warnings).
+
+- docs(aether-arena): v0 infrastructure complete — Space live, harness gate passing (M8)
+
+- fix(aether-arena): move HF Space to gradio 5.9.1 (4.44.1 jinja2 cache bug)
+
+- fix(aether-arena): Space launch on 0.0.0.0:7860
+
+- fix(aether-arena): pin huggingface_hub 0.25.2 for gradio 4.44.1 Space
+
+- fix(aether-arena): pin HF Space to python 3.12 (gradio pydub pyaudioop 3.13 removal)
+
+- docs(aether-arena): mark M6 HF Space deployed
+
+- feat(aether-arena): HF Space (Gradio) v0 — deployed to ruvnet/aether-arena (M6)
+
+Public face of the benchmark: empty-board leaderboard from the witness ledger,
+chain-integrity display, submit/verify/about tabs. Presentation layer per ADR-149
+§2.2 (heavy scoring stays in the pinned RuView harness / CI).
+Live: https://huggingface.co/spaces/ruvnet/aether-arena
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- feat(aether-arena): benchmark-first scorer + witness chain + repeatability (M2/M5/M7)
+
+Per direction &#34;remove the initial number, optimize for benchmark first&#34; + &#34;include
+witness chain capabilities for proof and repeatability analysis&#34;:
+
+- Empty board, no seeded numbers: ledger seeds to genesis only. Every result is a
+  real scoring-pipeline witness; RuView gets no hand-entered baseline.
+- Real model scoring: aa_score_runner now loads predictions + an eval split
+  (--split/--pred) and scores them through the real ruview_metrics pose harness —
+  not just a synthetic fixture. Committed public smoke split (fixtures/smoke_*.json).
+- Witness chain: each score emits a witness = inputs_sha256 (binds it to the exact
+  inputs) + proof_sha256 (cross-platform-stable score hash) + harness_version.
+- Repeatability analysis: --repeat N runs the harness N× and fails if it ever
+  yields &gt;=2 distinct proof hashes (16/16 identical locally).
+- Witness ledger: ledger/ledger_tools.py — append-only, hash-chained, tamper-
+  evident (seed/append/verify); editing any past row breaks the chain.
+- CI gate extended: determinism + repeatability(16) + real-scoring smoke + ledger
+  chain verify on every PR.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- feat(aether-arena): ADR-149 spatial-intelligence benchmark — scorer + CI harness gate (M1-M4)
+
+AetherArena (&#34;AA&#34;) — the official, project-agnostic Spatial-Intelligence Benchmark
+(ADR-149, Accepted). Iteration 1 of the long-horizon build:
+
+- ADR-149 accepted: name locked (ruvnet/aether-arena), v0 metrics locked
+  (pose/presence/latency/determinism), dataset legality resolved (MM-Fi CC BY-NC
+  only; Wi-Pose excluded). Adds four-part framing, threat model, arena_score
+  formula, submission state machine, neutrality/governance, and the §7 acceptance test.
+- aa_score_runner: deterministic scorer bin reusing the real ruview_metrics pose
+  harness on a fixed seed=42 fixture → RuViewTier-style verdict + cross-platform
+  SHA-256 proof hash. Builds --no-default-features (no torch/GPU). VERDICT: PASS.
+- CI harness gate: .github/workflows/aether-arena-harness.yml runs the scorer on
+  every PR — the &#34;PR that runs the harness as part of the build&#34; requirement.
+- Scaffold: aether-arena/{README,VERIFY,STATUS}.md + schema/aa-submission.toml.
+- Horizon record persisted (.claude-flow/horizons/aether-arena-aa.json).
+
+Infra = the deliverable; model SOTA (MM-Fi PCK@20) is a separate effort blocked on
+ADR-079 data collection, tracked as a stretch goal, not an infra exit.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- feat(swarm): add ruview-swarm crate — drone swarm control system (ADR-148) (#862)
+
+* feat(swarm): add wifi-densepose-swarm crate implementing ADR-148 drone swarm control system
+
+New crate `wifi-densepose-swarm` with hierarchical-mesh swarm topology,
+Raft consensus, MAPPO MARL, CSI sensing integration, and ITAR-gated
+coordination features. Closes 3 of 7 milestones (M1, M2, M5) with 5/5
+ADR-148 SOTA performance targets met.
+
+## Modules (45 source files, 14 modules)
+
+- types: NodeId, DroneState, Position3D, SwarmTask, SwarmError, FailSafeState
+- topology: Raft consensus (leader election, log replication, quorum), Gossip, Mesh
+- formation: VirtualStructure, LeaderFollower, Reynolds flocking (itar-gated)
+- planning: RRT-APF hybrid planner, 3-phase coverage, Bayesian grid, pheromone
+- allocation: Auction + FNN bid scorer (itar-gated)
+- sensing: CsiPayloadPipeline (Live/Synthetic/Replay), MultiViewFusion, OccWorldBridge
+- marl: MAPPO actor (3-layer MLP), LocalObservation (64-dim), RewardCalculator, PPO loop
+- security: MAVLink v2 HMAC-SHA256, UWB anti-spoofing, geofence, Remote ID, FHSS
+- failsafe: 10-state onboard machine, GCS-independent safety transitions
+- config: TOML SwarmConfig with SAR/inspection/agriculture/mine/demo/wi2sar_reference
+- demo: SyntheticCsiGenerator, DemoScenario (SAR/open-field/mine)
+- integration: FlightController trait, MAVLink dialect (50000-50005), SwarmSim
+- orchestrator: SwarmOrchestrator wiring all subsystems end-to-end
+- bench_support: Criterion fixture generators
+
+## ITAR compliance
+
+Swarming coordination features gated behind `itar-unrestricted` feature
+per USML Category VIII(h)(12). Default build compiles clean stubs.
+
+## Benchmark results (criterion, release mode)
+
+- MARL actor inference: 3.3 µs (target ≤ 5 ms — 1,516× headroom)
+- RRT-APF planning (100 iter): 0.043 ms (target &lt; 300 ms — 6,946× headroom)
+- MultiView CSI fusion (3 UAVs): 58.5 ns (target &lt; 10 ms — 171,000× headroom)
+- 3-view localization: 1.732 m (target ≤ 2 m — beats Wi2SAR SOTA)
+- 4-drone SAR coverage (400×400 m): 223 s (target ≤ 240 s — PASS)
+
+## Tests
+
+- --no-default-features: 73/73 passing
+- --features itar-unrestricted: 85/85 passing
+
+Closes #861
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+* refactor(swarm): rename wifi-densepose-swarm → ruview-swarm
+
+The swarm control system is a RuView-level capability (drone coordination,
+Raft consensus, MARL) that operates above the wifi-densepose sensing layer
+rather than being a sub-component of it. Rename aligns with the project
+identity and separates coordination infrastructure from sensing modules.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+* fix(swarm): resolve all clippy warnings + add MARL convergence test
+
+- planning/probability_grid: map_or(true,…) → is_none_or (clippy::unnecessary_map_or)
+- planning/pheromone: &amp;mut Vec&lt;T&gt; → &amp;mut [T] on evaporate+deposit (clippy::ptr_arg)
+- marl/observation: fix doc lazy-continuation warning on TOTAL line
+- marl/trainer: manual Default impl → #[derive(Default)] + #[default] on Demo variant
+
+Also adds test_marl_convergence_improves_mean_return: fills 64-transition
+ReplayBuffer with mixed rewards (steps 0-31: negative, 32-63: positive),
+runs ppo_update, asserts mean_return is finite and non-zero.
+
+Result: 0 clippy warnings · 74/74 tests (default) · 86/86 (itar-unrestricted)
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+* feat(swarm): integrate Ruflo AI-agent capabilities into ruview-swarm
+
+Adds a feature-gated Ruflo integration layer connecting ruview-swarm to the
+claude-flow daemon&#39;s AgentDB, AIDefence, and SONA intelligence subsystems.
+Default build is unaffected (all paths behind `Option&lt;Box&lt;dyn RufloBackend&gt;&gt;`).
+
+## New module: src/ruflo/
+
+- backend.rs: RufloBackend trait (9 async methods) + RufloError, MissionMemoryEntry,
+  PatternEntry, MavlinkScanResult types (always compiled)
+- mock_backend.rs: MockRufloBackend in-memory impl for testing (always compiled, 5 tests)
+- http_backend.rs: HttpRufloBackend — JSON-RPC 2.0 → claude-flow daemon localhost:3000
+  (gated behind `ruflo` feature, requires reqwest)
+- mission_summary.rs: MissionSummary serializer with pattern description + confidence
+  scoring from victim recall, coverage %, collision penalty (always compiled, 3 tests)
+
+## 4 capability areas
+
+1. MissionMemory   → memory_store / memory_search       (cross-mission victim memory)
+2. PatternLearner  → agentdb_pattern-store / -search     (HNSW SONA trajectory patterns)
+3. MavlinkDefence  → aidefence_is_safe / aidefence_scan  (scan MAVLink before accepting)
+4. IntelligenceHooks → trajectory-start/step/end          (SONA learning loop)
+
+## SwarmOrchestrator integration
+
+- with_ruflo(backend): builder to attach a backend
+- start_trajectory(task) / finish_trajectory(success, key): SONA mission lifecycle
+- receive_peer_detection_checked(): AIDefence scan before accepting peer detections
+
+## Cargo feature
+
+`ruflo = [&#34;dep:reqwest&#34;, &#34;dep:serde_json&#34;]` — optional, not in default
+
+## Tests
+
+- --no-default-features: 82/82 pass (8 new ruflo tests)
+- --features ruflo,itar-unrestricted: 94/94 pass
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+* feat(swarm): M7 mission profiles with victim confirmation reports + pre-merge docs
+
+Adds end-to-end mission runners producing structured MissionReport output,
+and updates project docs (CHANGELOG, README, CLAUDE.md) per pre-merge checklist.
+
+## M7 Mission Profiles (integration/mission_report.rs + swarm_sim.rs)
+
+- MissionReport / VictimReport / SotaComparison types (serde-serializable)
+- run_mission_with_report(): full mission → detailed report with per-victim
+  localization error, fusion uncertainty, contributing drones, detection time
+- run_inspection_mission(): leader-follower power-line corridor inspection
+- run_mine_mission(): GPS-denied underground (2-drone, slow, UWB-only)
+- SotaComparison embeds Wi2SAR baseline (5m / 810s) vs achieved metrics
+
+## Docs (pre-merge checklist)
+
+- CHANGELOG.md: ruview-swarm + Ruflo integration + performance entries
+- README.md: ruview-swarm row
+- CLAUDE.md: Key Rust Crates table row + ADR-148 in ADR list
+
+## Tests
+- --no-default-features: 86/86 pass
+- --features ruflo,itar-unrestricted: 98/98 pass
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+* fix(swarm): convergence-assist for victim fusion + 5s Ruflo HTTP timeout
+
+Follow-up to 13b08927 which committed an intermediate M7 state with one
+failing test. This lands the M7 agent&#39;s convergence fixes and the security
+review&#39;s timeout hardening.
+
+## Fixes
+- swarm_sim.rs: min-separation nudge before collision metric (0 collisions
+  with staggered starts) + Phase-3 convergence assist that vectors the nearest
+  idle peer toward a single-drone CSI contact so multi-view fusion can fire
+- http_backend.rs: add 5s request timeout to reqwest client (security review
+  Medium finding — a dead daemon would otherwise hang the swarm step loop)
+
+## Security review verdict (HttpRufloBackend)
+Safe to merge. No credentials in requests, serde_json prevents injection,
+fail-open on daemon-down is documented and appropriate for SAR missions,
+MAVLink passed as structured text (not raw bytes). Timeout fix applied.
+
+## Tests
+- --no-default-features: 87/87 pass
+- --features ruflo,itar-unrestricted: 100/100 pass
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+* perf(swarm): add PPO training-throughput benchmark + fix bench crate-name imports
+
+- bench_ppo_update: PPO update over 64-transition buffer — 244 µs median
+- fix: bench imports referenced stale `wifi_densepose_swarm` (pre-rename),
+  corrected to `ruview_swarm` so the bench target compiles
+
+M6 benchmark suite now 5/5 compiling and running. Tests unchanged: 87/100.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+* feat(swarm): real Candle autodiff PPO + A-MAPPO role attention + GPU training (M4)
+
+Replaces the finite-difference PPO placeholder with a real GPU-capable Candle
+0.9 autodiff trainer, adds A-MAPPO heterogeneous-role attention, a runnable
+training binary, and right-sized GCP/local launch scripts. This is the unlock
+that makes &#34;GPU long training cycles&#34; actually mean something — the previous
+ppo_update did no gradient descent.
+
+## Real autodiff PPO (feature `train`, optional `cuda`)
+- candle_ppo.rs: CandleActorCritic (64→128→64 MLP + action/value heads +
+  learnable log_std), CandlePpoConfig, CandleTrainer with GAE and a genuine
+  optimizer.backward_step over the network. select_device() picks CUDA when
+  built --features cuda and a GPU is present, else CPU.
+- Verified: 5-episode CPU smoke run shows value_loss 12643→12375 (critic
+  actually learning); safetensors checkpoint saved. Placeholder never moved weights.
+
+## A-MAPPO heterogeneous-role attention (role_attention.rs, always compiled)
+Addresses the four sensor-vs-relay edge cases:
+- relay attention floor (prevents collapse — relays produce no CSI)
+- role-segmented sensor/relay attention pools (variable neighbor cardinality)
+- sensor-gated triangulation-geometry penalty (protects 3-view fusion baseline,
+  ADR-148 §4.2 — relays not dragged into triangulation geometry)
+- one-hot role embeddings for keys
+
+## Training binary
+- src/bin/train_marl.rs (required-features=[&#34;train&#34;], excluded from default build)
+- CLI: --episodes --drones --profile --steps --checkpoint-dir --checkpoint-every
+- Wires CandleTrainer to the SwarmOrchestrator rollout loop; GAE + PPO update
+  per episode; periodic safetensors checkpoints
+
+## Right-sized launch (scripts/gcp/)
+- provision_marl.sh: g2-standard-16 (1× L4, 16 vCPU, ~$1.40/hr) — NOT the
+  $29/hr A100×8 box. MARL is rollout-bound not matmul-bound; ~21× cheaper.
+- run_marl_train.sh: GCP rsync + train + checkpoint pull
+- run_marl_train_local.sh: local RTX 5080, $0
+- A100×8 provision_training.sh left for OccWorld (which saturates the GPUs)
+
+## Tests
+- --no-default-features: 91/91 (87 + 4 role_attention)
+- --features train: 96/96 (+ 5 candle_ppo, incl. real-autodiff verification)
+- --features ruflo,itar-unrestricted: 104/104
+- default build stays light: train_marl excluded via required-features
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+* docs(adr-148): mark M4 complete — real GPU autodiff training; overall 98%
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+* feat(swarm): training visualizer — JSONL telemetry + self-contained HTML viewer
+
+Adds an offline, dependency-free visualization for the drone training system:
+a top-down swarm replay synced with training-metric curves, fed by a JSONL
+telemetry log the trainer emits. No server, no build step, no CDN.
+
+## Telemetry recorder (integration/telemetry.rs, always compiled, no new deps)
+- TelemetryRecorder writes newline-delimited JSON: one `meta` (profile, area,
+  ground-truth victims), many `step` (per-tick drone x/y/heading/battery/detection
+  + coverage%), and per-episode `episode` (mean_return, policy_loss, value_loss).
+- Written by hand (no serde_json) so it stays in the default build; 2 tests.
+
+## train_marl telemetry flags
+- `--telemetry FILE` writes the log; `--telemetry-episode N` selects which
+  episode&#39;s spatial steps to record (metrics recorded for all episodes).
+
+## Visualizer (viz/swarm_viz.html — single file, vanilla JS + canvas)
+- LEFT: top-down replay — heading-oriented drone triangles (cyan/lime on
+  detection), victim markers, growing coverage heatmap, detection pulse rings,
+  play/pause/scrub/speed controls + live coverage/detection readout.
+- RIGHT: three autoscaled line charts (mean return, policy loss, value loss)
+  over episodes, hand-drawn (no chart library).
+- Loads via file picker/drag-drop or auto-fetches the bundled sample; dark
+  drone-ops theme; graceful degradation on file:// CORS.
+- viz/sample_telemetry.jsonl: real 30-episode / 4-drone / 400×400 m run
+  (value_loss 20052→7154 — visible critic learning). Parses 1 meta / 60 step / 30 episode.
+
+## Usage
+  cargo run --release -p ruview-swarm --features train,cuda --bin train_marl -- \
+      --episodes 5000 --telemetry run.jsonl
+  open v2/crates/ruview-swarm/viz/swarm_viz.html  # load run.jsonl
+
+Tests unchanged (91 default / 96 train / 104 ruflo+itar); telemetry adds 2.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+* feat(swarm): selectable flight + self-learning patterns, wired into training + viz
+
+Adds multiple flight/coverage-optimization strategies and self-learning
+strategies, selectable from the trainer, and fixes drone clustering — the
+demo sweep now covers 36% of the area (was ~0.9%) with 4 disjoint strips.
+
+## Flight patterns (planning/patterns.rs) — `FlightPattern`
+- PartitionedLawnmower (new default): area split into per-drone strips → no
+  overlap, coverage scales ~linearly with swarm size (clustering fix)
+- Boustrophedon (baseline), Spiral, Pheromone (stigmergic), PotentialField,
+  LevyFlight. from_str/name/all + next_target(&amp;PatternContext).
+
+## Self-learning patterns (marl/learning.rs) — `LearningPattern`
+- Mappo (CTDE centralized critic), Ippo (independent, jamming-robust),
+  MappoCuriosity (count-based intrinsic novelty), MetaRl (MAML fast-adapt).
+- CuriosityModule (visit_bonus = beta/sqrt(count), novelty decays on revisit),
+  MetaAdapter (base + fast-weights, reset_fast/consolidate), shaped_reward().
+
+## Trainer wiring (bin/train_marl.rs)
+- --flight-pattern {boustrophedon|partitioned|spiral|pheromone|potential|levy}
+- --learn-pattern  {mappo|ippo|curiosity|meta}
+- Rollout now moves each drone per the selected FlightPattern (PatternContext
+  with visited trail + live peers), curiosity-shapes the reward, and logs
+  CTDE vs independent. Telemetry meta profile carries the pattern labels so the
+  viewer header shows `flight=… · learn=…`.
+
+## Verification
+- Browser pass (viz at localhost:8777): partitioned run renders 4 distinct
+  serpentine coverage bands, header shows the patterns, final coverage 36.3%,
+  scrubber/speed/playback work, ZERO console errors. Screenshot confirmed.
+- Regenerated viz/sample_telemetry.jsonl: 1 meta / 120 step / 30 episode,
+  coverage 0.9% → 36.3%.
+
+## Tests
+- --no-default-features: 103/103 (was 91; +6 patterns +6 learning)
+- --features train: 108/108
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+* feat(swarm): add flight-pattern telemetry presets for the visualizer
+
+5 loadable presets (verified browser-distinct, physics-ordered coverage):
+pheromone ~44% &gt; potential ~40% &gt; partitioned 36% &gt; spiral ~13% &gt; levy ~5%.
+Load any in viz/swarm_viz.html to compare flight strategies without retraining.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+* chore(swarm): clippy-clean + publish guard for ruview-swarm
+
+- ruview-swarm src is now 0 clippy warnings across default/train/full feature
+  sets (derive Default, targeted allows for intentional from_str + bounded
+  casts + borrow-required index loops; removed redundant unsigned .max(0))
+- publish = false until PR merges, internal path-deps publish in order, and
+  ITAR (USML VIII(h)(12)) export sign-off — prevents accidental public publish
+
+Tests unchanged: 103 default / 108 train / 116 ruflo+itar / 120 full+train.
+(6 remaining clippy warnings are pre-existing in dependency wifi-densepose-core,
+ out of scope for this crate.)
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+* ci(swarm): add ruview-swarm CI guard
+
+Path-scoped guard for v2/crates/ruview-swarm/** (ADR-148). Complements the
+main ci.yml (which only runs the default workspace tests):
+- feature-matrix tests: default / train / ruflo+itar / full+train
+- clippy -D warnings --no-deps (crate-own code only; dep warnings don&#39;t gate)
+- train_marl bin builds under &#39;train&#39; AND is excluded from the default build
+- ITAR/publish guards: publish=false present, itar-unrestricted never in default
+
+All steps verified locally green before commit.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;</div>
+</div>
+
+<a href="../project/ruvnet_RuView.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,1754 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (73 commits) - simstudioai/sim - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (73 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/simstudioai_sim.html">simstudioai/sim</a> /
+    Updates in main (73 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/simstudioai_sim.html">simstudioai/sim</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-06 01:18 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/simstudioai/sim/commits/main" target="_blank">https://github.com/simstudioai/sim/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление значительно улучшает управление таблицами, внедряя дробные ключи порядка для ускорения операций с строками и фоновый импорт CSV с отображением прогресса. Оно существенно расширяет интеграционные возможности, добавляя 18 новых коннекторов к базам знаний, новых поставщиков моделей (Together AI, Baseten, Ollama Cloud) и улучшенную интеграцию с ClickHouse с усиленной безопасностью. Ключевые функции надежности и безопасности включают комплексную защиту от SSRF и XSS, уникальные идентификаторы служб OTel для точных метрик, оптимизированное хранение стенограмм чатов и улучшенное журналирование ошибок по всей платформе.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- v0.6.103: readme updates, tables lifecycle improvements, new connectors, clickhouse integration
+
+- fix(clickhouse): harden read-only query enforcement and centralize WHERE-clause validation (#4895)
+
+* fix(clickhouse): centralize WHERE-clause validation in input-validation and harden tautology detection
+
+* fix(clickhouse): enforce server-side readonly=1 on the query operation
+
+* fix(clickhouse): allow BETWEEN bounds in WHERE validation (OR-only literal rule) and dedupe JSDoc
+
+- feat(tables): fractional order keys for O(log n) row insert/delete (flag-gated, default off) (#4890)
+
+* feat(tables): add order_key column, fractional-indexing util, and ordering flag (off)
+
+* feat(tables): write order_key on insert, flag-gate delete reindex + query ordering, add backfill
+
+Flag off (default) = identical behavior. Single-insert assigns a fractional
+order_key; queryRows orders by order_key when the flag is on; deletes skip the
+O(N) reindex when on. Per-table-atomic backfill script populates existing rows.
+
+* feat(tables): write order_key on all insert paths (batch, upsert, replace, import, create, copilot)
+
+Completes the always-write-keys prerequisite: every row insert now assigns a
+fractional order_key consistent with position order, so the flag can be flipped
+safely after backfill. Flag off (default) still = identical behavior.
+
+* feat(tables): insert-by-neighbor-id + orderKey on wire + client order-by-key
+
+Inserts express intent as afterRowId/beforeRowId (O(1) key mint via the
+(table_id,order_key,id) index); orderKey is returned on every row; client
+reconcile/undo place by orderKey (no neighbor bump) with position fallback.
+Flag off = unchanged. 205 table tests pass.
+
+* feat(tables): resolve position-based inserts by key ordinal under the flag
+
+Position-based callers (mothership tool, v1 API, undo fallback, transient old
+clients) resolve their insert neighbor by order_key ordinal (OFFSET) when the
+flag is on — positions are gappy then, so WHERE position=N would miss. Flag off
+keeps the indexed position lookup. The mothership tool itself is unchanged.
+
+* test(tables): flag-on coverage — delete skips reindex, insert mints key + no shift
+
+* fix lint
+
+* chore(db): regenerate order_key migration with default drizzle name
+
+* fix(tables): address review — guard neighbor insert + mutual-exclusion + safe reconcile
+
+- resolveInsertByNeighbor throws when the anchor row is missing (was silently
+  inserting at the front) and when its order_key is null under the flag.
+- insert contract: afterRowId/beforeRowId are mutually exclusive (refine).
+- reconcileCreatedRow only key-sorts when every cached row is keyed, so mid-
+  backfill un-keyed rows aren&#39;t yanked to the front.
+
+* fix(kb): restore non-null guard in storage-key filter (unsafe-lint regression)
+
+* refactor(tables): extract maxOrderKey + thread import append key
+
+- Extract maxOrderKey(executor, tableId) helper; replaces three identical
+  max(order_key) selects (single/batch insert append + import).
+- Import: read the append anchor once up front and thread each batch&#39;s last
+  key forward (nextImportStartOrderKey + afterOrderKey) instead of re-scanning
+  max(order_key) per batch over a growing table — one scan per import, not
+  one per 1k-row batch.
+
+* fix(tables): keep insert body base omittable for v1 contract
+
+The afterRowId/beforeRowId mutual-exclusion .refine() turned the schema into a
+ZodEffects, which Zod forbids .omit() on — v1&#39;s insertTableRowBodySchema.omit({
+position }) threw at module load (runtime-only; tsc misses it). Split the plain
+object base out, apply the shared refine on top, and have v1 omit from the base
+then re-apply it.
+
+* fix(tables): chunk backfill order-key writes
+
+A single UPDATE … FROM (VALUES …) over a whole large table overflows the JS call
+stack while drizzle assembles the VALUES list (and would blow past Postgres&#39;s
+65535 bound-param limit at ~32k rows) — large tables failed with &#39;Maximum call
+stack size exceeded&#39;. Write in 1000-row chunks inside the same per-table
+transaction so keying stays atomic.
+
+* fix(tables): emit orderKey in insert responses
+
+The single-row and batch insert handlers dropped orderKey from the JSON
+response even though the service returns it, so reconcileCreatedRow always fell
+back to position-sorting and could place neighbor inserts wrong under the
+fractional-ordering flag. Serialize orderKey alongside position.
+
+* fix(tables): restore by orderKey, not position, under fractional flag
+
+A saved position is the gappy column value, but under the flag insert reads
+position as a visual rank (OFFSET) — so position-based restore misplaces rows.
+
+- create-row redo now goes through the batch path carrying the saved orderKey
+  (the single-insert API has no orderKey field); drop the now-unused single
+  create mutation.
+- resolveBatchInsertOrderKeys appends under the flag instead of feeding gappy
+  positions to resolveInsertOrderKey; positions remain the flag-off path.
+
+* perf(tables): backfill writes 5000 rows/chunk (was 1000)
+
+5x fewer round-trips per table; ~10k bound params stays well under Postgres&#39;s
+65535 ceiling and far below the single-statement size that overflows the stack.
+
+* fix(tables): drop rowNumber from table trigger payload
+
+position is gappy under the fractional-ordering flag, so rowNumber (= row.position)
+no longer reflects a contiguous visual rank. Rather than compute-on-read, remove
+it from the trigger payload, output schema, and column-execution input.
+
+Also pin isTablesFractionalOrderingEnabled=false in update-row.test.ts so its
+flag-off position-shift assertions are deterministic regardless of local env.
+
+* chore(db): format generated 0226 migration metadata
+
+biome check . flagged the drizzle-generated _journal.json and 0226_snapshot.json;
+apply the formatter so packages/db lint:check passes in CI.
+
+* docs(triggers): drop rowNumber from table trigger outputs
+
+rowNumber was removed from the table trigger payload; remove it from the
+documented output fields to match.
+
+* test(tables): remove flag-on fractional-ordering unit suite
+
+Flag-on behavior is covered by manual large-table verification; the heavily-
+mocked DB-chain suite added little signal.
+
+- fix(otel): make service.instance.id unique per process (#4891)
+
+All app replicas shared a hardcoded service.instance.id (&#34;mothership-sim&#34;),
+so OTel metrics from every process collapsed into one Prometheus series.
+Their independent cumulative counters then interleaved, producing phantom
+counter resets that corrupt rate()/increase() — staging hosted-key cost
+inflated to ~$0.72 from a few cents, while no-`key` metrics (cost_charged,
+throttled, queue_wait_*) were affected fleet-wide.
+
+Append the hostname (the container id under ECS, unique per task) so each
+replica gets its own series and sum(rate(...)) / sum(increase(...)) aggregate
+correctly. The mothership-sim prefix is kept so Jaeger&#39;s clock-skew adjuster
+still separates Sim from Go.
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- feat(tables): workflow version selection (live/deployed) and not-found/no-output badges (#4889)
+
+* feat(tables): workflow version selection (live/deployed) and not-found/no-output badges
+
+* fix(tables): draw row-selection left edge as checkbox cell border so it cannot be cut off
+
+* fix(tables): per-group version in cascade, accurate deploy error, skip not-found for deployed groups
+
+* fix(tables): render selection left edge as continuous strip overlapping row gridlines
+
+* feat(tables): not-found column icon, optional workflow inputs, mothership deploymentMode
+
+---------
+
+Co-authored-by: waleed &lt;walif6@gmail.com&gt;
+
+- refactor(tables): consolidate row data-access in service.ts (#4881)
+
+- Route both row-GET endpoints (internal + v1) and the copilot tool through
+  the single service.queryRows instead of three inline query copies; add a
+  withExecutions option so the public v1 route still omits executions.
+- Run COUNT(*) and the page fetch concurrently in queryRows.
+- Move CSV-import transaction ownership out of the API route into
+  importAppendRows / importReplaceRows so routes never hold a trx.
+- Extract row position mechanics (reserve / shift / compact) into named
+  private helpers in service.ts; no separate table-wrapper module.
+
+- feat(metrics): emit hosted-key metrics to Grafana via OTel (#4885)
+
+* feat(metrics): emit hosted-key metrics to Grafana via OTel
+
+Replace the dropped platform.hosted_key.* spans with OTel counters/histograms for usage, cost, failures, throttles, and queue waits. Wire a MeterProvider into the Next.js OTel SDK (trigger.dev already exports metrics). Per-key attribution via a key label (env var name).
+
+* fix(metrics): correct hosted-key failure attribution
+
+- Re-point used/cost/failed labels at the freshly acquired key after reacquire
+- Classify quota-style 401/403 as rate_limited (mirror isRateLimitError)
+- Count returned success:false runs (e.g. deep_research polling) as failed
+
+* fix(metrics): label hosted_key.throttled with real provider on exhausted retries
+
+* fix(metrics): parse OTLP metrics URL via URL/pathname, not string suffix
+
+Handles query strings and trailing slashes so the /v1/traces-&gt;/v1/metrics
+swap can&#39;t produce a malformed endpoint, matching normalizeOtlpTracesUrl.
+
+- fix(autolayout): relocate notes that overlap blocks after layout (#4888)
+
+* fix(autolayout): relocate notes that overlap blocks after layout
+
+* fix(autolayout): harden note overlap resolution against resize and non-finite positions
+
+- feat(integrations): add ClickHouse block and expand Dagster + Tinybird tools (#4883)
+
+* feat(integrations): add ClickHouse block and expand Dagster + Tinybird tools
+
+* fix(tinybird): fail loudly on invalid query_pipe parameters JSON
+
+parsePipeParameters previously returned {} on any JSON parse error, so a
+mistyped &#39;parameters&#39; input produced a successful pipe call with the dynamic
+filters silently dropped. Throw a clear error for non-empty, non-object input
+instead; an omitted/empty value still means &#39;no parameters&#39;.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(dagster): guard NaN numeric coercions and bound list_assets pagination
+
+Address PR review:
+- Route all block numeric coercions (list_runs limit/createdAfter/createdBefore,
+  get_run_logs logsLimit, list_assets assetsLimit) through a toFiniteNumber()
+  guard so invalid/wand-generated text becomes undefined instead of NaN.
+- list_assets now applies a default page size (100) when no limit is given, so
+  paging stays bounded and hasMore is meaningful even when limit is omitted.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(dagster): make list_assets hasMore exact via fetch N+1
+
+Address PR review (hasMore true on exact page): request one extra row
+(pageSize + 1), use its presence as the authoritative hasMore, slice it off,
+and derive the returned cursor from the last RETURNED asset&#39;s key path
+(JSON-serialized; Dagster normalizes JS/Python whitespace on the way in).
+This removes the false-positive hasMore when the final page is exactly full.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(clickhouse): enforce read-only query operation and harden WHERE-clause guard
+
+* fix(dagster): make list_runs hasMore exact via fetch N+1
+
+Address PR review (list runs false hasMore): request one extra row
+(pageSize + 1), use its presence as the authoritative hasMore, and slice it
+off before mapping. Removes the false-positive hasMore (and misleading cursor)
+when the final page is exactly `limit` runs long. Mirrors the list_assets fix.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(clickhouse): restrict DROP PARTITION to literal values to prevent SQL injection
+
+* fix(clickhouse): reject chained statements in read-only query operation
+
+* fix(clickhouse): force JSON output on query path and ignore comments when detecting chained statements
+
+* fix(tinybird): encode datasource/pipe names in URL paths to prevent traversal
+
+A user-or-llm datasource/pipe name interpolated raw into the URL path (e.g.
+&#39;real_ds/../../other&#39;) is normalized by the WHATWG URL parser and can target a
+different endpoint. Wrap the path segment with encodeURIComponent in the
+truncate, delete, and query_pipe URLs. Events/append pass the name via
+URLSearchParams, which already encodes, so they were unaffected.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(clickhouse): block WITH-led writes/DDL in read-only query operation
+
+* fix(clickhouse): validate column types structurally and normalize FORMAT around SETTINGS
+
+* fix(clickhouse): balance-check ORDER BY/PARTITION BY and skip leading comments in read-only guard
+
+---------
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- feat(connectors): add 7 knowledge base connectors (Google Forms, Typeform, Azure DevOps, YouTube, JSM, S3, Sentry) (#4880)
+
+* feat(connectors): add 7 knowledge base connectors (Google Forms, Typeform, Azure DevOps, YouTube, JSM, S3, Sentry)
+
+* fix(connectors): tighten listingCapped semantics per review (WIQL cap, batch omissions, cap-vs-exhaustion)
+
+* fix(connectors): google-forms listingCapped must fire on slice regardless of hitLimit (404-null-filter gap)
+
+* fix(connectors): s3 streaming size cap for chunked responses without content-length
+
+* fix(connectors): ado byte-exact file content fetch, google-forms hash-poisoning on listing failure
+
+* fix(connectors): ado auth-failure deletion guard, jsm last-page slice flag, google-forms response cap in hash
+
+* fix(connectors): shared streaming size-cap reader for ado file hydration (promote from s3)
+
+* fix(knowledge): flag incomplete listings at engine level when pagination is truncated
+
+* fix(connectors): ado flags listing incomplete when a non-empty repo has no resolvable branch
+
+* fix(knowledge): engine truncation flag is an absolute deletion block (fullSync cannot override); s3 byte-exact size fallback; ado tsdoc accuracy
+
+* improvement(knowledge): extract shouldReconcileDeletions gate as tested pure function, tighten engine comments
+
+* test(connectors): mapTags coverage for the 7 new connectors
+
+* fix(connectors): ado probes past the wiql 20k cap before flagging; document custom-wiql full-listing behavior
+
+* fix(connectors): ado flags partial repo trees when items listing emits a continuation token
+
+* fix(connectors): ado discards foreign-phase cursors; google-forms scans all response pages for change detection
+
+* fix(connectors): audit fixes across new connectors
+
+- registry: register x connector (was dead code, never wired in)
+- google-docs/google-drive/google-forms: gate deletion reconciliation on
+  Drive incompleteSearch; google-docs also now sets listingCapped on its
+  maxDocs cap path
+- jsm: add read:jira-user scope so reporter resolves on requests
+- gong: only set listingCapped on genuine truncation, not exact-cap
+  source exhaustion
+- gitlab: issues phase switched to keyset pagination (removes ~50k
+  offset ceiling), matching the repo-tree phase
+- grain: parallelize recording + transcript fetch in getDocument
+- ashby: document updatedAt-based content-hash limitation for
+  notes/feedback change detection
+- tests: mapTags coverage for x, granola, greenhouse, fathom, rootly
+
+- chore(db): drop legacy copilot_chats.messages JSONB column (#4886)
+
+Reads and writes are fully cut over to the normalized copilot_messages table
+(verified in production: no writes to the column in 24h, recently-active chats
+have empty JSONB while copilot_messages holds the transcript). Drop the dead
+column via drizzle migration 0225 and re-type CopilotChatDetailRow.messages as
+an assembled (non-column) field.
+
+Deploy notes: reconcile any chats where the JSONB still leads copilot_messages
+before applying, and pg_repack copilot_chats afterward to reclaim the ~5.7GB
+TOAST storage (DROP COLUMN is metadata-only).
+
+- fix(polling-tools): pass plan execution timeout to internal polling tool routes (#4884)
+
+* fix(polling-tools): pass plan execution timeout to internal polling tool routes
+
+* address comments
+
+- chore(skills): mirror model/enrichment/hosted-key/council skills into .agents/skills and expand add-model touchpoints (#4882)
+
+* chore(skills): mirror model/enrichment/hosted-key/council skills into .agents/skills and expand add-model touchpoints
+
+* chore(skills): document council yaml omission and disambiguate validate-model cross-ref
+
+- fix(mcp): enforce tool name validation in deploy modal (#4879)
+
+* fix(mcp): enforce tool name validation in deploy modal
+
+* fix(mcp): correct cn import path to fix build
+
+* fix(mcp): align tool-name regex with server sanitization, add disabled-combobox hint
+
+- chore(readme): refresh demo GIFs from docs, lead with Mothership (#4878)
+
+- fix(security): chat attachment XSS, MCP OAuth SSRF guards, Teams clientState verification (#4877)
+
+* fix(chat): prevent XSS in attachment preview via filename/data URL escaping
+
+Replace document.write with an escaped blob URL preview: HTML-entity
+encode the user-controlled filename and data URL, open with
+noopener,noreferrer, and revoke the blob URL after navigation.
+
+* fix(mcp): guard OAuth discovery and token revocation against SSRF
+
+Route discoverOAuthServerInfo and the RFC 7009 revocation POST through an
+SSRF-guarded fetch that validates every request URL via validateMcpServerSsrf
+(blocking private/reserved/loopback targets, honoring ALLOWED_MCP_DOMAINS and
+self-hosted localhost rules) and pins the connection to the resolved IP to
+prevent DNS-rebinding TOCTOU. Previously these fetches used unvalidated global
+fetch against URLs taken verbatim from attacker-controllable
+authorization-server metadata.
+
+* fix(webhooks): verify Graph clientState on Teams chat-subscription notifications
+
+The microsoftteams_chat_subscription trigger set clientState=webhook.id when
+creating the Graph subscription but never validated it on inbound change
+notifications, so any request to the webhook path with a crafted notification
+body was treated as authentic (CWE-345). verifyAuth now requires every
+notification in the value array to carry a clientState matching the stored
+webhook id (constant-time compare) and rejects payloads without notifications.
+Validation handshakes (validationToken) are handled before auth and remain
+unaffected; outgoing-webhook HMAC auth is unchanged.
+
+* fix(webhooks): fail closed when Teams chat-subscription webhook id is unavailable
+
+Hardens the clientState check so a missing webhook id (theoretically
+unreachable, since the row is looked up by primary key) can never collapse
+the expected value to an empty string that a forged clientState could match.
+
+* docs(mcp): note AbortSignal does not bound SSRF-guard DNS lookup
+
+* improvement(chat): hoist HTML escape map to module-level constant
+
+- chore(api-key): remove legacy scan+decrypt auth fallback (#4876)
+
+- feat(tables): background import for large CSVs with live progress (#4861)
+
+* feat(tables): background import for large CSVs with live progress
+
+* fix(tables): address review — import heartbeat, overlap guard, column/empty validation
+
+* fix(tables): guard sync import overlap, scope fileKey to workspace, delete-on-replace after download
+
+* fix(tables): stream large CSV imports from storage instead of buffering the whole file
+
+* test(tables): fix async-import route tests for workspace-scoped fileKey + name uniquification
+
+* fix(tables): append imports start after existing rows; reconcile missed import failures in the tray
+
+* fix(tables): delete the uploaded CSV from storage after the import finishes
+
+* fix(tables): validate replace before deleting rows; ignore stale replayed import events by importId
+
+* fix(tables): bind import worker to its importId (no stale-worker clobber/overlap) and destroy storage stream on failure
+
+* feat(tables): byte-based import progress, cancel support, and a start toast that opens the import view
+
+* fix(tables): don&#39;t emit ready after cancel; honor cancel during the upload phase
+
+* improvement(tables): use a stop (square) icon for canceling an active import
+
+* fix(tables): make markTableImporting an atomic claim to close the concurrent-import TOCTOU race
+
+* improvement(tables): preview CSV import from a slice, drop client row-count warning
+
+The import dialog parsed the entire file in the browser to show an exact row
+count and a row-limit warning. That holds the whole file in memory, blocks the
+main thread, and hits V8&#39;s ~512MB string ceiling — so the dialog capped the
+effective import size well below what the streaming importer handles.
+
+Parse only the first 512KB (headers + sample for the mapping); drop the exact
+count and the &#34;would exceed the row limit by N&#34; gate. The DB row-count trigger
+already enforces max_rows server-side, so an over-limit import fails fast during
+the run with a clear message instead of being blocked by an expensive parse.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(tables): gate import ownership every batch and stop canceled imports reappearing
+
+- Worker checked run ownership only at the progress cadence (~every 5k rows), so
+  a canceled/superseded import could insert several more batches (incl. the final
+  partial batch) before stopping. Move the updateImportProgress ownership gate to
+  the top of every flush — a run that lost the table stops within one batch.
+- A list/dialog import canceled mid-upload left the server row `importing` until
+  the in-flight server cancel landed; hydration re-seeded it from useTablesList,
+  so the dismissed import flickered back. Flag the real table id canceled on the
+  mid-upload cancel path, skip re-seeding flagged tables in hydration, and clear
+  the flag once the server import is terminal.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor(tables): drive import tray by polling derived from server, not SSE
+
+Import progress no longer holds an SSE connection per importing table. The tray
+now derives its importing rows live from the table list (React Query), polled
+only while an import is in flight; the table detail page keeps its own
+cell-state SSE for grid refresh.
+
+- store holds only client-only state now: optimistic uploads, which terminal
+  completions to surface this session, canceled ids, menu open — no copied
+  importStatus/rowsProcessed.
+- useWorkspaceImports is the single source: polls via a data-predicate
+  refetchInterval, derives rows, and fires completion toasts on the
+  importing -&gt; terminal transition.
+- kickoff handlers use startUpload/setUploadPercent/endUpload; the invalidated
+  list refetch surfaces the server row and polling takes over.
+- removes use-hydrate-import-tray + use-import-progress-tracker (folded in).
+- trims over-verbose comments across the import paths.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(tables): ignore superseded-run import events in the detail SSE cache
+
+applyImport applied every replayed import payload to the detail cache. The SSE
+buffer can replay a prior import&#39;s terminal event for the same table, stomping a
+newer in-flight import&#39;s UI. Lock to the active run&#39;s importId (and ignore a
+replayed terminal before the id is known), matching the guard the header tracker
+used to have.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(tables): close sync-import TOCTOU by claiming the atomic import gate
+
+The sync import route checked importStatus from a checkAccess snapshot, then
+parsed/validated/wrote seconds later without taking the atomic claim. A
+concurrent async kickoff (markTableImporting) could slip into that window and
+both writers would run together — for replace mode, two delete+insert passes
+leave the table indeterminate.
+
+Claim the same atomic gate (markTableImporting) right before the write and
+release it in the finally (before the response returns, so a client refetch
+never sees the transient status). A row-level FOR UPDATE was avoided on purpose:
+it would invert lock order against the position advisory lock / row-count
+trigger and risk a deadlock — markTableImporting is the established gate.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(multipart): keep abort wired after resolve so a mid-upload disconnect tears down the stream
+
+readMultipart resolves on the file-part header and hands the caller an un-drained
+stream, but settle() ran cleanup() and detached the abort listener on that path
+too. A client disconnect mid-upload then destroyed nothing — busboy never saw EOF,
+the file stream stalled, and the route&#39;s `for await` held a request slot until
+maxDuration (300s). Re-arm an abort handler scoped to the file stream on resolve,
+detached when the stream closes.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- v0.6.102: support S3-compatible in object storage, GitLab code knowledgebase connector, SSO provider ID allowlist, singleton memory leak fix
+
+- fix(tables): surface real error causes on cell-execution failures (diagnostics) (#4868)
+
+* fix(tables): retry transient DB/Redis failures in cell execution and surface error causes
+
+Workflow-group-cell runs intermittently failed on trivial DB reads/writes
+under heavy fan-out, stranding cells in `running`. Investigation showed the
+PlanetScale and ElastiCache backends were healthy at the time — the failures
+are transient connection-level faults that the cell (maxAttempts: 1) had no
+tolerance for, and the real cause was never logged (Drizzle wraps it as
+&#34;Failed query: ...&#34; and the driver cause lives in error.cause).
+
+Resilience:
+- Add retryTransient (lib/table/retry-transient.ts): retries only transient
+  infra errors (reuses isRetryableInfrastructureError; adds an ioredis
+  command-timeout match) with jittered backoff, then rethrows. Fail-fast for
+  everything else.
+- Wrap the cell&#39;s getTableById/getRowById reads, the terminal write
+  (cell-write updateRow — idempotent via the executionId guard), and the
+  Redis cascade-lock acquire.
+
+Diagnostics:
+- Add describeError (lib/core/errors/retryable-infrastructure.ts): walks the
+  .cause chain and always returns the underlying driver cause (code/errno/
+  syscall + causeChain), including for unclassified errors like AbortError.
+- Log `cause` + a `retryable` flag (and aborted/timedOut in the cell&#39;s main
+  catch) across the cell + finalization error paths, mirroring the existing
+  schedule-execution pattern. Logging-only; no behavior change. This lets the
+  next recurrence reveal the real cause and whether the retry applies.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(tables): address review feedback on cell retry resilience
+
+- retryTransient: re-check the abort signal after the backoff sleep so a
+  cancellation during sleep stops the next attempt (don&#39;t run/return work for
+  an already-cancelled task).
+- isRetryableRedisError: walk the .cause chain (mirroring the infra
+  classifier) so wrapped Redis timeouts are recognized; drop &#34;Connection is in
+  subscriber mode&#34; — that&#39;s a connection-state programming error, not a
+  transient drop, and would just fail identically every retry.
+- cascade-lock: stop wrapping acquireLock in retryTransient. acquireLock is a
+  non-idempotent SET NX, so retrying after a timed-out-but-applied first SET
+  returns false (key already ours) and yields a false `contended` that skips
+  the cascade. A transient Redis blip here just fails the run before pickup
+  (no stranded cell); the dispatcher re-drives it.
+- Tests: cause-chain Redis match, subscriber-mode exclusion, abort-during-sleep.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(tables): drop out-of-scope abort/timeout fields from cell catch
+
+The main catch logged `aborted`/`timedOut` from `abortSignal`/`timeoutController`,
+but those are declared inside the outer try block (the inner try around
+executeWorkflow is try/finally, so this catch belongs to the outer try) and are
+not in scope in the catch — `next build`&#39;s type-check failed with &#34;Cannot find
+name &#39;abortSignal&#39;&#34;. Local incremental `tsc --noEmit` had skipped the file and
+falsely passed; the Cursor/Greptile reviewers flagged this correctly.
+
+Removed the two fields. Abort/timeout is still surfaced via `cause:
+describeError(err)` (an aborted run shows `name: &#39;AbortError&#39;` / the timeout
+message), so no diagnostic signal is lost.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor(tables): drop in-process retry, keep cause diagnostics only
+
+In-process retry is the wrong layer for this path: the cell task is
+maxAttempts:1 by design, retrying on a possibly-degraded worker may not help,
+and it masks the very transient-failure signal we&#39;re trying to capture before
+we understand the root cause. Removed retryTransient entirely (file + all
+wrapping in cell-write, the cascade reads, and the lock acquire) and kept only
+the diagnostic logging.
+
+- Deleted lib/table/retry-transient.ts (+ test); cell-write and the cascade
+  reads call getTableById/getRowById/updateRow directly again, fail-fast.
+- Kept describeError + `cause`/`retryable` fields across the cell + finalization
+  catch blocks; the cell-path `retryable` flag now sources from
+  isRetryableInfrastructureError (the canonical classifier) for consistency.
+
+Diagnostics-first: surface the real driver cause on the next recurrence, then
+decide the actual fix (e.g. task-level maxAttempts, or addressing the worker-
+side cause) from evidence rather than a speculative in-process retry.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(schedules): log error cause on scheduled-execution failure paths
+
+The scheduled-job failure paths logged the raw error (.message/stack only) —
+its `.cause` (the real driver error behind a Drizzle &#34;Failed query: ...&#34;
+wrapper) was never recorded, and the classified-only
+`describeRetryableInfrastructureError` returns undefined for unrecognized
+errors. A real failed run (same incident window as the cell failures) failed in
+`applyScheduleUpdate` with exactly this unrecorded cause.
+
+Added `cause: describeError(error)` (always-on, walks the cause chain) to the
+applyScheduleUpdate catch, the early-failure catch, and the unhandled-error
+catch — passed as a second arg so the existing message+stack still emit.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor(errors): move describeError to @sim/utils/errors
+
+`describeError` is a general-purpose error/cause-chain helper — it didn&#39;t
+belong in `lib/core/errors/retryable-infrastructure.ts` (that module is
+specifically about classifying retryable infra errors, and the name read wrong
+for a generic diagnostic). Moved it to `@sim/utils/errors` alongside `toError`/
+`getErrorMessage`/`getPostgresErrorCode`, with its own cycle-safe cause walk.
+
+- Added describeError + DescribedError + tests to packages/utils/src/errors.ts.
+- Reverted the describeError addition from retryable-infrastructure.ts (it keeps
+  only isRetryableInfrastructureError / describeRetryableInfrastructureError,
+  which are accurately named and still used by the schedule retry path).
+- Re-pointed all consumers (cell, logging-session, pause-persistence, schedule)
+  to import describeError from @sim/utils/errors. The `retryable` classification
+  flag still sources from isRetryableInfrastructureError where used.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(storage): percent-encode object key in multipart fallback URL (#4872)
+
+* fix(storage): percent-encode object key in multipart fallback URL
+
+buildObjectFallbackUrl built the object URL from a raw key. Keys with spaces
+or reserved characters (and the pre-existing AWS branch) would produce a
+structurally invalid location. Encode the key per path segment (preserving
+&#39;/&#39; separators) across all branches (AWS, custom path-style, virtual-hosted).
+
+* refactor(storage): clearer per-segment key encoding in fallback URL
+
+* test(storage): cover multipart fallback URL (AWS, R2 virtual-hosted, MinIO path-style, key encoding)
+
+- fix(gitlab): pin pagination cursor to configured host + consolidate isSameOrigin (#4873)
+
+* fix(gitlab): pin pagination cursor to configured host before following it
+
+The repository-tree keyset cursor stores GitLab&#39;s verbatim rel=&#34;next&#34;
+URL and re-fetches it with an Authorization: Bearer header. Assert the
+cursor&#39;s origin matches the configured apiBase before following it, so a
+tampered or corrupted fileNextUrl cannot exfiltrate the access token to
+an attacker-controlled host. Fails closed on mismatch.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* improvement(validation): generalize isSameOrigin and reuse across connectors/tools
+
+Add an optional base argument to the shared isSameOrigin (defaulting to
+the app base URL) so callers can pin a URL to any trusted origin. The
+GitLab connector&#39;s cursor host-check and the tools self-origin check now
+consume the shared helper instead of their own URL-parsing.
+
+---------
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- fix(dev): use globalThis for singleton state to prevent HMR memory leaks (#4869)
+
+* fix(dev): use globalThis for singleton state to prevent HMR memory leaks
+
+* fix(dev): apply globalThis guard to rate-limiter storage factory to prevent listener accumulation
+
+* fix(types): resolve McpConnectionManager globalThis undefined type error
+
+- fix(mothership): run client-routed workflow tools server-side in headless execution (#4870)
+
+* fix(mothership): run client-routed workflow tools server-side in headless execution
+
+Headless Mothership (Mothership block, no browser) could not run workflows.
+The run_workflow/run_workflow_until_block/run_block/run_from_block tools are
+registered with route &#39;client&#39;, so the executor gate (isSimExecuted) skipped
+their registered server handlers and fell through to executeAppTool, throwing
+&#39;Tool not found&#39;. Interactive runs delegate these to the browser before reaching
+the executor, so only the headless path broke.
+
+Allow a client-routed tool to use its registered server handler when one exists,
+which only affects the four run tools (the only client-routed tools, all of which
+have server handlers).
+
+* test(mothership): clear handler registry between executor tests
+
+Add clearHandlers() helper and reset the module-level handler registry in
+beforeEach so handlers registered in one test do not leak into the next.
+
+- feat(gitlab): sync repository files (code/docs) (#4864)
+
+* feat(gitlab): sync repository files (code/docs) alongside wiki and issues
+
+* fix(gitlab): follow full keyset next-link for repo tree + skip disabled wiki gracefully in all/both
+
+* fix(gitlab): error on bad user branch (tree 404), warn on resolveRef fallback, normalize pathPrefix to directory boundary
+
+* fix(gitlab): preserve slashes in branch ref for file source URLs (GitFlow branches)
+
+* fix(gitlab): never abort sync on repo-tree 404 (empty repo); validate user branch exists at setup instead
+
+* fix(gitlab): validate ref via commits endpoint so tags and commit SHAs are accepted, not just branches
+
+* fix(gitlab): skip repo phase on tree 403 (missing read_repository) so wiki/issues still sync under all
+
+* fix(byok): add Fal icon and repair corrupted Ollama icon path
+
+The Ollama BYOK icon rendered blank because its SVG path had spaces
+stripped between arc-command flags (e.g. `a5.05 5.05 0 12.05-.636`),
+producing invalid tokens. Replaced with the canonical Ollama path.
+
+Also added a dedicated FalIcon (was falling back to the generic
+ImageIcon) and wired it into the BYOK provider list.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(icons): repair corrupted Fireworks icon arc command
+
+The leftmost spark of the Fireworks icon never rendered because its
+third subpath used a corrupted arc command (`a34.59 34.59 0 17.15 37.65`)
+with collapsed flags, yielding an invalid sweep-flag of 7 that aborts
+the path parse. Replaced with the canonical lobehub Fireworks source.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- fix(auth): link SSO sign-in to existing same-email accounts (#4866)
+
+* fix(auth): link SSO sign-in to existing same-email accounts
+
+SSO sign-ins failed with &#34;account not linked&#34; (then a cascading &#34;Invalid
+callbackURL&#34;) when an account with the same email already existed. Better
+Auth&#39;s `@better-auth/sso` plugin hardcodes the provisioned user&#39;s
+`emailVerified: options?.trustEmailVerified ? &lt;claim&gt; : false`, so with the
+option unset every SSO login arrived unverified and tripped the account
+linking gate `(!isTrustedProvider &amp;&amp; !userInfo.emailVerified)` whenever the
+provider was not in `accountLinking.trustedProviders`.
+
+- Set `trustEmailVerified: true` on the SSO plugin so the IdP&#39;s verified-email
+  claim is honored (Okta, Entra ID, Google Workspace, Auth0 all assert it).
+- Trust the operator&#39;s configured provider for linking: merge
+  `SSO_PROVIDER_ID` (when present in the app env) plus a new
+  `SSO_TRUSTED_PROVIDER_IDS` list into `trustedProviders`. Empty/unset =&gt;
+  no-op, so existing deployments are unchanged.
+- Invite callback URL: return a clean `/invite/&lt;id&gt;` (token already persists
+  in sessionStorage) so an appended `?error=` cannot produce a malformed URL.
+- Document `SSO_TRUSTED_PROVIDER_IDS` in SSO docs, Helm values, and schema.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(auth): address review — guard trusted SSO providers, revert invite callback
+
+- Only compute additionalTrustedSsoProviders when SSO_ENABLED, so
+  trustedProviders is exactly unchanged for non-SSO deployments.
+- Revert the invite getCallbackUrl change: keep the token in the callback URL
+  (with sessionStorage/searchParams fallback) so the token survives when
+  sessionStorage is unavailable. The account-linking fix removes the
+  &#34;account not linked&#34; error that caused the malformed callback URL, so the
+  callback cleanup is unnecessary.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(auth): guard trusted SSO providers with isSsoEnabled (isTruthy)
+
+env.SSO_ENABLED can be the string &#34;false&#34; (t3-env returns strings for
+booleans), which is truthy in JS. Use the canonical isSsoEnabled flag
+(isTruthy(env.SSO_ENABLED)) so SSO_ENABLED=&#34;false&#34;/&#34;0&#34; correctly yields an
+empty trusted-provider list, matching how SSO is gated elsewhere.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- docs(slack): remove archival reference from Download files per Slack Marketplace guidelines (#4867)
+
+- feat(storage): support S3-compatible endpoints (R2, MinIO, B2) for file storage (#4865)
+
+* feat(storage): support S3-compatible endpoints (R2, MinIO, B2) for file storage
+
+Add S3_ENDPOINT and S3_FORCE_PATH_STYLE env vars, wired into the shared upload
+S3 client so Cloudflare R2, MinIO, Backblaze B2, and other S3-compatible stores
+work for self-hosted file storage. The endpoint is trusted operator config (no
+SSRF/HTTPS gate). Makes the multipart Location fallback endpoint-aware, extends
+the S3 client unit tests, and documents the new vars in Helm values, .env.example,
+and the English self-hosting docs (incl. browser-reachability + CORS guidance).
+
+* docs(storage): add RustFS as an S3-compatible provider example
+
+* fix(storage): address review feedback and fix env mock for CI
+
+- Add envBoolean to the shared env test mock (createEnvMock) so config.ts&#39;s
+  forcePathStyle coercion resolves — fixes failing knowledge/utils.test.ts
+- Declare S3_FORCE_PATH_STYLE as z.string() (every other env var&#39;s pattern);
+  it&#39;s coerced via envBoolean at the consumption site, avoiding a boolean
+  type that never matches the string process.env value
+- Log path-style from S3_CONFIG.forcePathStyle (envBoolean) instead of a
+  separate isTruthy call, so the startup log can&#39;t disagree with the client
+- Make buildObjectFallbackUrl honor forcePathStyle: virtual-hosted-style URL
+  (bucket as subdomain) for R2, path-style only when forcePathStyle is set
+
+* docs(storage): add backlinks to S3-compatible providers (R2, MinIO, Ceph, B2, RustFS) and backends
+
+- fix(env): schema treatment of empty string (#4862)
+
+- fix(background): recategorize user/recovery failures as errors, not trigger faults (#4860)
+
+* fix(webhook): don&#39;t fault trigger run on user/workflow execution errors
+
+Webhook-triggered executions re-threw every error, so trigger.dev marked
+the run failed and fired #eng-errors alerts. The vast majority of these are
+user-caused workflow failures (missing required fields, invalid field
+references, bad URLs, provider 4xx, expired models, low credit) that are
+already recorded in the execution logs.
+
+Distinguish fault vs error in executeWebhookJobInternal: when the failure
+was finalized by core (the workflow ran and its failure is logged), complete
+the run with { success: false } instead of throwing. Errors that were not
+finalized came from the webhook pipeline itself and still re-throw to fault
+the run. Await waitForPostExecution first so the finalized flag is reliable.
+
+The error is still recorded on the run&#39;s OTel span via recordException (no
+ERROR status, so the run isn&#39;t faulted) and remains in the execution logs,
+so these stay investigable in Tempo/Loki without false alerts.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(schedule): don&#39;t fault trigger run on error-recovery failures
+
+The schedule task already treats workflow-execution failures as recorded
+errors rather than trigger faults, but the outermost catch&#39;s own recovery
+code (the infra-retry and releaseClaim calls) was unguarded. A secondary DB
+blip while releasing the claim re-threw and escaped run(), faulting the
+trigger.dev run and firing an alert — a double-fault during cleanup.
+
+Wrap the recovery path in a try/catch: log and record the exception on the
+span without re-throwing. The claim expires on its TTL and the next tick
+re-claims the schedule, so swallowing the cleanup failure is safe.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* test(webhook): assert waitForPostExecution runs on the non-finalized path
+
+Guards the race fix on the infra-error path so a future refactor can&#39;t
+silently drop the await. Addresses Greptile review feedback.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- v0.6.101: 11 new knowledgebase connectors, slack scopes update, login refinements
+
+- fix(fathom): skip getDocument when header cache is missing instead of emitting a degraded, un-refreshable record (#4859)
+
+- fix(slack): request reactions:read in OAuth URL, drop im:history (#4856)
+
+* fix(slack): request reactions:read in OAuth URL, drop im:history
+
+* chore(slack): update read-messages missing-scope message to drop im:history
+
+- fix(auth): show &#34;account already exists&#34; on duplicate email signup (#4855)
+
+* fix(auth): show &#34;account already exists&#34; on duplicate email signup
+
+* fix(auth): use exact path match for duplicate-email signup check
+
+- feat(connectors): add 11 knowledge base connectors (#4849)
+
+* feat(connectors): add 11 knowledge base connectors (Gong, Grain, Fathom, Granola, incident.io, Rootly, Ashby, Greenhouse, DocuSign, Monday, GitLab)
+
+* fix(granola): restore correct calendar_event field names (event_title/organiser/calendar_event_id/scheduled_start_time/scheduled_end_time/invitees)
+
+* fix(connectors): correct Grain id field/include flags and incident.io timestamp value shape (verified vs raw API specs)
+
+* feat(connectors): add scoping filters for Gong (host users), Fathom (meeting type/domain), Granola (folder/created-after)
+
+* feat(connectors): add verified scoping filters (Grain, Rootly, Ashby, Greenhouse, DocuSign, GitLab) + clarify Monday board scope
+
+* fix(connectors): docusign sandbox source URL, greenhouse scorecard cap, gong overlap; add incident.io status/mode filters
+
+* chore(connectors): remove non-TSDoc inline comments
+
+* fix(fathom): apply 14-day overlap to incremental created_after so late transcripts are recaptured
+
+* fix(fathom): cache sourceUrl in header so getDocument preserves it; return concrete contentHash (drop omit/cast)
+
+* fix(connectors): grain check transcript before formatting; gong cache date window across cursor pages
+
+* fix(connectors): fathom skip meetings with no transcript/summary; docusign cache from_date across cursor pages
+
+* fix(fathom): return metadata from getDocument (carried via header cache) for tag consistency
+
+* fix(connectors): grain cache filter window across pages, greenhouse guard NaN page, rootly skip empty incidents
+
+* feat(connectors): final audit — add verified scoping filters (grain team/type, granola+greenhouse createdBefore, gitlab milestone, rootly service/team/env), fix incident.io paused category + rootly severity-slug copy
+
+- fix(schedules): count usage lim error schedule as failed run (#4853)
+
+* fix(schedules): count usage lim error schedule as failed run
+
+* remove backoff logic
+
+- v0.6.100: auth, mothership, scopes improvements, new apify tools
+
+- feat(apify): add run task, get dataset items, and get run tools (#4851)
+
+* feat(apify): add run task, get dataset items, and get run tools
+
+* fix(apify): guard undefined dataset id and forward explicit offset=0
+
+- fix(tables): count dispatcher pre-stamps in &#34;X running&#34; during active dispatch (#4850)
+
+The live SSE path counts pending pre-stamps (isExecInFlight) but
+countRunningCells excluded them, so each per-window refetch reset the badge
+from ~20 to 0 (visible flicker now that the control stays shown via
+hasActiveDispatch). Include unclaimed pre-stamps in byRowId when a dispatch is
+active; keep excluding them only in the no-dispatch fallback (orphan case).
+
+- fix(mothership): connect integrations from chat without `state_mismatch` (#4848)
+
+* fix(oauth):  skipStateCookieCheck flag change
+
+* browser initated solution
+
+* fix draft timing issue
+
+- chore(auth): remove deprecated OAuth MCP provider plugin and backing tables (#4847)
+
+- fix(hubspot): remove unused scopes (#4846)
+
+- feat(landing): add AI-generated content disclaimer to integration landing page (#4845)
+
+Adds an optional aiDisclaimer field to the integration landing content (types + data), rendered as an independent &#39;AI-generated content&#39; section and baked into integrations.json via docs-gen. Populates Slack to satisfy Slack&#39;s AI-components guideline (disclaimer on the landing page).
+
+- fix(mothership): scope mothership block tool permissions to the executing user (#4843)
+
+- v0.6.99: tables filter operators, copilot chat persistence consolidation, together AI, Baseten, Ollama Cloud, Linq integrations, kb doc ownership bindings
+
+- chore(access): helper cleanup (#4842)
+
+- fix(tables): reliable stop-all, accurate &#34;X running&#34;, and rate/usage gating for cell runs (#4838)
+
+* fix(tables): reliable stop-all, accurate &#34;X running&#34;, and rate/usage gating for cell runs
+
+Stop-all:
+- Make the cancellation guard status-based (not executionId-scoped) so a
+  `cancelled` tombstone stamped while a cell is still a dispatcher pre-stamp
+  (null executionId) keeps the cell dead — fixes function-execute cells that
+  resurrected after Stop all. Consolidated into shared isExecCancelled /
+  isExecCancelledAfter predicates in deps.ts, reused by the in-memory guard,
+  the SQL guard, the dispatcher tombstone filter, the worker, and resume.
+- Add an explicit pre-execution cancellation read so a cell that dequeues
+  after Stop all (e.g. from the trigger.dev queue) never runs.
+- Resume worker aborts a cancelled paused/awaiting cell before resuming;
+  cancelWorkflowGroupRuns marks paused executions cancelling.
+
+&#34;X running&#34;:
+- Emit a dispatch SSE at dispatch start so auto-fired/capped runs surface
+  immediately; show the control whenever a dispatch is active.
+
+Checkbox dependency:
+- Treat boolean `false` as an unmet dependency so unchecking never reruns
+  dependents — only checking does. deriveExecClearsForDataPatch no longer
+  re-arms a downstream group whose deps are unmet after the patch.
+
+Rate / usage gating:
+- Route table cell execution through preprocessExecution (billing actor =
+  workspace billed account, usage limit, per-plan timeout), keeping draft.
+- Rate limit: pace &amp; retry per cell (async counter) so rows aren&#39;t skipped.
+- Usage limit: halt the dispatch without marking cells and emit a
+  usageLimitReached event; the client shows an Upgrade prompt that routes to
+  subscription settings.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(tables): dedupe usage-limit event + release rate-limited cells on cancel
+
+Addresses PR review:
+- Usage limit: only the cell that transitions the dispatch active→complete
+  (via completeDispatchIfActive) emits usageLimitReached, so concurrent cells
+  don&#39;t fire up to 20 identical &#34;upgrade&#34; toasts.
+- Rate-limit retry: re-check the cancelled tombstone after each sleep so a
+  Stop All mid-wait releases the concurrency slot promptly (signal never fires
+  on the trigger.dev backend).
+
+* fix(tables): jitter rate-limit retry backoff to avoid thundering herd
+
+Passing the bucket&#39;s shared resetAt as retryAfterMs made backoffWithJitter
+return a fixed clamped value (no jitter, attempt ignored), so all concurrent
+cells retried in lockstep. Pass null to get jittered exponential backoff.
+
+* fix(tables): unstick cells + resync counter on usage-limit halt
+
+Addresses PR review:
+- Clear each blocked cell&#39;s pre-stamp on a 402 so it reverts to un-run instead
+  of being stuck &#34;Queued&#34; (no error/cancelled badge); covers auto-fire cells
+  with no owning dispatch.
+- Client re-syncs run-state counts and refetches rows on usageLimitReached so
+  the stale &#34;X running&#34; / Stop-all control clears and queued cells drop.
+- Make usageLimitReached.dispatchId optional; client only touches the dispatch
+  overlay when present.
+
+* fix(tables): don&#39;t emit stale dispatching event after a mid-window halt
+
+If a cell halts the dispatch mid-window (usage limit), re-read the dispatch
+status after the batch and bail instead of emitting a per-window &#39;dispatching&#39;
+event that would arrive after the client dropped the dispatch and re-add it
+(flickering &#39;X running&#39; back).
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(misc): keep block-tool params selected across store replace, perms parity for delete  (#4840)
+
+* fix(tool-input): keep block-tool params selected across store replace
+
+* fix tests and extract kb ownership helper
+
+- fix(tables): enforce plan limits in mothership user_table tool (#4832)
+
+* fix(tables): enforce plan limits in mothership user_table tool
+
+* improvement(tables): truncate over-limit CSV imports to the plan cap instead of rejecting
+
+* fix(tables): log rollback failures and surface a clear reason on failed CSV import
+
+- feat(tables): add PostHog events for table-workflow run/stop gestures (#4839)
+
+* feat(tables): add PostHog events for table-workflow run/stop gestures
+
+* fix(tables): pass run source from action-bar play/refresh dispatchers
+
+- fix(deps): upgrade vitest to ^4.1.0 to patch critical Vitest UI advisory (GHSA-5xrq-8626-4rwp) (#4837)
+
+* fix(deps): upgrade vitest to ^4.1.0 to patch critical Vitest UI advisory (GHSA-5xrq-8626-4rwp)
+
+- Bump vitest and @vitest/coverage-v8 to ^4.1.0 across all workspaces (only patched release for the critical &#39;Vitest UI server arbitrary file read/execute&#39; advisory; no 3.x backport exists)
+- Widen @sim/testing peer range to ^3.0.0 || ^4.0.0
+- Migrate constructor mocks to class expressions: vitest 4 uses Reflect.construct for mocks invoked with new, and arrow/function implementations are not constructable (function expressions also get reverted to arrows by biome&#39;s useArrowFunction)
+- Remove deprecated test.poolOptions from apps/sim/vitest.config.ts (options are now top-level in vitest 4)
+
+* fix(deps): exclude vulnerable vitest 4.0.x from @sim/testing peer range
+
+Tighten the v4 arm of the peer range to &gt;=4.1.0 &lt;5.0.0 so the peer
+requirement cannot be satisfied by the unpatched 4.0.x builds that
+GHSA-5xrq-8626-4rwp affects.
+
+* fix(testing): make vitest 4 constructor mocks type-check cleanly
+
+- logging-session &amp; mcp-oauth mocks: a class passed to mockImplementation has
+  a construct signature that isn&#39;t assignable to its (...args) =&gt; any parameter,
+  failing tsc. Use named function declarations instead (constructable via
+  Reflect.construct, assignable to mockImplementation, and not rewritten to
+  arrows by biome&#39;s useArrowFunction).
+- database.mock.ts: vitest 4&#39;s generic vi.fn typings no longer break the
+  self-referential cycle on the transaction callback&#39;s tx param; loosen tx and
+  annotate the callback&#39;s return type to resolve the implicit-any errors.
+
+* test(isolated-vm): de-flake queue-capacity scheduler tests
+
+The &#39;queue is full&#39; and &#39;per-owner queued limit&#39; tests relied on
+&#39;await sleep(1)&#39; to assume the first request had reached the queue before
+submitting the overflow request. The first request only enqueues after an
+async spawn-failure chain (acquireWorker -&gt; spawn exit -&gt; resolve null -&gt;
+enqueue), which isn&#39;t guaranteed within 1ms under CI load — the overflow
+request then found an empty queue and hit the 200ms queue-wait timeout
+instead of the capacity rejection.
+
+Replace the wall-clock barrier with a deterministic, event-driven one: hold
+the single global concurrency slot (IVM_MAX_CONCURRENT=1) with an active
+worker and await an explicit &#39;dispatched&#39; signal (fired when the worker
+receives its execute message, after the scheduler counts it active). The
+follow-up requests then deterministically hit the synchronous enqueue path.
+Also drops the queue-wait timeout from 200ms to 50ms, so the tests run faster.
+
+- improvement(kbs): ownership bindings (#4833)
+
+* improvement(kbs): ownership association
+
+* address comments
+
+* more comments
+
+- fix(table): preserve workflow groups on CSV column-add and dispatch after tx commit (#4503)
+
+Two bugs in the CSV-import path:
+
+- addTableColumnsWithTx rebuilt the schema with only `columns`, dropping
+  `workflowGroups` (and any other top-level schema fields). Importing CSV
+  into a table that has workflow groups erased the group config. Spread
+  `table.schema` first so siblings survive.
+
+- batchInsertRowsWithTx fired fireTableTrigger and scheduleRunsForRows from
+  inside the caller&#39;s transaction. Both read through the global db
+  connection, so they could run before the inserts committed and see no
+  rows. Extracted the dispatch into dispatchAfterBatchInsert; non-tx
+  wrapper fires it after `db.transaction(...)` resolves, and the CSV
+  import route does the same after its tx.
+
+- feat(linq): add Linq iMessage/SMS/RCS integration (34 tools, block, attachment upload) (#4831)
+
+- feat(providers): add Together AI, Baseten, and Ollama Cloud model providers (#4830)
+
+* feat(providers): add Together AI, Baseten, and Ollama Cloud model providers
+
+* fix(providers): guard Ollama streaming fast-path with hasActiveTools
+
+Match Together/Baseten/Fireworks: when tools are supplied but all are
+filtered out (usageControl &#39;none&#39;), take the single streaming call instead
+of an extra non-streaming round-trip.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(providers): filter non-chat model types from Together model list
+
+* refactor(providers): dedupe Ollama Cloud upstream schema
+
+ollamaCloudUpstreamResponseSchema was byte-for-byte identical to
+ollamaUpstreamResponseSchema (both /api/tags endpoints return the same
+{ models: [{ name }] } shape). Drop the duplicate and reuse the shared schema.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- improvement(copilot): stop persisting tool-call result outputs in transcripts (#4829)
+
+Opening a Mothership task could take many seconds because a single persisted
+assistant message in copilot_messages.content can reach hundreds of MB, almost
+entirely inside contentBlocks[].toolCall.result.output (e.g. a get_workflow_logs
+or run_workflow result). The DB query is ~2ms; the cost is detoasting that
+payload, shipping it to the browser, and parsing it.
+
+These outputs are dead weight on the Sim side: they are never rendered (the
+thread shows only tool name/title/status) and never replayed to the model (the
+upstream copilot service owns conversation memory). So drop result.output before
+it is persisted, keeping result.success/error plus the tool metadata.
+
+- add stripToolResultOutput() in persisted-message.ts
+- apply it in messages-store toRow (covers every write path) and in
+  loadCopilotChatMessages (existing rows render fast on read)
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- feat(tables): expand filter operators (not-contains, starts/ends-with, not-in, empty) (#4827)
+
+Add does-not-contain ($ncontains), starts-with ($startsWith), ends-with
+($endsWith), not-in-array ($nin, previously executed server-side but unexposed
+in the UI), and is-empty/is-not-empty ($empty) filter operators end-to-end —
+SQL builder, condition types, query-builder converters/constants, the filter
+UI, the Table tools/block descriptions, and docs.
+
+Also fix correctness bugs in the filter builder surfaced by the wider operator
+set:
+- Same-column AND rules (e.g. age &gt; 18 AND age &lt; 65, or name startsWith &#39;A&#39;
+  AND name endsWith &#39;Z&#39;) silently overwrote each other because the AND group
+  was keyed by column name. They now merge into one operator object, which
+  also makes Filter -&gt; rules -&gt; Filter round-trip losslessly for multi-operator
+  columns.
+- $nin values were not split into an array like $in, and textual-match values
+  like &#34;123&#34; were numeric-coerced (breaking the ILIKE path).
+- A non-boolean $empty operand from the raw API silently inverted the check; it
+  now coerces &#39;true&#39;/&#39;false&#39; strings and otherwise returns a 400.
+
+- improvement(copilot): make copilot_messages the sole transcript store, remove JSONB dual-write (#4826)
+
+Stop writing/reading the legacy copilot_chats.messages JSONB column now that
+reads are cut over to copilot_messages. Make appendCopilotChatMessages the
+primary write (throws on failure instead of swallowing), repoint peripheral
+readers (workspace VFS, chat cleanup, data drains, fork, superuser import) to
+copilot_messages, and persist the assistant turn inside finalizeAssistantTurn&#39;s
+transaction so it commits atomically with the stream-marker clear. The column
+itself is dropped in a follow-up migration after this bakes.
+
+- v0.6.98: redundant index, security hardening, new copilot messages table, integration icons audit
+
+- fix(sso): re-check domain conflict before write and reject IP-address domains (#4825)
+
+- fix(selectors): fetch all pages for paginated dropdown list routes (#4823)
+
+* fix(selectors): fetch all pages for paginated dropdown list routes
+
+Dropdown selectors fetched only the first page of paginated provider
+APIs, silently hiding results past page one. Add bounded server-side
+draining to the list routes across Microsoft Graph, Google, Notion,
+Atlassian, Linear, AWS CloudWatch, and offset/token REST APIs, plus a
+shared client-side drain cap in the selector hook. Response shapes,
+stored values, and tool execution are unchanged; CloudWatch list tools
+still honor a caller-supplied limit. Also fixes the Word file picker
+that was searching for .xlsx files.
+
+* fix(selectors): harden JSM and Monday pagination draining
+
+- JSM service-desk/request-type drains advance `start` by the actual row
+  count returned (not the fixed page size) and stop on an empty page, so a
+  short non-final page can&#39;t skip items.
+- Monday boards drain now checks `response.ok` per page, surfacing a
+  mid-drain HTTP failure instead of treating it as an empty final page and
+  returning a partial 200.
+
+* docs(selectors): clarify JSM drain advances start by actual row count
+
+The offset-advancement fix (advance `start` by the rows returned, not the
+fixed page size) landed in 7b19788a8; update the TSDoc to match so it no
+longer reads as advancing by `limit`.
+
+* fix(selectors): drain fetchPage in direct fetchList callers
+
+Making `fetchList` optional left three direct callers (outside the
+useSelectorOptions hook) calling it unguarded, which broke the build&#39;s
+type check. Route them through a shared `loadAllSelectorOptions` helper
+that uses `fetchList` when present and otherwise drains `fetchPage`.
+This also prevents a regression: `confluence.spaces` / `knowledge.documents`
+now paginate via `fetchPage` only, and these callers (search/replace,
+value resolution) would otherwise have silently returned no options.
+
+* chore(selectors): rename MAX_PAGE_PAGES to MAX_NOTION_PAGES for readability
+
+- feat(google-sheets): add row filtering to read with numeric operators (#4822)
+
+* feat(google-sheets): add row filtering to read with numeric operators
+
+Adds client-side row filtering to the Google Sheets read (v2) operation.
+Filter the returned rows by a header column using text operators
+(contains, not_contains, exact, not_equals, starts_with, ends_with) and
+numeric/ordering operators (gt, gte, lt, lte). Filtering lives in a pure,
+unit-tested helper (filterSheetRows) and runs over the fetched read range;
+an optional `filter` output reports whether the column was found and how
+many rows matched.
+
+Also hardens the surrounding tools:
+- trim spreadsheetId in write/update/append URL builders (matches read)
+- URL-encode the v1 read default range
+- expose valueInputOption for the update operation in the block
+
+Backwards compatible: with no filter requested, read output is byte-
+identical and the `filter` field is omitted. The filterMatchType union is
+widened additively (4 -&gt; 10 values).
+
+* fix(google-sheets): correct filter metadata for missing column and header-only sheets
+
+- matchedRows is now 0 (not totalRows) when the filter column is not found,
+  so it no longer contradicts applied=false / columnFound=false
+- columnFound now reflects an actual header lookup for empty/header-only
+  sheets instead of being hardcoded true
+- add tests covering header-only and empty sheets with present/absent columns
+
+- fix(files): don&#39;t reject external URLs containing &#39;..&#39; in file parse validation (#4821)
+
+* fix(files): don&#39;t reject external URLs containing &#39;..&#39; in file parse validation
+
+The file block&#39;s file_fetch operation rejected any external URL whose path
+contained &#39;..&#39; (e.g. Slack files-pri slugs with a literal &#39;...&#39;) with
+&#39;Access denied: path traversal detected&#39;. Traversal checks only apply to
+local paths — external http(s) URLs are fetched with SSRF protection
+downstream and are never resolved against the filesystem, so they now
+short-circuit as valid. Internal /api/files/serve/ URLs keep full traversal
+protection.
+
+* test(files): fix external-URL assertion to handle undefined error
+
+* test(files): assert success explicitly in external-URL traversal test
+
+* fix(files): keep traversal protection for https URLs matching internal serve paths
+
+- improvement(enrichments): limit company-info to fields both providers return (#4817)
+
+Hunter&#39;s company dataset returns null industry/foundedYear for many large companies (verified against the live API for Microsoft, Amazon, Google), so under the first-non-empty-wins cascade those columns appeared inconsistently across rows. Limit company-info outputs to employee count and description — the fields Hunter and PDL both reliably return — so every row is consistent. employeeCount is a string so Hunter&#39;s range bucket and PDL&#39;s exact count share the column.
+
+- fix(search-replace): don&#39;t auto-navigate when content edits invalidate the active match (#4819)
+
+* fix(search-replace): don&#39;t auto-navigate when content edits invalidate the active match
+
+* fix(search-replace): clear afterReplaceIndexRef on apply failure and zero matches
+
+* fix(search-replace): remove duplicate setActiveSearchTarget(null) on close
+
+* fix(search-replace): move afterReplaceIndexRef write inside handleApply past the guard
+
+* fix(search-replace): auto-navigate when hydration resolves with no prior active match
+
+* chore(search-replace): remove inline comments
+
+* fix(search-replace): revert !activeMatchId guard that caused immediate re-navigation after deselect
+
+- improvement(integrations): validate and expand devin, cursor, and greptile (#4820)
+
+* improvement(integrations): validate and expand devin, cursor, and greptile
+
+- devin: fix missing org_id path segment on all session endpoints, add 7 session sub-resource tools (list messages/attachments, get/append/replace tags, archive, terminate), pagination, and is_archived output
+- cursor: add get_api_key_info, list_models, list_repositories tools
+- greptile: align block and docs
+- normalize array outputs to default [] and tighten types
+
+* refactor(cursor): simplify list_repositories v2 array normalization
+
+Collapse the redundant `?? []` + `Array.isArray` double-guard into a
+single Array.isArray check, per PR review feedback.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(devin): scope session-tag mapping to tag ops and normalize array tag inputs
+
+- Only map sessionTags into the tools tags param for append/replace operations,
+  preventing stale sessionTags state from clobbering create_session tags
+- Fall back to a wired tags value when sessionTags is empty for tag operations
+- Normalize tag inputs (string or wired string[]) via normalizeTags so array
+  values from other blocks no longer throw on .split
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(cursor): restore base64 file data in legacy download_artifact metadata
+
+The legacy CursorBlock exposes only content + metadata (no v2 file
+output), so metadata.data was the only way legacy-block workflows could
+access downloaded artifact bytes. Restore the base64 data field and
+document it in the outputs/type instead of dropping it.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(devin): coerce terminateArchive to archive flag for boolean-wired input
+
+* docs(integrations): regenerate tool docs for new devin and cursor operations
+
+---------
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- fix(security): block private/reserved IPs for hosted 1Password Connect SSRF (#4818)
+
+* fix(security): block private/reserved IPs for hosted 1Password Connect SSRF
+
+* test(security): use real isPrivateOrReservedIP and cover IPv6 edge cases
+
+- fix(security): harden SSO domain registration, webhook path isolation, and CSV export (#4813)
+
+* fix(security): harden KB file access, SSO domain registration, webhook path isolation, env secrets, and CSV export
+
+* fix(sso): scope domain conflict query with indexed lower(domain) filter
+
+Address PR review: avoid a full-table scan on every SSO provider
+registration by filtering candidate rows in SQL with
+lower(domain) = &lt;normalized&gt;, keeping the in-memory ownership check.
+Also tighten the normalizeSSODomain TSDoc.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* chore: condense env route security comments
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* icons update
+
+* chore(security): tighten inline comments in CSV export and KB file authorization
+
+Condense verbose comment blocks to concise TSDoc/single-line form; no behavior change.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(security): validate internal serve origin in KB file authorization
+
+Replace the bypassable isInternalFileUrl substring check in resolveInternalKbKey
+with an origin allow-list (base URL, internal API base URL, TRUSTED_ORIGINS).
+A crafted external host whose path is /api/files/serve/&lt;victim-key&gt; no longer
+resolves to the victim key. Relative same-origin URLs are unaffected.
+
+* style(sso): use idiomatic sql lower() comparison for domain conflict query
+
+Match the repo&#39;s prevailing `sql`lower(col) = value`` idiom for the
+case-insensitive SSO domain conflict lookup.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(security): align workspace env admin gate with hasWorkspaceAdminAccess
+
+Use the same admin check the secrets UI uses (owner, admin permission, or
+org-admin) so owners and org-admins are not wrongly denied their own decrypted
+workspace secrets, while read-only members remain restricted to names only.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(sso): rely on lower(domain) match for conflict detection, drop dead in-memory recheck
+
+Address PR review: the SQL `lower(domain) = &lt;normalized&gt;` predicate already
+excludes rows that the in-memory `normalizeSSODomain(...) === domain` recheck
+claimed to catch, making that recheck dead/misleading code. Match on the
+canonical lower-cased domain and filter purely by ownership. Malformed legacy
+values (wildcards, schemes, ports) never match an email domain at sign-in, so
+excluding them is not a gap. Test DB mock now applies the lower() predicate so
+the casing-variant case is genuinely exercised.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(security): scope webhook deploy path conflict to active webhooks
+
+findConflictingWebhookPathOwner omitted the isActive filter that the
+runtime dispatcher (findAllWebhooksForPath) applies, so an inactive but
+non-archived webhook from another workflow (e.g. after undeploy or
+failure auto-disable) would permanently block any new deployment on that
+path even though it never receives deliveries. Align the guard with the
+runtime isActive + archivedAt filter; the earliest-owner runtime check
+remains the authoritative cross-tenant protection. Also trims verbose
+TSDoc on the webhook path-isolation helpers.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(security): exclude archived workflows from webhook deploy path conflict
+
+findConflictingWebhookPathOwner now joins workflow and filters
+isNull(workflow.archivedAt), matching the runtime dispatcher
+(findAllWebhooksForPath). A webhook on an archived workflow can never
+receive deliveries at runtime, so it must not block legitimate path reuse
+with a 409.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(security): anchor KB file ownership to earliest document in any state
+
+A KB file&#39;s owner is now the earliest document referencing its key regardless of
+state (active/archived/deleted/excluded); access is granted only when that owning
+document is still active. Closes the residual where an attacker could plant an
+active document to claim a file whose original document was archived or deleted.
+
+* updated greptile icon
+
+* revert(security): drop KB file authorization changes
+
+Reverts the knowledge-base file-access work (origin-pinning / owner-pinning /
+origin allow-list in verifyKBFileAccess) and its test. The other hardening fixes
+(SSO domain registration, webhook path isolation, workspace env secrets, CSV
+export) are unchanged. apps/sim/app/api/files/authorization.ts is restored to its
+origin/staging baseline.
+
+* fix(sso): treat caller&#39;s own user-scoped provider as owned during conflict check
+
+Self-hosters often register SSO user-scoped via the CLI script (no
+SSO_ORGANIZATION_ID). If they later enable organizations and reconfigure the
+same domain org-scoped through the UI, the conflict check previously treated
+their own user-scoped row as another tenant&#39;s and returned a misleading 409.
+Recognize the caller&#39;s own user-scoped provider as owned so that migration is
+allowed, while still blocking another user&#39;s or another org&#39;s domain.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* revert(security): remove workspace-env admin gate
+
+Defer to a credential-based access model (separate change). Restores
+GET /api/workspaces/[id]/environment to main behavior and removes the test.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* refactor(security): consolidate webhook path-collision check into one helper
+
+Extract findConflictingWebhookPathOwner to lib/webhooks/utils.server.ts as
+the single source of truth for cross-tenant path-collision detection, used by
+both webhook creation paths (deploy sync and the manual /api/webhooks route).
+
+This also repairs two latent issues in the manual route&#39;s previous inline
+check, which queried with limit(1) and only webhook.archivedAt:
+- limit(1) inspected one arbitrary row, so a same-workflow row could mask a
+  foreign collision (false negative). The shared helper scans all matching
+  rows.
+- It omitted isActive/workflow.archivedAt, so inactive or archived-workflow
+  webhooks (which never receive deliveries) permanently blocked path reuse.
+  The helper mirrors the runtime dispatcher&#39;s filter.
+
+Same-workflow webhook reuse for upsert is now a separate, explicit lookup.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- fix(wait): resume live/draft async waits and preserve cell context on chained waits (#4814)
+
+* Make workflow description nullable
+
+* fix(wait): resume live/draft async waits and preserve cell context on chained waits
+
+- fix(tables): serialize schema mutations to prevent parallel column clobber (#4812)
+
+* Make workflow description nullable
+
+* fix(tables): serialize schema mutations to prevent parallel column clobber
+
+* fix(tables): load workflow outside schema lock; use DbOrTx for getTableById
+
+* fix(tables): scale idle timeout in updateColumnType to avoid aborting large type changes
+
+* fix(tables): skip stale remap types when workflowId changes concurrently
+
+* fix(tables): scale idle timeout in updateColumnConstraints for large tables
+
+- fix(icons): repair broken integration icon rendering (#4810)
+
+* fix(icons): repair broken integration icon rendering
+
+Two distinct bugs left integration icons broken on the /integrations page
+(visible at 32-40px, hidden at the toolbar&#39;s 16px):
+
+1. Corrupted SVG paths (Notion, Greptile, Granola, Calendly, Grafana, Bedrock):
+   over-minified data dropped elliptical-arc flag digits (e.g. `A1 1 0 5.9 7`
+   instead of `A1 1 0 0 0 5.9 7`); Granola&#39;s cubic stream was truncated. Browsers
+   abort path parsing at the first invalid arc flag, so each rendered as a fragment
+   or blank. Replaced with correct path data from canonical sources, preserving each
+   icon&#39;s existing fill/gradient and bgColor.
+
+2. Invisible glyph (Bright Data): its icon uses fill=&#39;currentColor&#39; but bgColor was
+   &#39;#FFFFFF&#39;, and every surface forces text-white on the glyph - white-on-white.
+   Changed bgColor to Bright Data&#39;s brand blue (#3d7ffc) so the white glyph reads,
+   matching the white-glyph-on-brand-chip convention.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(icons): restore Calendly dual-tone brand colors
+
+Addresses review feedback: the previous fix replaced the broken Calendly icon
+with a monochrome #006BFF path, dropping the cyan #0ae8f0 accent from the
+original dual-tone mark. Restored the two-tone logo (blue + cyan) using clean,
+valid path data, cropped to a tight square viewBox so it fills the chip.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* improvement(icons): enlarge icons, fix Zoom contrast and Quiver chip
+
+- Zoom: glyph was blue-on-blue (#0B5CFF on #2D8CFF chip); switched to
+  currentColor so it renders as a white glyph on the blue chip.
+- Quiver: chip bgColor #000000 -&gt; #FFFFFF to match the icon&#39;s near-white box,
+  and enlarged the mark slightly (viewBox crop).
+- Enlarged (tightened viewBox, verified no clipping): RevenueCat, Prospeo,
+  Granola, Firecrawl, Enrich.so, and the AWS icons (RDS, DynamoDB, SQS,
+  CloudFormation, Athena, CloudWatch, SES, Bedrock, S3).
+- ZoomInfo left unchanged: it is a full red rounded-square logo that already
+  fills its frame, so a crop would clip it.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(icons): use Bright Data wordmark on white chip; repair Circleback
+
+- Bright Data: replaced the flame glyph with the official two-tone &#39;bright data&#39;
+  wordmark (provided asset), centered in a symmetric viewBox. Reverted the chip
+  bgColor from #3d7ffc to #FFFFFF since the blue wordmark is invisible on a blue
+  chip (the wordmark is designed for a light background).
+- Circleback: a minifier had rounded the pattern&#39;s image scale to scale(0),
+  collapsing the embedded logo to zero size (invisible). Restored the correct
+  scale (1/280 = 0.00357142857) so the C. mark renders.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(docs): sync Quiver block color card to white chip
+
+Reflects the Quiver bgColor change (#000000 -&gt; #FFFFFF) in the docs block info card.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* improvement(icons): enlarge AWS/Cloudflare/Dagster icons, fully white Zoom
+
+- Enlarged (tighter viewBox, render-verified, no clipping): Cloudflare, Dagster,
+  and the red AWS icons AWS IAM, Identity Center, Secrets Manager, SES, STS.
+  Identity Center was anomalously small (filled ~32% of its frame); the group is
+  now sized consistently (~80% fill).
+- Zoom: the camera lens triangle was still #0B5CFF (blue-on-blue); switched it to
+  currentColor so the whole camera renders white on the blue chip.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* docs(wiza): consolidate individual reveal into a single operation
+
+Merges the separate Start/Get Individual Reveal operations into one Individual
+Reveal operation in the Wiza docs and integrations data (operationCount 5 -&gt; 4).
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* improvement(icons): size remaining AWS icons to match the set (~80% fill)
+
+Bring RDS, DynamoDB, SQS, CloudFormation, Athena, CloudWatch and S3 up to the
+same ~80% fill as the AWS IAM/Identity Center/Secrets Manager/SES/STS group, so
+all AWS icons are visually consistent. Bedrock left as-is (already ~92% fill).
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(icons): use Bright Data flame mark, enlarge ZoomInfo
+
+- Bright Data: the full &#39;bright data&#39; wordmark was illegible at chip size.
+  Replaced with just the flame-&#39;i&#39; brand mark (blue #4280f6 on the white chip),
+  centered.
+- ZoomInfo: cropped the viewBox toward the white &#39;Zi&#39; so it&#39;s larger; the red
+  rounded-square background still fills the chip.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* improvement(icons): enlarge CrowdStrike icon
+
+The falcon mark sat small in its chip because the icon used a wide 768x500
+viewBox (letterboxed in the square chip). Switched to a square viewBox centered
+on the mark so it fills ~80%, consistent with the other icons.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- fix(tables): right-align run/stop in embedded toolbar; workflow cells format like normal cells (#4806)
+
+* fix(tables): right-align run/stop in the embedded table toolbar
+
+Add a right-aligned `trailing` slot to ResourceOptionsBar and move the embedded
+mothership table&#39;s run/stop control into it, so Filter + Sort stay left-aligned
+and run/stop sits opposite on the right. No-op for the search-bearing consumers
+(logs, resource list), which don&#39;t pass `trailing`.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(tables): workflow-output cells format values like normal cells
+
+Workflow-output columns short-circuited in resolveCellRender and rendered their
+value as plain text, so a sim-resource URL / external URL / JSON / date produced
+by a workflow never got the chip, favicon link, or typed formatting a normal
+cell gets. Factor value formatting into a shared `resolveValueKind` helper used
+by both the workflow-value branch and the plain-cell branch; the workflow branch
+keeps the typewriter reveal for plain streaming text via a `typewriter` flag.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(tables): detect resource/URL links on workflow output regardless of column type
+
+Workflow output columns default to `json` (columnTypeForLeaf), so routing their
+values through the type-based formatter (a) gated chip/URL promotion behind
+`column.type === &#39;string&#39;` — a URL produced by a json-typed output never became
+a chip — and (b) JSON.stringify&#39;d plain string values, adding quotes and losing
+the typewriter reveal. Detect links (sim-resource chip / favicon URL) on the
+value string directly for workflow outputs, falling back to the plain `value`
+kind; plain cells keep the type-based formatting. Addresses Greptile P2 on #4806.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- perf(copilot): read chat transcripts from copilot_messages (R+1 cutover) (#4808)
+
+* perf(copilot): read chat transcripts from copilot_messages, not JSONB
+
+Flip user-facing chat reads from the legacy copilot_chats.messages JSONB
+array (5.7GB, 99% TOAST) to the normalized copilot_messages table via a
+new loadCopilotChatMessages helper ordered by seq NULLS LAST, created_at,
+id — the verified canonical order. Both chat-detail getters
+(getAccessibleCopilotChat, getAccessibleCopilotChatWithMessages) now drop
+the messages column from their metadata select (no more whole-array
+detoast on every load) and assemble the transcript from the table after
+authorization. This cascades to the copilot + mothership GET endpoints
+and to resolveOrCreateChat&#39;s conversationHistory (the LLM payload).
+
+The normalize/effective-transcript pipeline is source-agnostic
+(copilot_messages.content == a JSONB array element), so transcripts are
+byte-identical. Dual-write and the JSONB column stay in place as the
+internal-logic source and fallback; removing JSONB writes is a later step.
+
+Prod integrity verified before cutover: 0 messages missing, 0 NULL-seq,
+0 dup keys/seq, 0 orphans, order-parity vs JSONB = 0 mismatches.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* test(copilot): cover auth-deny on a found row skips the messages query
+
+Address PR review: exercise the `if (!authorized) return null` contract —
+when the chat row exists but authorization fails, the getter returns null
+and never issues the copilot_messages read.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;</div>
+</div>
+
+<a href="../project/simstudioai_sim.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
