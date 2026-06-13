@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (85 commits) - AI-Hypercomputer/maxtext - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (85 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/AI-Hypercomputer_maxtext.html">AI-Hypercomputer/maxtext</a> /
+    Updates in main (85 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/AI-Hypercomputer_maxtext.html">AI-Hypercomputer/maxtext</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-12 23:44 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/AI-Hypercomputer/maxtext/commits/main" target="_blank">https://github.com/AI-Hypercomputer/maxtext/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление устраняет критическую ошибку, из-за которой модели Gemma 4 некорректно использовали маркеры чат-шаблона Gemma 3, что приводило к серьезным проблемам с форматированием ответов, путем перехода на правильные специальные токены Gemma 4. Оно также включает значительные оптимизации для моделей NNX, такие как расширенное разбиение словаря (vocabulary tiling) для экономии памяти и полную интеграцию 8-битного квантования (AQT) в MaxEngine для более эффективной загрузки и обслуживания моделей. Кроме того, выпуск содержит улучшения для оценки RL (например, настраиваемый размер пакета, отчетность по средней награде), перенос QK-Clip в NNX и различные другие исправления ошибок и улучшения производительности.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix Gemma 4 multimodal chat-template markers in processor_gemma4
+
+The Gemma 4 multimodal SFT path was emitting Gemma 3 chat-template markers
+(&#34;&lt;start_of_turn&gt;&#34;, &#34;&lt;end_of_turn&gt;&#34;) which are NOT special tokens in the
+Gemma 4 tokenizer. They BPE-tokenize into 7-token noise sequences each, so a
+training label like &#34;A&lt;end_of_turn&gt;&#34; became an 8-token sequence
+([236776 &#39;A&#39;, 236820 &#39;&lt;&#39;, 643 &#39;end&#39;, 236779 &#39;_&#39;, 1340 &#39;of&#39;, 236779 &#39;_&#39;,
+887 &#39;turn&#39;, 236813 &#39;&gt;&#39;]).
+
+With sft_train_on_completion_only=true the model learned to reproduce this
+noise sequence after every answer, producing severe response-format collapse
+post-SFT (e.g. &#34;A&lt;B&lt;C&lt;D&lt;...&#34;).
+
+The Gemma 4 chat template uses different special tokens:
+  &lt;bos&gt;    (id 2)
+  &lt;|turn&gt;  (id 105)
+  &lt;turn|&gt;  (id 106)
+This CL switches the prompt and response formatters to use them.
+
+PiperOrigin-RevId: 931396545
+
+- Merge pull request #4145 from AI-Hypercomputer:0.2.3
+
+PiperOrigin-RevId: 931357244
+
+- Update release notes for 0.2.3
+
+- Merge pull request #4152 from AI-Hypercomputer:shuningjin-gmm-clean
+
+PiperOrigin-RevId: 931335471
+
+- Merge pull request #4122 from lukebaumann:fix-synthetic-sharding
+
+PiperOrigin-RevId: 931325261
+
+- Merge pull request #4156 from AI-Hypercomputer:yixuann-dev-qwen
+
+PiperOrigin-RevId: 931293216
+
+- clean tokamax gmm and add test
+
+- Merge pull request #3849 from AI-Hypercomputer:feat/nnx-vocab-tiling-custom-vjp
+
+PiperOrigin-RevId: 931260551
+
+- fix qwen3-30b-a3b-base missing shape for to_huggingface conversion
+
+- NNX: vocab tiling custom_vjp with output-head carve-out
+
+Replaces the PR9.5 NNX vocab-tiling MVP (chunked forward + default
+autograd backward) with a jax.custom_vjp that mirrors the Linen path&#39;s
+backward-memory savings, then carves out the output-head params so the
+custom_vjp&#39;s residuals + grad accumulator scale with LM-head size, not
+with the full model. Linen vocab_tiling_linen_loss is byte-for-byte
+unchanged. Call sites in train.py / pyconfig_deprecated.py /
+configs/types.py are unchanged.
+
+Custom_vjp + output-head carve-out (vocabulary_tiling.py):
+- Outside the custom_vjp: 3-way nnx.split with a callable path filter
+  (_is_output_head_param_path) matching {token_embedder,
+  shared_embedding, decoder_norm, logits_dense} — the only nnx.Param
+  paths apply_output_head touches. Returns (graphdef, head_params,
+  other_params, rest).
+- Custom_vjp primals: (head_params, other_params, rest, hidden_states,
+  labels, segmentation). Only head_params and hidden_states are
+  differentiated; other_params + rest are threaded through as
+  non-differentiated primals so their tracers don&#39;t have to cross both
+  the custom_vjp and the inner lax.scan boundary (which previously
+  caused UnexpectedTracerError under logits_via_embedding=True).
+- Forward (_chunked_cross_entropy_loss_fwd): reshapes to
+  (num_vocab_tiling, vocab_tile_size, ...) and runs lax.scan whose body
+  rebuilds the model per chunk via nnx.merge(graphdef, chunk_head,
+  chunk_other, chunk_rest, copy=True) and calls
+  logits_from_hidden_states. Initial scan accumulator is fp32 (was
+  hidden_states.dtype previously — caused a lax.scan carry dtype
+  mismatch with bf16 hidden_states since cross_entropy_with_logits
+  always returns fp32). Residuals are (chunk_head, chunk_other,
+  chunk_rest, reshaped_*, batch/seq/emb).
+- Backward (_chunked_cross_entropy_loss_bwd): a second lax.scan whose
+  body builds loss_fn_for_vjp = lambda p, h: ..., calls
+  jax.vjp(loss_fn_for_vjp, chunk_head_params, hidden_chunk),
+  accumulates grad_head via tree.map(add), emits per-chunk grad_hidden.
+  Chain-rules grad_head *= loss_cotangent and dtype-casts to each
+  primal&#39;s dtype (custom_vjp requires this). chunk_other_params and
+  chunk_rest cotangents are explicit tree_map(jnp.zeros_like, ...) zero
+  pytrees, NOT None — None makes JAX synthesize zeros at AOT trace time
+  with axis-0 stacking (jax.scan convention) for nnx.scan-stacked
+  transformer-layer params, which carry axis-1 stacking (nnx
+  convention), and the cotangent-shape check fails as
+  &#34;Expected cotangent type bfloat16[E,M] for primal type bfloat16[E,M],
+  but got bfloat16[L,E,M]&#34;. Materializing the zeros ties the cotangent
+  shape to the primal shape exactly.
+- Correctness: logits_from_hidden_states provably depends only on
+  head_params; the gradient w.r.t. other_params through this loss is
+  exactly zero. When train.py also calls the full model forward (which
+  produces hidden_states), transformer-layer gradients flow back
+  through grad_hidden_states → outer backward, unaffected by the
+  carve-out.
+
+Supporting fixes (touched for the carve-out to work end-to-end):
+- nnx_decoders.py::apply_output_head logits_via_embedding=True branch
+  reads embedding_table = shared_embedding.embedding[...] instead of
+  the deprecated .value shim. The .value shim registers the access in
+  NNX mutation tracking, which JAX detects as a tracer leak when the
+  embedding is closure-captured / threaded across the custom_vjp +
+  lax.scan boundaries. The Linen branch is unchanged.
+- models.py: deletes dead-code self.hidden_states = None and
+  if num_vocab_tiling &gt; 1: self.hidden_states = hidden_state from the
+  NNX Transformer class. Two lines left over from an early PR5
+  implementation idea — neither path actually reads
+  model.hidden_states (Linen reads via mutable=[&#34;intermediates&#34;]; NNX
+  reads via nnx.pop(model, nnx.Intermediate) from the decoder&#39;s sown
+  (&#34;decoder&#34;, &#34;hidden_states&#34;) intermediate). Without this fix, AOT
+  compile under pure_nnx=True + num_vocab_tiling&gt;1 raised
+  ValueError: Cannot assign data value of type &#39;LinearizeTracer&#39; to
+  static attribute &#39;hidden_states&#39; of Pytree type &#39;Transformer&#39; —
+  would have silently broken any post-PR11 user with vocab tiling on.
+
+Tests (tiling_test.py — new VocabTilingNNXTest class with 9 TPU tests):
+- test_nnx_vocab_tiling_non_tied_embedding / _tied_embedding: loss +
+  grad parity vs. full-vocab xent reference for both LM-head modes.
+- test_nnx_vocab_tiling_total_z_loss_value_parity: asserts the second
+  tuple element matches the reference (was untested before).
+- test_nnx_vocab_tiling_padded_segmentation: half-padded mask;
+  exercises the segmentation != 0 mask branch and asserts padded loss
+  is strictly less than unpadded.
+- test_nnx_vocab_tiling_grad_over_hidden_states: argnums=1
+  differentiation; exercises the custom_vjp&#39;s second-primal cotangent
+  path (grad_reshaped_hidden_states), shape + dtype + value parity.
+- test_nnx_vocab_tiling_bf16_hidden_states: bf16 inputs with rtol/atol
+  loosened to 5e-2; asserts grad_h.dtype == bf16 (the bwd dtype-cast
+  preserves the primal&#39;s dtype). Caught the fp32-accumulator bug.
+- test_nnx_vocab_tiling_z_loss_zero: z_loss_multiplier=0;
+  total_z_loss == 0.0 exactly and grad parity holds.
+- test_nnx_vocab_tiling_num_vocab_tiling_variants: runs n ∈ {2, 4, 8}
+  and asserts identical loss + grads (catches off-by-one in
+  vocab_tile_size and scan/reshape interactions).
+- test_nnx_vocab_tiling_other_params_get_zero_grad (carve-out
+  invariant): asserts every non-head leaf has gradient exactly zero
+  AND at least one head leaf has non-zero gradient (so the test can&#39;t
+  trivially pass by zeroing everything). Catches filter bugs (e.g.
+  forgetting that NNX names the embedder token_embedder while Linen
+  names it shared_embedding) and bwd zero-shape bugs.
+
+AOT compile coverage (train_compile_test.py):
+- Removed the now-stale pytest.skip(&#34;Vocab tiling not supported on
+  NNX.&#34;) in test_vocab_tiling_bf16.
+- Added test_vocab_tiling_bf16_nnx (cpu_only): AOT-compiles the train
+  step under pure_nnx=true + enable_nnx=true + pure_nnx_decoder=true
+  with num_vocab_tiling=4 and weight_dtype=bfloat16. Surfaced both the
+  models.py dead-code regression and the cotangent-axis-ordering issue
+  the explicit-zeros bwd fixes.
+
+Tests pass: 18 in tiling + AOT (7 Linen UTs + 9 NNX UTs + 2 AOT, one
+Linen and one NNX); 52 in adjacent NNX surfaces (train_nnx, dpo_nnx,
+grpo_nnx, lora_utils_nnx, maxengine, qk_clip, aqt_serve_roundtrip_nnx)
+— regression check for the nnx_decoders.py change.
+
+- Merge pull request #4133 from AI-Hypercomputer:feat/nnx-e2e-fixes
+
+PiperOrigin-RevId: 931227563
+
+- Merge pull request #4051 from AI-Hypercomputer:mohit/gdn_support
+
+PiperOrigin-RevId: 931217348
+
+- support of gdn kernel from tpu-inference
+
+- NNX: fix MTP eval under pure_nnx (sharding rule + sown-var handling)
+
+Two NNX-only bugs blocked MTP eval (mtp_num_layers&gt;0 + mtp_eval_target_module)
+under pure_nnx=True. Both exist on main and surface only on the NNX path (main
+defaults to Linen).
+
+1. logical_axis_rules: the MTP projection kernel is tagged with logical axis
+   &#39;concat_embed&#39; (and the fused gated-MLP wi uses &#39;num_activations&#39;), but neither
+   was in logical_axis_rules. get_abstract_model resolves logical-&gt;physical via
+   flax&#39;s from_sharding_rules, which returns unmapped names verbatim, so the literal
+   name reached NamedSharding and was rejected. Linen replicates unmapped axes by
+   default. Add both as replicated ([])  (base.yml).
+
+2. loss_fn: mtp_losses/mtp_acceptance are nnx.Variable subclasses, not
+   nnx.Intermediate, so nnx.pop(model, nnx.Intermediate) missed them. They leaked
+   into the returned train state and broke out_shardings at compile, and were
+   absent from intermediate_outputs so calculate_mtp_loss read None and the MTP loss
+   was silently dropped. Pop them into intermediate_outputs under their collection
+   names and exclude them from the returned state (train.py).
+
+Validated on CPU (gpt3-52k, mtp_num_layers=1 mtp_eval_target_module=1): trains,
+mtp_loss is non-zero in the total loss, and mtp_acceptance_rate is reported in eval.
+
+- Merge pull request #4155 from AI-Hypercomputer:mohit/skip-distill-test
+
+PiperOrigin-RevId: 930831680
+
+- Merge pull request #4151 from AI-Hypercomputer:yixuann-dev-gemma3-naming
+
+PiperOrigin-RevId: 930824546
+
+- Fix rank mismatch in MaxText synthetic data sharding
+
+* Change SyntheticDataIterator to use get_input_data_sharding instead of manual 1D sharding.
+* This ensures the sharding spec is 2D, matching the rank of the output tensors.
+* Fixes AssertionError: (1, 2) in JAX sharding validation on some JAX builds.
+* Remove unused PartitionSpec import in synthetic_data_processing.py.
+* Add parameterized unit test `tests/unit/synthetic_data_test.py` to verify synthetic data sharding works for both &#39;auto&#39; and &#39;explicit&#39; shard modes.
+
+- Skip test_train_save_and_resume distillation unit test.
+
+This test hangs indefinitely when running on synthetic datasets because the loop termination check inside `tunix` library is skipped when `is_managed_externally=True` is configured.
+
+TAG=agy
+CONV=1822511f-5517-44c5-8294-426243b7b179
+
+- fix gemma3 to_maxtext flag
+
+- Merge pull request #4108 from AI-Hypercomputer:rbierneni-q35-model-support
+
+PiperOrigin-RevId: 930640270
+
+- Move torch installation and remove safetensors from checkpoint conversion guides
+
+PiperOrigin-RevId: 930625456
+
+- Update model readme&#39;s with model support claim
+
+update readme with model sizes
+
+Update with links and formatted readme file
+
+Apply linter
+
+Update notes for model
+
+- Merge pull request #4140 from AI-Hypercomputer:pr/fix-eval-reward-question-v2
+
+PiperOrigin-RevId: 930602952
+
+- Merge pull request #4118 from AI-Hypercomputer:agagik-distill-perf
+
+PiperOrigin-RevId: 930580466
+
+- Optimize distillation perf for qwen3-30b (20%→26% MFU) and gpt-oss-20b (17%→18%).
+
+- Merge pull request #4099 from AI-Hypercomputer:shralex_ux3
+
+PiperOrigin-RevId: 930530650
+
+- Merge pull request #4106 from AI-Hypercomputer:rbierneni-q35-model-readme
+
+PiperOrigin-RevId: 930361921
+
+- Add model script for qwen3.5
+
+Update qwen moe readme
+
+Update commands
+
+Fix directory
+
+Update script so that it runs
+
+Update python paths to work with xpk test
+
+lower target length for decode
+
+Remove pythonpath changes
+
+Resolved pr comments
+
+Resolve minor nits
+
+- Merge pull request #4114 from AI-Hypercomputer:ranran_ragged_buffer
+
+PiperOrigin-RevId: 930150883
+
+- Add ragged buffer to ring of experts
+
+- Fix KeyError(&#39;question&#39;) in evaluate-time reward path
+
+`_compute_row_reward` (added in #4083) called reward functions with only
+`(prompts, completions, answer)`. The default `check_numbers` reward fn
+(utils_rl.py:430) reads `kargs[&#34;question&#34;]`, so it raised
+`KeyError(&#39;question&#39;)` on every eval row, suppressed by the helper&#39;s
+broad except, silently zeroing the reward contribution for the row.
+
+Symptom in production logs:
+
+  [eval-reward] reward_fn failed on row N: KeyError(&#39;question&#39;)
+
+Fix: thread `question` (already in scope at the caller as the per-row
+zip variable) through `_compute_row_reward` to each reward fn call.
+The training-time reward path always provides `question` because tunix
+passes the full dataset row dict to reward fns; eval-time was the only
+caller that dropped it.
+
+Tests: existing `TestComputeRowReward` tests in evaluate_rl_test.py
+updated to pass the new `question=` keyword argument. Test coverage
+preserved: multi-pass aggregation, per-fn summing, empty-responses
+zero-count, exception swallowing.
+
+- Merge pull request #3871 from AI-Hypercomputer:dsv4-moe-routing-primitives
+
+PiperOrigin-RevId: 930066054
+
+- Merge pull request #4054 from AI-Hypercomputer:517267368
+
+PiperOrigin-RevId: 930065356
+
+- Merge pull request #4109 from AI-Hypercomputer:yixuann-fix-gemma3-hf
+
+PiperOrigin-RevId: 930033604
+
+- Update vllm/tpu-inference commit and fix vllm installation
+
+- Add DeepSeek V4 Phase 1: Hash routing
+
+- Merge pull request #4119 from AI-Hypercomputer:lukebaumann/refactor-elastic-init-logic-fix
+
+PiperOrigin-RevId: 929955114
+
+- Merge pull request #4121 from AI-Hypercomputer:doc_fix
+
+PiperOrigin-RevId: 929935412
+
+- Merge pull request #3738 from melissawm:bucket-names
+
+PiperOrigin-RevId: 929912132
+
+- Use generic bucket names
+
+- Merge pull request #4110 from AI-Hypercomputer:chengnuojin-remove-weight-sum
+
+PiperOrigin-RevId: 929494335
+
+- Merge pull request #4123 from huytransformer:fix-integer-check-v2
+
+PiperOrigin-RevId: 929484580
+
+- rebase remove mask pr
+
+- Merge pull request #4030 from AI-Hypercomputer:pr/eval-batch-size
+
+PiperOrigin-RevId: 929448807
+
+- Fix unspecified mesh-axis integer validation (#4102)
+
+Fixes `fill_unspecified_mesh_axes` by calling `float.is_integer()` when validating inferred mesh-axis parallelism.
+
+Previously the assertion checked the bound method object instead of the boolean result, so non-integer inferred values could pass the intended validation.
+
+- Add eval_batch_size knob for faster post-train RL evaluation
+
+Post-train RL evaluation batched at trainer_config.batch_size, which
+for GRPO is intentionally small (e.g. 4 prompts per training step ×
+8 generations = 32 trajectories per step — set by the GRPO recipe to
+keep trainer HBM workable for the backward pass). At eval time this
+is wasteful: eval is greedy decode only (no backward), so the trainer
+budget doesn&#39;t apply, and vLLM rollout has many DP replicas sitting
+idle when only 4 prompts are dispatched per batch.
+
+Add an `eval_batch_size` knob (default -1 = use batch_size, preserving
+old behavior) that overrides the batch dimension during dataset
+preparation for the test split. Setting it to e.g. 128 on a sampler
+with 8 DP replicas gives a ~32x eval throughput improvement on TPU
+without affecting training behavior.
+
+Total eval examples = num_test_batches * eval_batch_size, so users
+should adjust num_test_batches when increasing eval_batch_size to keep
+total eval set size constant.
+
+- docs: fix broken links and cross-references
+
+- Removed broken standalone :link: in index.md.
+
+- Updated &#39;Get started&#39; link in index.html.
+
+- Fixed relative paths to build_maxtext.md.
+
+- Replaced relative link to sft_qwen3_demo.ipynb with GitHub link.
+
+- Fix elastic manager initialization bug when elastic is disabled
+
+Wrap elastic check condition into should_use_elastic and use it in
+ensure_elastic_manager_initialized and live_devices to avoid crash when
+elastic_enabled is False but pathways is used.
+
+Bug: http://b/521670882
+
+- Merge pull request #4083 from AI-Hypercomputer:pr/mean-reward-evaluate
+
+PiperOrigin-RevId: 929379997
+
+- Fix unspecified mesh-axis integer validation (#4102)
+
+Fixes `fill_unspecified_mesh_axes` by calling `float.is_integer()` when validating inferred mesh-axis parallelism.
+
+Previously the assertion checked the bound method object instead of the boolean result, so non-integer inferred values could pass the intended validation.
+
+- Merge pull request #3844 from AI-Hypercomputer:feat/nnx-aqt-maxengine
+
+PiperOrigin-RevId: 929376538
+
+- Merge pull request #3866 from AI-Hypercomputer:deepseek_v4_compressed_attention
+
+PiperOrigin-RevId: 929343004
+
+- Merge pull request #4101 from AI-Hypercomputer:shralex_ux5
+
+PiperOrigin-RevId: 929282635
+
+- Merge pull request #3907 from AI-Hypercomputer:rbierneni-test-q3-caching
+
+PiperOrigin-RevId: 929278986
+
+- feat: Add DeepSeek-V4 Compressed Attention
+
+- Try new caching strategy for gdn layer
+
+Add mini config model support for q3.5
+
+Wrong config name updated
+
+Remove special casing for caching since using existing kvcache class
+
+return kvcache instead of active_cache
+
+Use kvcache class and remove extra logic in decoders.py
+
+Add logic for proper batching of gdn caches
+
+Update for nnx issue when batch size &gt; 1
+
+Remove GDN specific cache
+
+Fixed linter issues
+
+Run linter on qwen3.py
+
+Fix caching so it doesn&#39;t reset when going from prefill to AR mode
+
+Fix cache initialization in gdn layer
+
+Use global_batch_size_to_load
+
+Align cache initialization with attentions.py
+
+update qwen3_5.py as well to mirror qwen3.py changes
+
+Add debugging logs
+
+Add layer logs with print()
+
+Fix naming bug
+
+Try with hardcoded value
+
+try with old code again
+
+try new function for batch_size
+
+fix function signature
+
+Try with existing code again
+
+Add resize logic
+
+Update calc for dummy image
+
+fix merge conflict
+
+chnge sharding to support tp=4
+
+Remove debug logs
+
+remove unecessary write to hbm
+
+Fix extra hbm transfers &amp; separate gatedeltarule for AR mode
+
+Update dynamic batching window
+
+Clean up pr and remove changes needed for tp=4
+
+Revert changes in train_compile for testing
+
+run linter
+
+remove unused imports
+
+Update gdn test as well with new arg
+
+Unpack tuple in attention test for gdn
+
+Add checks to fix pytype error
+
+- Merge pull request #4117 from AI-Hypercomputer:fix-52b-sh-oom
+
+PiperOrigin-RevId: 929230162
+
+- Merge pull request #3792 from melissawm:api-reference-fixes
+
+PiperOrigin-RevId: 929226274
+
+- Fix MaxText 52b.sh AOT compilation OOM on v4-384 (Option 1)
+
+This change enables vocabulary tiling (num_vocab_tiling=8) and forces flash attention (attention=flash) in 52b.sh.
+This resolves the HBM OOM when running AOT compilation for v4-384 with 2 slices (FSDP=192, per_device_batch_size=7).
+
+- NNX: AQT in MaxEngine + serve-mode reload + gpt3 prefill fix
+
+Builds on PR9. Migrates the NNX + AQT integration so MaxEngine can both
+load pre-quantized checkpoints directly and convert full-precision
+checkpoints to int8 on load. Also bundles a pre-existing gpt3 prefill
+bug surfaced by the AQT end-to-end validation.
+
+NNX + AQT in MaxEngine:
+- model_creation_utils threads quant_mode_str (&#34;train&#34; | &#34;convert&#34; |
+  &#34;serve&#34;) through from_config / create_model /
+  get_nnx_create_model_fn / create_nnx_abstract_model /
+  from_pretrained. Default &#34;train&#34; preserves existing callers; &#34;serve&#34;
+  propagates to configure_quantization so AQT layers don&#39;t materialize
+  the full-precision kernel when the on-disk checkpoint already
+  carries qrhs scale factors.
+- maxengine.__init__ selects the quant mode from
+  config.checkpoint_is_quantized; _load_params_nnx drops its
+  NotImplementedError. Two paths: pre-quantized
+  (checkpoint_is_quantized=True) loads via quant_mode_str=&#34;serve&#34;;
+  full-precision + quantization=int8 loads in TRAIN mode and AQT
+  layers quantize per-forward (same numerical result for absmax
+  calibration).
+- layerwise_quantization._load_and_quantize_nnx: whole-model NNX
+  convert path. Loads full-precision in TRAIN mode, transfers kernels
+  into a CONVERT-mode model, runs forward to populate qrhs.frozen via
+  the ToNNX(AqtDotGeneral) bridge, strips kernels at quantized paths,
+  saves serve-mode-shaped state.
+
+Sharding helpers and from_pretrained QTensor handling (5 chained fixes
+that kept the serve-mode reload from working):
+- maxtext_utils.get_nnx_named_sharding_with_scan_axis emits a
+  parallel-tree of replicated NamedSharding leaves when a Variable&#39;s
+  value is a composite pytree (AQT serve-mode QTensor with a qvalue
+  int8 leaf and a list of bf16 scale leaves).
+- model_creation_utils.from_pretrained: drops a redundant
+  jax.set_mesh wrap in create_nnx_abstract_model that broke serve-mode
+  AQT under Flax 0.12.6. _build_value_target / _free_device_memory /
+  _unwrap_for_align use Variable.get_value() instead of v[...]
+  indexing for QTensor leaves (QTensor.__getitem__ trips on the
+  LogicallyPartitioned wrapper around qvalue). Widens the restore
+  filter beyond nnx.Param to cover the aqt-typed qrhs.frozen Variable
+  type. Skips QTensor leaves in the per-axis shape-alignment dispatch
+  (their saved shape already matches the model). _build_value_target
+  strips Partitioned wrappers around composite-leaf values so the
+  restore tree path matches the on-disk layout (LogicallyPartitioned
+  was adding an extra .value key under each QTensor leaf, which made
+  orbax silently fill the path with zero-init values).
+
+gpt3 prefill / autoregressive fix (pre-existing, surfaced here):
+- Gpt3MultiHeadAttention.__call__ invoked attention_op(...) without
+  ever calling update_kv_caches to build cached_values, so any
+  non-TRAIN forward (prefill or autoregressive) tripped the
+  `assert prefill_kv_cache` check. Mirror the standard Attention
+  plumbing in attentions.py: __init__ constructs a KVCache_0 module
+  when model_mode != MODEL_MODE_TRAIN, threads
+  max_prefill_predict_length into AttentionOp; __call__ calls
+  self.KVCache_0(...) and passes [prefill_kv_cache, ar_kv_cache] as
+  cached_values to attention_op. TRAIN-mode shape unchanged.
+
+Tests:
+- layerwise_quantization_nnx_test (new): 3 cases for
+  _strip_kernels_at_quantized_paths covering quantized removal,
+  non-quantized preservation (norms, embeddings), mixed-shape trees.
+- aqt_serve_roundtrip_nnx_test (new): end-to-end regression test that
+  builds a small NNX model in CONVERT mode with int8, runs a forward
+  to populate qrhs.frozen via the ToNNX bridge, saves the
+  serve-mode-shape state to a tmp local orbax checkpoint, reloads via
+  from_pretrained(quant_mode_str=&#34;serve&#34;), and asserts every saved
+  qrhs.frozen.qvalue array byte-matches what came back. Guards the
+  full chain of QTensor / Partitioned / filter fixes.
+- maxengine_test: replaced test_quantize_raises_for_nnx with
+  test_quantize_passes_gate_for_nnx; added
+  test_load_pre_quantized_nnx_passes_quant_gate and
+  test_quantized_prefill_nnx_train_mode (real numerical verification
+  with quantization=int8 + random params + TRAIN mode).
+
+End-to-end on TPU (gpt3-52k): convert-mode forward + qrhs.frozen
+extraction + serve-mode-shape save + reload via
+from_pretrained(quant_mode_str=&#34;serve&#34;) + maxengine.load_params +
+quantized prefill forward all work; loaded qrhs.frozen.qvalue
+byte-matches the on-disk state.
+
+- docs &amp; feat: clarify and improve scan_layers mismatch error handling in conversion, training and checkpoints
+
+- feat(sft): robust list config parsing and improved SFT docs
+
+- Added automatic string-to-list and tuple-to-list coercion in pyconfig.py
+  for list[str] configuration fields (train_data_columns, eval_data_columns,
+  trainable_parameters_mask, adamw_mask) to prevent unhelpful Pydantic validation errors.
+- Added comprehensive unit tests in pyconfig_test.py covering 6 coercion
+  scenarios and end-to-end integration.
+- Added unit tests in instruction_data_processing_test.py validating that
+  unsupported SFT columns throw helpful, descriptive assertion errors.
+- Expanded docs/tutorials/posttraining/sft.md to document SFT schemas, custom
+  chat templates, ShareGPT custom formatters, and linked a runnable example.
+
+- Merge pull request #3836 from AI-Hypercomputer:feat/nnx-qk-clip-and-checkpoint-utils
+
+PiperOrigin-RevId: 929151150
+
+- Merge pull request #3890 from dandragona:dandragona/mhc_k4_shortcut
+
+PiperOrigin-RevId: 928997510
+
+- Merge pull request #4097 from AI-Hypercomputer:shralex_ux1
+
+PiperOrigin-RevId: 928895601
+
+- Merge pull request #4082 from AI-Hypercomputer:chengnuojin-remove-mask
+
+PiperOrigin-RevId: 928886644
+
+- Merge pull request #4112 from AI-Hypercomputer:aireen/fix_colocated_tokenizer_path
+
+PiperOrigin-RevId: 928875782
+
+- Merge pull request #4094 from AI-Hypercomputer:getting_started_doc
+
+PiperOrigin-RevId: 928859605
+
+- Fix tokenizer path when using colocated_python
+
+- revert previous commit
+
+- trick to remove select in gmm
+
+- remove masks and update gmm function in moe
+
+Update reference HLO from CI artifact
+
+- Merge pull request #4031 from AI-Hypercomputer:pr/dataset-processor-path
+
+PiperOrigin-RevId: 928781201
+
+- Add weekly linkchecker and report failures on issue
+
+Also adds linkchecker and docs build to pypi_release action
+
+- Revert &#34;Fix the param names for Gemma3 model&#34;
+
+This reverts commit 9de0143622b324eed09ddf172f19869f60f1c755.
+
+- Merge pull request #4056 from AI-Hypercomputer:ajkv/efficient-top-k-saving
+
+PiperOrigin-RevId: 928686854
+
+- Add mean_reward to evaluate() via reusing user-provided reward functions
+
+evaluate() previously returned only binary correctness metrics (corr,
+accuracy, partial_accuracy, format_accuracy). For RL training the most
+important metric is the actual reward signal — but that was only
+available at training time, not during PRE / POST / intermediate eval.
+
+Extend evaluate() to accept an optional `reward_fns` list and compute
+the per-example sum of all reward functions, returning the mean as a
+6th element `mean_reward`. The reward functions used are the same ones
+that drive training (per `reward_functions_path` + `reward_functions`
+CLI knobs from commit 50eb2ca) — so eval-time mean_reward is exactly
+what training optimizes for. No task-specific code is added to maxtext;
+whatever scoring scheme the user plugs in becomes both the training
+signal AND the eval-time reward metric.
+
+Plumbed through to all three eval call sites in train_rl.py:
+  * Pre RL Training log line now includes mean_reward=...
+  * Post RL Training log line now includes mean_reward=...
+  * Intermediate Eval (step=N) log line now includes mean_reward=...
+
+When no reward_fns is configured, mean_reward is reported as 0.0 and
+the rest of evaluate() works exactly as before (backward compatible).
+
+create_rl_components() return signature extended to also return
+reward_fns so the eval call sites can pass them along.
+
+- Add dataset_processor_path CLI knob for custom datasets
+
+Currently utils_rl.process_data hard-branches on `dataset_name == &#34;openai/gsm8k&#34;`
+to call `extract_hash_answer`. Other datasets either work as-is (if their
+`answer` column is already clean) or require editing utils_rl directly.
+
+Add an optional `dataset_processor_path` config: a filesystem path to a
+user-provided Python file with a `process_data(dataset_name, tokenizer,
+template_config, tmvp_config, x) -&gt; dict` function. When set, that function
+replaces the built-in one for all train/eval dataset map() calls.
+
+Default (`dataset_processor_path: &#39;&#39;`) keeps existing behavior unchanged.
+
+Also adds `_load_custom_callable` helper used by this and the upcoming
+custom reward CLI knob.
+
+- Merge pull request #4098 from AI-Hypercomputer:shralex_ux2
+
+PiperOrigin-RevId: 928650279
+
+- updated formatting
+
+- fixed attribute error
+
+- Update geting started doc
+
+- NNX: QK-Clip + NNX-format checkpoint utilities + GRPO bug fixes from PR8
+
+Migrates the remaining Linen-only utilities to NNX (QK-Clip, three
+checkpoint helpers) and picks up two real NNX-GRPO bugs flagged on the
+already-merged PR8 review. Every NNX edit is gated on
+`config.pure_nnx` or runtime state-shape detection; Linen paths are
+preserved byte-for-byte.
+
+QK-Clip:
+- `qk_clip_utils.apply_qk_clip_nnx` mutates `state.model` in place via
+  `nnx.split` -&gt; pure-dict `tree_map` -&gt; `nnx.replace_by_pure_dict` -&gt;
+  `nnx.update`. Accepts both the production NNX intermediate shape
+  (`self_attention.attention_op.max_logits`, sown inside `AttentionOp`)
+  and the synthetic-fixture shape used by the existing Linen tests
+  (`self_attention.max_logits`).
+- `train.py::train_step` dispatches on `isinstance(model, nn.Module)`
+  to call `apply_qk_clip` (Linen) or `apply_qk_clip_nnx` (NNX). The
+  TODO at the QK-Clip call site is removed.
+
+NNX-format checkpoint utilities:
+- `standalone_checkpointer.checkpoint_loop` builds an NNX
+  `init_state_fn` under `pure_nnx` (mirroring PR8&#39;s GRPO trainer).
+  `add_entropy_to_checkpoint` dispatches across Linen `TrainState`,
+  NNX `TrainStateNNX` Module, and post-split `nnx.State` shapes; all
+  three produce identical `cos(1000*p)`/`sin(1000*p)` mu/nu
+  replacements.
+- `generate_param_only_checkpoint`: `_read_train_checkpoint` builds an
+  NNX `init_state_fn` under `pure_nnx`. New `_possibly_unroll_params_nnx`
+  slices scanned NNX layers via dict-style mutation on
+  `state.model.decoder`. New `_save_decode_checkpoint_nnx` writes a
+  bf16 pure-dict tree to orbax. Parallel LoRA decode flow operates on
+  the single-nested LoRA delta tree from PR8&#39;s
+  `get_lora_abstract_state_nnx`.
+- `convert_gpt3_ckpt_from_paxml`: parallel NNX `state_map` keystr
+  translation. Paths use the dict-style format that
+  `jax.tree_util.keystr` actually produces on an `nnx.State` — e.g.
+  `[&#39;optimizer&#39;][&#39;step&#39;].value` and
+  `[&#39;optimizer&#39;][&#39;opt_state&#39;][0][&#39;mu&#39;]&lt;rest&gt;.value` (dict-style for
+  the State Mappings, `[0]` for the optax tuple, `.value` for the
+  `nnx.Variable` leaf). Save uses `state.optimizer.step.value` for
+  the step number on NNX. End-to-end paxml -&gt; NNX conversion is wired
+  but not yet validated on hardware.
+
+NNX-GRPO bug fixes from merged PR8:
+- `setup_train_loop`&#39;s NNX `init_state_fn` called
+  `TrainStateNNX(nnx_model, optimizer, reference_model=...)` — but
+  `TrainStateNNX.__init__` only accepts `(model, optimizer)`, so this
+  would raise `TypeError` the first time GRPO ran with
+  `pure_nnx=True`. (The original code masked the failure with
+  `# pylint: disable-next=unexpected-keyword-arg` rather than running
+  it.) Fixed by constructing `TrainStateNNX` with the two valid args
+  and setting `state.reference_model` as a sibling attribute after
+  construction. `nnx.Module` is mutable, and the attribute survives
+  `nnx.split` / `nnx.merge` round-trips.
+- `_train_step_nnx`&#39;s `diff_wrapper` closed over `state.reference_model`
+  directly inside `jax.value_and_grad`. `nnx.Module` is not a
+  registered JAX pytree, so closure-capture only worked as long as
+  JAX treated the module as static — fragile, and any internal-state
+  touch during the reference forward would trace badly. Fixed by
+  mirroring the existing policy-model pattern:
+  `nnx.split(state.reference_model)` outside the wrapper, pass
+  `ref_state` as an explicit pytree argument into `diff_wrapper`, and
+  `nnx.merge` it inside.
+
+Tests:
+- `qk_clip_test`: 7 new NNX cases (`QKClipNNXTest`,
+  `CalculateMaxLogitNNXTest`) covering attention-type guard, MLA
+  wq_b/wkv_b math, both intermediate shapes, no-clip-below-threshold,
+  missing-stats resilience, Linen&lt;-&gt;NNX numeric parity.
+- `standalone_checkpointer_nnx_test` (new): 3 cases for adam mu/nu
+  overwrite on `TrainStateNNX` Module shape, no mutation of
+  `state.model` params, post-split `nnx.State` shape from
+  `setup_training_state`.
+- `generate_param_only_checkpoint_nnx_test` (new): 3 cases for
+  scanned-layer slicing (Llama-style; DeepSeek-style dense+moe split;
+  LoRA delta unroll on the single-nested NNX shape).
+
+Test results: 31 passed, 2 skipped across the PR9 surface
+(`qk_clip_test`, `standalone_checkpointer_nnx_test`,
+`generate_param_only_checkpoint_nnx_test`, `grpo_nnx_test`).
+
+- Add validation to block unsupported parameters in post-training SFT, RL, and DPO
+
+- SFT, RL, and DPO trainers now error out on optimizer_memory_host_offload=True since the underlying Tunix trainers do not support host offloading.
+- DPO and RL trainers now error out on num_vocab_tiling &gt; 1 since they require full vocabulary projections to compute preference/policy log-probabilities, which is incompatible with vocabulary tiling.
+- Created unit tests for SFT, RL, and DPO validation functions to verify these restrictions.
+
+- Clarify GCS bucket permission requirements in SFT and RL tutorials
+
+Updates the SFT and RL multi-host tutorials to recommend either the broader Storage Admin role, or combining the restrictive Storage Object Admin role with Storage Legacy Bucket Reader. This ensures JAX/TensorStore can perform bucket-level operations (like storage.buckets.get) and prevents misleading &#39;bucket not found&#39; errors.</div>
+</div>
+
+<a href="../project/AI-Hypercomputer_maxtext.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

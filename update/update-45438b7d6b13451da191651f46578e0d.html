@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (22 commits) - FluidInference/FluidAudio - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (22 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a> /
+    Updates in main (22 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-13 03:55 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/FluidInference/FluidAudio/commits/main" target="_blank">https://github.com/FluidInference/FluidAudio/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Этот выпуск представляет Parakeet Unified 0.6B как надёжный потоковый ASR бэкэнд, с 8-битным квантованием, офлайн-режимом и улучшенной точностью для обработки длинного аудио за счёт слияния на границах слов. Значительные улучшения TTS включают англоязычный интерфейс KokoroAne с приоритетом лексикона, а также серьёзные оптимизации производительности PocketTTS на Apple Neural Engine и квантованный VectorEstimator, оптимизированный для ANE, для Supertonic-3. Обновление также улучшает совместимость KokoroAne с процессорами M5 &#34;из коробки&#34; и удаляет несколько экспериментальных, менее производительных ASR/TTS бэкэндов.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- feat(asr): Parakeet Unified 0.6B backend (chunked-attention streaming + offline batch) (#693)
+
+## Summary
+
+Adds
+[nvidia/parakeet-unified-en-0.6b](https://huggingface.co/nvidia/parakeet-unified-en-0.6b)
+(Unified FastConformer-RNNT, 600M) as a true streaming ASR engine,
+closing the request in #49
+([comment](https://github.com/FluidInference/FluidAudio/issues/49#issuecomment-4526026299)).
+CoreML models:
+[FluidInference/parakeet-unified-en-0.6b-coreml](https://huggingface.co/FluidInference/parakeet-unified-en-0.6b-coreml);
+conversion pipeline in mobius (FluidInference/mobius#72).
+
+## Design
+
+Unlike the cache-aware engines (EOU, Nemotron), the unified model&#39;s
+encoder is **stateless**: each step re-encodes a `[left | chunk |
+right]` audio window whose chunked attention mask
+(`chunked_limited_with_rc`) was baked in at conversion time. Only the
+RNNT decoder LSTM state + last token persist across chunks, so streamed
+output closely matches the model&#39;s offline quality.
+
+- `StreamingUnifiedAsrManager` — actor conforming to
+`StreamingAsrManager`; plain greedy RNNT loop (no TDT duration head;
+blank=1024, vocab 1024)
+- `UnifiedStreamingWindower` — pure window/frame bookkeeping
+(unit-tested, no models needed); the final flush emits at most once so
+termination never depends on re-deriving the encoder&#39;s length formula
+- New variant `parakeet-unified-2080ms`: `[70,13,13]` frames = 5.6 s
+left / 1.04 s chunk / 1.04 s right (2.08 s theoretical latency)
+- Zero CLI changes needed — `--parakeet-variant parakeet-unified-2080ms`
+works through the existing protocol path
+
+## Validation
+
+| Check | Result |
+|---|---|
+| LibriSpeech test-clean, streaming (all 2620 files, CoreML chain) |
+**2.15% WER** @ 2.08 s latency |
+| LibriSpeech test-clean, offline batch — **all 2620 files**, long ones
+via overlapping windows | **1.86% WER** |
+| CLI E2E (60 s YC clip) | RTFx 37 (debug build), transcript
+word-for-word identical to NeMo reference |
+| Encoder latency | ~12 ms per 1.04 s chunk (CPU+ANE) |
+
+```
+swift run fluidaudiocli transcribe audio.wav --parakeet-variant parakeet-unified-2080ms
+```
+
+## Notes
+
+- The variable-length preprocessor and per-token decoder/joint run
+CPU-only (the RangeDim preprocessor trips E5RT shape inference on ANE;
+tiny per-step models don&#39;t benefit from ANE dispatch)
+- **Offline 15 s overlapping-batch mode** (second commit):
+`--parakeet-variant parakeet-unified-offline-15s` uses the
+full-attention offline encoder (1.82% vs 2.15% test-clean WER) —
+frame-aligned 14.96 s windows, 2 s overlap, fresh RNNT state per window,
+seams merged via the existing `ChunkProcessor.mergeChunks`. 60 s clip at
+RTFx 97; transcript matches streaming output except two commas, no seam
+artifacts. Download variant &#34;offline&#34; fetches the offline encoder only
+when this mode is used.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+## int8 quantization (third commit)
+
+Both encoders also ship int8 (per-channel linear symmetric) —
+**WER-lossless on full test-clean** (offline 1.83% vs 1.82% fp16;
+streaming 2.14% vs 2.15%), identical ANE latency, half the download
+(~565 MB vs ~1.1 GB per encoder). int8 is the **default**; fp16 stays
+available via `encoderPrecision: .fp16`.
+
+Gotcha encoded in the managers: int8 must not route to the GPU — under
+`.all` compute units MPSGraph fails its MLIR pass and aborts, so encoder
+loads coerce `.all` → `.cpuAndNeuralEngine`.
+
+- docs(claude): allow HuggingFace uploads in CLAUDE.md (#694)
+
+## Summary
+- Replace the &#34;NEVER UPLOAD TO HUGGINGFACE&#34; rule with a &#34;HUGGINGFACE
+UPLOADS&#34; section: uploads and repo creation are now allowed, with the
+target repo confirmed before uploading.
+
+- fix(tts): Misaki-lexicon-first English frontend for KokoroAne (#692)
+
+Fixes #691.
+
+## Problem
+
+`KokoroAneManager`&#39;s English frontend whitespace-split the text and ran
+every word through the BART G2P CoreML model, which returns stressed
+citation forms. The function word `to` came back as `tˈO` and rendered
+as a stressed &#34;toe&#34; in ordinary sentences like &#34;I want to go&#34; with
+`af_heart`.
+
+## Fix
+
+Resolve words against Kokoro&#39;s preprocessed Misaki lexicon cache first
+(`us_lexicon_cache.json` — the same asset and `LexiconAssetCache` loader
+the StyleTTS2 frontend already uses), keeping BART G2P as the OOV
+fallback. The lexicon carries the weak forms (`to` → `tu`, unstressed),
+and all 46 of its distinct phoneme tokens are present in the ANE chain
+vocab, so entries feed the chain unmodified (Misaki diphthong shorthand
+`A O I Y W` is NOT expanded, unlike the StyleTTS2 frontend).
+
+New `KokoroAneEnglishPhonemizer` resolution order:
+1. caller-supplied custom lexicon (exact spelling, then lower-cased)
+2. case-sensitive Misaki hit (`AI`, `NATO`, …)
+3. lower-cased Misaki hit (weak function-word forms)
+4. BART G2P fallback for OOV words
+
+Also:
+- **Punctuation kept as prosody tokens.** The chain vocab encodes `, . !
+? ; …` etc.; the old frontend stripped them on the wrong assumption the
+vocab was IPA-only. Kept punctuation attaches to the preceding word,
+matching upstream `KPipeline.g2p` output shape.
+- **`phonemes(for:)`** — public diagnostic API exposing the exact
+phoneme string `synthesize(text:)` feeds the 7-stage chain (both
+variants).
+- **`setEnglishCustomLexicon(_:)`** — override hook mirroring the
+existing Mandarin custom lexicon API, so downstream apps no longer need
+to bypass `synthesize(text:)` for pronunciation fixes.
+- **Best-effort lexicon download** — a missing/unfetchable lexicon
+degrades to the previous BART-G2P-only path instead of failing; the
+degraded frontend is not cached, so the lexicon is retried on the next
+call.
+
+## Verification
+
+- 14 unit tests for the new frontend (weak forms, resolution order,
+punctuation attach/drop, custom-lexicon precedence, degraded paths).
+- ASR round-trip with real assets on &#34;I want to go to the store.&#34;: the
+first `to` token confidence goes **0.442 → 1.000** (clip confidence
+0.924 → 0.998); lexicon load (178,546 entries) confirmed in logs.
+
+- fix(asr): splice long-form chunk merges on SentencePiece word boundaries (#688)
+
+Fixes #683.
+
+## Problem
+
+`ChunkProcessor`&#39;s window merge splices token streams purely by token
+IDs and timestamps. None of the three merge paths checks SentencePiece
+word boundaries, so a seam splice could decode:
+
+- a **hybrid word** — left window&#39;s word prefix + right window&#39;s
+continuation pieces,
+- a **glued word** — a continuation piece (no `▁` prefix) appended
+directly onto a completed word, or
+- a **truncated word** — a raw time cutoff splitting a word.
+
+## Fix
+
+- `ChunkProcessor.spliceSafeTokenIds(vocabulary:)` derives the set of
+word-initial token IDs (`▁`/space-prefixed or punctuation-only pieces)
+from the model vocabulary, computed once per merge pass and threaded
+through `mergeChunks`.
+- **`mergeUsingMatches` post-match tail**: when the splice lands
+mid-word (first tail token is a continuation piece), adopt the **right
+window&#39;s segmentation of the whole seam word** — the left chunk is
+typically the one whose audio was cut mid-word. Only when the right
+stream itself starts mid-word (no `▁` piece before the matched anchor —
+the construction that produces glued words) does the merge keep the left
+window&#39;s word and resume right at its next word-initial piece.
+- **`mergeByMidpoint`**: extends the left stream to finish the word the
+time cutoff splits, and drops orphaned continuation pieces from the
+right stream&#39;s head.
+- Without a vocabulary the merge is byte-for-byte unchanged.
+
+Note on the issue&#39;s analysis: gap fills turned out to be structurally
+safe — splices between matches are always anchored at identical token
+IDs, so they stay stream-contiguous. Only the post-match tail and the
+midpoint cutoff can splice mid-word.
+
+The issue&#39;s suggested repair (complete the seam word from the *left*
+window) was implemented first and rejected empirically: on FLEURS uk_ua
+it truncated 4 seam words (e.g. `Гренландією`→`Гренланді`,
+`воскресіння`→`воскресен`) because at a seam the left window is the one
+cut mid-word — the right window heard the word in full.
+
+## Validation
+
+- **1h earnings22 audio (~277 window seams)**: the only 3 word-level
+diffs vs baseline are organic seam-splice artifacts repaired by this
+change — `Patrict.`→`Patrick.` (seam 47), `outlocate`→`allocate` (seam
+144), `automoti`→`automotive` (seam 274). Zero regressions.
+- **FLEURS uk_ua, 200 samples**: WER 7.0% == baseline (CER 2.3%); the 28
+files ≥ 15s (every one with a seam) are WER-neutral with no truncated or
+hybrid seam words.
+- **FLEURS en_us, 200 samples**: WER 5.0% == baseline. RTFx unchanged
+(~140x).
+- New unit tests cover the glue repro from the issue, the
+adopt-right-segmentation path, the right-cut-mid-word fallback, the
+midpoint path, piece classification, and unchanged legacy behavior
+without a vocabulary.
+
+- fix(asr): make SlidingWindowAsrConfig.default fit the model&#39;s 240k-sample input (#689)
+
+Fixes #686
+
+## Problem
+
+`SlidingWindowAsrConfig.default` used a 10+15+2 layout, assembling 27 s
+(432,000-sample) windows — but the Parakeet TDT v3 preprocessor has a
+fixed `[1, 240000]` (15 s) input. Every live window threw a shape error
+that `attemptErrorRecovery` swallowed (OSLog only), so:
+
+- the update stream never yielded anything (0 updates on a 34-min
+recording per the issue report),
+- `finish()` returned only the last few seconds of audio,
+- and the consumer had no signal that anything was wrong.
+
+## Fix
+
+- **`.default` now uses the proven 11+2+2 layout** (2 + 11 + 2 = 15 s,
+fits the model input exactly), matching `.streaming` and the CLI
+streaming defaults.
+- **Fixed the `chunkDuration` convenience initializers&#39; 10 s left
+context** (broken for any chunk &gt; 3 s) to 2 s.
+- **`startStreaming` now validates** `left + chunk + right &lt;=
+ASRConstants.maxModelSamples` and throws
+`SlidingWindowAsrError.invalidConfiguration` so misconfiguration fails
+loudly at startup instead of failing every window silently.
+- **Window-processing failures are now tracked**: `finish()` throws the
+last window error when *every* window failed (instead of silently
+returning a truncated transcript), and logs a warning when only some
+windows failed.
+
+## Validation
+
+- New unit tests: presets fit the model input, `validate()` rejects the
+old oversized layout, `startStreaming` throws for oversized configs,
+convenience initializers produce valid windows.
+- E2E smoke: `fluidaudiocli transcribe --streaming` on a 28.9 s FLEURS
+uk_ua file produces the full transcript through the sliding-window path.
+- `swift build` clean, `swift format lint` clean.
+
+- Revise app logo submission guidelines in README
+
+Updated the instructions for submitting app logos to the showcase section.
+
+- docs: add Hedy to the showcase and featured apps (#682)
+
+Adds [Hedy](https://hedy.ai) to the Showcase table (chronological, at
+the end) and a logo to the featured apps strip.
+
+Hedy is a privacy-first AI meeting coach for iOS, macOS, Android, and
+Windows. On Apple platforms it runs fully on-device transcription with
+speaker diarization on the Apple Neural Engine, using FluidAudio&#39;s
+Parakeet and Nemotron streaming ASR.
+
+Changes:
+- Showcase table row for Hedy
+- `Documentation/assets/hedy.png` (250×100, transparent) added to the
+featured logo strip
+
+Happy to adjust the wording or the logo if you&#39;d prefer something
+different.
+
+Co-authored-by: Brandon Weng &lt;18161326+BrandonWeng@users.noreply.github.com&gt;
+
+- Add Parakey to Showcase (#684)
+
+Adds Parakey at the end of the Showcase table, per the note above it.
+
+Parakey is an MIT-licensed menu-bar app for push-to-talk dictation on
+macOS — hold a key, speak, release, and the transcript pastes at the
+cursor. FluidAudio&#39;s Parakeet TDT v3 path on the ANE is the entire
+engine; the ~100 ms key-release-to-paste it enables is the whole
+product. Thanks for the library.
+
+Co-authored-by: Brandon Weng &lt;18161326+BrandonWeng@users.noreply.github.com&gt;
+
+- Add TypeWhisper to the FluidAudio showcase (#685)
+
+## Summary
+
+- Add TypeWhisper to the FluidAudio README showcase.
+- Mention that TypeWhisper uses FluidAudio&#39;s Parakeet ASR for local
+transcription on macOS.
+
+## Test Plan
+
+- README-only change.
+- `git diff -- README.md`
+- `git diff --check`
+
+- feat(asr): expose per-token timings from Nemotron streaming ASR (English + multilingual) (#673)
+
+### Why is this change needed?
+
+The Nemotron streaming RNNT decode loop already knows which encoder
+frame each token is emitted at, but the streaming managers only return
+the decoded text. So there is no way for a caller to line transcript
+words up with anything time-based (diarization, word-level highlighting,
+subtitle timing) without running a separate forced alignment.
+
+This change surfaces the timing that is already computed. At each
+token-emission site, next to the existing
+`accumulatedTokenIds.append(...)`, it records a `TokenTiming` whose
+`startTime` is the token&#39;s absolute encoder-frame index times
+`ASRConstants.secondsPerEncoderFrame` (80 ms per frame). Callers get the
+timings from a new `finishWithTokenTimings() -&gt; (text, timings)`, with a
+`getTokenTimings()` accessor for salvaging a partially decoded session
+that cannot safely `finish()`. The existing `process()` / `finish()`
+String API does not change.
+
+Both managers are covered:
+
+- `StreamingNemotronAsrManager` (English): one emission site in the
+per-frame decode loop.
+- `StreamingNemotronMultilingualAsrManager`: three sites, since it has
+the legacy per-frame loop plus the default-on speculative decoder
+(first-hit and multi-emission drain). Two extra details here.
+Language-tag tokens, which `decode()` already strips from the
+transcript, are kept out of the timing stream so it stays 1:1 with the
+visible tokens. And a new `NemotronMultilingualTokenizer.rawToken(for:)`
+passthrough exposes the raw `▁`-marked piece, because the existing
+`tokenizerPiece` helper strips that marker and callers need it to find
+word starts. A VAD-skipped chunk still advances the frame base by its
+nominal frame count so the timeline does not drift.
+
+Grouping tokens by the SentencePiece `▁` marker yields word-level
+`(text, startTime, endTime)` spans. In our app we use that to assign
+each transcript word to the diarizer segment it overlaps, which fixed
+boundary-word speaker misattribution on imported audio.
+
+A few notes:
+
+- Purely additive. No existing API or behavior changes.
+- `swift format lint` is clean on the changed files (the two
+pre-existing `K` constant warnings are untouched upstream code).
+- Granularity is per encoder frame (80 ms), which matches the greedy
+RNNT decode. There is no per-token duration here like the TDT path has.
+
+- feat(asr/eou): opt-in fused decoder+joint_decision path (+7-9% RTFx, WER neutral-or-better) (#680)
+
+- fix(kokoro): route the Noise stage to GPU in the M5-safe preset (+~10% synth) (#677)
+
+- feat(tts/pocket): ANE placements — rank-4 split-KV models (.ane) + MLState pipeline (.aneState) (#679)
+
+## Summary
+
+Two stacked opt-in placements for PocketTTS, both Swift-measured with
+the built-in Parakeet WER gate. `.gpu` default behavior unchanged.
+
+### `.ane` — rank-4 split-KV models (mobius Trials 19/20)
+The rank-5 v2.1 graphs fail `ANECCompile` outright; the rank-4
+scatter-free rewrites are bit-identical and plan flowlm **100% ANE** /
+cond_prefill 92% under `.cpuAndNeuralEngine`.
+
+| Placement | Inference | RTFx | WER |
+|---|---|---|---|
+| `.gpu` (shipped) | 1.32 s | 5.7 | 0 |
+| `.ane` | **1.108 s (−19%)** | 7.1 | 0 |
+
+- Split-KV `KVCacheState`, explicit-name layer keys, per-model compute
+units, CLI `--placement ane`
+- BOS host contract: the `_ane` FlowLM has no NaN-BOS protocol — **the
+ANE mangles NaN inputs before `isnan` evaluates** (measured divergence
+2.9 vs 3e-2 CPU); host passes the BOS latent directly
+- All 11 language packs ship `*_ane.mlmodelc` on HF (`v2.1/&lt;lang&gt;/`);
+cold-download verified (en, de)
+
+### `.aneState` — full-pipeline MLState multifunction (mobius Trial 23),
+macOS 15+/iOS 18+
+One compiled package, three functions
+(`write_state`/`prefill`/`generate`) over **shared MLState KV buffers**:
+caches never cross the IO boundary, and generate is the fused
+flowlm+flowdec (one ANE call/frame).
+
+| Placement | 3-sentence utt | ms/frame | WER | Seeded WAVs |
+|---|---|---|---|---|
+| `.ane` | 1.430 s | 11.6 | 0 | bit-identical |
+| `.aneState` | **1.216 s (−14.9%)** | **10.0** | 0 | bit-identical |
+
+- Measured −1.66 ms/frame matches Trial 23&#39;s python prediction (−1.69)
+exactly; mimi (CPU, unchanged) is the remaining floor
+- New `PocketTtsStateEngine` actor: host-side `MLState.withMultiArray`
+voice-snapshot injection (bit-exact), windowed stateful prefill, fused
+generate; runtime `#available` gate; 24-tensor plumbing untouched for
+`.gpu`/`.ane`
+- MLState×multifunction verified clean on macOS (state shared across
+function instances)
+
+## Remaining ship gates (documented, not blockers for opt-in merge)
+- `pocket_state.mlmodelc` (163 MB) not yet published to HF — `.aneState`
+errors with install instructions until then
+- iPhone on-device ANE verification (known MLState×ANE iOS-18 caveat)
+
+Evidence chain: mobius `feat/pocket-tts-flowlm-ane` (Trials 19–23) +
+mobius#70 (campaign index).
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+## Listening samples (same text, seed 42)
+-
+[gpu](https://huggingface.co/FluidInference/pocket-tts-coreml/blob/main/samples/pr679/679_pocket_gpu.wav)
+·
+[ane](https://huggingface.co/FluidInference/pocket-tts-coreml/blob/main/samples/pr679/679_pocket_ane.wav)
+·
+[ane-state](https://huggingface.co/FluidInference/pocket-tts-coreml/blob/main/samples/pr679/679_pocket_ane-state.wav)
+- gpu↔ane SNR 7.9 dB (fp16 tie-flips cascade through the AR loop —
+different but equivalent renderings, both WER 0); ane↔ane-state SNR 0.4
+dB (**a different take, not a perturbation**: the fused step&#39;s RNG draw
+stream shifts, documented in code — within-placement output is
+bit-identical across runs)
+- Listen before merge: all three should be natural; they will not sound
+like the *same* recording.
+
+- fix(download): retry transient per-file failures in downloadRepo (#681)
+
+- chore(asr): remove experimental Qwen3 ASR backend (#676)
+
+- Remove experimental Magpie multilingual TTS backend (#674)
+
+## Why
+
+Magpie (357M, NVIDIA research license) is dominated on every axis by
+backends already in the SDK, so we are removing it instead of carrying
+its maintenance and model-hosting surface:
+
+| | Magpie | Supertonic-3 (int4) | Kokoro ANE (zh) |
+|---|---|---|---|
+| Agg RTFx | 2.34× | **94×** | 20.1× |
+| Latency p50 / p95 (full-wav) | 3.8 s / 12.1 s | **81 / 120 ms** | 201
+/ 286 ms |
+| WER (en, MiniMax) | 3.98% | **1.02%** | — |
+| CER (zh, MiniMax) | — | n/a (no zh) | **3.81%** |
+| Footprint | ~1.3 GB | **~0.10 GB** | ~0.33 GB |
+| License | research | **Apache-2.0** | Apache-2.0 |
+| Languages | 8 | **31** (incl. vi, hi) | en + zh |
+
+(M5 Pro / macOS 26.5 numbers from `Documentation/TTS/Benchmarks.md`.)
+
+## Migration
+
+| Magpie language | Replacement |
+|---|---|
+| en, es, de, fr, it, vi, hi | **Supertonic-3** (`Supertonic3Manager`,
+`tts-benchmark --backend supertonic3`) |
+| zh (Mandarin) | **Kokoro ANE Mandarin** (`KokoroAneManager`,
+`--variant mandarin`, voice `zf_001`) |
+
+## Obsoleted work
+
+The unmerged Magpie TTFA optimization (issue #590, branch
+`feat/magpie-lt-fusion` — fused sampler + 24-frame NanoCodec cap) dies
+with this removal. #590 can be closed and the branch deleted once this
+merges.
+
+## Removed surface
+
+- `Sources/FluidAudio/TTS/Magpie/` — manager, types, chunker,
+char/phoneme/Mandarin tokenizers, IPA override, prefill, synthesizer,
+NanoCodec decoder driver, KV cache, local transformer + sampler,
+MT19937, NpyReader, asset/model/constants stores, resource downloader
+(22 files)
+- `Sources/FluidAudioCLI/Commands/MagpieCommand.swift` + the `magpie`
+CLI subcommand and help text
+- `tts-benchmark`: `magpie` backend, `runMagpie` driver,
+`parseMagpieLanguage`/`parseMagpieSpeaker`, `--speaker` flag
+(Magpie-only), help/examples
+- `ModelNames`: `Repo.magpieTts` (HF repo
+`FluidInference/magpie-tts-multilingual-357m-coreml`) and the
+`ModelNames.Magpie` enum — including all NanoCodec model names
+(NanoCodec was exclusively Magpie&#39;s; verified no other backend
+references it)
+- `Tests/FluidAudioTests/TTS/Magpie/` (6 test files) + the `magpieTts`
+exclusion in `ModelNamesTests`
+- Docs: `Documentation/TTS/Magpie.md` deleted; Magpie top-line row,
+per-stage section, corpus-table row, and footnote ∥ removed from
+`Documentation/TTS/Benchmarks.md` (tables remain valid markdown);
+rows/mentions removed from `Models.md`, `Architecture.md`,
+`MinimaxCorpus.md`, `KokoroAne.md`, `Documentation/README.md`,
+`README.md`, `CLAUDE.md`
+
+Note: `TtsBackend` never had a `magpie` case — the CLI dispatched
+through the standalone `magpie` subcommand — so no library-level backend
+enum change was needed.
+
+`swift build` and `swift build -c release` pass; swift-format lint clean
+for the touched files.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+- chore(asr): remove experimental Parakeet CTC zh-CN Mandarin model (#675)
+
+The experimental Parakeet CTC 0.6B zh-CN model (8.23% mean CER, 14.8x
+RTFx on THCHS-30) is dominated by two in-house Mandarin models:
+Paraformer-large (2.12% CER, 85x RTFx) and SenseVoice (3.09% CER, 382x
+RTFx). There is no remaining use case where the CTC zh-CN model is the
+best choice.
+
+Removed:
+- CtcZhCnManager / CtcZhCnModels
+(Sources/FluidAudio/ASR/Parakeet/SlidingWindow/CTC/)
+- ctc-zh-cn-transcribe and ctc-zh-cn-benchmark CLI commands + help text
+- .ctcZhCn AsrModelVersion case and the isCtcOnly guard machinery
+- Repo.parakeetCtcZhCn / ModelNames.CTCZhCn entries
+- THCHS-30 dataset plumbing (ChineseDatasetDownloader, exclusively used
+by the zh-CN benchmark)
+- CtcZhCnTests and the CTC-only validation tests in AsrModelsTests
+- zh-CN benchmark leg in Scripts/parakeet_subset_benchmark.sh
+- Documentation: Benchmarks.md zh-CN section, Models.md rows,
+DirectoryStructure.md entries, README highlight
+
+Kept (shared with the English CTC 0.6B/110M keyword-spotting path):
+CtcDecoder.swift, ARPALanguageModel.swift, and all CTC 110M /
+ctc-earnings-benchmark code. The Japanese hybrid TDT model
+(parakeet-ctc-0.6b-ja repo naming notwithstanding) is untouched.
+
+Capability gap (follow-up, not blocking): the CTC zh-CN manager had
+built-in 15s sliding-window long-form support; the Paraformer and
+SenseVoice hosts do not yet chunk long audio. Tracked as a follow-up.
+
+### Why is this change needed?
+&lt;!-- Explain the motivation for this change. What problem does it solve?
+--&gt;
+
+- fix(kokoro): make the M5-safe routing the default (Kokoro works on M5 out of the box) (#671)
+
+Makes Kokoro ANE work on M5/macOS 26.5 **by default** — no
+`--compute-units` flag needed.
+
+## Problem (#667)
+The default routing put prosody/noise/tail on `.all`, which **crashes by
+default on M5**: the prosody RNN hits a GPU `GPURNNOps &#39;JIT not
+supported&#39;` assert, and the tail iSTFT separately segfaults `libBNNS` on
+CPU. Kokoro was only usable on M5 if the caller passed `--compute-units
+ane-tail-gpu` (added in #666).
+
+## Fix
+Make the default `KokoroAneComputeUnits` the M5-safe placement: every
+stage on `.cpuAndNeuralEngine` **except the tail (iSTFT) →
+`.cpuAndGPU`**. This is the routing the converter intended — the
+`exp/sin/iSTFT` chain must run fp32 on CPU/GPU (ANE rejects it), so
+pinning the iSTFT to GPU and keeping the RNN off the GPU is faithful,
+not a workaround. `.default` is now identical to `.aneTailGpu`.
+
+## Verified on M5 Pro / macOS 26.5
+- Previously-crashing corpora now complete with **`--compute-units
+default`** (exit 0).
+- Full-run quality unchanged: en 25.4× / WER 10.33%, zh 20.1× / CER
+3.81% (matches the M2 baseline).
+
+## Caveat
+The old `.all` default ran fine on M2 and its placement was tuned there;
+the new default uses valid backends on every Apple Silicon generation
+but its **M2 perf is not re-verified** (no M2 hardware available).
+Correctness is preserved everywhere; only M2 throughput is unmeasured.
+
+Also fixes a stale `90 CJK` → `57 CJK` reference in Benchmarks.md. Refs
+#667 (underlying Apple bug stays open for tracking).
+
+- docs(supertonic): fix stale maxChunkLengthCJK comment (90→57) (#670)
+
+Comment-only follow-up to #669 / #666. The CJK chunk cap dropped 90→57
+(to match the Latin 110→70 fix and keep CJK tighter), but a doc comment
+in `Supertonic3Constants.swift` still read `(90-char)`. Corrects it to
+`(57-char)`. No behavior change.
+
+- feat(tts): M5 benchmark re-baseline + Kokoro ane-tail-gpu (M5 fix) + Supertonic int4 default + PocketTTS v2.1 ANE docs (#666)
+
+- PocketTTS v2.1: fused flow decoder (ANE) + cond prefill + fp16 flowlm (~1.8× RTFx) (#665)
+
+## Summary
+Optimized CoreML re-conversion of PocketTTS (same weights as v2),
+measured **905 ms → ~452–520 ms / utterance (~1.8× RTFx)** on
+M-series/macOS 26.
+
+Pairs with HF PR: FluidInference/pocket-tts-coreml#3 (the v2.1 model
+packs).
+
+## Changes
+- **Fused flow decoder** — unroll the 8-step LSD Euler loop into one
+graph: 336→42 dispatches/utt, and the fat scatter-free fp16 graph
+becomes **0%→100% ANE** (the only model that reaches the ANE). 249→46
+ms.
+- **cond_prefill** — whole voice+text conditioning block in one call
+(18→1 dispatch) via fixed T_max + runtime valid_len gate (no dynamic
+shapes; padded rows → masked dump slot). 122→4.8 ms. KV parity 7.6e-6.
+- **fp16 flowlm** — −21% GPU + half size; EOS drift 0.042 &lt; shipped
+int8&#39;s 0.099.
+- **Per-model compute units** — measured fastest: flowlm/flow .all, mimi
+.cpuOnly, cond .all.
+- **v2.1 loader** — points at v2.1/&lt;lang&gt;; cond_prefill +
+flow_decoder_fused replace cond_step + flow_decoder.
+- **Opt-in cross-engine pipelining** (gated off) — overlaps mimi(CPU)
+with flowlm(GPU)+flow(ANE); projected ~330 ms; needs device timing.
+
+## Validated
+- english (6L): Whisper → &#34;Hello, this is a text-to-speech system.&#34;
+(exact)
+- german_24l (24L): intelligible/correct — both architectures confirmed
+end-to-end
+- Builds clean, swift-format clean.
+
+## Not yet device-tested
+On-device Swift load+inference of the v2.1 packs (the models are
+validated via the Python harness; Swift integration is build-verified
+only).
+
+- feat(tts/supertonic3): quantized + ANE-bucketed VectorEstimator (#664)
+
+## Summary
+
+Adds an opt-in **VectorEstimator** selector to the Supertonic-3 TTS
+pipeline. VectorEstimator is the heaviest stage (run once per denoising
+step × 8); this lets callers trade size and choose the compute device.
+Default behavior is unchanged.
+
+Two independent axes:
+- **Shape** → compute device. Dynamic (RangeDim) shapes can&#39;t use the
+ANE, so they stay on CPU/GPU. **Fixed-length** builds (L=128/256/512)
+land ~94–96% on the Neural Engine.
+- **Quantization** → size only (placement/latency unchanged). int8
+(linear per-channel), int6/int4 (k-means palettization).
+
+```swift
+let tts = try await Supertonic3Manager.downloadAndCreate(
+    vectorEstimator: .aneBucketed(.int4))   // smallest + ANE
+```
+
+| option | model | device | size vs fp16 |
+| --- | --- | --- | --- |
+| `.fp16Dynamic` (default) | `VectorEstimator` | CPU/GPU | 1× |
+| `.dynamic(.int8/.int6/.int4)` |
+`VectorEstimatorVariants/VectorEstimator_int*` | CPU/GPU | 2× / 2.5× /
+3.9× |
+| `.aneBucketed(.int8/.int6/.int4)` |
+`VectorEstimatorVariants/VectorEstimator_L{128,256,512}_int*` | **ANE**
+| 2× / 2.5× / 3.9× |
+
+## How it works
+- `Supertonic3Types`: `Supertonic3VectorEstimator` +
+`Supertonic3Quantization` enums.
+- `ModelNames`: variant filename builder + `requiredFiles(veVariant:)`;
+variants live under the `VectorEstimatorVariants/` repo subdir, shared
+modules stay at root. Only the selected file(s) download via the
+existing variant filter — no cost to the default path.
+- `Supertonic3ModelStore`: routes VE compute units (dynamic→CPU/GPU,
+bucketed→ANE), lazily loads + caches bucket models,
+`vectorEstimator(forLatentLength:)` picks the smallest bucket ≥ chunk
+length.
+- `Supertonic3Synthesizer`: pads the latent to the bucket before the
+denoise loop, trims back before the vocoder.
+- `TTSCommand`: `--ve-variant fp16|int8|int6|int4|dyn-int8|…` flag.
+
+## Validation
+- `swift build` clean; added `Supertonic3BucketPaddingTests` (pad/trim
+round-trip + variant naming).
+- **End-to-end on Apple M5 Pro / macOS 26.5**: `fluidaudiocli tts
+--backend supertonic3 --ve-variant int4` downloaded the variant files
+(subfolder layout resolved), lazy-loaded the L128 bucket on
+`cpuAndNeuralEngine`, and produced valid 3.63 s audio.
+- Models published at `FluidInference/supertonic-3-coreml` under
+`VectorEstimatorVariants/` (manifest updated).
+
+## Notes
+- Per-chunk latent length is bounded by the text chunker, so the L128
+bucket covers the common case; longer chunks pick 256/512.
+- Quality: human A/B listening found int8 closest to fp16 and int4 still
+perceptually clean (the low waveform SNR vs fp16 is diffusion trajectory
+divergence, not degradation).</div>
+</div>
+
+<a href="../project/FluidInference_FluidAudio.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

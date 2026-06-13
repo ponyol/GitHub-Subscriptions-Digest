@@ -1,0 +1,1833 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (100 commits) - CopilotKit/CopilotKit - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (100 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/CopilotKit_CopilotKit.html">CopilotKit/CopilotKit</a> /
+    Updates in main (100 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/CopilotKit_CopilotKit.html">CopilotKit/CopilotKit</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-12 20:58 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/CopilotKit/CopilotKit/commits/main" target="_blank">https://github.com/CopilotKit/CopilotKit/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This update primarily resolves critical A2UI &#34;Catalog not found&#34; errors in showcase demos by configuring default catalog IDs and enhancing test reliability for real-model tool usage. It significantly improves dashboard accuracy and fleet monitoring, introducing end-to-end run visibility features, Slack alerts for silent worker families, and a corrected definition of &#34;successful&#34; completions. Additionally, the release adds comprehensive reference documentation for the React Native SDK and addresses various bugs in core React, Angular components, and underlying infrastructure.
+
+---
+
+**Russian translation:**
+
+Это обновление направлено на устранение критических ошибок A2UI &#34;Каталог не найден&#34; в демонстрационных приложениях путем настройки идентификаторов каталогов по умолчанию и повышения надежности тестирования реальных моделей. Оно также значительно улучшает точность дашборда и мониторинг флота, включая новые функции видимости выполнения, оповещения Slack для &#34;молчащих&#34; семейств воркеров и скорректированное определение &#34;успешных&#34; завершений. Кроме того, релиз добавляет полную справочную документацию для SDK React Native и исправляет различные ошибки в базовых компонентах React и Angular, а также в основной инфраструктуре.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix(showcase): pin page-registered A2UI catalog as defaultCatalogId fleet-wide (#5425)
+
+## Problem
+
+Asking for a sales dashboard in the beautiful-chat demo (reported on
+`dojo.showcase.copilotkit.ai/?integration=langgraph-python&amp;demo=beautiful-chat`)
+fails with:
+
+&gt; A2UI render error: Catalog not found:
+https://a2ui.org/specification/v0_9/basic_catalog.json
+
+## Root cause
+
+**Introduced by #5245** (&#34;chore(showcase): upgrade langgraph A2UI to
+stable releases + rewrite dynamic-schema docs&#34;, merged 2026-06-05): it
+flipped the beautiful-chat routes to `injectA2UITool: true` — switching
+them onto the runtime-injected `render_a2ui` tool — without adding the
+`defaultCatalogId` the middleware contract expects the host to provide.
+/cc @ranst91
+
+The runtime-injected `render_a2ui` tool guide explicitly tells the model
+**not** to send a `catalogId` (&#34;the catalog id is set by the host, not
+by you&#34; — `@ag-ui/a2ui-middleware` `tools.ts`), and integrations whose
+backend owns `generate_a2ui` see real models omit or late-stream the
+argument. When the streamed `createSurface` is emitted without a
+configured `defaultCatalogId`, the middleware falls back to the spec
+basic catalog URL — which no showcase page registers, so the renderer
+throws &#34;Catalog not found&#34;.
+
+The middleware contract expects the host to pin the catalog via
+`a2ui.defaultCatalogId`; none of the showcase routes did. The pinned
+`@ag-ui/a2ui-middleware@0.0.6` (resolved via
+`@copilotkit/runtime@1.59.4` in the integration lockfiles) already
+prefers the configured value over streamed args, so this is config-only.
+
+## Fix
+
+Add `defaultCatalogId` matching the catalog each page registers:
+
+- 17 × `copilotkit-beautiful-chat` routes →
+`copilotkit://app-dashboard-catalog` (every beautiful-chat page
+registers this id)
+- 14 × `copilotkit-declarative-gen-ui` routes →
+`declarative-gen-ui-catalog` (all declarative catalogs use this id)
+
+Left untouched: the 3 declarative routes with no `a2ui` block (ag2,
+claude-sdk-typescript, strands) — `isA2UIEnabled` is false there, the
+middleware never attaches, so the fallback path can&#39;t fire.
+`copilotkit-a2ui-fixed-schema` routes are also untouched (direct tools
+carry their catalog in the result envelope).
+
+## Verification
+
+- RUNBOOK-canonical D6 isolate run (`bin/showcase test langgraph-python
+--d6 --isolate ...`) on this branch: **all A2UI pills green**
+(`gen-ui-declarative`, `gen-ui-a2ui-fixed`, all five beautiful-chat
+pills) — these stream through the middleware with the new
+`defaultCatalogId` active (config preference). Aggregate green; the only
+non-green features are pre-existing and unrelated (2×
+`crypto.randomUUID` insecure-context in headless demos, 1× agent-config
+fixture-length assertion).
+- All 31 patched files parse-checked clean; full `tsc --noEmit` on
+langgraph-python shows zero errors in the patched routes.
+- Confirmed published middleware 0.0.6 (what the integration lockfiles
+resolve) contains the host-preference logic for `defaultCatalogId`.
+- Caveat: the Sales Dashboard pill itself could not be manually verified
+end-to-end — its aimock fixture chain is broken by a pre-existing
+fixture-shadowing collision from the `1e66a5f8d` fixture reorg (a
+`userMessage: &#34;First&#34;` substring catch-all shadows the pill prompt;
+three overlapping fixture chains mismatch on `toolCallId`
+mid-conversation → `404 no_fixture_match` → `RUN_ERROR`). Broken
+identically on `main`; tracked as a follow-up issue.
+
+## Follow-ups (not in this PR)
+
+- The canonical `examples/integrations/langgraph-python` route has the
+same gap (`a2ui: { injectA2UITool: false }`, no `defaultCatalogId`,
+pages register `copilotkit://app-dashboard-catalog`) — needs the same
+fix through the parity sync flow.
+- Test gap that let this ship: the D5 declarative fixture is a text-only
+stub and beautiful-chat&#39;s D5 mapping reuses the agentic-chat
+conversation, so no fixture exercises a `generate_a2ui` call that omits
+`catalogId` the way real models do.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+- docs(shell-docs): add @copilotkit/react-native reference documentation (#5397)
+
+Adds a **React Native** SDK to the reference docs at
+`/reference/react-native`, covering the full `@copilotkit/react-native`
+public API. Modeled on the existing React/Core/Bots reference sections.
+
+**Nav:** register `react-native` in `reference-items.ts`, add the SDK
+selector label + an overview card.
+
+**Content (22 pages, written from package source):** index, 8
+components, 13 hooks. `CopilotChat` and `CopilotModal` exist in both a
+headless (root) and prebuilt-UI (`/components`) form; each page
+documents both, split by import path.
+
+**Verified:** `next build` passes, all pages render, `oxlint` + `tsc`
+clean, and content appears in `llms.txt` / `llms-full.txt`.
+
+Out of scope per the issue: guide content and new demos.
+
+
+---
+
+## Preview
+
+**Overview + SDK nav** — `/reference/react-native` (left sidebar shows
+the new “React Native” SDK selector and all 8 components + 13 hooks)
+
+![React Native reference
+overview](https://raw.githubusercontent.com/CopilotKit/CopilotKit/0ce40a7546eeb5556580882a0b6ecf8923284490/pr-screenshots/rn-01-overview.png)
+
+**Component page — `CopilotChat`** —
+`/reference/react-native/components/CopilotChat` (headless + prebuilt-UI
+split by import path)
+
+![CopilotChat reference
+page](https://raw.githubusercontent.com/CopilotKit/CopilotKit/0ce40a7546eeb5556580882a0b6ecf8923284490/pr-screenshots/rn-02-component-copilotchat.png)
+
+**Hook page — `useAgent`** — `/reference/react-native/hooks/useAgent`
+(re-export callout, react-native code examples)
+
+![useAgent reference
+page](https://raw.githubusercontent.com/CopilotKit/CopilotKit/0ce40a7546eeb5556580882a0b6ecf8923284490/pr-screenshots/rn-03-hook-useagent.png)
+
+- test(showcase): make sales-dashboard e2e reproduce real-model catalogId omission
+
+The injected/streamed a2ui fixtures all included catalogId, so aimock
+replay never exercised the basic-catalog fallback that broke production
+(real models omit catalogId per the tool-usage guide). Strip catalogId
+from the langgraph-python sales-dashboard secondary-call fixtures and
+hard-assert &#34;Catalog not found&#34; is absent outside the charts-rendered
+soft branch, so the spec fails without a route defaultCatalogId.
+
+Also repoint the on-demand e2e workflow at the d4/d5-recorded/d6/shared
+fixture dirs — it still referenced feature-parity.json, deleted in the
+1e66a5f8d fixture reorg, so every /test-aimock run died at aimock start.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- docs(shell-docs): add @copilotkit/react-native reference documentation
+
+Adds a &#34;React Native&#34; SDK to the reference section, documenting the full
+public surface of @copilotkit/react-native at /reference/react-native.
+
+Navigation wiring:
+- Register `react-native` in REFERENCE_VERSIONS / VERSION_SUBDIRS
+- Add the &#34;React Native&#34; label to the SDK version selector
+- Add a React Native card to the reference overview page
+
+Content (22 pages, sourced from package source for accuracy):
+- index: install, polyfills, provider setup, and the headless vs prebuilt
+  two-tier model
+- components: CopilotKitProvider, CopilotChat, CopilotModal, CopilotSidebar,
+  CopilotPopup, CopilotMarkdown, AssistantMessage, UserMessage — disambiguating
+  the headless (root) and prebuilt-UI (/components) variants of CopilotChat and
+  CopilotModal by import path
+- hooks: RN-specific useAttachments and useRenderTool, plus the platform-
+  agnostic hooks re-exported from react-core/v2 adapted to RN imports and
+  primitives (useAgent, useCopilotKit, useFrontendTool, useAgentContext,
+  useThreads, useCapabilities, useComponent, useHumanInTheLoop, useInterrupt,
+  useSuggestions, useConfigureSuggestions)
+
+Content is picked up automatically by llms.txt / llms-full.txt via the
+reference content walker.
+
+OSS-250
+
+- fix(showcase): pin page-registered A2UI catalog as defaultCatalogId fleet-wide
+
+The injected render_a2ui tool guide instructs models to omit catalogId
+(&#34;the catalog id is set by the host&#34;), and backend-owned generate_a2ui
+tools see real models omit or late-stream it. Without defaultCatalogId
+the a2ui middleware falls back to the spec basic catalog, which no
+showcase page registers — surfaces fail with &#34;Catalog not found:
+https://a2ui.org/specification/v0_9/basic_catalog.json&#34; (reported on
+beautiful-chat / langgraph-python).
+
+Pin each route to the catalog its page registers: beautiful-chat -&gt;
+copilotkit://app-dashboard-catalog, declarative-gen-ui -&gt;
+declarative-gen-ui-catalog. Routes with no a2ui block never attach the
+middleware and are left untouched.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- fix(react-core): refresh thread headers on provider updates (#5300)
+
+## What does this PR do?
+
+Fixes #5282.
+
+Provider header updates already reach the core instance via
+`setHeaders`, but React consumers of `useCopilotKit()` were only
+re-rendered for runtime connection status changes. That left
+`useThreads()` with stale context after the provider `headers` prop
+changed, so subsequent `/threads` requests could miss headers such as
+`X-CSRF`.
+
+This subscribes the React context hook to `onHeadersChanged` and adds a
+provider-level regression test that verifies `/threads` is refetched
+with the updated header.
+
+## Related PRs and Issues
+
+- Fixes https://github.com/CopilotKit/CopilotKit/issues/5282
+
+## Testing
+
+- `pnpm install --frozen-lockfile`
+- `pnpm --dir packages/react-core exec vitest run
+src/v2/hooks/__tests__/use-threads-provider-headers.e2e.test.tsx`
+(failed before the production change, passed after)
+- `pnpm --dir packages/react-core exec vitest run
+src/v2/hooks/__tests__/use-threads.test.tsx
+src/v2/hooks/__tests__/use-threads-provider-headers.e2e.test.tsx`
+- `pnpm exec oxlint packages/react-core/src/v2/context.ts
+packages/react-core/src/v2/hooks/__tests__/use-threads-provider-headers.e2e.test.tsx`
+- `pnpm exec oxfmt --check packages/react-core/src/v2/context.ts
+packages/react-core/src/v2/hooks/__tests__/use-threads-provider-headers.e2e.test.tsx`
+- `pnpm nx run @copilotkit/react-core:build`
+- `pnpm nx run @copilotkit/react-core:test`
+- `git commit -m &#34;fix(react-core): refresh thread headers on provider
+updates&#34;` (pre-commit ran `pnpm run test &amp;&amp; pnpm run check:packages`;
+commit-msg ran `pnpm commitlint --edit`)
+
+Also checked: `pnpm nx run @copilotkit/react-core:check-types` currently
+fails before checking this package because dependency package type/build
+errors are reported in `@copilotkit/shared` and
+`@copilotkit/a2ui-renderer`; I did not change those packages.
+
+Note: I used Codex while preparing this change, reviewed the final diff,
+and ran the listed checks locally.
+
+## Checklist
+
+- [x] I have read the [Contribution
+Guide](https://github.com/copilotkit/copilotkit/blob/master/CONTRIBUTING.md)
+- [ ] If the PR changes or adds functionality, I have updated the
+relevant documentation (not applicable: internal header propagation bug
+fix)
+- [x] &#34;Allow edits by maintainers&#34; is checked (lets us help iterate on
+your PR directly - faster turnaround for everyone)
+
+- fix(react-core): refresh thread headers on provider updates
+
+- fix(showcase/harness): redefine family lastSuccessAt — terminal-completion, not all-green (#5422)
+
+## Symptom
+
+Dashboard banner false alarm: *&#34;Worker family E2E demos has not
+completed successfully since 2h 40m ago&#34;* (and the same on D5/D6) firing
+while workers were healthy and emitting results every cycle.
+
+## Triage (already done)
+
+The D5/D6 family-silence banner fires because:
+
+- `lastSuccessAt` is computed via `maxFinishedAtIso(completed)` where
+`completed` requires the §5.2.1 `deriveOutcome` to return `&#34;completed&#34;`
+(all jobs `done`, zero cell failures) — see
+`showcase/harness/src/fleet/control-plane/run-view.ts` (pre-fix
+`findCompletedBatch` + the `lastSuccessAt` line in `projectFamily`).
+- With chronic content-reds present, every batch lands with
+`jobs.done=1, jobs.failed=17` (cells failing inside the probes). The
+outcome derives `&#34;failed&#34;`, no batch satisfies `outcome ===
+&#34;completed&#34;`, and `findCompletedBatch` returns null.
+- The family-silence monitor falls back to oldest-batch-`enqueuedAt` and
+fires after `now − oldest &gt; 3 × period` (see
+`family-silence-monitor.ts`).
+- The worker is fine: per-job `commError: null`, jobs completing with
+real cell results, just `&lt;100%` pass-rate.
+
+This is a DEFINITIONAL bug. The worker is healthy; the definition of
+&#34;success&#34; was conflating worker-completion with cells-all-green.
+
+## The fix
+
+Redefine &#34;success&#34; as **terminal-state accounting**, not pass-rate.
+
+A batch counts as a terminal completion when:
+1. Every job is in a terminal status (`done` or `failed`), AND
+2. No job carries a `result.commError` (i.e. no worker-crashed-mid-job,
+lease-expired, or other comm-level outage signal).
+
+Cells red without a `commError` IS a terminal completion — the worker
+reached the pool, ran the probe, and returned a result. Chronic content
+reds become &#34;known bad&#34; instead of &#34;stalled.&#34;
+
+The strict §5.2.1 `outcome==&#34;completed&#34;` all-green semantic is unchanged
+— it still drives `lastRun.outcome` and §6.2 dashboard rendering. No
+external caller of run-view consumed the old strict `lastSuccessAt` for
+logic beyond the banner and monitor (grep verified — every reference
+outside this file is either a test fixture or the silence-banner display
+surface), so renaming was unnecessary; only the definition was
+redirected.
+
+The fallback path in `family-silence-monitor.ts`
+(oldest-batch-enqueuedAt when `lastSuccessAt` is null) is intentionally
+**untouched** — with the new semantics, `lastSuccessAt` advances every
+sweep on a healthy family, so the fallback only fires on true
+never-completed envs (the rule it was designed for).
+
+## Affected files
+
+- `showcase/harness/src/fleet/control-plane/run-view.ts` — new
+`isTerminalCompletionBatch` + `findTerminalCompletionBatch` predicates;
+`projectFamily` now sources `lastSuccessAt` from terminal completion;
+doc comment on the type updated.
+- `showcase/harness/src/fleet/control-plane/run-view.test.ts` — 3 new
+tests; 1 existing walk-back fixture updated to add a `commError` so its
+original intent (skip non-completion batches) survives the new
+predicate.
+-
+`showcase/harness/src/fleet/control-plane/family-silence-monitor.test.ts`
+— 2 new tests: chronic-reds stays silent; real outage still fires.
+- `showcase/harness/src/http/fleet-runs.test.ts` — T5 multi-page
+walk-back fixture updated to flag its 20 &#34;outage&#34; batches with a
+`commError` (so the walk-back still has to extend to page 2);
+`batchFixture` gained an optional `resultFor` parameter.
+
+## Tests (RED → GREEN)
+
+Confirmed the 2 net-new predicate tests fail under the old
+implementation and pass under the new:
+
+- `lastSuccessAt advances when all jobs reach a terminal state with no
+commError, even if cells failed` — old: `null`, new: newest finishedAt
+- `lastSuccessAt does NOT count a batch where any job carries a
+commError (worker-outage signal)` — old: `null` (walk-back to prior
+worked but for the wrong reason — strict all-green semantics), new:
+walks back past the comm-erroring batch to the terminal-completion batch
+
+Negative cases preserved:
+- `lastSuccessAt is null when every batch in the capped window has a
+commError` — real outage stays loud
+- `lastSuccessAt does NOT count a batch with non-terminal jobs` —
+stall/abandon still excluded
+- Family-silence monitor still alerts on real outages
+
+Final test counts: harness `2700/2700` green, fleet/control-plane +
+fleet-runs slice `355/355` green; format / lint / typecheck / build all
+clean.
+
+## Follow-up
+
+Per the minimize-PRs directive, the D5+D6 banner remediation and
+`redsCleared` semantic refresh are tracked separately in the coordinate
+channel handoff — this PR is scoped to the `lastSuccessAt` definitional
+fix.
+
+- fix(react-core): stabilize pin-to-send scrolling (#5386)
+
+## What does this PR do?
+
+Fixes `pin-to-send` scrolling in the v2 chat view.
+
+- Re-attaches the non-autoscroll scroll listener after the real scroll
+element mounts by depending on `nonAutoScrollEl`, not the stable
+`scrollRef` object.
+- Lets the `usePinToSend` spacer adjust in both directions as content
+below the pinned user message changes, so the user message stays
+anchored after streaming finishes and layout height changes.
+- Adds regression coverage for the scroll-to-bottom button and spacer
+adjustment behavior.
+
+## Related PRs and Issues
+
+Fixes #5355
+
+## Tests
+
+- `corepack pnpm -C packages/react-core exec vitest run
+src/v2/hooks/__tests__/use-pin-to-send.test.tsx
+src/v2/components/chat/__tests__/CopilotChatView.pinToSend.test.tsx`
+- `corepack pnpm exec oxfmt --check
+packages/react-core/src/v2/components/chat/CopilotChatView.tsx
+packages/react-core/src/v2/hooks/use-pin-to-send.ts
+packages/react-core/src/v2/hooks/__tests__/use-pin-to-send.test.tsx
+packages/react-core/src/v2/components/chat/__tests__/CopilotChatView.pinToSend.test.tsx`
+- `git diff --check`
+
+Attempted:
+
+- `corepack pnpm -C packages/react-core run check-types`
+- This failed in the local workspace on existing/type-resolution issues
+outside this diff, including `react-markdown` JSX namespace errors,
+missing `@copilotkit/runtime-client-gql` declarations, and existing e2e
+mock `AbstractAgent` private member mismatches.
+
+## Checklist
+
+- [x] I have read the [Contribution
+Guide](https://github.com/copilotkit/copilotkit/blob/master/CONTRIBUTING.md)
+- [x] If the PR changes or adds functionality, I have updated the
+relevant documentation (N/A: bug fix only, no API/docs change)
+- [x] &#34;Allow edits by maintainers&#34; is checked (lets us help iterate on
+your PR directly — faster turnaround for everyone)
+
+- fix(showcase): BIA D6 followups — PARITY_NOTES NSF naming + STATE_DELTA op:add (#5421)
+
+## Summary
+
+Small followups to PR #5413 (BIA D6 readiness, merged 2026-06-12).
+
+- **`PARITY_NOTES.md` NSF naming**: corrected `hitl` (which is supported
+in BIA via Strategy-B `useFrontendTool`) to call out the actual
+NSF-quarantined demos `gen-ui-interrupt` and `shared-state-streaming`
+per the manifest. PR #5413&#39;s NSF banner commit (`3585c33b8`) mounted the
+banners on the correct demos.
+- **Sub-Agents TODO removed**: post-merge staging dashboard showed
+sub-agents RED; diagnose confirmed code on `5e828aed9` is correct (local
+`--direct` D6 PASSES). The staging RED was stale dashboard image /
+fixture cache, not code. PARITY_NOTES no longer claims sub-agents is a
+known-issue.
+- **gen-ui-agent STATE_DELTA op fix**: BIA&#39;s `set_steps` tool emission
+used RFC-6902 `op: &#34;replace&#34;` on path `/steps`, but the agent&#39;s initial
+state is `{}` and `fast-json-patch` rejects unresolvable paths in strict
+mode (`@ag-ui/client@0.0.57` swallows the throw with `console.warn`).
+Changing to `op: &#34;add&#34;` creates the path on first emission and
+idempotently overwrites on subsequent calls. Single-line fix in
+`tanstack-factory.ts`.
+
+## Out-of-scope (tracked separately)
+
+- **a2ui-fixed-schema + declarative-gen-ui** (PR #5413 documented
+known-issues): root cause is in `@copilotkit/runtime/v2` v2-stack
+pipeline OR `@ag-ui/a2ui-middleware@0.0.8` JSON.parse gap — one upstream
+fix likely unblocks both. Diagnose reports at
+`/tmp/cr/bia-rxr-diagnose/{a2ui-fixed-schema,declarative-gen-ui}.md`.
+Needs separate packages PR.
+- **tool-rendering port + headless-complete missing components**: BIA
+needs StockCard, ChartCard, `get_revenue_chart` server tool, UI
+primitives. Separate component-port PR.
+- **shadcn catchall**: product/design call pending (escalate to PM).
+
+## Test plan
+
+- [x] Local `--direct` D6 verify on `gen-ui-agent` after the JSON-Patch
+op fix
+- [x] CI green on PR
+
+- fix(showcase/harness): redefine family lastSuccessAt as terminal-completion, not all-green
+
+Chronic content-reds in the D5/D6 worker families left `lastSuccessAt`
+pinned to null on /api/runs, which tripped the dashboard &#34;worker family X
+has not completed successfully since Yh ago&#34; silence banner even though
+the workers were healthy. Each batch landed with jobs.done=1,
+jobs.failed=17 (cells failing inside the probes), the §5.2.1 outcome
+precedence derived &#34;failed&#34;, findCompletedBatch returned null, and the
+§9 family-silence monitor fell back to oldest-batch-enqueuedAt and fired
+after 3 x period.
+
+The fix is definitional: a batch counts as a &#34;terminal completion&#34; for
+lastSuccessAt purposes when every job reaches a terminal state (done |
+failed) with no `result.commError` on any row. Cell-level reds (rollup
+counts) no longer block the timestamp; only worker-level outages
+(crashed / reclaimed / lease-expired, surfaced via commError) do.
+
+The strict §5.2.1 outcome==&#34;completed&#34; all-green semantic is unchanged
+(it still drives lastRun.outcome and §6.2 dashboard rendering). No
+caller of run-view consumed the old strict lastSuccessAt for logic
+beyond the banner and monitor (grep verified — every external reference
+is either a test fixture or the silence-banner display surface).
+
+Tests added (RED -&gt; GREEN):
+- run-view.test.ts: lastSuccessAt advances when all jobs reach a terminal
+  state with no commError, even if cells failed (the regression case)
+- run-view.test.ts: lastSuccessAt does NOT count a batch where any job
+  carries a commError (worker-outage signal stays loud)
+- run-view.test.ts: lastSuccessAt does NOT count a batch with non-terminal
+  jobs (stalled / abandoned still excluded)
+- family-silence-monitor.test.ts: does not alert when the family runs every
+  cycle with cell-level reds but no commError
+- family-silence-monitor.test.ts: still alerts when the family stops
+  emitting results entirely (real outage)
+
+Two existing tests updated to add commError to their &#34;no completion&#34;
+fixtures so their original intent (walk-back across non-completion
+batches) survives the new predicate:
+- run-view.test.ts: lastSuccessAt walk-back through a commError batch
+- fleet-runs.test.ts: T5 multi-page walk-back coverage
+
+- fix(showcase/built-in-agent): emit STATE_DELTA with op:add (not replace) so first /steps patch creates the path
+
+- docs(showcase/built-in-agent): remove sub-agents TODO — diagnose confirms code correct, prior staging RED was image cache
+
+- docs(showcase/built-in-agent): fix PARITY_NOTES NSF terminology + add sub-agents TODO
+
+- fix(angular): emit fresh messages array so OnPush views render on addMessage (#5418)
+
+Fixes #5416
+
+## Problem
+
+`AgentStore` mirrored the agent&#39;s messages into a signal via
+`this.#messages.set(abstractAgent.messages)`. `AbstractAgent.addMessage`
+pushes **in place** and notifies with the **same array reference**.
+Angular signals compare with `Object.is`, so `set(sameRef)` is a no-op:
+the signal never notifies, the OnPush `&lt;copilot-chat&gt;` view is never
+marked dirty, and a freshly added message — including the user&#39;s own
+bubble on submit — does not render until the run pipeline reassigns
+`messages` to a new array at run completion.
+
+## Fix
+
+```ts
+this.#messages.set([...abstractAgent.messages]);
+```
+
+A shallow copy gives the array a new identity, so the signal notifies
+and OnPush views re-render immediately. The `Message` objects stay
+referentially stable, so `trackBy` still avoids re-creating existing
+bubbles.
+
+`onStateChanged` is intentionally left unchanged: `AbstractAgent`
+reassigns `this.state` to a freshly cloned reference on every change
+(`setState(e) { this.state = clone(e) }`) and never mutates state in
+place, so that signal already notifies correctly. Scoping the fix to
+messages keeps it minimal.
+
+## Tests
+
+Added two regression tests in `agent.spec.ts`, both exercising the
+in-place mutation path that the existing tests never hit (they assign a
+fresh array each emit):
+
+1. **Reference guard** — the store must not hand back the agent&#39;s live
+`messages` array.
+2. **OnPush re-render** — a count rendered in an OnPush *descendant* (a
+root `detectChanges()` would force-check the root and hide the bug; only
+a child whose dirty flag depends on the signal exposes it). Two in-place
+pushes; the second is the same-reference no-op the fix repairs.
+
+Both tests fail without the fix (`&#39;1&#39; to be &#39;2&#39; // Object.is equality`)
+and pass with it.
+
+## Verification
+
+- `agent.spec.ts`: 6/6 pass
+- full `@copilotkitnext/angular` suite: 50/50 pass
+- `tsc --noEmit`: clean
+
+- fix(shared): preserve lambda client cjs export (#5419)
+
+## Summary
+- export the telemetry lambda client as a named binding instead of
+default-reexporting it through the shared barrel
+- update shared telemetry internals/tests to consume the named binding
+- add a built-package smoke check to ensure both CommonJS and ESM expose
+`lambdaClient.send`
+
+## Root Cause
+`@copilotkit/shared` re-exported `lambdaClient` from a default export.
+The unbundled CommonJS build emitted `exports.lambdaClient =
+require_lambda_client`, so CommonJS consumers received the module
+namespace object instead of the `{ send }` client. `@copilotkit/runtime`
+then called `lambdaClient.send(...)` and crashed because `send` was
+nested under `lambdaClient.default`.
+
+## Validation
+- `pnpm nx run @copilotkit/shared:build --skip-nx-cache`
+- `node packages/shared/scripts/verify-cjs-exports.cjs`
+- `pnpm nx run @copilotkit/shared:test --skip-nx-cache`
+- `pnpm nx run @copilotkit/shared:check-types --skip-nx-cache`
+- `pnpm nx run @copilotkit/shared:publint --skip-nx-cache`
+- `pnpm nx run @copilotkit/runtime:build --skip-nx-cache`
+- runtime CJS telemetry capture smoke test
+- `pnpm nx run @copilotkit/runtime:test --skip-nx-cache --
+src/v2/runtime/__tests__/telemetry.test.ts`
+- pre-commit hook: `pnpm run test &amp;&amp; pnpm run check:packages`
+
+- fix(react-core): scope streamdown markdown styles (#5099)
+
+## Summary
+
+Fixes #5072 
+
+Fix unstyled Streamdown markdown in non-Tailwind apps that import
+`@copilotkit/react-core/v2/styles.css`.
+
+Streamdown renders plain utility class names, but CopilotKit’s CSS
+bundle is generated with the `cpk:` Tailwind prefix. That left default
+markdown elements like headings, lists, strong text, tables,
+blockquotes, inline code, and code blocks without matching styles unless
+the host app also shipped unprefixed Tailwind utilities.
+
+## Changes
+
+-&gt; Add scoped fallback styles for Streamdown’s stable `data-streamdown`
+elements under `[data-copilotkit]`.
+-&gt; Use CopilotKit theme variables and prefixed Tailwind utilities so
+styles stay inside the CopilotKit surface.
+-&gt; Remove the ineffective Streamdown `@source` scan, since it only
+generated prefixed utilities that Streamdown does not emit.
+-&gt; Add a regression test to ensure the scoped Streamdown selectors
+remain present.
+
+## Testing
+
+-&gt; `node node_modules\nx\bin\nx.js run @copilotkit/react-core:build:css
+--excludeTaskDependencies`
+-&gt; `node node_modules\nx\bin\nx.js run @copilotkit/react-core:test
+--excludeTaskDependencies --skip-nx-cache --
+src/v2/styles/__tests__/streamdown-styles.test.ts`
+
+- fix(react-core): cover mermaid-block + sub/superscript streamdown styles
+
+- fix(react-core): scope streamdown markdown styles
+
+- fix(shared): preserve lambda client cjs export
+
+- fix(angular): drop redundant comment on messages signal copy
+
+- Merge branch &#39;main&#39; into fix/5416-angular-agentstore-messages-ref
+
+- fix(angular): emit fresh messages array so OnPush views render on addMessage
+
+AgentStore mirrored the agent&#39;s messages into a signal via
+`this.#messages.set(abstractAgent.messages)`. AbstractAgent.addMessage
+pushes in place and notifies with the same array reference, so the
+signal&#39;s Object.is equality check treats set(sameRef) as a no-op: it
+never notifies, the OnPush &lt;copilot-chat&gt; view is never marked dirty,
+and a freshly added message (including the user&#39;s own on submit) does
+not render until the run pipeline reassigns messages to a new array at
+run completion.
+
+Copy into a fresh array so the reference changes and the signal
+notifies. Message objects stay referentially stable, so trackBy still
+avoids re-creating existing bubbles. State is unaffected: AbstractAgent
+reassigns this.state to a cloned reference on every change, so its
+signal already notifies.
+
+Adds regression tests covering the in-place mutation path: a reference
+guard and an OnPush descendant re-render check. Both fail without the
+fix.
+
+Fixes #5416
+
+- fix(runtime): add a2ui enabled opt-out via shared isA2UIEnabled predicate (#5385)
+
+## Summary
+
+Follow-up to #5383 (per-agent A2UI scoping). Two small,
+backwards-compatible runtime changes:
+
+1. **One shared `isA2UIEnabled()` predicate.** Before, &#34;is a2ui on?&#34; was
+computed independently in two places — `if (runtime.a2ui)` in the run
+path (`agent-utils.ts`) and `!!runtime.a2ui` in the `/info` response
+(`get-runtime-info.ts`). Two separate checks can drift apart, and that
+drift between the run path and the info path is the root of #5369. Both
+now call the same predicate, so they can&#39;t disagree.
+
+2. **An explicit `enabled` off-switch** on the runtime `a2ui` config.
+Previously, once `a2ui` was configured there was no way to turn it off
+short of deleting the whole block. Now `a2ui: { enabled: false }`
+disables it while keeping the rest of the config (e.g.
+`schema`/`catalog`) in place.
+
+```ts
+export function isA2UIEnabled(a2ui) {
+  return !!a2ui &amp;&amp; a2ui.enabled !== false;
+}
+```
+
+## Backwards compatibility
+
+No breaking changes. `enabled` is a new optional field; every existing
+config behaves identically:
+
+- omitted `a2ui` → off (unchanged)
+- `a2ui: {}` → on (unchanged)
+- `a2ui: { injectA2UITool: true }` / `{ agents: [...] }` → on
+(unchanged)
+- only an explicit `a2ui: { enabled: false }` is new behavior — and it&#39;s
+an opt-out nobody could have relied on.
+
+Enablement stays entirely server-side; no client/provider API change.
+
+## Scope
+
+This does **not** fix the #5369 leak — #5383 does that via per-agent
+scoping. This is complementary hardening: it adds the missing off-switch
+and removes the run-path/info-path divergence that allowed the leak to
+exist in the first place.
+
+## Tests
+
+- `get-runtime-info`: reports `a2uiEnabled: false` when `a2ui: {
+enabled: false }`.
+- run path (`handle-run`): does not apply `A2UIMiddleware` when
+`a2ui.enabled` is `false`.
+
+https://claude.ai/code/session_01TYohiEJyhsU3mJS4jabdv6
+
+---
+_Generated by [Claude
+Code](https://claude.ai/code/session_01TYohiEJyhsU3mJS4jabdv6)_
+
+- Merge branch &#39;main&#39; into claude/a2ui-injection-config-9r2ve3
+
+- fix(showcase): content-red dashboard remediation — spring-ai/ag2/cst/llamaindex (#5412)
+
+## Summary
+
+Content-red dashboard remediation across CopilotKit showcase
+integrations (spring-ai, ag2, claude-sdk-typescript, llamaindex). Aligns
+aimock fixtures (d4 and d6) with real backend output shapes, ports A2UI
+v0.9 declarative legs, quarantines unsupported features as NSF with the
+canonical d5-feature-mapping literals, adds route aliases the harness
+expects, and fixes backend bugs in the per-family agent stacks.
+
+## Verification (local `bin/showcase test &lt;family&gt; --d6`
+baseline-vs-branch comparison)
+
+**13 dashboard cells go from RED on `main` to GREEN on this branch:**
+
+| Family | Cells fixed |
+|--------|-------------|
+| spring-ai | auth, gen-ui-open, gen-ui-open-advanced, headless-simple,
+subagents, tool-rendering-custom-catchall |
+| ag2 | gen-ui-a2ui-fixed, gen-ui-agent, tool-rendering |
+| claude-sdk-typescript | beautiful-chat-search-flights,
+gen-ui-a2ui-fixed, gen-ui-agent, tool-rendering |
+| built-in-agent | headless-simple ✓ (verified — was the targeted A20
+fix) |
+
+**Zero regressions on spring-ai, claude-sdk-typescript.** Pre-existing
+reds unchanged.
+
+## ⚠️ Known regression — DOCUMENTED, not yet fixed
+
+- **ag2 / `mcp-apps`**: was GREEN on `main`, RED on this branch.
+Per-pill snapshot confirms (`/tmp/cr/baseline-ag2-pills.json` vs
+`/tmp/cr/ag2-final-pills.json`). Harness signature: `assistant did not
+respond within 30000ms (turns_completed=0)` → &#34;Run ended without
+emitting a terminal event&#34;. Root cause not localized; suspect
+interaction between R7-A1 (`http.disconnect` synthesis dropped from
+request-context middleware) and the mcp-apps SSE shutdown path, but the
+middleware fix was deliberate ASGI semantics correction and reverting it
+re-opens the SSE-abort it was meant to address.
+
+Possible remediations (for follow-up):
+1. Investigate the mcp-apps `/api/copilotkit-mcp-apps` SSE close
+sequence under R7-A1&#39;s &#34;always await real disconnect&#34; semantics. If the
+inner FastAPI app holds the channel waiting for a real disconnect, the
+harness may time out before uvicorn signals it.
+2. Re-evaluate R7-A1: emit a synthetic disconnect ONCE per request, but
+ONLY in response to a specific signal (e.g. `more_body=False` for the
+inner app&#39;s final receive), not unconditionally.
+
+This regression was caught BY the verification gate, NOT bypassed.
+Documented here so reviewers can decide ship-as-is + follow-up vs
+hold-for-fix.
+
+## Pipeline summary
+
+- 8 cr-loop review rounds, 1000+ findings deduped per round
+- 5 fix cycles (R1: 24 items; R2: 10 R2-A regressions + 5 in-diff
+bucket-(a); R3: 7 items; R5: 3 items; R7: 4 items; R9: 1 byoc demo
+cleanup)
+- Procedure 3 bucket-(c) promotion audit: 0 PROMOTE_TO_A
+- Rebased onto `origin/main` (203-commit gap caught at pre-push)
+- `pre-push-quality` clean: formatter (oxfmt + ruff) green, lint green,
+typecheck green, tests green, build green, docker build green
+(`showcase-spring-ai:prepush-test` 3.62GB), actionlint green on new
+workflow
+- Local `bin/showcase test --d6` verification per the user&#39;s hard gate —
+5 families verified + baseline comparison
+
+## Coordinated work
+
+Coordinated via `coordinate` channel with peer session
+`dashboard-cell-fixes` (PR #5407, merged: D6 manifest cleanup +
+claude-sdk-python testid backfill, 13 manifests excluding ag2 +
+spring-ai). Manifests ag2 + spring-ai are this PR&#39;s territory;
+non-overlap confirmed.
+
+## Test plan — what improved
+
+Per-family local `bin/showcase test &lt;family&gt; --d6` baseline-on-main vs
+branch (per-pill PocketBase snapshots in
+`/tmp/cr/{baseline,our}-*-pills.json`). The change attributable to this
+PR:
+
+| Family | Δ on D6 dashboard | Cells flipped red → green |
+|--------|-------------------|----------------------------|
+| **spring-ai** | **+6** | `auth`, `gen-ui-open`,
+`gen-ui-open-advanced`, `headless-simple`, `subagents`,
+`tool-rendering-custom-catchall` |
+| **ag2** | **+2 net** (+3 fixed, −1 regression) | fixed:
+`gen-ui-a2ui-fixed`, `gen-ui-agent`, `tool-rendering` · regression:
+`mcp-apps` (see ⚠️ above) · also: dangling `byoc` declarative-* demos
+removed from manifest |
+| **claude-sdk-typescript** | **+4** | `beautiful-chat-search-flights`,
+`gen-ui-a2ui-fixed`, `gen-ui-agent`, `tool-rendering` |
+| **llamaindex** | **+1** | `gen-ui-agent` (R1-A4 target) —
+`shared-state-write` confirmed green |
+| **built-in-agent** | **+1** | `headless-simple` (A20 targeted fix) |
+
+**Net dashboard impact: 13 cells red → green, 1 regression
+(ag2/`mcp-apps`) = +12 net.**
+
+What landed per family (commit per concern, in stack order):
+
+- **`975d5d80b` spring-ai** — manifest NSF reasoning canon (closes
+spring-ai&#39;s reasoning-default-render + agentic-chat-reasoning +
+tool-rendering-reasoning-chain pills against AG-UI Java SDK&#39;s missing
+`REASONING_MESSAGE_*` union) + Jackson `@Primary` ObjectMapper bean-race
+fix (deterministic JSON wire shape) + `RunErrorEvent` mixin renaming
+`error` → `message` for AG-UI core wire compatibility + error-banner
+pattern across mcp-apps routes + Java tool JSON hardening + `.ag-ui-sha`
+centralized pin source + new `test_unit-spring-ai.yml` workflow +
+Dockerfile explicit `git fetch origin $SHA` guard. → fixes the 6
+spring-ai cells above by closing the wire-shape gap between spring-ai
+and the harness.
+- **`2b0ce1065` ag2** — manifest NSF reasoning canon + new ASGI
+middleware `_request_context.py` with `_latest_user_message`
+`ContextVar` (unblocks per-request user-message threading the harness
+asserts on) + async OpenAI client + tool serialization fix + R9-A2
+manifest cleanup of stale declarative-* demos. → fixes the 3 ag2 cells.
+- **`4e79e3bd1` claude-sdk-typescript** — per-content-block array
+refactor for text/thinking/tool_use replay order on Anthropic
+`/v1/messages` shape (the core fix) + per-block `randomUUID` + reasoning
+route + alias coherence. → fixes the 4 cst cells by aligning Anthropic
+content-block sequencing with the harness&#39;s strict replay-order check.
+- **`5fd4028b4` llamaindex** — `gen-ui` + beautiful-chat agent updates +
+mcp-apps + copilotkit route alias coherence + demo-files assets. → fixes
+`gen-ui-agent`.
+- **`aec5b82ed` per-integration adjacencies** — `@ts-expect-error` swaps
++ agno comment + built-in-agent `headless-simple` UUID fallback + error
+banner across agno/crewai-crews/langroid/mastra/pydantic-ai/strands
+mcp-apps routes. → fixes built-in-agent `headless-simple`; prevents
+banner-render regressions across 6 other families.
+- **`a02cfb7a7` aimock** — d4 broad-matcher narrowing + d6 per-family
+content-shape alignment + chunkSize emoji surrogate-pair guard +
+threadid context gates. → the fixture realignment that makes all the
+above backend fixes verifiable end-to-end through the harness.
+- **`1f5b90095` Validate Showcase fix** — `KNOWN_SHADOW_CEILING` 123 →
+128 in `aimock-fixtures.test.ts` (the d6 content-shape alignment adds
+tracked, runtime-disambiguated substring overlaps; this is the test
+author&#39;s documented escape hatch — see the comment around the constant).
+
+Quality gates run:
+
+- [x] `pre-push-quality` — oxfmt+ruff, lint, typecheck, tests, monorepo
+build, `docker build` on `showcase-spring-ai:prepush-test` (3.62 GB
+image), actionlint on the new CI workflow — all green
+- [x] CI: 43/43 green on `1f5b90095` (Validate Showcase needed attempt
+2; `generate-registry.test.ts:211` is a known sentinel-cleanup flake
+unrelated to this PR&#39;s diff)
+
+**Decision needed**: ship-as-is and roll `ag2/mcp-apps` regression into
+the consolidated follow-up PR (alongside the bucket-(c)/(d) deferred
+items in `## Follow-up` below), OR hold this PR and fix `mcp-apps` in-PR
+first. Two candidate remediations are described in the ⚠️ block above.
+## Upstream gaps (flagged, not in scope)
+
+- AG-UI Java SDK lacks `REASONING_MESSAGE_*` typed event union —
+spring-ai uses raw-JSON workaround in `ReasoningController` (manifest
+declares `reasoning-default-render` + `agentic-chat-reasoning` +
+`tool-rendering-reasoning-chain` NSF accordingly)
+- aimock has no `customEvents` key — blocks headless-interrupt D6 replay
+(interrupt-headless red across all families)
+- llama-index `ag-ui` lacks `REASONING_MESSAGE_*` ingestion gap —
+manifest declares accordingly
+- ag2 image-content rejection — multimodal pill red across ag2 (Python
+ValueError in agent.py); separate from this PR
+
+## Follow-up
+
+A consolidated follow-up handoff file documents the deferred
+bucket-(c)/(d) items (R2-D1 stack-leak hardening sweep across 11 routes,
+R2-D2 customEvents, R2-D3 @copilotkit/runtime agents-generic, R2-D4
+mcp.excalidraw.com default URL, R3 misc adjacencies, etc.) for a single
+consolidated follow-up PR per the &#34;minimize PRs by aggregating related
+work&#34; directive.
+
+- Merge branch &#39;main&#39; into claude/a2ui-injection-config-9r2ve3
+
+- chore(showcase/aimock): bump KNOWN_SHADOW_CEILING 123→128 for tracked runtime-disambiguated overlaps (PR #5412)
+
+The 5 new substring shadows are in d6 fixtures landed by this PR:
+- d6/ag2/gen-ui-declarative.json: &#39;Show me a quick KPI dashboard&#39; inner-call mirror overlaps with pre-existing &#39;KPI dashboard&#39; entry in render-a2ui.json (same toolName=render_a2ui, context=ag2). Runtime-disambiguated by load order (inner-call mirrors ordered BEFORE outer generate_a2ui fixtures per the _meta._note in that file).
+- d6/claude-sdk-typescript/gen-ui-declarative.json: same pattern as ag2.
+- d6/claude-sdk-typescript/tool-rendering.json: dropped userMessage/turnIndex gates on toolCallId-keyed follow-up fixtures (per _shape_note in that file — Anthropic /v1/messages shape needs toolCallId-only gating for multi-pill loop safety). The remaining ungated userMessage fixtures (&#39;weather in Tokyo&#39;, &#39;AAPL&#39;) now substring-overlap with gen-ui-headless-complete and tool-rendering-reasoning-chain prompts in the same context. Runtime-disambiguated by toolCallId chains and first-match-wins ordering.
+
+These overlaps are exactly the runtime-disambiguated pattern the test comment endorses for ceiling bumps.
+
+- fix(showcase/aimock): consolidate content-red fixture fixes — d4 broad-matcher narrowing, d6 per-family content-shape alignment, chunkSize emoji guard, threadid context gates
+
+- fix(showcase): per-integration adjacencies — @ts-expect-error swaps + agno comment + built-in-agent headless-simple UUID fallback + error banner across agno/crewai-crews/langroid/mastra/pydantic-ai/strands mcp-apps routes
+
+- fix(showcase/llamaindex): consolidate content-red fixes — gen-ui agent + beautiful-chat agent updates, mcp-apps + copilotkit route alias coherence, demo-files assets
+
+- fix(showcase/claude-sdk-typescript): consolidate content-red fixes — per-content-block array refactor for text/thinking/tool_use replay order, per-block randomUUID, reasoning route + alias coherence
+
+- fix(showcase/ag2): consolidate content-red fixes — manifest NSF reasoning canon, ASGI middleware for per-request user-message ContextVar, async OpenAI client, tool serialization, manifest demos cleanup (R9-A2)
+
+- fix(showcase/spring-ai): consolidate content-red fixes — manifest NSF reasoning canon, Jackson @Primary mapper + RunErrorEvent wire-shape, error-banner pattern, Java tool JSON hardening, .ag-ui-sha pin + CI workflow
+
+- fix(showcase): D6 reds remediation on built-in-agent — testid backfill + PARITY_NOTES + aimock fixtures + STATE_DELTA wiring (#5413)
+
+## Scope
+
+Built-in-agent integration D6 readiness pass — companion to PR #5407
+(merged) which fixed the claude-sdk-python integration. This PR follows
+the same PARITY_NOTES pattern.
+
+### What changed
+
+- **~28 testids backfilled across 13 demos**: declarative-gen-ui
+renderers, headless-complete (assistant-bubble, user-bubble,
+weather-card, highlight-note, input-bar), headless-simple, gen-ui-agent,
+a2ui-fixed-schema (definitions + renderers), auth (new `sign-in-card`
+component), chat-slots welcome, gen-ui-interrupt cancel.
+- **New components**: shared `not-supported-banner` for NSF demos (hitl,
+shared-state-streaming); subagents extraction into LGP-mirror components
+(`subagent-activity-card`, `delegation-log`,
+`supervisor-activity-banner`).
+- **2 aimock fixtures**: `gen-ui-a2ui-fixed.json` (new — routes
+`display_flight` pill through the Card mount); `gen-ui-declarative.json`
+(reshaped to BIA&#39;s two-call sequence + flat catalog shape).
+- **1 backend wire-up**: `set_steps` tool registered in `state-tools`
+and wired through `tanstack-factory` so `gen-ui-agent` emits
+`STATE_DELTA` events on its agent-plan stream.
+- **PARITY_NOTES.md**: tracks BIA-vs-LGP feature parity + a Known Issues
+section.
+- **feature-registry.json**: adds `threadid-frontend-tool-roundtrip`
+feature entry.
+
+## D6 verify status
+
+- **3 GREEN**: auth, chat-slots, subagents.
+- **1 expected-NSF**: gen-ui-interrupt (cancel testid verified).
+- **3 still RED with documented downstream root causes** (all require
+fixes in `packages/react-core`, outside this PR&#39;s scope — see
+`PARITY_NOTES.md` &#34;Known Issues&#34;):
+  - a2ui-fixed-schema: renderer host doesn&#39;t mount Card.
+- gen-ui-agent: STATE_DELTA stream emits, but `useAgent`
+state-subscription gap prevents the React side from observing the delta.
+  - declarative-gen-ui: same renderer-host class as a2ui-fixed-schema.
+- **2 additional reds are pre-existing harness issues NOT introduced
+here**: headless-complete aimock fixture, headless-simple chip-text
+drift.
+
+Verify reports: `/tmp/cr/verify-5425/d6-direct-v2-REPORT.md`.
+
+## Builds on
+
+PR #5407&#39;s PARITY_NOTES pattern for documenting integration-vs-LGP gaps
+with downstream-tracked known issues.
+
+- chore: release monorepo v1.60.1 (#5415)
+
+- chore: release monorepo v1.60.1
+
+- fix: update cpk to use latest agui core packages (#5408)
+
+## Summary
+
+- Bumps `@ag-ui/client`, `@ag-ui/core`, and `@ag-ui/encoder` to `0.0.57`
+across all packages under `packages/`
+- Updates `pnpm-lock.yaml` to reflect the new versions
+
+## Test plan
+
+- [ ] Verify packages build successfully
+- [ ] Confirm no runtime regressions in ag-ui communication
+
+- Merge branch &#39;main&#39; into claude/stupefied-fermi-0c3310
+
+- fix(showcase): bump generate-catalog test counts for threadid-frontend-tool-roundtrip feature add
+
+- fix(showcase-tests): skip generator in integration-smoke-registry when registry.json exists
+
+Prevents a file-parallelism race where this suite&#39;s beforeAll generator
+call atomically renamed catalog.json while generate-registry.test.ts was
+mid-sentinel-test, clobbering the appended sentinel.
+
+- docs(showcase): built-in-agent PARITY_NOTES + feature-registry threadid-frontend-tool-roundtrip + known issues
+
+Documentation companion to the BIA D6 readiness work:
+
+- PARITY_NOTES.md: tracks built-in-agent feature parity vs LGP +
+  a &#39;Known Issues&#39; section documenting 3 D6 demos that remain red
+  due to downstream renderer/state gaps in @copilotkit/react-core
+  (a2ui renderer host doesn&#39;t mount Card; STATE_DELTA → useAgent
+  state-subscription gap; declarative-gen-ui renderer host shares
+  the same class). All three require fixes outside this PR&#39;s scope.
+- feature-registry.json: adds threadid-frontend-tool-roundtrip
+  feature entry covering the new gen-ui-agent STATE_DELTA wiring.
+
+- fix(showcase/built-in-agent): wire set_steps tool for gen-ui-agent STATE_DELTA stream
+
+Adds the set_steps tool definition to state-tools and wires it through
+the tanstack factory so the gen-ui-agent demo emits STATE_DELTA events
+on its agent-plan stream the same way the LGP integration does.
+
+- fix(showcase/aimock): add gen-ui-a2ui-fixed + reshape gen-ui-declarative fixtures for built-in-agent D6
+
+Two aimock fixture updates to unblock built-in-agent D6 verification:
+
+- gen-ui-a2ui-fixed.json: new fixture so display_flight pill routes
+  the Card mount through the a2ui-fixed-schema renderer host
+- gen-ui-declarative.json: reshaped to the built-in-agent two-call
+  sequence with the flat catalog shape the BIA route emits
+
+- feat(showcase/built-in-agent): extract subagents DelegationCard into LGP-mirror components
+
+Extracts the inline subagents page DelegationCard into three reusable
+components that mirror the LGP integration layout, enabling D6 testid
+coverage:
+
+- subagent-activity-card.tsx: per-subagent activity panel
+- delegation-log.tsx: cumulative delegation event log
+- supervisor-activity-banner.tsx: supervisor-level status banner
+
+The subagents page now composes these components instead of inlining
+the markup, with data-testid hooks for D6 selectors.
+
+- fix(showcase/built-in-agent): D6 testid backfill across 13 demos
+
+Backfills data-testid attributes to enable D6 cross-integration test
+coverage for the built-in-agent integration. Covers:
+
+- declarative-gen-ui renderers (5 testids)
+- headless-complete demo components (6 testids: assistant-bubble,
+  user-bubble, weather-card, highlight-note, input-bar)
+- headless-simple page (3 testids)
+- gen-ui-agent page (3 testids including agent-step)
+- a2ui-fixed-schema definitions + renderers (chat-slots, auth flow)
+- new sign-in-card component for auth demo
+- gen-ui-interrupt cancel testid on time-picker-card
+- shared not-supported-banner component for hitl +
+  shared-state-streaming NSF demos
+
+- fix(showcase): D6 reds remediation — manifest NSF + hygiene (14 integrations) + claude-sdk-python testid/hook fixes (+16 component testids) (#5407)
+
+## Summary
+
+D6 reds remediation across the staging dashboard. Consolidates
+manifest-level NSF/hygiene fixes for 13 integrations with two targeted
+claude-sdk-python fixes that surfaced during the per-integration audit.
+
+### What&#39;s in scope
+
+**Manifest cleanup** (12-14 integrations touched):
+- Added `not_supported_features` entries for `reasoning-default-render`,
+`agentic-chat-reasoning`, `tool-rendering-reasoning-chain`, and
+`interrupt-headless` per backend capability (e.g. ms-agent-dotnet gets
+only `interrupt-headless` since its `ReasoningAgent.cs` natively emits
+REASONING_MESSAGE_*; langgraph-fastapi natively supports both → no
+additions).
+- Deduped `shared-state-streaming` and related entries that previously
+appeared in BOTH `features:` AND `not_supported_features:`.
+- Added `shared-state-read` and `threadid-frontend-tool-roundtrip` to
+`features:` where the demo exists but wasn&#39;t declared. **Note**:
+`threadid-frontend-tool-roundtrip` was REVERTED — feature isn&#39;t
+registered in `showcase/shared/feature-registry.json`; the registry
+needs the canonical entry before manifests can declare it. Tracked as
+follow-up.
+
+**claude-sdk-python**:
+- `hitl/page.tsx`: replaced `useLangGraphInterrupt` (from
+`@copilotkit/react-core`) with `useInterrupt` (from
+`@copilotkit/react-core/v2`) — wrong-framework import on a non-LG
+backend.
+- `gen-ui-interrupt`: added `data-testid=&#34;time-picker-cancel&#34;` to the
+cancel button.
+
+### Out of scope (deferred / handled elsewhere)
+
+- **ag2 + spring-ai manifests**: owned by parallel session
+`fix/content-reds` — those changes land via that PR.
+- **11 of 12 audit-flagged claude-sdk-python testid gaps**: investigated
+and refused — they&#39;re missing FEATURES (custom-catchall renderers,
+sign-in cards, headless composer, etc.), not missing testid attributes
+on existing JSX. Adding them would be a behavior change requiring
+backend-capability audit per demo. Separate follow-up if the team wants
+the structural gaps closed.
+- **built-in-agent 17-item testid backfill**: per D analysis, the
+single-`&#34;default&#34;`-agent pattern is INTENTIONAL architecture (documented
+in README + earliest port commit + uniform across 12+ routes); per-demo
+dimension comes from `src/lib/factory/*` keyed off route URL. Track 1
+(PARITY_NOTES.md doc) + Track 2 (testid-only backfill, separate PR)
+tracked as follow-ups.
+
+### Validation
+
+- `npm run validate-manifests` passes; all 15 affected manifests parse
+valid YAML.
+- claude-sdk-python typecheck: no new errors (pre-existing
+module-resolution noise unchanged).
+- No vitest tests exist for the touched claude-sdk-python demos.
+- `npx oxfmt --write` on changed files.
+
+### Provenance
+
+Driven by a per-integration parity audit (LGP canon, 17 red
+integrations, 11-slot CR fan-out, 39-demo canon enumerated; reports
+archived to /tmp/cr/audit/ during the investigation). Coordinated with
+parallel `fix/content-reds` session via the `coordinate` skill to avoid
+file-overlap with their ag2 + spring-ai manifest work and other deeper
+changes.
+
+Closes #5406 (claude-sdk-python testid/hook fixes — folded into this
+PR).
+
+## Additional fixes (folded in after re-audit)
+
+Re-audit of the original claude-sdk-python audit revealed 16 ADD-EMITTER
+fixes the prior agent missed. All components existed; only `data-testid`
+attributes were absent.
+
+| demo | testids | commit |
+|---|---|---|
+| auth | 1 (`auth-demo-error-message`) | 1238046fc |
+| headless-simple | 3 (composer + 2 message bubbles) | 5793a3652 |
+| a2ui-fixed-schema | 1 (`a2ui-fixed-card` via Card renderer override +
+matching definitions entry, mirroring LGP) | 4436f3afa |
+| headless-complete | 6 (composer + 2 bubbles + stock/weather/highlight
+cards) | 083eb09a7 |
+| declarative-gen-ui | 5 (card + status-badge + metric + pie-chart +
+bar-chart) | 6187040b5 |
+
+Not added (genuinely missing components, deferred):
+- `auth-sign-in-card`, `auth-sign-out-button`, `auth-profile-card`
+- `headless-revenue-chart`
+- tool-rendering testids (15 components), chat-slots (2), etc.
+
+- chore(showcase/claude-sdk-python): document LGP parity for headless-message testids
+
+Adds inline comments next to the data-testid=&#34;headless-message-{user,assistant}&#34;
+markers in assistant-bubble.tsx, user-bubble.tsx, and headless-simple/page.tsx
+explaining that the testids intentionally repeat once per message — mirroring
+the canonical LGP implementation — and that role discrimination for the D6
+conversation-runner is via data-message-role, not unique testids.
+
+- fix(showcase/claude-sdk-python): D6 probe alignment — testid backfill + demo bugfixes + V2 import for gen-ui-interrupt
+
+Backfills the data-testid markers the D6 probes assert against across the
+auth, headless-simple, headless-complete, a2ui-fixed-schema,
+declarative-gen-ui, and gen-ui-interrupt demos; aligns the python
+a2ui_fixed agent + a2ui definitions/renderers with the canonical LGP
+shapes; and switches the gen-ui-interrupt CopilotKit provider import to
+@copilotkit/react-core/v2 so the demo mounts under the V2 runtime that
+the D6 probe drives.
+
+- feat(showcase/claude-sdk-python): add headless-revenue-chart for D6 probe
+
+Adds the chart-card renderer and wires it into the headless-complete
+tool-renderers map so the D6 probe for the headless-revenue-chart feature
+can mount and assert against a real chart component.
+
+- fix(showcase/aimock): a2ui-fixed + declarative fixtures for claude-sdk-python D6 probes
+
+Adds the missing gen-ui-a2ui-fixed aimock fixture and reshapes the
+declarative-gen-ui fixture so the claude-sdk-python D6 probes have
+deterministic LLM replay for both gen-ui demos.
+
+- fix(showcase/claude-sdk-python): hitl demo bugfixes — useInterrupt hook + V2 CopilotKit import
+
+Replaces useLangGraphInterrupt with useInterrupt (LangGraph-specific hook
+not exported from the V2 React core) and switches the CopilotKit provider
+import to @copilotkit/react-core/v2 so the demo mounts under the V2
+runtime that the D6 probe drives.
+
+- fix(showcase): add D6 NSF entries + feature alignment across 14 integration manifests
+
+Annotates 14 integration manifests with d6_not_supported_features entries
+and aligns d6_supported_features with what each backend actually implements,
+so the D6 fleet probe only enumerates demos that the backend can serve.
+
+- fix(bot-slack): adapt runHttpRequest call to ag-ui 0.0.57 signature
+
+- fix: update cpk to use latest agui core packages
+
+- feat(showcase): end-to-end run-visibility for fleet — /api/runs + family-silence Slack alerting (#5400)
+
+## Summary
+
+Adds end-to-end **run-visibility** to the showcase fleet — a new data
+path from queue enqueue → per-family projection → dashboard + Slack
+alerting:
+
+- **Contracts + PB schema**: `EnqueueJobInput.family`,
+`FleetQueueClient.pruneAged`, run-id/family/worker-id columns on
+`probe_jobs` / `resource_snapshots`, fleet-claim hook stamps at claim
+time.
+- **Queue + aggregator**: queue-client stamps run-id/family on enqueue;
+d6 producer owns `pruneAged` retention; aggregator computes
+`redsIntroduced`/`redsCleared` into `probe_runs`.
+- **Run-view projection (`run-view.ts`)**: §5.1 `FLEET_FAMILIES`
+registry + §5.2.1 family-summary projection.
+`createMemoizedFamilySummary` bounds PB load at ~one fan-out per TTL
+regardless of viewer count.
+- **Producer wiring**: `PRODUCER_FAMILY_WIRING` drift-locks the four
+producers&#39; family ids set-equal to the registry (unit-tested);
+CLI-triggered runs route through `familyForLevel` so a registry rename
+breaks loudly.
+- **Family-silence monitor (§9)**: Slack alerting for the one incident
+class transition-keyed rules are blind to (a silent family produces no
+row transitions). Rides the existing fleet-health interval (no extra
+timer), per-family 6h rate-limit + recovered one-shot + boot-grace,
+fails open on PB-down for the meta-alert. Closed-vocabulary redaction.
+- **HTTP `/api/runs`** + **`/health.fleetRuns.lastEvaluatedAt`**:
+read-only fleet-runs routes mounted unconditionally on the CP role,
+backed by the SAME memoized summary the monitor uses. `/health` stamp is
+the §9 compensating control so an external poll can detect a wedged
+monitor.
+- **Orchestrator wiring**: boot-resolved `workerStaleAfterMs` threaded
+through both fleet-health and the projection so they judge staleness
+against the same window; test queues across the harness gain a no-op
+`pruneAged`.
+- **Dashboard**: worker-runs Ops section (family table, worker strip,
+run-history drill-down), D0-from-staleness vs D0-from-failure family
+annotation, per-family silence banner on the coverage tab; data layer
+(DTOs, fetchers, polling hook, context provider).
+- **Integration test**: 689-line end-to-end test exercising the full
+queue lifecycle → /api/runs projection across all four families.
+
+This is the merged scope of the **runviz blitz** lanes T1-T15.
+
+## Test plan
+
+- [x] `pnpm typecheck` on `showcase/harness` and
+`showcase/shell-dashboard` — clean
+- [x] `vitest run` on full harness suite — 2276 pass / 3 pre-existing
+probe-pool timing flakes (NOT in diff; subject is &#34;probe-pool timing
+fragility&#34;, a different PR&#39;s concern)
+- [x] `oxfmt --check showcase/` — all green
+- [x] Integration test `run-visibility.integration.test.ts` passes —
+exercises queue → projection across all four families
+- [ ] CI on PR HEAD — pending push, monitored after open
+
+## Known follow-up (bucket-d)
+
+- Probe-pool timing-sensitive flakes in
+`src/probes/helpers/browser-pool.test.ts` (FIX#4a self-heal) and
+`src/probes/loader/probe-invoker.test.ts` (timeout assertions) —
+different test fails on each run; subject is probe-pool timing
+fragility, not runviz.
+
+## Deviation note
+
+The runviz ship-finisher session ran in a Claude Agent SDK harness
+without an Agent dispatch tool, so the standard 7-agent CR-loop could
+not be dispatched. Inline review was performed against the cr-loop
+subject-manifest + four-bucket partition: T1-T15 each landed via their
+own per-task review on the blitz integration branch before reaching this
+PR, and T8/T15 (the two final-merged streams) were validated via
+typecheck-clean + targeted-tests-pass + cross-module wiring inspection.
+A heavyweight 7-agent CR can be run against this PR if desired.
+
+- fix(harness): post-rebase test/syntax fixes for queue-client and fleet tests
+
+- queue-client.ts: add missing closing brace at EOF (TS1005 after rebase)
+- job-producer.test.ts: add required `family: &#34;d6&#34;` to producer fixtures
+  and remove duplicate `logger` key in startedProducer
+- result-aggregator.test.ts: align with per-row try/catch + dedup-lookup
+  behavior introduced in 0b2f613e0 — add `persisted: true` and
+  `writeOverlay` to test writers, update B6 contract expectations
+- queue-client.test.ts: drop a stray blank line
+
+- fix(dashboard): worker-run-detail-panel abort fetches on cleanup + move side-effects out of setState updater
+
+- fix(harness): job-producer.pruneAged uses depth registry constant, not hardcoded literal
+
+- fix(harness): aggregator per-row try/catch + dedup lookup throw + worker-health helper parity
+
+- fix(harness): escape PB filter args in control-plane-run + run-history
+
+- style: auto-fix formatting
+
+- test(showcase): run-visibility integration + deploy-script regression covers
+
+Adds a 689-line integration test that exercises the full queue lifecycle
+to the /api/runs projection (enqueue → claim → terminal → projection)
+across all four families. Updates the railway-envs golden + verify-deploy
+drivers regression test to account for the new fleet-runs route surface.
+
+- feat(showcase): dashboard worker-runs UI + data layer
+
+Adds the dashboard Ops worker-runs section — family table, worker strip,
+run-history drill-down, D0-from-staleness vs D0-from-failure family
+annotation with clock glyph, and the per-family silence banner on the
+coverage tab. Wires the data layer: DTOs, /api/runs fetchers, polling
+hook, and a worker-runs context provider. cell-drilldown / cell-pieces
+gain family-aware rendering.
+
+- feat(showcase): orchestrator wires producers + monitor + /api/runs onto runControlPlane
+
+PRODUCER_FAMILY_WIRING (drift-locked set-equal to FLEET_FAMILIES via a unit
+test) drives every buildJobProducer call site; the boot-resolved
+worker-stale-after window is threaded through BOTH fleet-health and the
+shared family-summary projection so they judge staleness against the same
+window. Triggered CLI control-plane runs route through familyForLevel so a
+registry rename breaks loudly instead of silently enqueueing jobs invisible
+to the projection. Test queues across the harness gain a no-op pruneAged
+for the new contract.
+
+- feat(showcase): /api/runs fleet-runs HTTP routes + /health fleetRuns stamp
+
+Read-only /api/runs routes mounted on the control-plane role, backed by
+the SHARED memoized family-summary instance (one PB fan-out per TTL).
+Bounds: per-route memo, request rate-limit. /health gains the
+fleetRuns.lastEvaluatedAt stamp from the family-silence monitor as the
+§9 compensating control for a wedged monitor (an external poll detects
+the wedge — the monitor cannot report its own host&#39;s death).
+
+- feat(showcase): producer family-stamping + family-silence Slack monitor
+
+job-producer takes a family option and stamps it on every enqueue; the
+prune-ownership key is the d6 producer&#39;s family. family-silence-monitor
+rides the existing fleet-health interval (no extra timer to tear down),
+keys 6 h rate-limit + recovered one-shot per family, fails open on
+PB-down (the meta-alert path must still fire), and renders alert text
+from closed-vocabulary parts only (§5.2.1 redaction). control-plane
+fire-and-forgets familySilence.tick(now) each fleet-health cycle.
+
+- feat(showcase): run-view family registry + memoized family-summary projection
+
+The §5.1 FLEET_FAMILIES registry and the §5.2.1 family-summary projection
+that derives per-family outcome / inflight / lastRun / lastSuccessAt from
+the PB-backed batches. The memoized variant fan-outs PB reads at most once
+per TTL regardless of viewer count — the SAME instance is shared by the
+/api/runs routes and the family-silence monitor so a dashboard poll and a
+monitor evaluation inside the same TTL cost one PB fan-out total.
+
+- feat(showcase): queue-client + aggregator wire run-id/family + reds projection
+
+queue-client stamps run_id/family onto every enqueue so downstream
+projections can attribute jobs to a family-scoped batch; pruneAged
+retention legs land here (the d6 producer owns the call, per §4.2).
+result-aggregator computes redsIntroduced/redsCleared from claimed/
+sequenced job state into probe_runs summary.
+
+- feat(showcase): fleet contracts + PB run-metadata schema for run-visibility
+
+Adds run-id/family/worker-id columns to probe_jobs and resource_snapshots,
+plus the EnqueueJobInput.family + FleetQueueClient.pruneAged contracts and
+the hoisted deriveHealth primitive that downstream projections share. The
+fleet-claim PB hook stamps run-id/family at claim time so every later
+projection has a stable join key. probes/run-history is updated to read
+the new columns.
+
+- fix(cf+dashboard): fleet claim-fairness, supplemental-merge freshness, dashboard drilldown D4 parity (#5399)
+
+## Summary
+
+Bundles two related dashboard/harness lanes that landed together once
+both reached green:
+
+1. **CF #18 fairness / claim-fair lane** — the 23-commit base
+(`fix/fleet-claim-fairness` rebased onto its CF7 integration tip
+`80c5c9402`) carrying claim-spike, cf3/cf4/cf5/cf6/cf7 hardening waves,
+plus the **CF8 micro-fix** for the round-8 supplemental-merge finding:
+
+- **CF8 F3 supplemental-merge freshness guard** (`useLiveStatus.ts`):
+the cold-load comm-error supplemental fetch runs CONCURRENTLY with the
+bulk pages, so the bulk copy of an aggregate row can be NEWER than the
+supplemental snapshot. The previous merge replaced the bulk row
+unconditionally, regressing `state`/`observed_at` to stale values until
+the row&#39;s next SSE delta (long for slow-cadence aggregates). Added
+`supplementalRowIsOlder` — when the supplemental row is strictly older
+the newer bulk row stays INTACT (signal-less) rather than being grafted
+into a chimera (newer core + stale signal) that the reducer&#39;s
+signal-PRESENCE no-op check would silently swallow.
+
+- **Procedure 3 promotions** (bucket-c/d audit over the CF round-8
+ledger): one functional fix (escape `workerId` in fleet-health&#39;s reclaim
+list filter — matches the `JSON.stringify` pattern used at
+orchestrator.ts:3240 for the same field; a `&#34;`-bearing worker_id would
+otherwise break out of the literal) plus five doc reconciliations on the
+producer/contract surfaces flagged across slot1/slot2/slot4/slot5 (stale
+queue-client cross-reference, WarmHealthConfig doc vs `gate.specs`
+reality, TickResult.reclaimedIndeterminate &#34;Of reclaimed&#34; → &#34;In addition
+to reclaimed&#34;, TickResult.skippedForBacklog poisoned-count contributor,
+SweepResult.commErrors equation scoping).
+
+2. **Dashboard drilldown D4 parity** — three commits making the
+dashboard drilldown surface the D4 rung the same way the grid does:
+
+- `feat(showcase): add resolveD4Row + CellState.d4 so the drilldown can
+see the D4 rung` — exposes the D4 row on `CellState`, modeled after
+`resolveD3Row`.
+- `fix(showcase): drilldown shows the D4 row, de-crosses the e2e label,
+and scopes the rollup line honestly` — renders D4 in the drilldown
+panel, fixes the crossed e2e label, scopes the rollup line to its real
+source set.
+- `fix(showcase): unify dimension naming on the legend taxonomy across
+grid, legacy cells, and legend` — taxonomy cleanup so legend, grid, and
+legacy cells use one set of labels.
+
+## Verification
+
+- Dashboard `npx tsc --noEmit`: clean (only the pre-existing
+missing-`@/data/*.json` errors that exist on `main`).
+- Dashboard `vitest run`: 59 files / 1012 tests passing, 1 skipped.
+- Harness `npx tsc --noEmit`: clean.
+- Harness `vitest run`: 121/122 files passing; 1 failed = `probe-invoker
+times out invoker-level even when driver ignores abortSignal` — the
+NAMED known wall-clock flake (per CF7 integration verification), re-run
+in isolation: 67/67 PASS.
+- Rebase of drilldown-parity onto the updated `fix/cf8-m1` tip: ZERO
+conflicts (the two lanes touch disjoint files).
+
+## Test plan
+
+- [ ] CI green on the PR
+- [ ] Dashboard drilldown shows D4 rung in addition to D3/D5/D6
+- [ ] Legend taxonomy reads the same in legend, grid, drilldown
+- [ ] (post-merge, in showcase) cold-load comm-error overlay still
+paints; a stale supplemental no longer regresses a freshly-failed
+aggregate row
+
+- test(harness): update SMOKE sweep test mock to writeOverlay API after rebase
+
+- fix(harness): import PoolCommError type after rebase merge
+
+- test(harness): tolerate oxfmt line-wrap in routerAdd auth-middleware pin
+
+The auth-middleware-presence regex in queue-client.test.ts hook-parity
+suite was anchored to the single-line `}, $apis.requireAdminAuth());`
+closer. After oxfmt rewrote fleet-claim.pb.js to its multi-line form
+(`},\n  $apis.requireAdminAuth(),\n);`) the regex stopped matching
+and the test asserted 0 routes were guarded — a false alarm.
+
+Broaden the regex to accept both the single-line closer and the
+formatter&#39;s split form; the structural intent (each routerAdd
+handler-end is followed by the requireAdminAuth middleware) is
+unchanged.
+
+- fix(harness): fleet-claim handlers preserve {ok:false} shape on transaction throw
+
+- style: auto-fix formatting
+
+- fix(showcase): unify dimension naming on the legend taxonomy across grid, legacy cells, and legend
+
+Grid d3 badge API-&gt;E2E, legacy e2e badge RT-&gt;E2E, legend D6 &#34;Parity
+(PR)&#34;-&gt;&#34;Parity (Reference)&#34;, legend D4 chip copy 6h-&gt;1h (real window);
+d4 grid &#34;RT&#34; and d2 &#34;API&#34; unchanged.
+
+- fix(showcase): drilldown shows the D4 row, de-crosses the e2e label, and scopes the rollup line honestly
+
+D4 row inserted with worst-state strictness; e2e relabeled &#34;E2E (Demo)&#34;
+atomically (label-derived testids); rollup line relabeled &#34;Service
+(health + e2e)&#34;; headline regression pins pill-red &lt;-&gt; visible red popup
+row via buildCellModel.chipColor cross-assert; green-badge tests
+FRESH-pinned.
+
+- feat(showcase): add resolveD4Row + CellState.d4 so the drilldown can see the D4 rung
+
+Mirrors cell-model resolveD4 fold semantics (worst-state-wins, 1h stale
+window, rank-based missing-chat collapse, chat-wins tie-break pinned by
+row-identity assertions); d4 is informational — rollup contributors
+unchanged.
+
+- fix(harness): escape claimed_by literal in fleet-health reclaim, plus tick-result doc reconciliations (Procedure 3 promotions)
+
+PROMOTE_TO_A (defense-in-depth, exploit-class):
+- fleet-health.ts reclaim list interpolated workerId raw into the PB filter
+  literal. workerId is DB-sourced (read back from the workers roster row),
+  not a compile-time constant, and the same field is escaped via JSON.stringify
+  at orchestrator.ts:3240 — but the reclaim path was missing the same
+  hardening. A double-quote in worker_id (corrupt row, buggy self-registration)
+  would either throw the list (silently skipping this worker&#39;s reclaim every
+  cycle) or widen the filter to claim other workers&#39; jobs. Match the sibling
+  escape pattern.
+
+PROMOTE_TO_B (doc reconciliations exposed by the CF round-8 audit):
+- queue-client.ts COUNT-NAME CAVEAT was stale — the cross-referenced
+  contracts.ts doc was already updated (commit 80c5c940) but the queue-client
+  side still asked a future maintainer to make the edit that had already
+  landed.
+- WarmHealthConfig + JobProducerOptions.warmHealth docs said the producer
+  warms &#39;every enumerated backend&#39; / &#39;each enumerated spec&#39;; the implementation
+  warms gate.specs (post-validation, post-backlog-gate). A fully-backlogged
+  tick warms nothing. Updated both interface-level docs to match.
+- TickResult.reclaimedIndeterminate said &#39;Of reclaimed, the reclaims...&#39; —
+  but the field is DISJOINT from reclaimed (sibling SweepResult contract +
+  the queue-client both state a thrown release lands here exclusively).
+  Rewrote to &#39;In addition to reclaimed, ...&#39;.
+- TickResult.skippedForBacklog doc named only the dedupe-gate contributor;
+  the in-function comment correctly documents the fail-CLOSED poisoned-count
+  fold-in. Expanded the field doc to name both contributors, and to clarify
+  that the fail-OPEN leg lands in backlogGateFailedOpen separately.
+- SweepResult.commErrors pairing equation
+  (commErrors.length === reclaimed + reclaimedIndeterminate) was asserted
+  unconditionally on the shared contract, but reclaimedIndeterminate is
+  optional and fakes may not report the split. Scoped to &#39;implementations
+  that report the split&#39;.
+
+- fix(dashboard): supplemental-merge keeps newer bulk row intact, never grafts older signal (CF8 F3)
+
+The cold-load comm-error supplemental fetch runs CONCURRENTLY with the bulk
+pages, so the bulk copy of an aggregate row can be NEWER than the supplemental
+snapshot (the row&#39;s state changed between the two reads). The previous merge
+replaced the bulk row unconditionally — regressing state/observed_at and
+potentially fail_count back to the older supplemental values until the row&#39;s
+next SSE delta (long for slow-cadence aggregates).
+
+Add a freshness guard: when the supplemental row is strictly older (by
+observed_at), keep the newer bulk row INTACT — signal-less rather than
+chimera (newer core + stale signal). A chimera row would be silently swallowed
+by the reducer&#39;s signal-PRESENCE no-op check; a signal-less bulk row lets
+the next SSE delta restore the real current signal via the
+undefined→defined presence flip.
+
+Equal timestamps and unparseable timestamps both prefer the supplemental
+(signal-bearing) row — only POSITIVELY-stale supplemental is suppressed,
+preserving the cold-load comm-error overlay intent of CF7-F3 #1.
+
+- docs(harness): SweepResult.expiredPending documents the lease-phase long-expired carve-out
+
+Sibling of the queue-client prose fix (CF7 #10), which flagged this
+contract doc as describing only the drain phase: despite the name, the
+lease phase&#39;s long-expired carve-out also claim-deletes claimed/running
+rows (stale created-age, long-expired or unparseable lease) into this
+count — no re-queue, no comm error, no reclaimed increment.
+
+- fix(dashboard): statusSignalHasCommErrorKey sibling companion lands on the live-status mirror
+
+The harness contract gained statusSignalHasCommErrorKey (REQ-B
+version-skew observability) with its dashboard sibling explicitly left
+to the dashboard owner. Add the byte-identity-safe companion to
+live-status.ts — placed OUTSIDE the commErrorFromStatusSignal region
+pinned by commError-contract-drift.test.ts (only the decode function
+source is mirrored; proven by the drift suite staying green) — so
+dashboard consumers can distinguish a present-but-undecodable overlay
+from a genuinely absent one. Unit-pinned: unknown future kind,
+well-formed, absent, and array-expando wire shapes.
+
+- fix(harness): fleet-health wires the contract&#39;s heartbeatParseable — unparseable heartbeats warned AND counted per cycle
+
+The S10 caller&#39;s ad-hoc raw Date.parse check could disagree with
+isWorkerStale&#39;s PB-space-form-normalized parser (engine-lenient vs
+anchored), so the unparseable-heartbeat warn did not fire precisely when
+the staleness check was blind. Wire the F2-exported heartbeatParseable
+companion (contracts.ts documents fleet-health as its intended caller)
+and surface a per-cycle unparseableHeartbeats count on the
+fleet.health.cycle log — red-green pinned (the count was the new
+observable; the cycle log previously never fired for a blind-but-online
+corrupt row).
+
+- fix(dashboard): minors batch — mergeRowsToMap signal-presence warn noise + comment truth (CF7-F3 #5)
+
+- mergeRowsToMap&#39;s disjoint-key divergence warn no longer fires on a
+  signal undefined⇄defined flip between row groups (live-status.ts:
+  coreRowFieldsEqual split out of rowsAreNoop): the initial fetch
+  projects signal away while SSE deltas deliver full rows, so the flip
+  is expected provenance, not a keyspace violation. upsertByKey&#39;s
+  reducer keeps treating the flip as observable (existing tests pin it).
+- __tests__/cell-model.test.ts destructure comment no longer claims
+  noUncheckedIndexedAccess is enabled (it is not in this package&#39;s
+  tsconfig) nor that the sibling matched (it did not).
+- src/lib/cell-model.test.ts row() helper aligned to the
+  destructure-with-fallback shape the comment describes.
+- cell-model.ts:29-31 re-export rationale now cites the actual
+  importer (__tests__/cell-model.test.ts).
+
+- docs(dashboard): document the opposite-polarity fail-safe between isStale and the comm-error staleness gate (CF7-F3 #3)
+
+staleness.ts isStale treats an unparseable observed_at as NOT stale
+(false-stale would downgrade a live green row), while the FF7 gate in
+decodeCellCommError treats unparseable as stale/skip (false-not-stale
+would pin an uncleared overlay forever). isStale predates this branch
+(blame: d0da6e357, pre-existing on main; untouched here), so per the
+blame gate it is left as-is and the divergence is documented at the
+FF7 site instead. Reported for the ledger.
+
+- fix(dashboard): future-dated comm-error observedAt beyond 5min skew is treated as stale, not pinned (CF7-F3 #4)
+
+decodeCellCommError&#39;s staleness gate (cell-model.ts:697) compared only
+`now - parsed &gt; staleAfterMs`, which is never true for a future-dated
+observedAt — clock skew or a corrupt producer timestamp would pin the
+unreachable/pending overlay indefinitely, the same permanent-phantom
+failure mode the FF7 unparseable-timestamp skip prevents. A timestamp
+more than COMM_ERROR_FUTURE_SKEW_TOLERANCE_MS (5min) ahead of now is
+now skipped like an unparseable one; skew within tolerance still
+surfaces (pinned by a companion test so the guard can&#39;t over-correct).
+
+- fix(dashboard): absent D3/D4 family collapses the chip to unverified gray, never green (CF7-F3 #2)
+
+The D1-D4 gate fires only on d3.exists/d4.exists, so a cell with ONLY
+green D5/D6 rows (no e2e/chat/tools rows at all) slipped past it and
+rendered a green chip + green d6Effective at achievedDepth=0/
+ceilingDepth=0 — a false top-of-ladder claim contradicting the
+strictness doctrine (PRESENT-but-null D4 grays; D5-no-data grays the
+ladder). A wholly absent D3/D4 family now collapses to the gray
+&#34;unverified&#34; chip (same shape as the d4NoData collapse) with red-D5/D6
+dominance preserved, and d6Effective stays blocked (null).
+
+cell-model.ts:847-852 (gate) / :905-921 (d6Effective).
+
+One existing fixture (amber pass-through under reclaimed-pending) built
+its amber from an absent-D3/D4 map; it now carries green e2e/chat rows
+so the chip is genuinely amber through an intact ladder — the test&#39;s
+never-mask assertion is unchanged.
+
+- fix(dashboard): comm-error overlay visible from a COLD initial fetch — supplemental signal fetch for aggregate rows (CF7-F3 #1)
+
+decodeCellCommError (cell-model.ts) derives the REQ-B unreachable/
+pending overlay from row.signal, but the bulk initial fetch projects
+STATUS_LIST_FIELDS, which omits signal (useLiveStatus.ts /
+live-status.ts:STATUS_LIST_FIELDS) — so on every page refresh rows
+materialized with signal undefined and ACTIVE overlays vanished until
+an SSE delta happened to re-deliver that row.
+
+Fix option (a) — matching the projection&#39;s data-volume rationale (the
+signal blob is ~61% of the bulk payload): useLiveStatus now issues a
+SUPPLEMENTAL initial fetch, concurrent with the bulk pages, of ONLY
+the comm-error candidate aggregate rows (key has no /&lt;featureId&gt;
+segment) for the four mirror dimensions, WITH signal, and merges them
+over their projected bulk twins by key. That is ~4 rows per
+integration, so the bulk projection&#39;s first-paint win is preserved.
+Per-cell rows under the same dimensions carry heavy parity-diff
+signals and are deliberately not re-fetched (a stale per-cell comm
+error is only a same/lower-severity tie-break candidate against the
+aggregate mirror).
+
+- live-status.ts: new FLEET_COMM_AGGREGATE_DIMENSIONS single source of
+  truth (d6/d4/e2e-demos/d5-single-pill-e2e); STATUS_LIST_FIELDS doc
+  updated to the truth (buildCellModel reads signal per cell at render;
+  the old &#34;only ever read in the drilldown&#34; claim was false).
+- cell-model.ts: decodeCellCommError derives its aggregate candidates
+  from the shared constant (scan order preserved; pinned by the
+  equal-timestamp tie-break tests).
+- useLiveStatus.ts: fetchCommAggregateRows + by-key merge; skipped
+  entirely for dimension scopes outside the aggregate set; supplemental
+  failure retries through the same connect() chain (fail loud).
+- useLiveStatus.test.tsx: the PB mock now honours the fields projection
+  (returning full rows for the projected bulk fetch is exactly how this
+  bug stayed invisible to the suite) and serves the supplemental fetch
+  from a dedicated fixture; new cold-fetch red-green tests assert the
+  overlay renders end-to-end with NO SSE delta, the narrow filter
+  shape, the out-of-set skip, and the in-set narrowing.
+- live-status.test.ts: formatter pass on the CF7-F3 #5 test added in
+  the previous commit (oxfmt).
+
+- test(harness): sweep e2e_d6 row-key fixtures to the contract-conformant d6:&lt;slug&gt; form (scope exception: recurring CR noise)
+
+CR finding recurring 3x; fixture lines pre-existing on the base (f8aee59b62 /
+ef76c6d0ff / 2a9b38bbfe). The fleet contract (contracts.ts ServiceJobResult
+.aggregateKey) forbids an e2e_d6:&lt;slug&gt; row on the fleet path - the dashboard
+only ever reads d6:&lt;slug&gt; - so fixtures pinning e2e_d6:* keys mask the exact
+regression class (success-path vs error-path aggregate-key drift) these
+suites exist to catch. Behavior-neutral: every assertion pins the same
+production logic, now over conformant keys.
+
+- contracts.test.ts: makeResult probeKey/aggregateKey + the projection pin
+  -&gt; d6:langgraph-python; fleetSurfaceState row key/dimension -&gt; d6
+- worker-loop.test.ts: makeDriver returns d6:&lt;slug&gt; (was e2e_d6:&lt;slug&gt;),
+  unified with the comm-error/driver-error paths that already pin d6:...;
+  all inline driver-fake fixtures + the buildServiceJobResult /
+  runClaimedJob aggregateKey assertions swept in lockstep. The
+  registry-routing `&lt;kind&gt;:routed` tagging keys are deliberately untouched
+  (they tag by DRIVER KIND to prove dispatch, symmetric across
+  e2e_smoke/e2e_demos)
+- orchestrator.test.ts: driverInputs.key -&gt; the d6:tracer-slug tracer,
+  slug-ALIGNED across probeKey/serviceSlug/probe_key because the d6 driver
+  derives its aggregate side-row slug from input.key (deriveSlug) while the
+  loop filters by d6:&lt;serviceSlug&gt; - a mismatched tracer would surface the
+  side row as a phantom cell; pass-through proof kept (aggregateKey echoes
+  the tracer) and strengthened with the &#34;no D5 features declared&#34; signal pin
+
+- fix(harness): statusSignalHasCommErrorKey companion makes an undecodable comm-error overlay observable (REQ-B version skew)
+
+CR finding on commErrorFromStatusSignal (contracts.ts:433-463, decode-guard
+region touched on this branch): a malformed embedded value decodes to
+undefined - indistinguishable from &#34;absent&#34; - so a REQ-B overlay written by a
+NEWER producer (new PoolCommErrorKind rolled out write-side first, or a
+renamed required field) is silently dropped by an older reader.
+
+- document the version-skew hazard on the decode (return type unchanged:
+  every render path branches on presence)
+- export statusSignalHasCommErrorKey(signal) so consumers can count/log
+  &#34;key present but undecodable&#34; drops; mirrors the decoder&#39;s wire-shape
+  guards (null/non-object/array are never valid signals)
+- pinned with tests: unknown future kind, renamed required field, well-formed,
+  genuinely-absent, and array/non-object wire shapes
+- the mirrored commErrorFromStatusSignal REGION is untouched: companion +
+  docs live OUTSIDE the byte-identity block; verified by running the
+  dashboard&#39;s commError-contract-drift.test.ts (12/12 green) - the dashboard
+  mirror (shell-dashboard live-status.ts) still needs its own sibling
+  companion, to be landed by the dashboard owner
+
+- fix(harness): isWorkerStale parses the PB space-form heartbeat; heartbeatParseable companion surfaces corrupt timestamps (scope exception: recurring CR noise)
+
+CR finding flagged 4x across 2 rounds (lines pre-existing on the base, f8aee59b62):
+isWorkerStale (contracts.ts:610-618) did a bare Date.parse with NaN -&gt; false,
+making a corrupt heartbeat indistinguishable from a fresh one (&#34;never stale
+forever&#34; = silent fleet-health blindness), and lacked the anchored PB
+space-&gt;&#34;T&#34; normalization the queue-client treats as load-bearing for lease
+timestamps (PB_DATE_SEP_RE, replicated locally - not imported, since
+queue-client imports contracts).
+
+- normalize the PB date form with the anchored regex before parsing
+- keep isWorkerStale(...): boolean compat (unparseable stays not-yet-stale)
+- export heartbeatParseable(lastHeartbeatAt) so fleet-health (S10) can
+  warn/count unparseable heartbeats (caller wiring is a follow-up; the S10
+  caller is outside this fix&#39;s file scope)
+- red-green: PB space-form timestamps, corrupt timestamp, fresh/stale ISO
+  boundary pins (strict &gt; at exactly-the-window)
+
+- test(harness): control-plane FakeTimers is per-handle — both consumer and fleet-health intervals pinned to fire and to be cleared on stop (CF7 #12, scope exception: recurring CR noise)
+
+The single-callback-slot fake let the fleet-health registration silently
+overwrite the consumer&#39;s, making consumer-loop assertions vacuous with
+fleetHealth injected and hiding leaked intervals from the cleared flag.
+
+- fix(harness): CF7 #11 minors — meta.priority shape validation, aggregateKey empty-sentinel fallback, memoized auth route, documented 4xx repetition and 401 class
+
+- assertServiceJobPayload rejects a non-number meta.priority when present
+- protocolViolationResult falls back to a jobId-derived aggregateKey
+  (defense-in-depth; empty probe_key is unreachable via claimNext&#39;s G1c gate)
+- job-claim memoizes the working auth route so a v0.22 backend pays the
+  /_superusers 404 probe once per process, not per token expiry
+- raceCandidates&#39; deterministic-4xx per-poll re-warn documented as accepted
+- deterministicEndpointRejection notes why 401 is deterministic (postFleet
+  already re-authed once)
+
+shuffleInPlace rng clamp NOT done: lines are pre-existing (d408766cce on
+origin/main) — blame-gated out.
+
+- docs(harness): fix stale prose — expiredPending also counts long-expired claimed/running deletes, reclaimed excludes thrown releases, stale window is family-configured (CF7 #10)
+
+Contracts-side SweepResult.expiredPending doc needs the sibling edit
+(out of scope for this branch).
+
+- fix(harness): serialize concurrent sweepExpired calls with an in-client latch — the per-call grace set is not concurrency-safe (CF7 #9)
+
+The SINGLE-SWEEPER comment claimed a singleton, but runControlPlane wires
+four producers over one queue client, so cron overrun can overlap sweeps;
+a concurrent sweep cannot see the first sweep&#39;s grace set and could
+claim-delete a row it just re-queued. Overlapping callers now piggyback on
+the in-flight sweep; cross-process replicas remain documented as uncovered
+(fleet deploys one control-plane).
+
+- fix(harness): report() preserves the claim-time caches on the equality-invariant rejection — the worker still holds the job (CF7 #8)
+
+The finally&#39;s unconditional eviction also fired on the malformed-input
+refusal thrown BEFORE the release CAS, dropping the assumed-live lease the
+indeterminate-renew containment depends on and killing the heartbeat of a
+live job. The eviction is now scoped; the &#39;DONE either way&#39; header claim is
+corrected.
+
+- fix(harness): writeResult intra-call retry reads before rewriting — a committed-then-thrown attempt can no longer un-latch an aggregated result (CF7 #7)
+
+Attempt N can commit server-side then throw; a blind attempt N+1 re-seeded
+result_processed:false, un-latching what the consumer aggregated in the
+250ms pause window. The cross-call retry path already guarded exactly this;
+the same read-before-write guard now applies inside the retry loop, and a
+failed pre-read refuses the blind rewrite.
+
+- feat(harness): tick-while-stopped warn discriminates never-started from stopped-after-running (CF7 #6)
+
+- feat(harness): warm-up skip observability — per-spec debug with reason + one zero-warmable warn per tick (CF7 #5)
+
+A warm-configured deployment whose enumerator stopped threading backendUrl
+silently lost all #72 cold-start coverage with no trace at any log level.</div>
+</div>
+
+<a href="../project/CopilotKit_CopilotKit.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

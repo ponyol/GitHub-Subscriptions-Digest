@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (7 commits) - microsoft/onnxruntime-genai - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (7 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/microsoft_onnxruntime-genai.html">microsoft/onnxruntime-genai</a> /
+    Updates in main (7 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/microsoft_onnxruntime-genai.html">microsoft/onnxruntime-genai</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-12 18:33 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/microsoft/onnxruntime-genai/commits/main" target="_blank">https://github.com/microsoft/onnxruntime-genai/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление значительно повышает надежность, производительность и уровень тестирования ONNX Runtime GenAI. Оно включает строгую проверку входных данных и предотвращение переполнения для размерностей сетки в конвейерах зрения, устраняет критический сбой CUDA TopK при обработке входных данных NaN, а также корректно применяет пользовательские параметры провайдера для WebGPU, что приводит к значительному увеличению производительности. Дополнительные улучшения включают улучшенную поддержку вызова инструментов для моделей Harmony/GPT-OSS и добавление комплексных интеграционных тестов с реальными моделями.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Add grid dimension validation (#2219)
+
+This pull request adds important validation and safety checks to the
+`QwenVisionPipeline::CalculateWindowIndex` function in
+`src/models/qwen_vl_vision.cpp`. The changes are focused on improving
+robustness by validating input dimensions and preventing integer
+overflows during memory allocation.
+
+**Input Validation and Safety Improvements:**
+
+* Added checks to ensure that all grid dimensions (`grid_t`, `grid_h`,
+`grid_w`) are positive; throws an exception if not.
+* Added upper bounds for grid dimensions and total allocation size to
+prevent integer overflow and excessive memory usage (limits each
+dimension and the total number of elements to ~1 billion). Throws
+exceptions if exceeded.
+* Refactored allocation and indexing logic to use the new validated and
+padded dimensions, improving clarity and safety.
+[[1]](diffhunk://#diff-a6f6231999dd369ccb24bdb364bd552aa89589dc3450bfdaa3e58a2cfe2d4ab2L263-R295)
+[[2]](diffhunk://#diff-a6f6231999dd369ccb24bdb364bd552aa89589dc3450bfdaa3e58a2cfe2d4ab2L293-R311)
+
+- Forward user provider options to allocator init session (#2177)
+
+## Summary
+
+- `EnsureDeviceOrtInit` creates a dummy ORT session to obtain a device
+allocator before the real user session is created. For WebGPU EP, this
+first session triggers `WebGpuContextFactory::CreateContext`, which
+creates a singleton `WebGpuContext` whose Dawn device toggles (including
+`skip_validation`) are immutable after creation via `std::call_once`.
+- Previously the dummy session was created with empty provider options,
+so the WebGpuContext was always initialized with the default
+`validation_mode=Basic`, ignoring the user&#39;s `validationMode:
+&#34;disabled&#34;` from `genai_config.json`. When the real session arrived with
+the user&#39;s setting, the singleton already existed and the setting was
+silently dropped.
+- This caused Dawn to run the expensive
+`TransformIndirectDispatchBuffer` validation path for every indirect
+dispatch (~4,199 per inference run), because the `skip_validation`
+toggle was never enabled on the Dawn device.
+- Forward the user&#39;s provider options from
+`config.model.decoder.session_options.provider_options` to the dummy
+session, excluding `enableGraphCapture` (which would fail on the trivial
+model). This ensures singleton resources like WebGpuContext are
+initialized with the user&#39;s intended settings on the very first
+creation.
+
+## Test plan
+
+- [x] Verified via runtime debug logging that `CreateContext` is now
+called with `validation_mode=0` (Disabled) on the first call, and
+`skip_validation` toggle is included in Dawn device toggles
+- [x] Verified model correctness with `qwen3-1.7b-graph-prune` (graph
+capture enabled)
+- [x] Run e2e benchmark to measure performance improvement from skipping
+indirect dispatch validation
+
+### Benchmark: phi4-graph-prune (Vulkan, graph capture ON, RTX 5080)
+
+Same ORT Vulkan DLL used for both runs. Only GenAI differs (`main` vs
+this PR).
+
+| Metric | `main` | This PR | Delta |
+|--------|--------|---------|-------|
+| Prefill (tps) | 11,374 | 11,654 | +2.5% |
+| Token Gen (tps) | 101 | 150 | **+49%** |
+
+Params: `-w 2 -r 2 --reuse_generator -l 1024 -g 300 -e follow_config`
+
+- Update Extensions for Harmony/GPT-OSS Tool Calling Support (#2200)
+
+# Update ort-extensions for Harmony/GPT-OSS tool calling support
+
+## Summary
+
+Updates the ort-extensions dependency to include the merged [Skip Tool
+Normalization for GPT-OSS/Harmony
+Templates](https://github.com/microsoft/onnxruntime-extensions/pull/1069)
+PR, and adds a tools-only path to `model-qa.py` for models that handle
+tool calling natively via their chat template (without constrained
+decoding).
+
+## Changes
+
+| File | Change |
+|------|--------|
+| `cmake/deps.txt` | Update `onnxruntime_extensions` SHA to
+`97809255e4cfc6fdee2b32d565935067c0309f8b` (includes Harmony
+skip-normalization fix) |
+
+## Context
+
+GPT-OSS (Harmony) models use chat templates that access `tool.function`
+directly, expecting the raw OpenAI tool format. The previous
+`NormalizeTools()` logic in ort-extensions unwrapped the function
+object, breaking these templates. The updated extensions commit skips
+normalization when the template content indicates it expects raw tool
+objects.
+
+## Testing
+
+- E2E validated against `gpt-oss-20b-generic-cpu` in Foundry Local with
+full tool-call round-trip (tool call generation → tool execution → final
+response)
+- Extensions PR passed all CI tests including new Harmony-specific unit
+tests
+
+## Related PRs
+
+- **ort-extensions**: [#1069 - Skip Tool Normalization for
+GPT-OSS/Harmony
+Templates](https://github.com/microsoft/onnxruntime-extensions/pull/1069)
+(merged)
+
+---------
+
+Co-authored-by: Sayan Shaw &lt;sayanshaw@microsoft.com&gt;
+
+-  Add real-model integration test pipeline (#2198)
+
+Adds an ADO pipeline that validates the ORT GenAI native layer against
+real models pulled from the `foundrylocalmodels` storage account.
+
+## What it does
+
+For every (model, execution provider) pair, the pipeline:
+1. Builds an ORT GenAI wheel from source (one build per OS / arch).
+2. Spawns a separate ADO test job that downloads only its model from
+blob, installs the wheel, and runs pytest.
+
+## Coverage
+
+| OS / arch        | Providers tested     |
+|------------------|----------------------|
+| Windows x64      | CPU, CUDA, WebGPU    |
+| Linux x64        | CPU, CUDA            |
+| macOS arm64      | CPU, WebGPU          |
+
+## Suites
+
+The hardwired model catalog lives in
+`test/python/integration/models.py`:
+- `pr` (6 small models, one per architecture family): runs on every PR.
+- `all` (22 models, broader coverage): runs on every merge to main.
+
+See `test/python/integration/README.md` for the local workflow and the
+decision table for when to add a new model to `pr` vs `all`.
+
+- Add README file for testing folder (#2205)
+
+### Description
+
+This PR adds a README file in `test/` to explain the folder structure
+for future contributions.
+
+### Motivation and Context
+
+[This PR](https://github.com/microsoft/onnxruntime-genai/pull/2192)
+updated the entire `test/` directory structure.
+
+- Fix: Skip CPU provider in SetProviderSessionOptions (#2179)
+
+## Fix: Skip CPU provider in SetProviderSessionOptions
+
+### Problem
+When users call `config.append_provider(&#39;cpu&#39;)`, onnxruntime-genai
+0.13.x throws:
+`
+RuntimeError: [ErrorCode:InvalidArgument] Unknown provider name &#39;cpu&#39;.
+Possible options: ...
+`
+
+This worked in v0.12.1 but regressed in v0.13.1.
+
+### Root Cause
+PR #2038 (*Decouple plugin execution providers from USE_WINML*, March
+2026) introduced `src/models/session_options.cpp` with a fallthrough
+path that passes unrecognized provider names to ORT&#39;s
+`AppendExecutionProviderV1`. ORT&#39;s strict whitelist (added in commit
+`4d03aeff0e`) rejects `cpu` since CPU EP is always implicitly registered
+and never needs an explicit append call.
+
+### Fix
+In `SetProviderSessionOptions`, detect CPU provider names
+(case-insensitive: `cpu`, `cpuexecutionprovider`) and:
+- **If no provider options are set**: skip silently (backward-compatible
+no-op)
+- **If provider options are present**: throw a clear error explaining
+that CPU EP does not support provider options and does not need explicit
+registration
+
+This ensures:
+1. Existing code using `append_provider(&#39;cpu&#39;)` continues to work
+2. Misconfigurations (setting CPU provider options that would be
+silently lost) are caught early with a helpful error message
+
+### Testing
+Added regression test `TEST(CAPITests, AppendCpuProvider)` that verifies
+`cpu`, `CPU`, and `CPUExecutionProvider` all succeed without error.
+
+---------
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+- Fix CUDA illegal memory access crash in TopK when inputs contain NaN (#2195)
+
+## Problem
+
+When vision models produce all-NaN logits (e.g., due to corrupt or
+edge-case images triggering incorrect pixel values in the image
+preprocessing pipeline), the CUDA TopK kernels crash with an **illegal
+memory access** error that corrupts GPU state and kills all subsequent
+inferences.
+
+### Root Cause
+
+- `TopK_Pair.p` is initialized to `INT_MAX` for tie-breaking (smaller
+index wins ties)
+- NaN comparisons (`NaN &gt; x`) always return false, so no `Insert`
+succeeds
+- `p` stays at `INT_MAX`, causing `scores_in[INT_MAX]` → **out-of-bounds
+write**
+- This corrupts GPU state, crashing the current and all subsequent
+inferences
+
+### Repro
+
+- Model: Qwen2.5-VL-3B-Instruct (ONNX, CUDA EP)
+- Image: 1500×1204 PNG from AI2D dataset (sample 926)
+- The ort-extensions bicubic resize (1500→1512 width) produces incorrect
+pixel values for this image
+- Incorrect pixels → NaN in vision encoder (feature index 2008) →
+propagates to 100% NaN logits → TopK crash
+
+### Fix
+
+Guard all `scores_in` writes with `p &lt; vocab_size` check, and clamp
+output indices to 0 when no valid element is found:
+
+1. **`GetTop1Kernel`**: Clamp `indices_out` to 0 if `p &gt;= vocab_size`
+2. **`GetTopKKernel`**: Clamp output index to 0, guard `scores_in` write
+with bounds check
+3. **`GetTopKKernelDistributedSelectSort` Stage 1**: Same pattern for
+distributed indices
+4. **`GetTopKKernelDistributedSelectSort` Stage 2**: Guard shared memory
+writes and output indices
+
+### Behavior After Fix
+
+- ✅ No crash or OOB memory access
+- ✅ No GPU state corruption (subsequent inferences work normally)
+- ✅ Downstream embedding lookups use token 0 (valid token, produces
+garbage text for that sample but doesn&#39;t crash)
+
+This is an ORT CUDA EP issue, not a genai bug per se. The genai TopK
+kernel is just the first thing that detects the corruption. The fix
+would need to be in ORT&#39;s attention kernel for large sequence lengths,
+or genai should cap/resize images that would produce too many patches.
+
+Confirmed! The root cause is vision model fp16 numerical instability,
+NOT an ort-extensions bug.
+
+Even with perfect, HF-identical pixel values, the vision.onnx model in
+fp16 produces NaN at output position [1316, 0] (patch 1316 onward). This
+is a model precision issue — certain image patterns trigger fp16
+overflow in the vision transformer&#39;s attention/normalization layers.
+
+### Testing
+
+Verified locally on A100-SXM4-80GB with the repro image:
+- Before fix: `CUDA error: an illegal memory access was encountered` →
+all subsequent GPU ops fail
+- After fix: Generation completes (garbage output due to NaN), second
+inference succeeds normally
+
+### Files Changed
+
+- `src/cuda/cuda_topk_select_sort.cuh` — GetTop1Kernel + GetTopKKernel
+- `src/cuda/cuda_topk_distributed_select_sort.cuh` — Distributed TopK
+Stage 1 + Stage 2
+
+---------
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;</div>
+</div>
+
+<a href="../project/microsoft_onnxruntime-genai.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

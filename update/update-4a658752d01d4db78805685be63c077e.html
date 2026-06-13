@@ -1,0 +1,1517 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in master (16 commits) - garrytan/gbrain - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in master (16 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/garrytan_gbrain.html">garrytan/gbrain</a> /
+    Updates in master (16 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/garrytan_gbrain.html">garrytan/gbrain</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-12 14:28 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/garrytan/gbrain/commits/master" target="_blank">https://github.com/garrytan/gbrain/commits/master</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This extensive update introduces a fundamental overhaul of the CLI exit and teardown process, eliminating arbitrary 10-second force-exit delays and ensuring explicit, bounded resource release. Key new capabilities include typed-edge relational retrieval for search queries and a &#39;Retrieval Reflex&#39; for the agent to intelligently decide when and what information to retrieve. Numerous stability, reliability, and security enhancements were also delivered across various modules, such as resumable synchronization, improved `.gitignore` adherence, robust job handling, and safeguards against unwanted database modifications.
+
+---
+
+**Russian translation:**
+
+Это обширное обновление представляет собой фундаментальную переработку процесса выхода и завершения работы CLI, устраняя принудительные 10-секундные задержки выхода и обеспечивая явное, ограниченное высвобождение ресурсов. Ключевые новые возможности включают реляционный поиск по типизированным связям для поисковых запросов и «Рефлекс Извлечения» для агента, позволяющий интеллектуально определять, когда и какую информацию извлекать. Также были внесены многочисленные улучшения стабильности, надежности и безопасности в различные модули, такие как возобновляемая синхронизация, улучшенное соблюдение `.gitignore`, надежная обработка заданий и защита от нежелательных изменений в базе данных.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- v0.42.42.0 fix(cli): bounded teardown + explicit exit — kill the 10s force-exit tax on txn-mode poolers (#2084) (#2141)
+
+* feat(core): finishCliTeardown + flushThenExit — bounded teardown, owned exit verdict (#2084)
+
+cli-force-exit.ts becomes the single owner of one-shot CLI exit + teardown:
+- finishCliTeardown: bounded sink drain -&gt; bounded disconnect under a backstop
+  whose deadline is COMPUTED from the bounds it guards (floor 10s;
+  GBRAIN_TEARDOWN_DEADLINE_MS env override). Arms at teardown start, never
+  before the op handler.
+- flushThenExit: stdio write-fence (unref&#39;d guard, EPIPE-safe) + REF&#39;D
+  aliveness grace for non-TTY stdio — Bun only delivers queued pipe writes
+  while the process is alive (no flush API reaches the native queue).
+- setCliExitVerdict/currentExitCode: the exit verdict lives in a gbrain-owned
+  channel, never read back from process.exitCode (PGLite&#39;s Emscripten runtime
+  scribbles its own status there mid-run).
+- background-work.ts exports backgroundWorkSinkCount() for the deadline formula.
+
+Unit tests + a spawned-Bun harness proving byte-complete piped output.
+
+* fix(cli): route all nine disconnect sites through finishCliTeardown; one exit seam (#2084)
+
+Deletes the pre-handler 10s force-exit timer (it measured handler + teardown
+combined: PgBouncer txn-mode deployments paid a flat 10s banner tax on every
+query, and any &gt;10s op was killed mid-run with exit 0 and truncated output).
+Sweeps op-dispatch, CLI_ONLY fall-through, search dashboard, read-only timeout
+path, dream, doctor x3 (fixing a pre-existing pool leak when DB checks throw),
+and ze-switch. The ONE process exit lives in main().then/catch via
+flushThenExit(currentExitCode()), gated by shouldForceExitAfterMain().
+Exit-code writers (op-dispatch catch, reindex, transcripts, brainstorm,
+autopilot, frontmatter) now set the verdict through setCliExitVerdict.
+
+* fix(pglite): contain Emscripten&#39;s process.exitCode writes at PGlite.create (#2084)
+
+PGLite&#39;s WASM runtime writes its own status into process.exitCode (99 at
+create; in-memory brains run initdb whose status lands on a later tick; the
+exit status at close) — on PGLite every error exit was silently clobbered.
+preservingProcessExitCode wraps create() to keep the global tidy; db.close()
+stays unwrapped (its 0-write is baseline behavior test runners depend on).
+The CLI verdict itself is immune: it lives in the owned channel.
+
+* test: e2e + structural pins for the #2084 teardown contract
+
+E2E: failed op exits 1; every swept command spawned (brain-copy isolation for
+mutators, no-network); slow-handler regression via the deadline env knob;
+piped --json parses complete; teardown banner absent on every happy path;
+daemon survival untouched. Structural: no bare awaited engine disconnects in
+cli.ts; DISCONNECT_HARD_DEADLINE_MS gone; &gt;=9 helper call sites; verdict
+channel + create-wrap pins.
+
+* test: fix R1 env-isolation violations in retrieval-reflex tests
+
+Pre-existing on master: both files mutated GBRAIN_RETRIEVAL_REFLEX directly,
+failing scripts/check-test-isolation.sh (bun run verify). Converted to the
+canonical withEnv() pattern; the reflex describe&#39;s beforeEach also never
+restored the flag, leaking it across the shard.
+
+* docs: KEY_FILES entries for the teardown contract; close + file TODOS (#2084)
+
+KEY_FILES.md: current-state entry for cli-force-exit.ts (helper + central exit
+seam pair, verdict channel, cli.ts-scoped claim); background-work.ts and
+pglite-engine.ts entries updated. TODOS.md: the drain-before-owner-disconnect
+P3 (filed from #1972) is done by this wave; files the trigger-gated
+GBRAIN_COMMAND_DEADLINE_MS follow-up (eng-review D2/D14).
+
+* fix: pre-landing review fixes (#2084)
+
+Review army (testing/maintainability/security/performance, 0 critical):
+- drain defense-in-depth: a throwing drain warns and still disconnects
+  (cannot escape a caller&#39;s finally or skip the engine teardown)
+- behavioral tests for preservingProcessExitCode (connect pins 0; create-throw
+  restores the pre-call verdict)
+- D9 widening test (live-registry sink count feeds the deadline formula),
+  env 0/negative boundary cases, verdict mirror-write assertion
+- stale comments: header diagram backstop line, structural-test &#39;both
+  lifecycle calls&#39; contradiction, KEY_FILES 10s-force-exit clauses, e2e D11
+  falsification story corrected
+- named the formula&#39;s pool-end literals
+
+* fix: adversarial-review hardening — daemon-safe command resolution, flush knob, ref&#39;d backstop (#2084)
+
+Cross-model adversarial review (Claude subagent + Codex, both P1&#39;d it):
+- shouldForceExitAfterMain now resolves the command through parseGlobalFlags —
+  the old first-non-dash heuristic read `gbrain --timeout 30s serve` as
+  command &#34;30s&#34; and the new exit seam would have killed the daemon ~250ms
+  after boot with exit 0 (unit-pinned)
+- GBRAIN_FLUSH_GRACE_MS env override for the non-TTY aliveness grace (batch
+  consumers piping large payloads to slow readers can raise it; agent loops
+  can lower it)
+- backstop timer is now REF&#39;D: a hung teardown on an otherwise-empty event
+  loop previously exited naturally — skipping the flush and surfacing
+  PGLite&#39;s scribbled process.exitCode
+- flushThenExit: real process.exit latched once per process
+- doctor-site comment corrected; in-command process.exit teardown-bypass
+  class (pre-existing) filed as a P2 TODO
+
+* chore: bump version and changelog (v0.42.42.0)
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* test: move #2084 exitCode-containment lifecycle tests to the serial quarantine (R3)
+
+* docs: update project documentation for v0.42.42.0
+
+- docs/TESTING.md: replace the stale 4-file serial-quarantine enumeration
+  with a current-state description (the quarantine is glob-discovered, now
+  several dozen files incl. the #2084 exitCode-containment suite); add unit
+  inventory entries for test/cli-finish-teardown.test.ts and
+  test/flush-then-exit-harness.test.ts.
+- docs/architecture/KEY_FILES.md: rephrase the pglite-engine exitCode
+  containment note to current-state wording (clears the
+  check-key-files-current-state prose-history warning).
+
+llms bundles regenerated (byte-identical: both docs are link-only).
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* docs: apply cross-model doc-review findings for v0.42.42.0
+
+Codex review of docs-vs-shipped-code found 9 gaps; all verified against
+the code before fixing:
+
+- CHANGELOG.md (0.42.42.0 entry, precision narrowing only — no entries
+  touched): &#34;every CLI exit path&#34; -&gt; &#34;every cli.ts disconnect site&#34;;
+  &#34;on every path&#34; -&gt; &#34;on every routed exit path&#34;; dream/doctor/ze-switch
+  claim scoped to dispatcher teardown (command-internal process.exit
+  sites are tracked in TODOS as the open P2).
+- docs/architecture/KEY_FILES.md: the teardown backstop is REF&#39;D, not
+  unref&#39;d (matches the F3 adversarial-review decision in the code).
+- src/core/cli-force-exit.ts: header diagram comment had the same stale
+  unref&#39;d claim + `process.exitCode ?? 0`; now matches the implementation
+  (ref&#39;d timer, `currentExitCode()`). Comment-only change.
+- docs/TESTING.md: verify is the 30-check parallel battery via
+  run-verify-parallel.sh (was described as 4 checks); CI is 10 weighted
+  LPT shards + dedicated verify/serial/slow jobs (was &#34;4-way FNV on
+  shard 1&#34;); test:serial runs one bun process per file (not
+  --max-concurrency=1); dead &#34;cap: 10&#34; line rewritten as debt guidance;
+  inventory entries added for test/cli-should-force-exit.test.ts and
+  test/e2e/pglite-cli-exit.serial.test.ts.
+
+bun run verify green (30/30); #2084 test files green; llms bundles
+regenerated (byte-identical — reference docs are link-only).
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* fix: route v0.42.41.0&#39;s raw exitCode writers through the verdict channel; reconcile merged structural pins (#2084)
+
+CI fallout from merging the v0.42.41.0 triage wave into the #2084 exit-seam
+design — both waves fixed the same timer-placement bug independently:
+
+- doctor.ts + extract.ts set failure exit codes via raw `process.exitCode =`
+  writes (v0.42.41.0&#39;s process.exit -&gt; exitCode conversion); the #2084 exit
+  seam reads only the gbrain-owned verdict channel, so doctor FAILs exited 0
+  (Tier 1 RLS e2e + half-migrated-Minions tests). Converted to
+  setCliExitVerdict, same as the wallclock-124 site in the merge commit.
+- cli-force-exit-teardown-arming.test.ts pinned v0.42.41.0&#39;s inline
+  finally-armed timer, which the merge replaced with finishCliTeardown;
+  rewritten to pin the merged invariant (no pre-try arming in cli.ts; the
+  backstop arms inside the helper before the drain).
+- eval-capture drain timing bound 1s -&gt; 2s: flaked at 1023ms under CI shard
+  load after the new test files shifted LPT shard packing (13x budget slack
+  still proves bounded-not-hung).
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- v0.42.41.0 fix: triage wave — 6 data-loss/availability fixes + 9 community PRs (#2128)
+
+* fix(oauth): default omitted authorize scope to client&#39;s full grant
+
+When a client omits `scope` on /authorize, the authorize() grant computed
+`(params.scopes || []).filter(...)` → the empty set. That empty grant was
+written to oauth_codes and propagated into the access AND refresh tokens, so
+every request failed `insufficient_scope` even though the client was
+registered with e.g. `read write`. Because refresh inherits the stored grant,
+it never self-healed — reconnecting just minted another empty-scoped token.
+
+Some MCP connectors (observed with Claude Desktop) omit `scope` on /authorize,
+so they hit this on every connection.
+
+Fix: when no scope is requested, default to the client&#39;s full registered scope
+(RFC 6749 §3.3 permits a server default). This mirrors exchangeClientCredentials,
+which already does `requestedScope ? ... : allowedScopes`. The result is still
+clamped to the allowed set, so an explicit over-broad request cannot escalate.
+
+Adds test/oauth-authorize-scope-default.test.ts covering: omitted/empty →
+inherits full grant; explicit subset honored; clamp preserved (over-broad and
+disallowed-only requests cannot escalate or trigger inheritance).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(sync): skip Python venv/ in the code walker
+
+collectSyncableFiles (first-sync walker) and the incremental PRUNE_DIR_NAMES
+set skipped node_modules but not Python venv/. On a Python repo the walker
+descended into venv/ (thousands of files); the resulting slug collisions
+crashed putPage&#39;s INSERT ... ON CONFLICT ... RETURNING with
+&#34;undefined is not an object (evaluating &#39;row.deleted_at&#39;)&#34;.
+
+Add `venv` alongside node_modules in both the import.ts inline skip and
+PRUNE_DIR_NAMES. venv is the Python equivalent of node_modules.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(gateway): carry asymmetric input_type across the AI SDK to the wire body (#1400)
+
+dimsProviderOptions() threads input_type (&#39;query&#39; | &#39;document&#39;) into
+providerOptions.openaiCompatible for asymmetric models (ZE zembed-1,
+Voyage v3+), but the AI SDK&#39;s openai-compatible adapter validates
+providerOptions against a fixed schema and silently drops the field
+before building the HTTP body. Every embedQuery() was therefore encoded
+document-side: the ZE shim&#39;s hard default fired (&#39;document&#39;), Voyage and
+local openai-compat servers got no input_type at all, and asymmetric
+retrieval silently collapsed toward surface-token overlap — while the
+providerOptions-level contract test stayed green.
+
+Fix: an AsyncLocalStorage (same pattern as __budgetStore) populated in
+embedSubBatch() only when providerOptions actually threads an
+input_type, read at body-rewrite time by the fetch shims:
+- zeroEntropyCompatFetch: recovers the threaded value; document default
+  preserved for ingest paths.
+- voyageCompatFetch: opt-in like the dims.ts Voyage branch — inject only
+  when threaded; the field stays off the wire otherwise.
+- NEW openAICompatAsymmetricFetch: fallthrough default for every other
+  openai-compatible recipe (llama-server, litellm, ollama, ...) — the
+  canonical local/proxy paths for asymmetric models. Strict pass-through
+  when nothing was threaded, so symmetric deployments see zero wire
+  change; recipes with their own compat fetch (azure) keep it via the
+  compat.fetch ?? precedence.
+
+KNOBS_HASH_VERSION bumped 10→11: cached query_cache rows were keyed on
+document-side query vectors; pre-fix rows must not be served to post-fix
+lookups (same convention as the v=3 embedding-provider bump). One-time
+global cold-miss on upgrade; refills within cache.ttl_seconds.
+
+Tests: test/embed-input-type-wire.test.ts runs the REAL SDK transport
+with a mocked global fetch and asserts on the outbound body — the only
+layer where this regression is observable. Covers ZE hosted, llama-server,
+litellm, ollama (query + document sides) and pins the pass-through for
+non-asymmetric models and Voyage&#39;s opt-in shape. 4 of the original 7
+assertions fail on master, proving the pin. One structural pin in
+test/ai/zeroentropy-compat-fetch.test.ts updated to the new line shape
+(same semantic); KEY_FILES.md gateway.ts entry updated to the new truth.
+
+Supersedes #1400 (closed unmerged) — same ALS mechanism, extended to
+Voyage + all openai-compatible recipes. Credit to @billy-armstrong for
+the original diagnosis.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* fix(sync): honor .gitignore in code walk; prune vendor/dist/build
+
+collectSyncableFiles (the full-sync / dry-run enumerator) reimplemented its
+own directory skip list inline (node_modules || ops), bypassing the canonical
+pruneDir gate and ignoring .gitignore entirely. On a Laravel/PHP repo this
+descended into vendor/ (~50k Composer files), storage/, and public/build/,
+trying to import 52k dependency/build files and flooding the index with
+library internals (a 35-min sync that never finished, killed by the watchdog
+at 3%).
+
+- collectSyncableFiles now enumerates via `git ls-files --cached --others
+  --exclude-standard` when dir is a git work tree, so the walk honors
+  .gitignore (tracked + untracked-not-ignored). Falls back to the FS walk for
+  non-git dirs. EroLab: 52164 -&gt; 1028 files.
+- The FS fallback now prunes through the canonical pruneDir() instead of a
+  drifted inline list, so the two skip lists can&#39;t diverge again.
+- PRUNE_DIR_NAMES gains vendor/dist/build (dependency + build-output trees).
+
+Addresses #1483 (.gbrainignore), #1159 (--respect-gitignore), and the
+maintainer&#39;s #1942 vendor/dist/build prune. Walker regression suites
+(sync-walker-symlink, brain-writer-walk-prune, sync, sync-walker-submodule)
+green: 90 pass.
+
+* fix(config): ignore DATABASE_URL auto-loaded from cwd .env (#427)
+
+Bun merges .env files from the process cwd into process.env before any
+user code runs. loadConfig() prefers env DATABASE_URL over
+~/.gbrain/config.json, so any gbrain invocation from inside a web-app
+checkout silently retargets the brain at that app&#39;s database — reads go
+to the wrong DB and apply-migrations can write gbrain&#39;s schema into a
+production app database (#427).
+
+effectiveEnvDatabaseUrl() re-parses the .env files Bun auto-loads from
+cwd and treats a DATABASE_URL whose value matches one of them as
+file-origin: ignored, with a one-time stderr notice. GBRAIN_DATABASE_URL
+and genuinely exported DATABASE_URLs are honored unchanged, so the
+operator escape hatch and the e2e suite&#39;s env-provided URL keep working.
+Applied at loadConfig, getDbUrlSource (doctor parity), init
+--non-interactive, and migrate --to.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* fix(cli): arm the disconnect hard-deadline at teardown entry, not before the op body
+
+The 10s force-exit timer in the shared-op dispatch was armed BEFORE the
+try block, so any op whose handler ran past 10s wall-clock was killed
+mid-flight with process.exit(0) and zero stdout. On a slow Postgres
+pooler (6-10s per fresh connection) a healthy `gbrain search` was
+force-exited every time — an empty &#39;success&#39; indistinguishable from no
+results. The v0.42.20.0 exitCode honor can&#39;t help: a mid-op kill fires
+before any error path sets exitCode.
+
+Move the arming into the finally (teardown entry), matching the
+fall-through owner-disconnect site later in main(): the timer still
+bounds a hung drain/disconnect (the C13 contract) but can no longer
+kill a slow-but-progressing op. Verified on a transaction-pooler
+Supabase brain: search went from 0 bytes/exit 0 at 10s to real results
+at ~21s.
+
+* fix(import): stamp source_id on extracted call-graph edges
+
+importCodeFile built CodeEdgeInput rows without source_id, so every
+edge landed NULL. getCallersOf/getCalleesOf filter
+`AND source_id = &lt;scoped&gt;` whenever a worktree pin or --source is in
+play — NULL never matches, so scoped call-graph queries silently
+returned 0 rows on multi-source brains even though the edges existed
+(2,122 edges, 26 targeting the probed symbol, count 0 returned).
+
+One-line fix: carry the sourceId already in scope into the edge input.
+Existing NULL rows backfill with:
+  UPDATE code_edges_symbol e SET source_id = p.source_id
+    FROM content_chunks c JOIN pages p ON p.id = c.page_id
+   WHERE c.id = e.from_chunk_id AND e.source_id IS NULL;
+(same for code_edges_chunk). Verified: code-callers returns 21 callers
+where it returned 0.
+
+* docs(migrations): NULL embeddings BEFORE the column-type alter
+
+The Postgres recipe ordered ALTER COLUMN TYPE vector(N) before the
+UPDATE that clears stale embeddings. pgvector refuses to cast existing
+vectors across dimensions (&#39;expected 1024 dimensions, not 1536&#39;), so
+the recipe as written aborts the transaction on any brain that has
+embeddings — which is every brain doing this migration. Swap the steps:
+NULLs cast fine.
+
+* fix: honor legacy token source grants in oauth
+
+* fix(cli): bound read-scope op handlers at 180s wallclock (pre-landing review)
+
+With the hard-deadline timer correctly scoped to teardown, a genuinely
+wedged read handler (hung pooler connection mid-query) would hang the
+CLI forever — the #1633 zombie class the old pre-try timer accidentally
+bounded at 10s. Reads now get a generous withTimeout (180s default, far
+above any healthy slow-pooler run; --timeout=Ns overrides; exit 124 with
+the teardown finally still draining + disconnecting). Writes/admin stay
+unbounded: a long import/embed must never be killed by a default.
+
+* fix(import): stamp unscoped edges &#39;default&#39;, matching the pages-table default
+
+Review catch: &#39;sourceId ?? null&#39; fixed the scoped path but left the
+unscoped one (reindex --code without --source, importCodeFile callers
+without opts.sourceId) stranding edges at NULL while their pages land
+under the schema default (pages.source_id DEFAULT &#39;default&#39;) — so
+getCallersOf(sym, { sourceId: &#39;default&#39; }) missed them. Same bug,
+other door. Fallback is now &#39;default&#39;.
+
+* fix(core): runtime dim-migration recipe NULLs embeddings before the alter
+
+Review catch: the doc fix corrected docs/embedding-migrations.md, but
+embeddingMismatchMessage still PRINTED the broken order — ALTER before
+UPDATE ... SET embedding = NULL — and linked to the now-contradicting
+doc. pgvector refuses to cast existing vectors across dimensions, so
+the printed recipe aborted on any brain that has embeddings. Swap the
+steps and say why inline.
+
+* feat(migrate): v116 — backfill NULL edge source_id + index from_symbol_qualified
+
+1. Backfill: edges written before the stamping fix sit at source_id=NULL
+   and stay invisible to scoped call-graph queries until repaired. Derive
+   each edge&#39;s source from its own from_chunk&#39;s page (pages.source_id is
+   NOT NULL DEFAULT &#39;default&#39;). Same SQL verified live on a 2,122-edge
+   production brain.
+2. Indexes: getCalleesOf filters both edge tables on from_symbol_qualified,
+   which had no index — every callee lookup was a seq scan, amplified
+   per-BFS-node by the recursive code walk. With NULL edges repaired,
+   scoped walks actually expand, so the latent cost becomes real.
+   Mirrored into src/schema.sql; schema-embedded.ts regenerated.
+
+* docs(migrations): align the rationale list with the corrected recipe order
+
+The &#39;Why we don&#39;t do this automatically&#39; list still said alter-then-wipe;
+reorder to wipe-then-alter and replace the fragile &#39;step 3&#39; numeric
+cross-reference with a name-based one.
+
+* test: regression coverage for edge source_id stamping, timer placement, recipe order
+
+- import-code-edges-source-id: scoped import stamps edges + scoped
+  getCallersOf/getCalleesOf match (verified failing pre-fix), plus the
+  unscoped-import case asserting &#39;default&#39; stamping.
+- cli-force-exit-teardown-arming: structural pin — the hard-deadline
+  timer arms inside the finally (teardown entry), never before the op
+  body; daemon guard, unref, clearTimeout intact.
+- embedding-dim-check: recipe order pinned — UPDATE precedes ALTER so
+  the printed SQL can&#39;t drift from docs/embedding-migrations.md again.
+
+* fix(cli): hard-exit after teardown on wallclock timeout; bound makeContext too
+
+Adversarial review, two findings on the new timeout path:
+1. On timeout the finally drained, disconnected, then CLEARED the
+   hard-deadline timer — removing the only backstop while the abandoned
+   handler (withTimeout races, it does not cancel) can hold ref&#39;d
+   sockets/SDK timers that keep Bun&#39;s loop alive: &#39;timed out&#39; printed,
+   process immortal — the zombie class this branch exists to kill,
+   resurrected through its own fix. The finally now exits explicitly
+   after teardown completes on the timeout path.
+2. makeContext does DB I/O (resolveSourceId) for EVERY op and sat
+   outside any bound — a pooler wedge at context build hung reads,
+   writes, and admin alike. It now shares the same wallclock bound.
+
+* fix(import): normalize edge source once — closes the &#39;&#39; door and the unscoped chunk fan-out
+
+Adversarial review: txOpts used truthiness while the edge stamp used
+nullish — sourceId:&#39;&#39; put pages under &#39;default&#39; but stamped edges &#39;&#39;,
+FK-violating against sources(id) and silently dropping the file&#39;s whole
+call graph in the best-effort catch. The unscoped getChunks could also
+fan out to same-slug chunks from another source. One normalized
+edgeSourceId (sourceId || &#39;default&#39;) now drives both the chunk lookup
+and the stamp.
+
+* fix(engine): default edge source_id to &#39;default&#39; at the insert layer (both engines)
+
+Adversarial review: addCodeEdges still wrote e.source_id ?? null, so any
+future caller that forgets the field reintroduces invisible NULL edges
+the day after the v116 backfill runs. A NULL source_id is invisible to
+every scoped call-graph query; default to the schema-default source the
+way the pages table does. Applied to both engines (parity).
+
+* fix(core): facts alter recipe NULLs embeddings before cross-dimension alters
+
+Adversarial review: buildFactsAlterRecipe shipped the same defect class
+this branch fixes for content_chunks 350 lines up — a cross-dimension
+ALTER ... USING cast that pgvector refuses while rows hold old-width
+vectors. Dimension changes now wipe first (the facts pipeline re-embeds
+on next write); same-dim type swaps (halfvec &lt;-&gt; vector) keep the
+lossless cast and PRESERVE data. Both behaviors pinned by tests.
+
+* v0.42.39.0 chore: version bump + CHANGELOG + TODOS
+
+Marks the v0.42.20.0 &#39;decouple the op-dispatch force-exit timer&#39; follow-up
+complete — this branch ships exactly that decoupling.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(postgres-engine): atomic JSONB merge in updateSourceConfig — eliminate lost-update race
+
+## Problem
+
+`updateSourceConfig` used a read-then-write pattern: read the current
+`config` row, normalize it in JavaScript, then write the merged result
+back with `SET config = &lt;normalized&gt; || &lt;patch&gt;`.
+
+Under concurrent callers (two background autopilot/cycle paths patching
+different keys simultaneously), both callers can read the same stale
+row. The later `SET config = ...` then clobbers the earlier patch,
+silently dropping whatever keys the first caller wrote. Reproduced
+at 21/25 lost-update events under real Postgres with parallel callers.
+
+## Fix
+
+Fold the normalization and merge into a single atomic `UPDATE … SET
+config = CASE … END || patch` statement. Because the `SET` expression
+evaluates against the row-locked latest version of `config`, there is
+no snapshot window between the read and the write. Concurrent callers
+now converge correctly (50/50 clean in reproduction test).
+
+The `CASE` also normalizes historical bad JSONB shapes inline:
+- `object` — used as-is
+- `string` — double-encoded config; inner text parsed with the SQL
+  `IS JSON` guard (Postgres 16+) so unparseable strings fall back to
+  `{}` instead of raising `invalid input syntax for type json`
+- `array` — array of patch objects aggregated into a flat object via
+  `jsonb_object_agg`
+- anything else — falls back to `{}`
+
+`pglite-engine.updateSourceConfig` already used an atomic `||` merge;
+this change brings postgres-engine to parity.
+
+## Test
+
+Added two assertions to `test/list-all-sources.test.ts`:
+1. JSONB string holding non-JSON text normalizes to `{}` (no cast throw)
+2. JSONB string holding double-encoded valid JSON is parsed then merged
+
+* fix(doctor): five correctness fixes — stale locks, content sanity, graph coverage, exit code, gateway guard
+
+## 1. Stale lock break hints cover gbrain-cycle: keys
+
+The doctor stale-lock report only recognized `gbrain-sync:` lock prefixes;
+everything else fell back to `gbrain sync --break-lock`, which is wrong for
+dream/autopilot cycle locks. A `gbrain-cycle:&lt;source&gt;` or `gbrain-cycle`
+lock now suggests `gbrain dream --break-lock [--source &lt;name&gt;]`, and
+unknown lock shapes fall back to `gbrain doctor` instead of a
+misleading sync command.
+
+## 2. content_sanity_audit_recent counts reject and quarantine as hard failures
+
+v0.42 renamed the hard disposition path: rejected pages emit a `reject`
+event and quarantined junk pages emit `quarantine`; `hard_block` is now
+only the pre-v0.42 legacy alias. The status check only counted `hard_block`,
+so fresh `reject` / `quarantine` events from the new path cleared as `ok`
+whenever fewer than 10 events existed. The check now sums all three for the
+hard count, and `soft_block + flag` for the soft count.
+
+## 3. graph_coverage excludes test fixture entity pages from the denominator
+
+Brains seeded with code sources (e.g. a sync of the gbrain repo itself)
+could accumulate test fixture pages typed as `entity` / `person`. Including
+these in the entity-count denominator diluted coverage and produced spurious
+warnings (&#34;Entity link coverage 0%, timeline 0%&#34;) on knowledge-only brains
+with no real entity pages. The check now queries a per-entity stats CTE that
+excludes `tools/gbrain/test/*` slugs and the `templates/new-person` stub,
+with an additional guard for the all-fixture case (`eligibleEntityCount = 0`).
+
+## 4. process.exitCode instead of process.exit at doctor main exit point
+
+`process.exit(hasFail ? 1 : 0)` was a hard kill that prevented cleanup
+handlers (Bun unload events, open DB connections) from running. Using
+`process.exitCode = hasFail ? 1 : 0` defers the actual termination until
+the end of the event loop, allowing cleanup to complete.
+
+## 5. checkSubagentCapability exported for test seams + gateway loop guard
+
+The function was private, making it untestable in isolation. It is now
+exported. Additionally, users running gbrain with a non-Anthropic chat model
+via `agent.use_gateway_loop=true` no longer receive a spurious warning that
+`ANTHROPIC_API_KEY` is missing — subagents route via the gateway loop in
+that configuration and do not need the key directly.
+
+## Tests
+
+Doctor test suite: 77 pass, 0 fail (no regressions).
+
+* fix(engine): deleteFactsForPage excludeSourcePrefixes (#1928) + reconnect() parity (#2034)
+
+Engine-layer API for two cycle/availability fixes that share these files:
+- deleteFactsForPage gains optional excludeSourcePrefixes so the fence
+  reconcile can protect non-fence facts (e.g. cli: conversation facts).
+- reconnect(ctx?) is now a first-class BrainEngine method on both engines
+  (PostgresEngine already had it; PGLite gains config capture + reconnect)
+  so callers stop using disconnect()+bare connect().
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* fix(cycle): stop extract_facts from wiping conversation facts (#1928)
+
+The fence reconcile delete-then-reinsert wiped cli:-origin facts (no fence to
+recreate them); a failed-sync full walk turned it brain-wide (1829 rows, 0
+reinserted, status ok). Now: exclude cli: rows from the wipe, do NOT inherit
+the failed-sync-&gt;full-walk fallback for this destructive phase, and warn on
+net-negative reconcile.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* fix(autopilot,supervisor): reconnect() instead of disconnect()+bare connect() (#2034)
+
+The autopilot health-probe recovery called connect() with no args after
+disconnect(), losing the startup config (database_url undefined -&gt; FATAL
+restart-loop on every DB blip) and opening a null-pool window. Both call sites
+now use engine.reconnect(), which restores the captured config.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* fix(write-through): mirror to the assigned source&#39;s local_path, never the global repo (#2018)
+
+put_page write-through resolved the disk target from the global sync.repo_path,
+so a default-source page (local_path NULL) got written into an unrelated
+federated source&#39;s working tree. Now it uses the assigned source&#39;s own
+local_path; NULL local_path skips (no leak); the global path is used only as a
+sole-source fallback.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* fix(pglite-lock): heartbeat + steal-grace so live holders are never stolen (#2058)
+
+A live holder&#39;s lock was force-removed after 5min age alone, letting a second
+process share the single-writer data dir -&gt; WAL corruption. The lock now
+heartbeats while held; a holder is reaped only when its PID is dead OR its
+heartbeat went stale past the steal grace. Pairs PID liveness with heartbeat
+age to also defeat PID reuse.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* fix(migrate,doctor): self-heal idx_timeline_dedup drift (#2038)
+
+A migration renumbered during a merge (v102) could be recorded-as-applied
+without its DDL running, leaving the 3-column index so every timeline write
+failed the 4-column ON CONFLICT. runMigrations now always runs a shape-keyed
+drift repair (dedupe-then-rebuild) even when no migration is pending, and
+doctor surfaces the drift.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* fix(timeline): un-silence the swallowed batch catch; pin Date-batch round-trip (#2057)
+
+The meetings extractor&#39;s bare catch {} hid a brain-wide timeline-write failure
+(0 entries, no error). It now counts + surfaces batch errors. Adds a Date-bearing
+batch regression test proving the #1861 jsonb_to_recordset refactor already
+fixed the original ::text[] cast failure.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* chore: bump version and changelog (v0.42.41.0)
+
+Triage fix wave: 6 authored critical fixes (#1928 facts wipe, #2018
+write-through leak, #2034 reconnect loop, #2058 WAL lock, #2038 timeline
+migration drift, #2057 timeline silent-empty) + community PRs #2064 #2052
+#2020 #2033 #2074 #2075 #2009 #2072 #2073. TODOS: deferred #1994 #1963 #2050.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* fix: address adversarial review findings (#1928, #2058, #2038, #2057)
+
+Codex as-built review of the authored fixes surfaced 4 real issues:
+- #2058: add a pid+acquired_at ownership token. A stale holder reaped + replaced
+  past the grace must NOT let its resumed heartbeat refresh, nor releaseLock
+  remove, the NEW owner&#39;s lock (re-opened the concurrent-writer hole). Heartbeat
+  and release now verify the on-disk lock is still ours. + regression test.
+- #1928: the destructive-full-walk guard keyed off phases.includes(&#39;sync&#39;),
+  which wrongly suppressed a legitimate full reconcile when sync was SKIPPED
+  (no engine / no brainDir). Key off a syncAttempted flag set only when sync
+  actually ran.
+- #2038: dedupe keeps MIN(id) not MIN(ctid) — deterministic and consistent with
+  the existing v-migration lower-id rule.
+- #2057: the extract CLI caller now surfaces batch_errors (stderr + exit 1)
+  instead of printing a clean success over failed inserts.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* docs(key-files): sync reference to v0.42.41.0 triage-wave behavior
+
+Update KEY_FILES.md to current-state truth for the shipped fixes (no
+release-history clauses, per the reference-doc discipline):
+
+- write-through.ts (#2018): resolves the disk target from the assigned
+  source&#39;s own local_path; sole-source falls back to sync.repo_path,
+  multi-source skips with source_has_no_local_path rather than leak.
+- engine.ts (#2034): reconnect() is now a REQUIRED lifecycle method on
+  both engines; config-restoring, never disconnect()+bare connect().
+- migrate.ts (#2073): document v116 edge source_id backfill + callee
+  index, and the always-run (version-counter-blind) timeline dedup
+  self-heal.
+- new entry for timeline-dedup-repair.ts (#2038) + the
+  timeline_dedup_index doctor check.
+- new entry for pglite-lock.ts (#2058): heartbeat + steal-grace
+  (GBRAIN_PGLITE_LOCK_STEAL_GRACE_SECONDS) so a live holder is never
+  stolen.
+- extract-facts.ts (#1928): cli:-fact protection, no failed-sync
+  full-walk inheritance, net_fact_deletion warn floor.
+
+bun run build:llms re-run (KEY_FILES is link-only so bundles unchanged);
+freshness + current-state guards green.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* fix(write-through): preserve nested multi-source layout; narrow #2018 leak guard
+
+The first #2018 fix skipped any no-local_path source on a multi-source brain,
+which broke the legitimate nested layout (a source without its own tree nests
+under the host repo at .sources/&lt;id&gt;/ — pinned by put-page-write-through.test).
+Narrow the guard: a no-local_path source nests under sync.repo_path as before;
+only SKIP when sync.repo_path is literally another source&#39;s own local_path
+(the actual leak — writing there pollutes that sibling&#39;s repo). Caught by the
+sharded suite.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* test: satisfy test-isolation guard for the new lock/reconnect tests
+
+CI `verify` flagged 3 intra-process isolation violations in the tests added
+this wave (the parallel runner shares one process per shard):
+- pglite-lock.test.ts: the GBRAIN_PGLITE_LOCK_STEAL_GRACE_SECONDS mutation now
+  goes through withEnv() instead of a raw process.env write (R1).
+- pglite-reconnect: renamed to *.serial.test.ts — it creates per-test engines
+  to exercise the connect/reconnect lifecycle, which doesn&#39;t fit the shared
+  beforeAll-engine model (R3/R4).
+verify is now 30/30; both files green.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* fix(pglite): reconnect() is a no-op for in-memory engines (#2034)
+
+CI serial-tests + test(5) caught two in-branch regressions from the #2034
+PGLite reconnect():
+- worker/queue claim-error recovery + their renewLock e2e test assume PGLite
+  reconnect is absent/no-op (queue.ts documents it). Making it a real
+  disconnect+reopen wiped an in-memory engine&#39;s state mid-job. reconnect() now
+  no-ops for in-memory (no database_path) — file-backed still re-opens the dir
+  (state persists on disk). Restores the documented worker assumption.
+- connection-resilience &#39;Supervisor still has the 3-strikes-then-reconnect
+  path&#39; pinned the removed unsafe-cast text; updated to assert the direct
+  this.engine.reconnect() call.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* test: quarantine embed-input-type-wire to serial lane (CI test(5) leak)
+
+#2033&#39;s embed-input-type-wire.test.ts configures a 1280-dim embedding gateway;
+the active dimension survived into engine-find-trajectory when CI&#39;s 10-way
+hash-disjoint sharding co-located them (this branch&#39;s added files reshuffled the
+assignment), failing 7 trajectory tests with &#39;expected 1280 dimensions, not
+1536&#39;. resetGateway() in afterEach clears the gateway but the dimension still
+leaked. It mutates global gateway/embedding state, so it belongs in the serial
+lane (own bun process, true isolation) by the repo&#39;s own definition. Root-caused
+by reproducing the exact failing pair locally.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Austin Arnett &lt;austin@sdsconsultinggroup.org&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+Co-authored-by: Dave MacDonald &lt;djmacdonald@ucdavis.edu&gt;
+Co-authored-by: pabloglzg &lt;186649799+pabloglzg@users.noreply.github.com&gt;
+Co-authored-by: Alex P. &lt;12667893+aphaiboon@users.noreply.github.com&gt;
+Co-authored-by: Garry Tan &lt;bo.m.liu@gmail.com&gt;
+Co-authored-by: jbarol &lt;barol.j@gmail.com&gt;
+Co-authored-by: maxpetrusenkoagent &lt;max.petrusenko.agent@gmail.com&gt;
+Co-authored-by: PAI &lt;pai@scaffolde.ai&gt;
+
+- v0.42.40.0 fix(extract,ingest): well-form lone UTF-16 surrogates before jsonb (#2011) (#2031)
+
+* fix(extract,ingest): well-form lone UTF-16 surrogates before jsonb (#2011)
+
+excerpt() in link-extraction.ts sliced the link-context window by raw UTF-16
+index, so a boundary landing inside a non-BMP char (emoji, math, CJK) left an
+unpaired surrogate half in `context`. Serialized to JSONB for the
+jsonb_to_recordset batch insert, Postgres rejects it at the ::jsonb cast and
+aborts the whole batch — wedging `extract --stale` because the staleness
+bookmark only advances on a clean finish.
+
+- text-safe.ts: new ensureWellFormed() (Bun isWellFormed/toWellFormed) — one
+  shared surrogate-cleaning primitive.
+- link-extraction.ts: excerpt() well-forms the slice (root-cause fix).
+- batch-rows.ts: new sanitizeForJsonb() = ensureWellFormed(stripNul(s)) applied
+  to every free-text body field (link context; timeline summary/detail/source;
+  take claim/source). Identity/security fields stay un-sanitized and fail closed.
+- postgres-engine.ts + pglite-engine.ts: scalar addLink + addTimelineEntry use
+  sanitizeForJsonb too, matching the batch path on both engines.
+- brainstorm/orchestrator.ts: consolidate hand-rolled sanitizeUnicode onto
+  ensureWellFormed (also fixes consecutive-lone-surrogate mishandling).
+
+Tests: ensureWellFormed unit cases (incl. consecutive lone surrogates), an
+excerpt window-split regression, PGLite + Postgres-e2e surrogate cases across
+all free-text fields and scalar paths, and fail-closed identity-field tests
+proving sanitization was NOT extended to slugs/holders.
+
+* v0.42.39.0 chore: bump version and changelog (#2011)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs: update project documentation for v0.42.39.0
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* v0.42.40.0 chore: re-slot release version (was 0.42.39.0)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* test: fix env-mutation isolation violations in retrieval-reflex tests
+
+check:test-isolation (rule R1) flags direct process.env mutation in
+non-serial test files — bun&#39;s parallel runner loads multiple files into
+one process, so a leaked GBRAIN_RETRIEVAL_REFLEX flips reflex behavior
+in unrelated tests. Both files landed via the #2019 merge; convert the
+beforeEach/afterEach env juggling to the canonical withEnv() wrapper,
+which restores the prior value via try/finally even on throw.
+
+Fixes the failing `verify` CI check on #2031 (and the `test-status`
+aggregate that inherits it). All 30 verify checks green locally.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- v0.42.39.0 feat(context): Retrieval Reflex — teach the agent when/what to retrieve (#1981) (#2019)
+
+* fix(integrations): parameterize resolver-row fence by recipe id
+
+The install fence was hardcoded gbrain:agent-voice:resolver-rows, so any
+second copy-into-host-repo recipe wrote a mislabeled block (and refresh/
+uninstall keyed on recipe id would miss it). Derive it from manifest.recipe.
+
+* feat(context): Retrieval Reflex — teach the agent when/what to retrieve (#1981)
+
+Deterministic per-turn pointer layer in the context engine: a zero-LLM,
+precision-biased scan resolves salient entities (names, @handles) to existing
+brain pages and injects compact pointers (name → slug → safe synopsis). Detect
++ point, never auto-dump. Fail-open, capped, suppression on prior context only.
+
+Engine-aware resolver ladder (no second DB connection): host ctx.brainQuery →
+PGLite serve resolve IPC (unix socket) → Postgres cached direct → disabled.
+Synopsis runs through get_page&#39;s privacy strip. Plus the retrieval-reflex recipe
++ policy skill, the retrieval_reflex_health doctor check, config gate, and the
+init next-step hint.
+
+* chore: bump version and changelog (v0.42.38.0)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs(architecture): KEY_FILES entries for Retrieval Reflex surface (#1981)
+
+Document the new src/core/context/ modules, the context-engine resolver
+ladder, the serve resolve IPC, the retrieval_reflex_health doctor check,
+and the recipe-id-keyed install fence. Current-state only.
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- v0.42.37.0 fix(jobs): reap stale locks, bound disconnect, complete cooperative-abort (#1972) (#2015)
+
+* fix(jobs): reap stale dead-holder cycle/sync locks (#1972)
+
+A crashed sync (OOM, recycle, SIGKILL) stranded its gbrain_cycle_locks row
+until something contended for it — reclaim was on-contention only. Add a
+host-scoped background reaper: reapDeadHolderLocks deletes locks whose holder
+PID is provably dead on this host, scoped to the gbrain-sync:*/gbrain-cycle*
+namespaces only (never elections/supervisor/reindex), with a snapshot-matched
+delete (date_trunc on acquired_at) that is TOCTOU-safe against PID reuse.
+Reuses isHolderDeadLocally (same-host + ESRCH + 60s grace). doctor --fix now
+auto-reaps for no-autopilot brains. DRY: selectLockRows + shared mapper now
+back inspectLock + listStaleLocks (killed the triplication).
+
+* fix(db): bound pool disconnect so teardown can&#39;t eat CLI output (#1972)
+
+pool.end() against PgBouncer transaction-mode never drained, so disconnect
+blocked until the CLI&#39;s 10s force-exit fired and process.exit()&#39;d mid-write,
+truncating stdout (e.g. #1959&#39;s relational query returned empty). Add a
+gbrain-owned endPoolBounded(pool): Promise.race of pool.end({timeout}) against
+a hard timer, so teardown is bounded regardless of what postgres.js does and is
+testable. connection-manager ends its direct + read pools concurrently so the
+per-pool bounds don&#39;t stack. PGLite disconnect is unaffected.
+
+* fix(cycle): complete cooperative-abort coverage + wire lock reaper (#1972)
+
+v0.42.29 made only the embed phase honor the abort signal; a 24h pull still
+showed force-evicts from a long non-embed phase ignoring it. Thread the signal
+into every cycle-reachable long loop: extract (extractForSlugs + the full-walk
+extractLinksFromDir/extractTimelineFromDir), extract_facts (per-page loop +
+embed signal + the phantom-redirect 30s lock-retry), and consolidate&#39;s bucket
+loop. Add a terminal abort check so an aborted cycle never stamps
+last_full_cycle_at as a completed run (Codex #9). lint now yields + checks
+abort every 200 pages (it&#39;s synchronous; the yield is what lets the signal
+land). New phase-duration force-evict attribution log names any phase that
+crosses the 30s deadline. Wire reapDeadHolderLocks at cycle start.
+
+* chore: bump version and changelog (v0.42.38.0)
+
+#1972 — stale-lock reaper, bounded pool disconnect, and complete
+cooperative-abort coverage across cycle phases.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs(key-files): current-state for the #1972 reaper, bounded disconnect, abort coverage
+
+document-release: update db-lock.ts (reapDeadHolderLocks + selectLockRows DRY),
+db.ts (endPoolBounded), and abort-check.ts (coverage now spans extract/
+extract_facts/consolidate/lint + terminal guard) entries to current truth.
+
+* test(isolation): fix shard-order flakes exposed by #1972&#39;s new test files
+
+Adding 3 new test files reshuffled the hash-based shards, exposing two
+pre-existing test-isolation bugs:
+
+- cycle-consolidate.test.ts assumed the global legacy-embedding preload&#39;s
+  1536-d gateway config still held at initSchema, but a co-sharded test that
+  calls resetGateway() in teardown nulls it, so initSchema fell back to the
+  1280-d default and built a halfvec(1280) facts column its 1536-d fixtures
+  can&#39;t fill. Re-pin the legacy OpenAI/1536 config in beforeAll (the pattern
+  legacy-embedding-preload.ts documents for 1536-d fixture tests).
+- db-lock-heartbeat-takeover.test.ts (merged from master&#39;s #1794) mutated
+  process.env.GBRAIN_LOCK_STEAL_GRACE_SECONDS raw, tripping check:test-isolation
+  rule R1. Convert to withEnv().
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- v0.42.37.0 fix(security,ingest): source-isolation grant enforcement + non-string frontmatter guard + papercuts (#1999)
+
+* fix(security): scope cross-source reads to the caller grant; close get_page exact-path leak
+
+One shared resolveRequestedScope() routes every source-scoped read op
+(query, code_callers/callees, search_by_image, code_blast/flow, get_page)
+through a single fail-closed trust+grant ladder: a remote caller&#39;s __all__
+collapses to its granted sources (never the whole brain) and an explicit
+out-of-grant source_id is rejected. get_page&#39;s exact-match path now honors a
+federated grant via getPage(sourceIds[]) in both engines. Legacy bearer tokens
+carry their stored permissions.source_id grant (bounded, never widened). Also
+retries getConfig on transient connection loss.
+
+Closes #1924, #1371, #1393, #1336, #1603.
+
+* fix(ingest): non-string frontmatter no longer aborts lint/sync; embed/hook/catalog papercuts
+
+Parser coerces a non-string title to a string and falls back to inference for
+slug/type (never fabricating a &#34;123&#34; slug), with a lint NON_STRING_FIELD finding
+surfacing the malformed frontmatter; a defensive guard in content-sanity stops a
+non-string title from crashing the whole lint/sync run brain-wide. Plus: embed
+--catch-up no longer arms the overflowed 32-bit budget timer (and surfaces
+unembeddable chunks); the frontmatter pre-commit hook ships a correct .md/.mdx
+regex; and the skill catalog parses YAML block-scalar descriptions.
+
+Closes #1883, #1658, #1556, #1948, #1946, #1840, #1711.
+
+* v0.42.37.0 fix(security,ingest): source-isolation grant enforcement + non-string frontmatter guard + papercuts
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs: add NON_STRING_FIELD frontmatter validation class to docs for v0.42.37.0
+
+The v0.42.37.0 non-string-frontmatter fix added an eighth validation
+class (NON_STRING_FIELD / lint code frontmatter-non-string-field). Update
+the two current-state docs that enumerate the validation classes:
+- skills/frontmatter-guard/SKILL.md (seven-&gt;eight + table row)
+- docs/integrations/pre-commit.md (seven-&gt;eight + table row)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- v0.42.36.0 fix(sync): resumable, durable, single-flight sync — converges under pool exhaustion + repeated kills (#1794) (#1980)
+
+* fix(retry): match EMAXCONNSESSION + SQLSTATE 53300 as retryable conn errors (#1794)
+
+* feat(schema): add op_checkpoint_paths append-only delta table (migration v115) (#1794)
+
+* refactor(op-checkpoint): append-only deltas via executeRawDirect + withRetry (#1794)
+
+* fix(sync): resumable-checkpoint durability + lock-thrash fix (#1794)
+
+Durable append-only checkpoint writes (executeRawDirect + retry), fail-loud
+consecutive-failure abort, first-file/10s flush cadence, race-safe pending-delta
+under parallel workers, guaranteed final flush on every exit path incl. SIGTERM
+(no-retry one-shot via registerCleanup), bankedFiles/reason observability,
+event-loop yield to keep the lock heartbeat alive, and routing the bare
+(no-source) sync through withRefreshingLock.
+
+* fix(db-lock): heartbeat-aware takeover + direct-pool refresh (#1794)
+
+* fix(cycle): treat SyncLockBusyError as skip, not a phase failure (#1794)
+
+* docs(sync): document the 5 checkpoint/lock env knobs (#1794)
+
+* v0.42.36.0 fix(sync): resumable, durable, single-flight sync — converges under pool exhaustion + repeated kills (#1794)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs(key-files): update sync.ts + op-checkpoint.ts entries to resumable-checkpoint current state (#1794)
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- v0.42.35.0 fix(sync): recover from unreachable last_commit instead of full-walking forever (#1970) (#1975)
+
+* v0.42.35.0 fix(sync): recover from unreachable last_commit instead of full-walking forever (#1970)
+
+When a source&#39;s history is rewritten (force-push, master→main consolidation,
+squash), the recorded last_commit can fall outside HEAD&#39;s history. The old
+guard sent both &#34;object missing&#34; and &#34;not an ancestor&#34; to performFullSync — a
+full repo re-walk that never advances the bookmark under a cron timeout on a
+large cross-region brain, so the source goes silently stale.
+
+Fix: only a truly-absent object forces a full reconcile. A present-but-non-
+ancestor bookmark is diffed tree-to-tree directly (git diff A..B needs no
+ancestry), importing only the real delta. Adds: oversized-diff fallback to full
+reconcile (F-B); performFullSync now purges deleted files, gated to file-backed
+pages by source_path so manual/put_page and metafile pages are spared (F-A);
+rename-to-unsyncable deletes the stale old page (F-C). 7 new PGLite e2e tests.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs(architecture): record #1970 sync bookmark recovery + full-sync delete reconcile in KEY_FILES
+
+Update the sync.ts entry to current truth: entry-time bookmark-reachability
+guard (gc&#39;d anchor → full reconcile; non-ancestor-but-present → direct
+tree-to-tree diff), oversized-diff fallback, performFullSync now authoritative
+for deletes (file-backed pages by source_path), and rename-to-unsyncable delete.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- v0.42.34.0 feat(search): typed-edge relational retrieval — relationship questions get relationship answers (#1959)
+
+* feat(search): deterministic relational-query parser
+
+Pure, ReDoS-bounded parser that detects relationship queries (&#34;who invested
+in X&#34;, &#34;who at X works on Y&#34;, &#34;who introduced me to X&#34;, &#34;what connects A and
+B&#34;) and maps them to typed edges. Schema-pack-extensible vocab with subset
+validation against the link types ingest produces, so query-side and
+ingest-side relation vocabularies can&#39;t drift. No-match / pronoun-seed /
+adjacency guards keep it precision-first (a candidate only; the arm fires
+only when a real seed also resolves).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(engine): relationalFanout typed-edge fan-out (both engines)
+
+Generalizes traversePaths to a SEED ARRAY, aggregating to ranked NODES
+(shortest hop, edge-richness count, via-link-types, shortest connecting
+path, canonical chunk id) instead of edges. Within-source traversal (never
+crosses a source boundary even across a federated scope), link_source=
+&#39;mentions&#39; excluded by default, deleted_at filtered at seed + every neighbor
++ every node, bounded depth (&lt;=3) + candidate cap. Adds RelationalFanoutRow
+/ RelationalFanoutOpts + the relational SearchResult/SearchOpts fields to
+types.
+
+Lands in lockstep in postgres + pglite engines, pinned by a DATABASE_URL-
+gated parity block in engine-parity.test.ts; a PGLite unit test exercises
+the SQL (typed-edge filter, mentions exclusion, deleted_at, canonical chunk,
+multi-seed connects, determinism) in default CI.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(search): relational recall arm + federation key hardening
+
+Wires edge-derived candidates into bare hybridSearch as a FOURTH RRF arm
+(relational-recall.ts): parse the original query -&gt; scope-aware,
+confidence-gated seed resolution (drops fallback_slugify; never traverses
+from a guess) -&gt; relationalFanout -&gt; batch-hydrate, reinforcing each page&#39;s
+REAL canonical chunk (page-level key for chunkless entity pages) -&gt;
+--explain attribution + fail-open audit row. Text-only (no-op in image
+mode); pure no-op for non-relational queries; rides every downstream stage
+(cosine, post-fusion boosts, dedup, reranker, autocut, token budget).
+
+Mode wiring: relationalRetrieval + relational_retrieval_depth knobs
+(conservative off; balanced/tokenmax on; depth 2), per-call thread-through
+in both bare + cached paths, KNOBS_HASH_VERSION 9-&gt;10 (rel=/reld=), config
+keys, modes-dashboard descriptions, and a `relational` param on the query op.
+
+Federation hardening (structural, engine-wide): the RRF/dedup key now
+carries source_id via a shared rrfKey() (fixes a latent cross-source
+collapse where same-slug pages in different sources merged), and the query
+cache scopes by a canonical source-set key (cacheScopeKey) so a federated
+read can&#39;t be served a single-source row.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(eval): relational benchmark + recall@k harness metrics
+
+NamedThingBench harness gains recall@k / recall@10 (the relational headline
+metric) on QuestionResult + FamilyReport, plus typed seed/linkTypes/kind on
+NamedThingQuestion so the graph-relationship family is machine-checkable.
+
+Adds the relational benchmark corpus (test/fixtures/retrieval-quality/
+relational/): a small entity graph whose answers are LEXICALLY UNRECOVERABLE
+— every page body is generic and never names the entity it relates to, so
+only the typed edge connects query to answer. corpus.ts is the canonical
+source for both the seed loader and the 38-question gold set; relational.jsonl
+is generated from it (a drift test pins them equal).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(eval): relational A/B proof + arm fires on all retrieval paths
+
+Fixes the integration bug the eval caught: the relational arm was only
+injected on the main RRF path, so it silently did nothing whenever vector
+was unavailable — no embedding provider configured (the default in many
+deployments) OR embed failure. The arm is now built once and fused via RRF
+on ALL THREE hybridSearch return paths (no-embedding-provider, embed-failed
+keyword fallback, main path). Without this it would have been dead in
+exactly the setups that most need it.
+
+Adds `gbrain eval retrieval-quality --ab-relational`: runs the gold set
+twice (arm off vs on) in a fixed mode and reports the graph-relationship
+recall@10 lift + Hit@3 + latency add. The CI A/B test pins the headline
+result — recall@10 jumps from &lt;25% (lexically unrecoverable) to &gt;75% with
+the arm on — and a non-relational query returns identical results arm-on vs
+off (the no-op / no-regression gate).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* chore: bump version and changelog (v0.42.34.0)
+
+Relational retrieval feature: typed-edge recall arm + federation key
+hardening. Also updates the KNOBS_HASH_VERSION 9→10 assertions across the
+remaining search test files (the bump invalidates relational-off cache rows).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs: document typed-edge relational retrieval (v0.42.34.0)
+
+CLAUDE.md Search Mode: add relationalRetrieval to the knob table, the
+knobs_hash v=9→10 note, and a relational-retrieval summary. RETRIEVAL.md:
+add the relational recall arm to the pipeline diagram. Regenerate llms
+bundles (build:llms).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(test): size relational fixtures to the actual embedding-column dim
+
+CI shard runs with the ZeroEntropy gateway default (1280-d), but the
+relational test fixtures hardcoded 1536-d embeddings, so chunk inserts were
+rejected with &#34;expected 1280 dimensions, not 1536&#34; (CheckExpectedDim) — the
+`test (6)` shard + `test-status` failures. The column width tracks the
+configured gateway default and can shift with shard order, so fixtures now
+probe `content_chunks.embedding`&#39;s actual `atttypmod` after initSchema and
+size embeddings to it (the pglite-engine.test.ts pattern), via a shared
+`probeEmbeddingDim` helper. Verified passing at a forced 1280-d column.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- docs(designs): add COMMUNITY_IDEAS ledger from open-PR backlog triage (#1969)
+
+Curated, high-bar diary of the valuable ideas surfaced by the community-PR
+wave, grouped into 10 themes with contributor credit and OPEN/CLOSED/HELD
+status, so good thinking survives PR closure. Captured during a full triage
++ hygiene pass over the open-PR backlog. Pure docs; no code impact.
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- v0.42.33.0 fix(sources): confine sync re-clone to gbrain-owned clones; never delete a user working tree (#1881) (#1960)
+
+* fix(sources): confine sync re-clone to gbrain-owned clones; never delete a user working tree (#1881)
+
+recloneIfMissing deleted local_path whenever a source had a remote_url and a
+non-healthy on-disk state, with no check that gbrain actually created the clone.
+A source whose local_path was a user&#39;s live working tree (remote_url set, no
+gbrain-created clone) could have its directory removed and re-cloned over.
+
+- isOwnedClone(): ownership, not path-containment. True only for a config
+  .managed_clone marker (written by addSource --url) or exact normalized-path
+  equality with defaultCloneDir(id) (back-compat for pre-marker default clones).
+- recloneIfMissing: ownership guard aborts before ANY filesystem op; EXDEV-safe
+  sibling-temp clone + atomic swap (old aside -&gt; new in -&gt; drop old) with
+  best-effort restore + a message naming where the original is preserved;
+  symlink-leaf reject before the destructive rename.
+- sync.ts validate_repo_state guards reclone on isOwnedClone (no per-sync warn).
+- sources restore degrades to a warning for an unowned source instead of the
+  misleading &#34;missing clone, try sync&#34; hint.
+
+Tests: #1881 regression (tree survives), isOwnedClone matrix, symlink reject,
+EXDEV swap residue-free, --clone-dir owned-via-marker, restore CV3, unownedHint
+healthy/degraded, sync-level refusal.
+
+* chore: bump version and changelog (v0.42.33.0)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs: document sources-ops reclone-ownership invariant for v0.42.33.0 (#1881)
+
+Add the missing src/core/sources-ops.ts entry to KEY_FILES.md capturing the
+must-never-violate reclone-ownership guarantee: gbrain only deletes/re-clones a
+clone it created (isOwnedClone), never a user working tree. Covers managed_clone
+marker, defaultCloneDir back-compat, EXDEV-safe swap, TOCTOU + symlink-leaf
+guards, unmanaged_path SourceOpError, and the read-only sources restore path.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- v0.42.32.0 fix(sync): coerce non-string frontmatter titles + bounded auto-skip failure ledger (#1939) (#1956)
+
+* fix(import): coerce non-string frontmatter title/slug/type (#1939)
+
+YAML `title: 2024-06-01` parses to a Date and `title: 1458` to a number;
+the old `(frontmatter.X as string)` cast was a compile-time lie, so
+downstream `.toLowerCase()` threw and (via the importer failure gate)
+could wedge sync indefinitely. parseMarkdown now coerces via
+coerceFrontmatterString (Date -&gt; UTC ISO date, deterministic), and the
+pure assessContentSanity self-protects against a non-string title.
+
+* feat(sync): bounded auto-skip failure ledger; poison file can&#39;t wedge indexing (#1939)
+
+New src/core/sync-failure-ledger.ts owns the failure store + a crash-safe,
+multi-source, concurrent bounded auto-skip valve. A file that fails N
+consecutive syncs (GBRAIN_SYNC_AUTOSKIP_AFTER, default 3) auto-skips so it
+can&#39;t freeze all indexing forever, while fresh failures still fail-closed
+and a `&lt;head&gt;` history-rewrite sentinel hard-blocks even with --skip-failed.
+
+- (source_id, path) keying — failures never merge across sources
+- success clears a path so attempts are truly consecutive
+- advance-before-ack ordering (a crash can&#39;t mark a file skipped while wedged)
+- shared applySyncFailureGate used by BOTH the incremental and full-sync gates
+- legacy-row normalization + duplicate collapse on load
+- cross-process lock + atomic temp-rename, age-based stale-lock break
+
+sync.ts re-exports the ledger for existing callers; import.ts records
+source-scoped and defers the bookmark to the gate under managedBookmark.
+
+* fix(doctor): sync_failures severity via one shared decision on both surfaces (#1939)
+
+Local buildChecks and remote doctorReportRemote now both route through
+decideSyncFailureSeverity, so a stuck bookmark escalates WARN -&gt; FAIL
+consistently (oldest-open age &gt; fail cadence, or large unresolved count),
+auto-skipped pages stay visible (WARN, not hidden), and the
+acknowledged/acknowledged_at field-split that caused drift is gone. The
+remote surface stays subprocess-free (file read + Date.parse only).
+
+* chore(test): add trailing newline to e5-lease-cap-ab baseline fixture
+
+* fix(sync): address adversarial review findings on the failure ledger (#1939)
+
+- #1: a parse-failed file that is later deleted/renamed-away no longer leaves
+  a permanent open ledger row. Removed paths (filtered.deleted, renamed-from,
+  and the &#34;gone from disk&#34; forward-delete skip branch) are treated as resolved
+  so the ledger self-heals instead of aging doctor to a stuck FAIL.
+- #3: decideSyncFailureSeverity escalates to FAIL on OPEN (blocking) failures
+  only — auto_skipped rows already advanced the bookmark, so they stay
+  WARN-visible regardless of count, matching the state-machine contract.
+
+* chore: bump version and changelog (v0.42.30.0)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs: document sync-failure ledger + auto-skip valve for v0.42.30.0
+
+KEY_FILES.md: new src/core/sync-failure-ledger.ts entry (bounded auto-skip
+state machine, decideGateAction/decideSyncFailureSeverity/applySyncFailureGate,
+GBRAIN_SYNC_AUTOSKIP_AFTER); update sync.ts (failure store moved to ledger,
+re-exported), doctor.ts (sync_failures severity via shared rule on both
+surfaces), markdown.ts (coerceFrontmatterString), import.ts (managedBookmark).
+live-sync.md: poison-file auto-skip tricky-spot. Regenerated llms-full.txt.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* chore: re-bump to v0.42.31.0 (queue collision on 0.42.30.0)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* chore: re-bump to v0.42.32.0 (queue collision)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- v0.42.31.0 feat(links): open link_source provenance + link-add/link-rm/link-sources (#1941) (#1957)
+
+* feat(links): relax link_source CHECK to kebab-case provenance + migration v114
+
+Open link_source from a closed allowlist to a kebab-case format gate
+(^[a-z][a-z0-9]*(-[a-z0-9]+)*$, char_length&lt;=64) so external derivers
+stamp their own provenance (e.g. citation-graph) without a per-deriver
+migration. Migration v114: Postgres NOT VALID + VALIDATE (lock-friendly,
+transaction:false); PGLite plain DROP+ADD. Updates the schema.sql +
+engine provenance contract comments. (#1941)
+
+* feat(links): expose link provenance on link ops + link-add/link-rm/link-sources
+
+add_link/remove_link now accept --link-source/--link-type; add_link guards
+the reconciliation-managed built-ins (markdown/frontmatter/mentions/
+wikilink-resolved) and defaults omitted provenance to &#39;manual&#39; (was the
+misleading engine default &#39;markdown&#39;). New cliHints.aliases mechanism with a
+startup collision guard registers link-add/link-rm; printOpHelp shows the
+invoked alias name. New list_link_sources read op + listLinkSources engine
+method (both engines, {sourceId?,sourceIds?}, deterministic order) powers
+`gbrain link-sources`, added to the minion read allowlist. (#1941)
+
+* test(links): kebab provenance, op guard, link-sources, aliases + parity
+
+Covers the v114 regex/length boundaries, upgrade-path constraint swap on
+existing data, the managed-built-in op guard + manual default, remove_link
+type/source filters, list_link_sources scoping (scalar + federated) and
+PG/PGLite parity, and alias resolution/collision/help. Fixes the prior
+&#39;inferred&#39;-rejection assertion (now valid kebab) in the mentions test. (#1941)
+
+* chore: bump version and changelog (v0.42.31.0)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs: update KEY_FILES for v0.42.31.0 link provenance surface
+
+KEY_FILES.md current-state updates for #1941: link_source now an open
+kebab-case provenance (migration v114), the add_link/remove_link guard +
+defaults, list_link_sources + listLinkSources, and cliHints.aliases.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(minions): supervisor queue-singleton keying + pidfile cleanup (follow-up #1849)
+
+Two correctness bugs in the v0.42.29.0 supervisor-singleton work, caught by
+adversarial review:
+
+- supervisorLockId mixed a config-derived DB identity into the key, but the
+  lock row already lives inside the target database. Two supervisors on the
+  same physical DB via different-but-equivalent URLs (pooler vs direct port,
+  host alias, trailing params) computed different ids and BOTH acquired the
+  &#34;singleton&#34; lock. Key on the queue alone; the database half of the mutex is
+  physical. Removes the now-dead currentDbIdentity() from worker-registry.
+
+- The pidfile-cleanup process.on(&#39;exit&#39;) listener was installed AFTER the
+  DB-lock acquire, so the LOCK_HELD early-exit stranded the pidfile this
+  process had just created. Install the listener first.
+
+Regression test pins the listener-before-lock ordering; updates the lockId
+test to the queue-only invariant; KEY_FILES updated to current state.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- feat(skills): add idea-lineage (#1830)
+
+- v0.42.29.0 fix(minions): long-job abort-honoring + attempt accounting + supervisor singleton; topic-aware voice (#1737, #1849, #1851) (#1943)
+
+* fix(minions): honest attempt accounting + cooperative abort-honoring + per-handler timeouts (#1737)
+
+- Wall-clock and stall dead-letter paths now increment attempts_made (terminal,
+  no retry — wall-clock fires at 2x cumulative timeout; retrying non-idempotent
+  embed/subagent work would duplicate side effects). Surface stalled_counter in
+  jobs get so &#39;started 3 / stalled 2 / attempts 0&#39; reads true instead of looking
+  like broken accounting.
+- Thread AbortSignal through embed-backfill/autopilot-cycle -&gt; runPhaseEmbed -&gt;
+  runEmbedCore -&gt; embedAll(Stale)/embedPage, checking it on BOTH --stale and
+  --all paths and between embed batches. A timed-out embed phase now bails within
+  a batch, so the cycle finally releases gbrain_cycle_locks instead of running
+  the full 10-15 min after the job was killed (the daily cycle-wedge). New shared
+  src/core/abort-check.ts (isAborted/throwIfAborted/anySignal).
+- Per-handler default wall-clock budget (handler-timeouts.ts) stamped at submit
+  for long handlers without an explicit timeout_ms.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(minions): queue-scoped DB supervisor singleton + canonical pidfile + doctor max-rss check (#1849)
+
+- Acquire a queue-scoped DB lock (tryAcquireDbLock, keyed on the raw DB identity
+  + queue) on supervisor.start(): a second supervisor on the same (db, queue)
+  fails fast with exit 2 regardless of $HOME/--pid-file. Refresh on a dedicated
+  timer; on refresh failure past the threshold, fail SAFE (exit non-zero) before
+  the TTL could lapse and let a second supervisor take over. Release on shutdown.
+- Canonical default pidfile keyed on brain id (currentBrainId, config-only, no DB
+  connect) so two brains under one HOME no longer share supervisor.pid.
+- doctor: new supervisor_singleton check surfaces the effective --max-rss (from
+  the started audit event) and warns when the lock holder&#39;s (host,pid) differs
+  from the local pidfile — comparing host+pid, not bare pid. Registered in
+  doctor-categories.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(agent-voice): topic-aware persona context via server-resolved topicId (#1851)
+
+Summon Mars/Venus into a specific conversation topic so they boot already knowing
+the recent thread. A per-topic call link carries only topicId (+ optional display
+topicName); the server resolves the recent-conversation context from the brain
+(topics/&lt;topicId&gt;.md) — topic CONTENT is never accepted over the wire (that would
+be prompt injection + a leak into URLs/referrers/logs). topicId is a strict slug
+with a path-traversal guard. New &#39;# Topic Context&#39; prompt slot injected after the
+persona body so identity-first ordering still wins; persona identity unchanged.
+No topicId -&gt; generic behavior. Contract doc + persona skill docs updated.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* chore: file #1737 slot-reservation fair-scheduling follow-up TODO (F7)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* chore: bump version and changelog (v0.42.29.0)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs: sync KEY_FILES.md for v0.42.29.0 minions + abort wave (#1737, #1849)
+
+Fold the #1737/#1849 behavior into the existing per-file entries and add the
+two new core files, keeping the doc at current-state truth:
+- queue.ts: honest attempt accounting on wall-clock + stall dead-letter paths;
+  defaultTimeoutMsFor stamping at submit.
+- supervisor.ts: queue-scoped DB singleton lock (supervisorLockId,
+  classifySupervisorSingleton, LOCK_LOST, refresh-fail-safe, brain-id pidfile,
+  max_rss_mb audit).
+- worker-registry.ts: currentDbIdentity().
+- New entries: src/core/abort-check.ts, src/core/minions/handler-timeouts.ts.
+- New doctor.ts extension: supervisor_singleton check.
+- cycle.ts / embed.ts extensions: AbortSignal threading note.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- v0.42.28.0 fix(engine): batch inserts use jsonb_to_recordset, not text[] array literals (#1861) (#1927)
+
+* fix(engine): batch inserts use jsonb_to_recordset, not text[] array literals (#1861)
+
+addLinksBatch/addTimelineEntriesBatch/addTakesBatch passed free text through
+unnest(${arr}::text[]); postgres.js serialized it to a Postgres text[] literal
+that array_in rejected (&#34;malformed array literal&#34;) on calendar/Zoom context,
+aborting the whole `extract links --stale` sweep. Bind the batch as one JSONB
+doc via jsonb_to_recordset(($1::jsonb)-&gt;&#39;rows&#39;) through the audited
+executeRawJsonb contract instead. Shared row builders (src/core/batch-rows.ts)
+keep both engines byte-identical; NUL is stripped only from free-text body
+fields (context/summary/detail/claim), while identity/security fields
+(slugs/source_ids/holder/kind/dates) still reject NUL. addTakesBatch is now
+batchRetry-wrapped (&#39;addTakesBatch&#39; audit site) and its BrainEngine signature
+takes BatchOpts. Scalar addLink context is NUL-stripped too.
+
+Regression tests on both engines: PGLite always-on poison/NUL/parity suite +
+DATABASE_URL-gated Postgres lane (the engine that actually crashed).
+
+* test: make &#34;no Anthropic key&#34; tests hermetic via withoutAnthropicKey
+
+hasAnthropicKey() reads both ANTHROPIC_API_KEY and ~/.gbrain config; tests that
+only deleted the env var fired a real LLM call on configured machines (warning
+flipped NO_ANTHROPIC_API_KEY -&gt; LLM_OUTPUT_NOT_JSON). New test/helpers/no-anthropic-key.ts
+neutralizes both sources (env + GBRAIN_HOME temp dir) for the duration of the call.
+Refactors the five no-key tests in think-pipeline + takes-mcp-allowlist to use it,
+including two that previously passed only by luck of the live LLM output.
+
+* chore: docs + version bump (v0.42.28.0)
+
+KEY_FILES.md/RETRIEVAL.md describe the jsonb_to_recordset batch path; TODOS.md
+files the #1861 follow-ups (element-isolation, remaining ::text[] sites, shared
+SQL-string hoist, batch-insert edge-case tests). CHANGELOG + VERSION + package.json
+to 0.42.28.0.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs: sync TESTING.md batch-insert references for v0.42.28.0
+
+The #1861 fix migrated links/timeline/takes batch inserts from
+unnest(::text[]) to jsonb_to_recordset. Update the stale &#34;postgres-js
+unnest() binding&#34; note and add the two new poison-regression test files
+(test/links-timeline-jsonb-poison.test.ts PGLite half,
+test/e2e/jsonb-batch-poison-postgres.test.ts Postgres lane) to the inventory.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(sql-query): reject top-level array jsonb params in executeRawJsonb (#1861 P2a)
+
+The &#34;no top-level array&#34; rule was only a comment. A bare JS array bound to a
+$N::jsonb position can serialize as a Postgres array literal (not jsonb) through
+postgres.js, silently re-entering the &#34;malformed array literal&#34; class #1861 just
+escaped. executeRawJsonb now throws a clear error steering callers to the
+{ rows: [...] } object wrapper. Verified breaks zero call sites (all pass objects
+or null). Codex adversarial P2a; batch-size enforcement (P2b) filed as a TODO.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;</div>
+</div>
+
+<a href="../project/garrytan_gbrain.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

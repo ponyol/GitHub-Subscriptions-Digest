@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (15 commits) - kagent-dev/kagent - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (15 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/kagent-dev_kagent.html">kagent-dev/kagent</a> /
+    Updates in main (15 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/kagent-dev_kagent.html">kagent-dev/kagent</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-12 22:58 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/kagent-dev/kagent/commits/main" target="_blank">https://github.com/kagent-dev/kagent/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This release introduces significant enhancements, including a new Bedrock prompt caching feature that reduces costs for multi-turn agent interactions by caching static prompt elements. It improves system stability and security by validating `RemoteMCPServer` configurations and refining error handling. Additionally, the update initiates the migration to A2A v1, enables declarative agents in Google Substrate, and exposes controller metrics for improved observability.
+
+---
+
+Этот выпуск включает значительные улучшения, в том числе новую функцию кэширования промптов Bedrock, которая снижает затраты на многоэтапные взаимодействия агентов путем кэширования статических элементов промпта. Он повышает стабильность и безопасность системы за счет проверки конфигураций `RemoteMCPServer` и улучшения обработки ошибок. Кроме того, обновление запускает миграцию на A2A v1, позволяет использовать декларативных агентов в Google Substrate и предоставляет метрики контроллера для улучшенной наблюдаемости.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix the issue where sandbox agents couldn&#39;t be added as tools (#2000)
+
+Fixes an issue where we always assumed agents where of Agent kind. The
+agent in the tool dialog shows the correct type now too. (a lot of
+changes in the tsx file, but it&#39;s mostly formatting)
+
+&lt;img width=&#34;616&#34; height=&#34;370&#34; alt=&#34;Screenshot 2026-06-11 at 11 24 01 AM&#34;
+src=&#34;https://github.com/user-attachments/assets/32c33cd7-795e-452e-8e7a-14ed366380cd&#34;
+/&gt;
+
+Signed-off-by: Peter Jausovec &lt;peter.jausovec@solo.io&gt;
+
+- Corrected spelling error in MemorySection.tsx (#2008)
+
+This corrects a spelling mistake on the create agent page.
+
+Closes #2007
+
+Signed-off-by: Colin Griffin &lt;colin@krum.io&gt;
+
+- feat(bedrock): add prompt caching via CachePoint markers (#1940)
+
+feat(bedrock): add prompt caching via CachePoint markers
+
+Closes #1871.
+
+## Why this is needed
+
+Multi-turn tool-using kagent agents on Bedrock pay full input-token cost
+on every Converse call, because the static prefix (system prompt + tool
+definitions) is re-sent and re-billed each turn. Real measurement from a
+production deployment using Claude Sonnet 4.5 via the `us.` inference
+profile in us-east-1, running every 2 hours against a ~700-pod EKS
+cluster:
+
+  - Per sweep: ~4 Converse calls
+  - Cumulative input tokens (CloudWatch InvokeModel metric): ~313k
+  - Cumulative output tokens: ~3k
+  - Per-sweep cost: ~$0.98 (input dominates ~95%)
+  - Per cluster/year (5 sweeps/weekday): ~$1,300
+  - Per cluster/year (24/7 every 2h): projected ~$4-9k
+
+~30k of the per-call input is identical across every call — system
+prompt and tool definitions don&#39;t change inside a single task. Bedrock
+prompt caching is designed precisely for this case: a `cachePoint` block
+in the Converse request marks where the cacheable prefix ends, and
+subsequent calls within ~5 minutes (per region) hit the cache and bill
+the prefix at a reduced rate.
+
+The Bedrock provider builds Converse requests using
+`system: [textBlock]` and `toolConfig.tools: [...]` but never appends a
+`cachePoint` block to either array, so caching is never engaged.
+
+## Why this is not redundant with the existing
+`spec.declarative.compaction`
+
+kagent already has an Agent-level context-compaction feature
+(`Compaction`, `CompactionInterval`, `Summarizer`, `TokenThreshold`,
+etc.) that summarizes old conversation turns when the conversation
+exceeds a token threshold. That solves a different problem:
+
+  - Compaction: shrinks the conversation prompt when it gets too long.
+    Helps with context-window pressure on long-running agents.
+  - Prompt caching: keeps the prompt the same size but tells Bedrock
+    &#34;the first N tokens are stable across calls, cache them and bill
+    cached portion at the reduced rate.&#34;
+
+Neither replaces the other. For a tool-using agent whose conversation
+stays under the context limit but whose static prefix (system prompt +
+tool defs) is large, prompt caching is the right hammer; compaction does
+nothing because there&#39;s nothing to compact in the static prefix.
+
+## What this PR does
+
+Adds a `promptCaching: bool` field to `BedrockConfig` (defaulting to
+`false` to preserve existing behavior). When set, the provider appends
+a `CachePoint` block:
+
+1. To the end of the `system` content array (after the system text
+block)
+2. To the end of the `toolConfig.tools` array (after the last ToolSpec)
+
+Markers use `CachePointTypeDefault`. Bedrock silently ignores cache
+points on models that don&#39;t support prompt caching, so the field is
+safe to enable on a heterogeneous model fleet without per-model
+gating.
+
+Tested against `us.anthropic.claude-sonnet-4-5-20250929-v1:0`: the
+second and subsequent Converse calls within the cache window drop their
+input-token billing by ~70-90% on cache hits, depending on which static
+portion (system vs tools vs both) is being hit.
+
+## Implementation surface
+
+Mirrors the change across both runtimes — Go (for `runtime: go` agents)
+and Python (for `runtime: python` agents):
+
+Go:
+  - `go/api/v1alpha2/modelconfig_types.go`: add `PromptCaching` to
+    `BedrockConfig` CRD struct with full doc + kubebuilder default.
+  - `go/api/adk/types.go`: add `PromptCaching` to the internal
+`adk.Bedrock` serializable model so it flows through agent config JSON.
+- `go/core/internal/controller/translator/agent/adk_api_translator.go`:
+populate the new field when translating ModelConfig CR -&gt; adk.Bedrock.
+- `go/adk/pkg/agent/agent.go`: thread the value into
+`models.BedrockConfig`.
+  - `go/adk/pkg/models/bedrock.go`: emit the cache point markers in the
+    Converse request builders.
+
+Python:
+  - `python/.../adk/types.py`: add `prompt_caching: bool` to the
+`Bedrock` Pydantic model and pass through to `KAgentBedrockLlm` factory.
+  - `python/.../adk/models/_bedrock.py`: append
+    `{&#34;cachePoint&#34;: {&#34;type&#34;: &#34;default&#34;}}` to `kwargs[&#34;system&#34;]` and
+    `kwargs[&#34;toolConfig&#34;][&#34;tools&#34;]` when enabled.
+
+Regenerated CRDs via `make controller-manifests` so
+`helm/kagent-crds/templates/kagent.dev_modelconfigs.yaml` reflects the
+new schema field.
+
+## Tests
+
+`go/adk/pkg/models/bedrock_test.go`: new
+`TestConvertGenaiToolsToBedrockPromptCaching` covering three cases:
+disabled = no marker, enabled = marker appended at END of tool list
+with default type, enabled-but-no-tools = no marker (no point in a
+standalone marker).
+
+Existing `convertGenaiToolsToBedrock` callers updated to pass the new
+`promptCaching bool` argument as `false` (no behavior change).
+
+## Backward compatibility
+
+  - `promptCaching` defaults to `false` everywhere; existing
+    ModelConfigs pick up no behavior change.
+  - Serialized `adk.Bedrock` JSON uses `omitempty` for the new field;
+    older agent pods deserializing newer config see an unknown field
+    they ignore (Pydantic + Go json decoders both lenient by default).
+  - The Converse API tolerates and ignores `CachePoint` markers on
+    models that don&#39;t support caching, so enabling on a mixed-model
+    setup is safe.
+
+## Example usage
+
+```yaml
+apiVersion: kagent.dev/v1alpha2
+kind: ModelConfig
+metadata:
+  name: bedrock-claude
+spec:
+  provider: Bedrock
+  model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+  bedrock:
+    region: us-east-1
+    promptCaching: true
+```
+
+Signed-off-by: Shamil Kashmeri &lt;shamil@viafoura.com&gt;
+
+---------
+
+Signed-off-by: Shamil Kashmeri &lt;shamil@viafoura.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- Add CEL validation rule for RemoteMCPServer with CA Cert and AllowedNamespaces (#1988)
+
+# Description
+
+Adds a CEL admission rule on `RemoteMCPServer` that rejects setting both
+`spec.allowedNamespaces` and `spec.tls.caCertSecretRef`. A
+`RemoteMCPServer` that pins a CA Secret must be same-namespace-only; one
+that allows cross-namespace references must not pin a CA Secret.
+
+This closes a silent footgun in the cross-namespace + TLS combination
+without changing any working behavior: the `AllowedNamespaces` field
+stays, the reconciler is unchanged, and non-CA cross-namespace sharing
+keeps working exactly as before.
+
+# Why
+
+When an agent consumes a `RemoteMCPServer` that pins a CA bundle, the
+translator mounts that Secret onto the **agent&#39;s** pod by bare name
+(`addTLSConfiguration`). A `SecretVolumeSource` has no namespace field —
+Kubernetes always resolves it in the pod&#39;s own namespace, not the
+`RemoteMCPServer`&#39;s. So if the RMS is referenced cross-namespace, the CA
+mount either:
+
+- **dangles** — the Secret doesn&#39;t exist in the agent&#39;s namespace and
+the pod fails to start; or
+- **silently mounts the wrong CA** — an unrelated Secret of the same
+name that happens to exist in the agent&#39;s namespace is trusted for the
+upstream, with no error anywhere.
+
+Meanwhile the controller validates and hashes the Secret in the
+`RemoteMCPServer`&#39;s namespace, so it reports `Accepted=true` while the
+pod mount looks elsewhere. The cert reference itself is structurally
+same-namespace (`caCertSecretRef` is a bare name with no namespace
+field, resolved in the owner&#39;s namespace by design); the only thing that
+broke co-location was opening the RMS object up cross-namespace via
+`allowedNamespaces`. Making the two mutually exclusive removes the
+unsound combination at admission time rather than letting it surface as
+a runtime mount failure on the consuming agent.
+
+# Validation rule
+
+Spec-level `XValidation` on `RemoteMCPServerSpec`:
+
+```
+rule:    !(has(self.allowedNamespaces) &amp;&amp; has(self.allowedNamespaces.from)
+            &amp;&amp; (self.allowedNamespaces.from == &#39;All&#39; || self.allowedNamespaces.from == &#39;Selector&#39;)
+            &amp;&amp; has(self.tls) &amp;&amp; has(self.tls.caCertSecretRef) &amp;&amp; size(self.tls.caCertSecretRef) &gt; 0)
+message: spec.allowedNamespaces must not permit cross-namespace access (from: All or from: Selector)
+         when spec.tls.caCertSecretRef is set: a pinned CA Secret is mounted onto the consuming agent&#39;s
+         pod and Kubernetes resolves it in the agent&#39;s namespace, not this RemoteMCPServer&#39;s. Use
+         from: Same (the default), or remove the CA Secret reference.
+```
+
+The rule only rejects the genuinely-hazardous case — a CA Secret
+combined with an `allowedNamespaces` that actually permits other
+namespaces (`from: All` or `from: Selector`). `from: Same` (or
+omitted/empty, which defaults to same-namespace) is always allowed
+alongside a CA Secret, since it carries no cross-namespace mount hazard.
+
+Regenerated `kagent.dev_remotemcpservers.yaml` and synced the helm CRD
+copy under `helm/kagent-crds/templates/`.
+
+# Tests
+
+Added cases to the existing envtest CEL suite (`tlsconfig_cel_test.go`),
+exercised against a real kube-apiserver:
+
+- `allowedNamespaces` `from: All` + `caCertSecretRef` → rejected.
+- `allowedNamespaces` `from: Selector` + `caCertSecretRef` → rejected.
+- `allowedNamespaces` `from: Same` + `caCertSecretRef` → accepted
+(same-namespace, no hazard).
+- `allowedNamespaces` `from: All`, no TLS → accepted (cross-namespace
+sharing still works).
+- `caCertSecretRef`, no `allowedNamespaces` → accepted (same-namespace
+CA pinning still works).
+
+# Compatibility
+
+Not a breaking API change — no field is removed and no working
+configuration changes behavior. The only new effect is at admission: a
+manifest that combines a CA Secret with a *cross-namespace-permitting*
+`allowedNamespaces` (`from: All` / `from: Selector`) is now rejected on
+create/update. That combination was already non-functional (dangling or
+wrong-CA mount), so this turns a silent runtime failure into an
+explicit, actionable admission error. Same-namespace configurations
+(`from: Same` or omitted) are unaffected, and objects already stored are
+not re-validated until their next write.
+
+---------
+
+Signed-off-by: Jeremy Alvis &lt;jeremy.alvis@solo.io&gt;
+
+- fix(bedrock): stream events incrementally instead of buffering (#1989)
+
+Fixes #1986
+
+`_run_converse_stream` used `list()` to collect all stream events before
+returning. This blocked the caller until the full response was ready.
+
+Replaced with an `asyncio.Queue` bridge so events are forwarded as they
+arrive from boto3.
+
+Signed-off-by: mesutoezdil &lt;mesudozdil@gmail.com&gt;
+Co-authored-by: J.M. Huibonhoa &lt;jmhbh@users.noreply.github.com&gt;
+
+- support running declarative agents in substrate (#1981)
+
+this enables running declarative (go) agents inside google substrate
+sandbox.
+
+note that you&#39;ll need install substrate (check instructions
+[here](https://github.com/kagent-dev/kagent/tree/main/examples/substrate-openclaw))and
+then explicitly enable it in kagent values.yaml. By default, we create a
+single worker pool, but you could manually create a different one and
+then reference it when creating the agent.
+
+---------
+
+Signed-off-by: Peter Jausovec &lt;peter.jausovec@solo.io&gt;
+Signed-off-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- chore: bump kagent tools to 0.2.1 (#1995)
+
+- Bump kagent tools to `0.2.1` which includes a change that mounts an
+empty `tmp` volume to the tools container to enable write operations to
+be unimpeded by pod&#39;s securityContext.readOnlyRootFileSystem set to be
+true.
+
+Signed-off-by: JM Huibonhoa &lt;jm.huibonhoa@solo.io&gt;
+
+- automatically refresh substrate status page (#1990)
+
+Signed-off-by: Peter Jausovec &lt;peter.jausovec@solo.io&gt;
+
+- switch from tags to digest for images (#1961)
+
+Signed-off-by: Peter Jausovec &lt;peter.jausovec@solo.io&gt;
+Signed-off-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- fix(controller): return error instead of panicking on unknown auth mode (#1791)
+
+## summary
+
+- `getAuthenticator` at `go/core/cmd/controller/main.go:51` panicked
+when `authCfg.Mode` was anything other than `trusted-proxy` or
+`unsecure`. a panic at startup bypasses defer-driven cleanup (e.g. the
+tracing shutdown registered earlier in `app.Start`), surfaces to
+kubernetes only as a `CrashLoopBackOff` with no reason set on the pod,
+and prints a stack trace where a typed error message would be clearer.
+- return `fmt.Errorf(&#34;unknown auth mode %q (valid modes: unsecure,
+trusted-proxy)&#34;, authCfg.Mode)` instead and propagate the error up
+through the `ExtensionConfig` closure so `app.Start` can log and exit
+cleanly.
+- swap the panic-recover test for one that asserts the typed error path
+and that the returned authenticator is nil on error.
+
+## ai model disclosure
+
+used claude code (claude opus 4.7) to triage and draft the diff.
+self-reviewed `go/core/cmd/controller/main.go` and the existing
+`auth_mode_test.go` to confirm `getAuthenticator` is only called from a
+closure that already returns `error`, so propagation is straightforward.
+verified locally via:
+
+```bash
+go vet ./core/cmd/controller/...
+./bin/golangci-lint run ./core/cmd/controller/...      # 0 issues
+go test -race -skip &#39;TestE2E.*&#39; -count=1 ./core/cmd/controller/...   # ok
+```
+
+---------
+
+Signed-off-by: SarthakB11 &lt;sarthak.bhardwaj21b@iiitg.ac.in&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- Migrate from A2A v0 to v1 (part 1) (#1921)
+
+The 1st of 3 PRs for A2A v0 to v1 zero downtime migration. This will go
+into release 0.10.0
+
+Makes the controller compatible with A2A v0 (trpc-a2a-go) and v1
+(a2a-go) data and both v0 and v1 JSON-RPC routes / agent card routes
+depending on `A2A-Version` header (designed explicitly by the protocol
+for version negotiations). Replaces **all** internal usages of
+`trpc-a2a-go` with `a2a-go` except in data conversion code and CLI
+client code.
+
+This ensure that the controller is compatible with old / existing agents
+and UI in A2A v0 and existing v0 data in db, while adding the capability
+to communicate with v1 agents and UI during upgrade as they are added in
+the next part.
+
+Follows
+https://a2a-protocol.org/latest/whats-new-v1/#migration-strategy-recommendations
+and db conversion reuses as much of existing a2a backward compatible
+code as possible.
+
+---------
+
+Signed-off-by: Jet Chiang &lt;pokyuen.jetchiang-ext@solo.io&gt;
+Signed-off-by: JM Huibonhoa &lt;jm.huibonhoa@solo.io&gt;
+Co-authored-by: JM Huibonhoa &lt;jm.huibonhoa@solo.io&gt;
+
+- Expose the controller&#39;s /metrics endpoint through a dedicated Service (#1803)
+
+Operators deploying through this chart can now point Prometheus,
+VictoriaMetrics, or any other authenticated scraper at the controller&#39;s
+`/metrics` endpoint without hand-rolling a Service, ClusterRoles, and a
+binding. The controller binary already understands
+`--metrics-bind-address` and `--metrics-secure` via flags or env vars
+(the env-var loader at `go/core/pkg/app/app.go` translates every flag
+automatically), but the chart had no way to surface the endpoint short
+of stuffing values into `controller.env` and writing the missing Service
+and RBAC by hand. Closes kagent-dev/kagent#1369.
+
+The shape mirrors the `kmcp` sub-chart that already lives in this same
+umbrella: a separate `&lt;fullname&gt;-controller-metrics` Service exposing
+`https:8443`, two ClusterRoles (`metrics-auth-role` granting the
+controller&#39;s ServiceAccount the right to call `TokenReview` and
+`SubjectAccessReview` against the API server; `metrics-reader` granting
+`get` on the `/metrics` non-resource URL), and a ClusterRoleBinding
+wiring only the auth role to the controller. The reader role is
+deliberately left unbound — picking a subject (Prometheus,
+VictoriaMetrics, an OpenTelemetry collector) belongs to the cluster
+operator, not the chart. This is also what `kubebuilder` and
+`operator-sdk` scaffold by default, for the same reason.
+
+The auth role and its binding are gated additionally on
+`controller.metrics.secureServing` because they&#39;re no-ops when the
+authn/authz filter isn&#39;t installed. The deployment&#39;s existing
+`controller.env` pass-through still wins over the chart-supplied
+defaults (the conditional env vars are emitted before the user-supplied
+list), so anyone who needs `METRICS_BIND_ADDRESS=0` for debugging or
+`--metrics-cert-path` wired through `volumes`/`volumeMounts` retains the
+escape hatch.
+
+Designed exclusions: `ServiceMonitor` is deferred — it pulls in a
+Prometheus-Operator coupling the rest of the chart has avoided, and it&#39;s
+straightforward to layer on top once the underlying Service exists,
+gated on `controller.metrics.serviceMonitor.enabled`.
+Cert-manager-issued metrics certificates are also out of scope;
+controller-runtime&#39;s self-signed default works for in-cluster scrapers
+that skip TLS verification or trust the kubelet CA, and the existing
+cert-path flags remain reachable via `controller.env` for those who want
+to wire their own. Default is opt-in (`controller.metrics.enabled:
+false`), so existing installations are unchanged.
+
+---------
+
+Signed-off-by: Daniel Orbach &lt;ddorbach@gmail.com&gt;
+
+- feat(ui): add guard to prevent out-of-sync sends when working cross-tabs (#1904)
+
+Before sending a new message, check the latest session state from the
+DB. If another tab is still streaming, reconnect to that stream instead
+of sending. If another tab completed a turn that this tab hasn&#39;t loaded,
+reload the messages and prompt the user to review before sending.
+
+Note: utilises reconnect functionality from #1903 so currently also
+contains those changes. Actual changes for this PR are isolated in
+3b330f87056345a673fed3d0b6b5c4f36276caf8.
+
+---------
+
+Signed-off-by: Brian Fox &lt;878612+onematchfox@users.noreply.github.com&gt;
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+Co-authored-by: Peter Jausovec &lt;peterj@users.noreply.github.com&gt;
+
+- fix: ignore local cache directories in go docker context (#1978)
+
+## Summary
+- Ignore local .cache directories in the Go Docker build context
+- Prevent agent/tool-created Go caches from invalidating Docker COPY
+layers
+
+## Verification
+- Ran `make build-controller DOCKER_BUILD_ARGS=&#39;--progress=plain
+--platform linux/amd64 --output type=cacheonly&#39;` twice
+- Confirmed the second run reused cached Dockerfile layers, including
+the Go compile step
+
+Signed-off-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- fix(controller): disable standalone SSE for STREAMABLE_HTTP remote mcp servers (#1974)
+
+- Fixes issue #1955 by disabling SSE for `STREAMABLE_HTTP` remote mcp
+servers. The reconciler&#39;s createMcpTransport was passing an HTTP client
+with Timeout: spec.timeout (default 30s) to StreamableClientTransport.
+After initialize completes, the SDK synchronously opens a GET request
+for the standalone SSE channel before returning from Connect. A
+spec-compliant server holds this connection open indefinitely, causing
+client.Do to block until http.Client.Timeout fires at which point the
+connection is marked failed and tools/list cannot complete. Since we
+currently do not implement notification handlers in the reconciler as
+the primary function is to perform tool discovery. disabling standalone
+SSE on the transport used for tool discovery fixes the issue and is safe
+as the SSE stream provides no value in this code path.
+
+Signed-off-by: JM Huibonhoa &lt;jm.huibonhoa@solo.io&gt;</div>
+</div>
+
+<a href="../project/kagent-dev_kagent.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
