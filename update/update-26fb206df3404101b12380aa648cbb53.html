@@ -1,0 +1,1553 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in master (53 commits) - milvus-io/milvus - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in master (53 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/milvus-io_milvus.html">milvus-io/milvus</a> /
+    Updates in master (53 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/milvus-io_milvus.html">milvus-io/milvus</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-20 03:27 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/milvus-io/milvus/commits/master" target="_blank">https://github.com/milvus-io/milvus/commits/master</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление значительно улучшает поддержку платформы, обеспечивая сборку для macOS (Apple Silicon) с Clang 19 за счет критически важных обновлений зависимостей, которые повсеместно влияют на производственные системы. Оно включает множество исправлений ошибок для повышения стабильности ядра, в том числе решения проблем с паниками, загрузкой данных и обработкой nullable-полей, а также улучшения производительности, такие как векторизованные операции и оптимизированная координация запросов. Ключевые новые функции охватывают поддержку boost-оценки, настраиваемую емкость массивов, сегментирование пространств имен и улучшенное управление внешними таблицами, что дополняется расширенными возможностями RBAC, улучшенной проверкой схем, обширным тестовым покрытием и доработанной обработкой ошибок.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- enhance: support building core on macOS (Apple Silicon) with clang 19 (#50616)
+
+issue: #50615
+
+## What this PR does
+Makes the C++ core build cleanly on **macOS (Apple Silicon) with
+Homebrew LLVM/clang 19**.
+
+&gt; [!IMPORTANT]
+&gt; **Scope / impact is NOT macOS-only.** Although this PR is framed as
+macOS/clang-19 enablement, two of the changes are **top-level
+`requires(...)` in `internal/core/conanfile.py`, so they apply to every
+platform, including Linux production builds:**
+&gt; - **`azure-sdk-for-cpp` `1.11.3@milvus/dev` → `1.16.0@milvus/dev`** (5
+minor versions, `force=True`). This is the SDK Arrow uses for the
+**Azure Blob remote-storage path**, so this is effectively a major Azure
+SDK bump on the **production Azure object-storage path for Linux
+deployments** too.
+&gt; - **`arrow` recipe `17.0.0@milvus/dev-2.6#c743ea7a…` →
+`17.0.0@milvus/dev#f411aa73…`** — same Arrow version, but **rebuilt
+against azure 1.16.0** with a patched `FindAzure.cmake`. The Arrow
+**`package_id` (recipe revision) DID change**; it is not the same binary
+as before.
+&gt; - **`libbson/1.30.6@milvus/dev`** added (also global, but new — no
+pre-existing behavior to regress).
+&gt;
+&gt; **Testing blind spot:** CI green proves compile/link/UT/e2e pass, but
+the UT and integration suites **do not exercise real Azure Blob
+read/write**, so the Azure object-storage path is **not covered** by
+this PR&#39;s CI. A real Azure Blob remote-storage regression is recommended
+before merge (see Verification).
+
+### Why the dependency bumps are required for clang 19
+- **azure 1.16.0**: azure 1.11.3 bundles an older `nlohmann/json` that
+uses `std::char_traits&lt;unsigned char&gt;`, which was **removed in libc++
+19** → 1.11.3 fails to compile on clang 19. 1.16.0 fixes this.
+- **arrow rebuilt against azure 1.16.0**: when Arrow is built from
+source on clang 19 it must link the same azure 1.16.0; the recipe also
+patches `FindAzure.cmake` to the monolithic `Azure` config so
+`find_package(Azure)` resolves. Hence a new Arrow recipe revision.
+
+### Toolchain / build enablement
+- **`scripts/setenv.sh`**: probe LLVM 19/20/21 first (libc++ 17/18
+`chrono operator&lt;&lt;` clashes with Arrow&#39;s vendored `date`; libc++ 19
+fixes it).
+- **`scripts/3rdparty_build.sh`**: arm64 `-march=armv8-a+crypto+crc` so
+folly&#39;s F14 (SimdAndCrc on Apple Silicon) matches core/knowhere — fixes
+`F14LinkCheck` undefined-symbol link errors.
+- **`InvertedIndexTantivy.cpp`**: drop spurious `-&gt;template` on
+non-template members (clang 19
+`-Wmissing-template-arg-list-after-template-kw`).
+
+### Drop bsoncxx / libmongoc → libbson only
+The BSON layer used the **bsoncxx** C++ driver, whose CMake
+unconditionally builds mongo-cxx-driver → **libmongoc** → bundled
+**utf8proc**, which fails to configure under newer CMake/clang on macOS.
+Milvus only needs BSON (de)serialization.
+
+- New Conan package **`libbson/1.30.6@milvus/dev`** (libbson-only,
+`ENABLE_MONGOC=OFF`; recipe published to milvus conanfiles &amp;
+production).
+- New **`src/common/bson_shim.h`** — a thin `milvus::bson` C++ layer
+over libbson&#39;s C API.
+- Migrated `bson_view.h`, `bson_builder.{h,cpp}`, json_stats consumers
+and unit tests off bsoncxx.
+- CMake: `find_package(bson-1.0)` + link `mongo::bson_shared`; removed
+FetchContent `thirdparty/bsoncxx`.
+
+All three global Conan requires (arrow / libbson / azure) pin an
+explicit recipe `#revision` for reproducibility.
+
+## Verification
+- Full clean rebuild on macOS arm64 / clang 19: `bin/milvus` builds;
+`libmilvus_core` links **only `libbson-1.0.dylib`** (no
+libmongoc/mongocxx/utf8proc).
+- libbson / arrow / azure resolve from production Conan at the pinned
+revisions.
+- All 21 BSON unit tests (BsonView / BsonBuilder / DomNode) pass.
+- Full ci-v2 suite green on Linux (build / build-ut-cov / ut-cpp / ut-go
+/ integration / e2e / go-sdk).
+- **TODO before merge:** real Azure Blob remote-storage read/write
+regression to cover the azure-1.16.0 / arrow-rebuild blast radius (not
+exercised by UT/integration).
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix: correct parquet sparse vector dimension (#50640)
+
+issue: https://github.com/milvus-io/milvus/issues/50638
+
+Signed-off-by: lianyu.sun &lt;lianyu.sun@ly.com&gt;
+
+- test: remove stale xfail on nullable struct array schema propagation (#50655)
+
+## Summary
+
+
+`TestRestfulStructArrayNullable::test_rest_v2_nullable_struct_array_schema_propagation`
+was marked `xfail(strict=True)` for *&#39;REST v2 schema.structFields
+nullable=true is silently ignored instead of preserved in describe
+output&#39;*.
+
+The behavior now correctly preserves `nullable=true` on struct array
+fields in the describe output, so the test passes. With `strict=True` an
+unexpected pass becomes `XPASS(strict)` which pytest reports as
+**FAILED**, breaking `ci-v2/e2e-default`:
+
+```
+[XPASS(strict)] REST v2 schema.structFields nullable=true is silently ignored instead of preserved in describe output
+```
+
+This was masked until the file&#39;s bad `L1` marker was fixed (#50651);
+once the file is collectable the stale xfail surfaces. Remove the
+decorator so the test runs as a normal positive case validating the (now
+correct) nullable propagation. Introduced by #50109.
+
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix: resolve xxhash multiple-definition when linking C++ unit tests (#50649)
+
+## Summary
+
+Linking the C++ unit-test binaries fails on Linux with `multiple
+definition of &#39;XXH...&#39;`, breaking `ci-v2/build-ut-cov` (UT-CPP-Cov
+stage) and `ci-v2/ut-cpp`:
+
+```
+FAILED: unittest/test_json_uint64
+... multiple definition of `XXH32&#39;;
+  thirdparty/milvus-storage/.../rust/librust_bridge.a(...xxhash.o): first defined here
+collect2: error: ld returned 1 exit status
+```
+
+`test_json_uint64` is just the first test binary linked — any target
+linking both `milvus_conan_deps` and `milvus-storage` trips it.
+
+## Root cause
+
+Two copies of xxhash on the same static link line:
+
+1. `milvus-storage`&#39;s Rust bridge (`librust_bridge.a`) statically embeds
+xxhash and **re-exports** its `XXH*` symbols globally.
+2. The conan `xxhash/0.8.3` that `milvus_core` legitimately links for
+`common/BloomFilter.h` and `minhash/MinHashComputer.cpp`.
+
+The GNU linker errors on the duplicate global symbols. This surfaced
+after the `milvus-common`/Knowhere bump in #50612 rebuilt the in-tree
+milvus-storage Rust bridge with the embedded xxhash; it is cache-state
+dependent, so unrelated PRs (#50616, #50645, #50636) hit the identical
+error intermittently.
+
+## Changes
+
+- Add `-Wl,--allow-multiple-definition` (via
+`add_link_options(LINKER:...)`, guarded by `if(LINUX)`) in
+`internal/core/unittest/CMakeLists.txt`, so the linker keeps the first
+xxhash definition for all unit-test targets.
+
+## Follow-up
+
+Proper root fix tracked in #50648: localize/hide the duplicate
+third-party `XXH*` symbols in `librust_bridge.a` (symbol version script
+/ `objcopy --localize-symbols`) in milvus-storage so it doesn&#39;t export a
+second copy of xxhash.
+
+issue: #50648
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- test: fix flaky test_import_job_with_non_exist_files (#50652)
+
+## Summary
+
+`TestCreateImportJobNegative::test_import_job_with_non_exist_files` is
+flaky in `ci-v2/e2e-default`:
+
+```
+FAILED testcases/test_jobs_operation.py::TestCreateImportJobNegative::test_import_job_with_non_exist_files
+AssertionError: assert &#39;Importing&#39; == &#39;Failed&#39;
+```
+
+## Root cause
+
+The test created an import job for a non-existent file, slept a **fixed
+5 seconds**, then asserted the job `state == &#34;Failed&#34;`:
+
+```python
+rsp = self.import_job_client.create_import_jobs(payload)
+time.sleep(5)
+rsp = self.import_job_client.get_import_job_progress(rsp[&#34;data&#34;][&#34;jobId&#34;])
+assert rsp[&#34;data&#34;][&#34;state&#34;] == &#34;Failed&#34;
+```
+
+The import job advances `Pending -&gt; Importing -&gt; Failed`
+**asynchronously** — it only becomes `Failed` after the datacoord import
+scheduler actually attempts to read the missing file and propagates the
+failure. On a fast/idle runner 5s is enough; under CI load the job is
+still `Importing` at 5s, so the assertion fails. It&#39;s a test-side race,
+not a product bug (the import does eventually fail).
+
+## Fix
+
+Poll the job progress until it reaches a terminal state
+(`Failed`/`Completed`), bounded by the existing `IMPORT_TIMEOUT`, then
+assert it failed — matching how every other import test in this file
+waits. No production behavior change.
+
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- test: fix stale error-message assertion in struct array reject test (#50654)
+
+## Summary
+
+
+`TestRestfulStructArrayNullable::test_rest_v2_add_struct_array_field_rejected`
+fails deterministically in `ci-v2/e2e-default`:
+
+```
+AssertionError: assert &#39;Invalid field type, type:ArrayOfStruct&#39; in
+  &#39;StructArray field must be added through /v2/vectordb/collections/struct_fields/add: invalid parameter&#39;
+```
+
+The test verifies that adding an `ArrayOfStruct` field via the regular
+`/collections/fields/add` endpoint is rejected. The rejection works
+correctly (non-zero code, field not added, `structFields == []`), but
+the test asserted a **stale error-message substring** (`Invalid field
+type, type:ArrayOfStruct`). The server actually returns a clearer
+message directing the caller to the dedicated endpoint: `StructArray
+field must be added through /v2/vectordb/collections/struct_fields/add`.
+
+This assertion was masked until now: the file failed collection on a bad
+`L1` marker (fixed in #50651), so none of its tests ran. Once the file
+is collectable, the stale assertion fails.
+
+## Fix
+
+Assert the stable `struct_fields/add` substring, which still verifies
+the rejection guides the caller to the correct endpoint. Introduced by
+#50109.
+
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- test: fix bare L1 marker breaking restful_client_v2 e2e collection (#50651)
+
+## Summary
+
+`tests/restful_client_v2/testcases/test_struct_array_nullable.py`
+decorated its test class with a **bare `@pytest.mark.L1`** instead of
+the suite convention `@pytest.mark.tags(CaseLabel.L1)`.
+
+restful_client_v2&#39;s `pytest.ini` runs with `addopts = --strict`, which
+turns any unregistered marker into a hard error. `L1` is not a
+registered marker (only `tags` is), so pytest fails at **collection
+time**:
+
+```
+ERROR collecting testcases/test_struct_array_nullable.py
+Failed: &#39;L1&#39; not found in `markers` configuration option
+```
+
+With `-x` (stop on first failure) this aborts the entire
+`ci-v2/e2e-default` run — deterministically, on master and on every PR
+whose e2e matrix includes the restful_client_v2 suite. Separately, the
+bare marker also would not be matched by the framework&#39;s
+`pytest_tagging` `--tags L1` level selection, so the level tag had no
+effect anyway.
+
+## Changes
+
+- Import `CaseLabel` from `utils.constant`.
+- Replace `@pytest.mark.L1` with `@pytest.mark.tags(CaseLabel.L1)`,
+matching every other file in the suite.
+
+Introduced by #50109.
+
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- test: remove stale xfail on TextEmbedding drop-function e2e tests (#50647)
+
+## Summary
+
+Bug #50424 — *&#34;dropping a TextEmbedding function incorrectly removes the
+output vector field&#34;* — was fixed and closed by #50471 (&#34;fix: Split
+function drop semantics by request flag&#34;).
+
+The three `drop_collection_function` e2e cases in
+`test_text_embedding_function_e2e.py` were still marked
+`@pytest.mark.xfail(strict=True)` referencing #50424. Now that the
+behavior is correct, the tests **pass**, and with `strict=True` pytest
+reports them as `XPASS(strict)` → **FAILED**, breaking
+`ci-v2/e2e-default` on `master` and on every open PR.
+
+```
+[XPASS(strict)] issue: .../issues/50424, dropping TextEmbedding function incorrectly removes output vector field
+= 3 failed, 5857 passed, 339 skipped, 2 xfailed, 1 xpassed, 9 rerun =
+```
+
+This is deterministic (not flaky): the `DataNotMatchException: Insert
+missed an field &#39;dense&#39;` log lines are the tests&#39; own expected
+negative-path assertions (after detaching the function, inserting
+without the vector must fail).
+
+## Changes
+
+- Remove the three `@pytest.mark.xfail(...)` decorators from:
+-
+`TestTextEmbeddingFunctionCURD::test_drop_collection_function_verify_crud`
+-
+`TestTextEmbeddingFunctionCURD::test_drop_collection_function_one_of_multiple`
+-
+`TestTextEmbeddingFunctionCURD::test_drop_collection_function_then_add_again`
+- Remove the now-unused `DROP_TEXT_EMBEDDING_FUNCTION_XFAIL_REASON`
+constant.
+
+The tests now run as normal positive cases validating the fixed
+drop-function semantics from #50471.
+
+issue: #50646
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- test: add REST import 2PC coverage (#50462)
+
+## What type of PR is this?
+
+/kind test
+
+## What this PR does / why we need it:
+
+Adds RESTful import 2PC coverage for Milvus import lifecycle and
+CDC-focused scenarios.
+
+This PR adds:
+- REST import job helpers for `/describe`, `/commit`, `/abort`, and
+state polling
+- pytest options for secondary CDC endpoint/object storage/topology
+parameters
+- a new REST test suite for import 2PC lifecycle, visibility,
+commit/abort, delete semantics, TTL, compaction, formats, data types,
+indexes, partitions, DML interleaving, CDC, and fault-tolerance gates
+- xfail regression coverage for known issues:
+  - #50458 REST import commit/abort authorization gap
+  - #50459 NaN/Inf FloatVector import/query behavior
+  - #50460 REST `options.auto_commit=null` validation gap
+
+## Which issue(s) this PR fixes:
+
+N/A
+
+## Special notes for your reviewer:
+
+The CDC cases require passing secondary cluster REST/MinIO options and
+topology arguments. Without those options, CDC-specific cases skip with
+an explicit environment precondition message.
+
+The manual compaction-after-commit case is marked non-strict xfail
+because compaction may remain `Executing` on current import 2PC test
+builds.
+
+## Test result:
+
+```text
+python -m py_compile tests/restful_client_v2/conftest.py tests/restful_client_v2/api/milvus.py tests/restful_client_v2/testcases/test_import_2pc_operation.py
+ruff check tests/restful_client_v2/api/milvus.py tests/restful_client_v2/conftest.py tests/restful_client_v2/testcases/test_import_2pc_operation.py
+python -m pytest --collect-only -q testcases/test_import_2pc_operation.py
+141 tests collected in 2.14s
+```
+
+---------
+
+Signed-off-by: zhuwenxing &lt;wenxing.zhu@zilliz.com&gt;
+
+- enhance: upgrade knowhere to v3.0.4 (#50612)
+
+## Summary
+
+- Upgrade Knowhere dependency to v3.0.4.
+- Upgrade milvus-common dependency to the version required by Knowhere
+v3.0.4.
+
+issue: #50610
+
+Signed-off-by: xianliang.li &lt;xianliang.li@zilliz.com&gt;
+
+- enhance: skip search requery for namespace partition mode (#50596)
+
+## Summary
+- Disable the proxy search requery path when a collection uses namespace
+partition mode.
+- Apply the same behavior to normal search and hybrid search
+initialization.
+- Add coverage for the Always requery policy being overridden by
+namespace partition mode.
+
+issue: #50626
+
+---------
+
+Signed-off-by: sunby &lt;sunbingyi1992@gmail.com&gt;
+
+- test: Enable vortex storage in Helm test values (#50442)
+
+## Summary
+
+Enable the DataNode vortex storage format in the Helm values that
+already enable Loon FFI storage:
+
+- tests/_helm/values/e2e/standalone
+- tests/_helm/values/e2e/distributed-pulsar
+- tests/_helm/values/e2e-amd/standalone
+- tests/_helm/values/e2e-amd/distributed-pulsar
+- tests/_helm/values/e2e-arm/standalone
+- tests/_helm/values/e2e-arm/distributed-pulsar
+- tests/_helm/values/nightly/distributed-woodpecker
+- tests/_helm/values/nightly/distributed-woodpecker-service
+
+Fixes #50441
+
+## Test Plan
+
+- [x] ruby YAML parse check for the eight target values files, verifying
+common.storage.useLoonFFI is true and dataNode.storage.format is vortex
+- [x] git diff scope check confirmed only the two nightly woodpecker
+files were added in the follow-up amend
+
+Signed-off-by: Yanliang Qiao &lt;yanliang.qiao@zilliz.com&gt;
+
+- feat: add result cache function for expr (#48873)
+
+#50225
+
+Co-authored-by: luzhang &lt;luzhang@zilliz.com&gt;
+
+- fix: Split function drop semantics by request flag (#50471)
+
+Fixes #50424
+
+## Summary
+
+This PR uses the `DropFunctionOutputFields` request flag to let
+`AlterCollectionSchema` distinguish two client-side drop paths:
+
+- `drop_collection_function` detaches the function and keeps its output
+fields as normal schema fields.
+- `drop_function_field` sets the flag and cascades supported
+BM25/MinHash output fields.
+
+MinHash detach keeps the output field because the MinHash signature is a
+materialized `BinaryVector` field. Insert and compaction paths persist
+the generated signature, raw retrieval is only blocked for BM25 function
+outputs, and after detach the MinHash output field is kept with
+`IsFunctionOutput=false` so it can stand alone as a normal vector field.
+
+The proxy validation and RootCoord schema mutation logic now follow the
+requested semantics, with tests covering detach-only and
+output-field-drop behavior.
+
+## Tests
+
+- `make generated-proto-without-cpp`
+- `make`
+- `go test -v -count=1 -tags dynamic,test -gcflags=&#34;all=-N -l&#34;
+./internal/proxy -run
+&#34;TestAlterCollectionSchemaTask_PreExecute|TestValidateDropFunction&#34;
+-timeout 300s`
+- `go test -v -count=1 -tags dynamic,test -gcflags=&#34;all=-N -l&#34;
+./internal/rootcoord -run
+&#34;TestBuildSchemaForDetachFunction|TestBuildSchemaForDropFunctionField&#34;
+-timeout 300s`
+- `/Users/zilliz/dev/milvus_py`: `pytest
+test_drop_collection_field.py::test_drop_function_field_bm25_cascades_output_field
+test_drop_collection_field.py::test_drop_collection_function_detaches_minhash_output_field
+test_drop_collection_field.py::test_drop_whole_struct_array_field_basic
+-v -s`
+
+Signed-off-by: sijie-ni-0214 &lt;sijie.ni@zilliz.com&gt;
+
+- enhance: decouple querycoord dispatch from dist pull (#50157)
+
+## Summary
+
+Decouple QueryCoord task dispatch from the dist pull loop.
+
+When a QueryNode holds more and more segments, `GetDataDistribution`
+returns a larger distribution and `pullDist` can take longer. If
+dispatch only happens after dist pull finishes, QueryCoord task dispatch
+frequency drops together with pull latency, which can hurt scheduling
+stability. This PR keeps dispatch cadence independent from dist pull
+latency.
+
+issue: #50158
+
+## Changes
+
+- Add `queryCoord.dispatchInterval` with a default value of 500ms.
+- Start separate dist pull and task dispatch loops in each dist handler.
+- Keep `pullDist` and `handleDistResp` focused on updating distribution
+state.
+- Remove the old dispatch flag from dist response handling.
+
+## Tests
+
+- `gofumpt -l internal/querycoordv2/dist/dist_controller.go
+internal/querycoordv2/dist/dist_controller_test.go
+internal/querycoordv2/dist/dist_handler.go
+internal/querycoordv2/dist/dist_handler_test.go
+pkg/util/paramtable/component_param.go`
+- `git diff upstream/master..HEAD --check`
+- `go test -count=1 ./util/paramtable`
+- `go test -v -count=1 -tags dynamic,test -gcflags=&#34;all=-N -l&#34;
+-ldflags=&#34;-r ${MILVUS_WORK_DIR}/cmake_build/lib -r
+${MILVUS_WORK_DIR}/internal/core/output/lib&#34;
+./internal/querycoordv2/dist -run
+&#34;TestDistControllerSuite/TestSyncAll|TestDispatchLoopUsesDispatchInterval&#34;
+-timeout 300s` blocked locally because this worktree has no
+`internal/core/output/lib/pkgconfig/milvus_core.pc`.
+
+---------
+
+Signed-off-by: sijie-ni-0214 &lt;sijie.ni@zilliz.com&gt;
+
+- fix: Reject dropping active TTL field (#50479)
+
+issue: https://github.com/milvus-io/milvus/issues/50476
+
+This PR rejects dropping a field when it is referenced by the collection
+`ttl_field` property. Users need to drop the property first, which
+avoids leaving dangling entity-level TTL metadata after Drop Field.
+
+Validation:
+- gofumpt -l internal/proxy/task.go internal/proxy/task_test.go
+- git diff --check
+- TestValidateDropField
+
+Signed-off-by: sijie-ni-0214 &lt;sijie.ni@zilliz.com&gt;
+
+- fix: support alter schema add request validation (#50118)
+
+## Summary
+
+- Allow AlterCollectionSchema AddRequest to carry a field-only add
+request while keeping the added field as a non-function output.
+- Support function-only add requests against existing output fields, and
+validate the merged function schema through the shared function
+validator.
+- Keep the BM25 field-plus-function path explicit, reject invalid BM25
+add forms, and normalize TIMESTAMPTZ default values before broadcasting
+field-only schema changes.
+
+issue: #50119
+
+## Test Plan
+
+- [x] source scripts/setenv.sh &amp;&amp; go test -v -count=1 -tags dynamic,test
+-gcflags=&#34;all=-N -l&#34; -ldflags=&#34;-r ${MILVUS_WORK_DIR}/cmake_build/lib -r
+${MILVUS_WORK_DIR}/internal/core/output/lib&#34; ./internal/proxy -run
+&#39;TestAlterCollectionSchemaTask($|_)&#39; -timeout 300s
+- [x] gofumpt -l internal/proxy/function_task.go
+internal/proxy/function_task_test.go internal/proxy/task.go
+internal/proxy/task_test.go internal/proxy/util.go
+internal/proxy/util_test.go
+internal/rootcoord/ddl_callbacks_alter_collection_schema.go
+internal/rootcoord/ddl_callbacks_alter_collection_schema_test.go
+internal/util/function/validator/validator.go
+- [x] git diff --check upstream/master..HEAD
+- [ ] source scripts/setenv.sh &amp;&amp; go test -v -count=1 -tags dynamic,test
+-gcflags=&#34;all=-N -l&#34; -ldflags=&#34;-r ${MILVUS_WORK_DIR}/cmake_build/lib -r
+${MILVUS_WORK_DIR}/internal/core/output/lib&#34; ./internal/rootcoord -run
+&#39;TestDDLCallbacksBroadcastAlterCollectionSchema|TestDDLCallbacksAlterCollectionSchemaAddSkipsSchemaDropReady&#39;
+-timeout 300s (blocked locally at link time by stale C++/Loon symbols
+such as _FreeCFieldMemSizeList and _loon_segment_writer_* in local core
+libraries)
+
+Signed-off-by: sijie-ni-0214 &lt;sijie.ni@zilliz.com&gt;
+
+- fix: handle V1/V2 text and JSON auxiliary paths in datacoord GC (#50592)
+
+Related to #50591
+
+Fix dropped-segment JSON path reconstruction by splitting legacy
+json_key_index_log and new-format json_stats on JsonKeyStatsDataFormat.
+Extend recycleUnusedBinlogFiles to scan text_log, legacy
+json_key_index_log, and json_stats with path-specific segment ID parsing
+while keeping V3 manifest-based GC unchanged.
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- fix: honor partition names in REST hybrid search (#50569)
+
+Honor top-level partitionNames for REST v2 hybrid_search so it only
+searches requested partitions.
+
+issue: #50396
+
+---------
+
+Signed-off-by: sunby &lt;sunbingyi1992@gmail.com&gt;
+
+- fix: preserve nullable expr rewrite semantics (#50555)
+
+issue: #49891
+
+---------
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- fix: prevent BM25 IDF nil map panic (#50584)
+
+issue: #50542
+
+## Summary
+Keep cloned empty BM25 stats writable so recovered growing segments
+cannot register nil stats in the IDF oracle. Add a regression test for
+updating a growing segment after empty BM25 stats registration.
+
+Signed-off-by: aoiasd &lt;zhicheng.yue@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- test: add struct array nullable dynamic field coverage (#50109)
+
+### What this PR does
+Adds Python client and REST coverage for struct array nullable fields,
+including dynamic field scenarios and nullable vector config variants.
+
+### Tests
+Not run; PR creation only.
+
+---------
+
+Signed-off-by: zhuwenxing &lt;wenxing.zhu@zilliz.com&gt;
+
+- enhance: validate TEXT add field and optimize LOB text indexing (#50494)
+
+issue: #50425
+
+Signed-off-by: luzhang &lt;luzhang@zilliz.com&gt;
+Co-authored-by: luzhang &lt;luzhang@zilliz.com&gt;
+
+- enhance: add namespace sharding collection property (#50541)
+
+issue: #50557
+
+Summary:
+- Add and validate `namespace.sharding.enabled` collection property.
+- Default unset property to `false`.
+- Reject changing or deleting it via alter collection properties.
+
+Signed-off-by: sunby &lt;sunbingyi1992@gmail.com&gt;
+
+- enhance: add namespace mode property (#50504)
+
+## Summary
+- Add `namespace.mode` collection schema property helpers with
+`partition_key` as the default mode.
+- Accept only `partition_key` and `partition` namespace modes; reject
+invalid values such as `multitenant`.
+- Validate namespace mode during collection creation so valid values are
+persisted in `CollectionSchema.Properties`.
+
+issue: #50589
+
+---------
+
+Signed-off-by: sunby &lt;sunbingyi1992@gmail.com&gt;
+
+- enhance: size compaction result ID preallocation (#49919)
+
+Derive compaction result segment ID reservations from the expected
+output segment count instead of fixed ranges.
+
+- Estimate output segment counts from total input size and target
+segment size for single, sort, clustering, storage-version-upgrade,
+force-merge, and schema-version compactions.
+- Allocate result segment IDs and task metadata IDs in one contiguous
+RootCoord block, with the result segment range fixed at the front and
+metadata IDs consumed from the tail.
+- Add CompactionView helpers for total input size and collection TTL so
+scheduler submission paths share the same size-based allocation flow.
+- Reserve result-segment IDs with
+dataCoord.compaction.preAllocateIDExpansionFactor so result segment and
+metadata ID preallocation share the existing compaction ID factor.
+- Update milvus-proto to e90ee63ad3fc for snapshot export and external
+restore APIs, and refresh affected service mocks.
+- Validate nil or external force-merge and schema-version collections
+before ID allocation, and keep compaction-local oversized allocation
+rejection before RootCoord AllocN.
+- Keep schema-version compaction on the current BumpSchemaVersion path
+and preserve the frozen schema captured by the view.
+- Cover allocation sizing, range layout, defensive returns, force-merge
+target counts, schema-version submission, and oversized allocation
+rejection.
+
+See also: #49955
+
+Signed-off-by: yangxuan &lt;xuan.yang@zilliz.com&gt;
+
+---------
+
+Signed-off-by: yangxuan &lt;xuan.yang@zilliz.com&gt;
+
+- test: Add external table add field E2E tests (#50420)
+
+Related to #50416
+
+### What changed
+
+- Add MilvusClient E2E coverage for external table
+`add_collection_field` on scalar and vector fields.
+- Cover refresh/load/search/query behavior after adding fields,
+including about 10% NULL values in newly added scalar/vector fields.
+- Add non-Parquet source coverage for add scalar field on Lance,
+Iceberg, and Vortex.
+- Add full supported DataType matrix coverage for external add field,
+including scalar, array, geometry, and vector fields.
+- Add negative coverage for missing/duplicate `external_field`, type/dim
+mismatch, unsupported public data types, add/drop function, and drop
+field APIs.
+- Update Python client test dependency pin to `pymilvus==3.1.0rc35`.
+
+### Verification
+
+- `python -m py_compile
+tests/python_client/milvus_client/test_milvus_client_external_table.py
+tests/python_client/common/external_table_common.py
+tests/python_client/base/client_v2_base.py
+tests/python_client/check/func_check.py`
+- `python -m ruff check
+tests/python_client/milvus_client/test_milvus_client_external_table.py
+tests/python_client/common/external_table_common.py
+tests/python_client/base/client_v2_base.py
+tests/python_client/check/func_check.py`
+- `python -m pytest -n 4
+milvus_client/test_milvus_client_external_table.py --host 10.104.18.101
+--port 19530 --minio_host 10.104.18.27 --minio_bucket yanliang-mas2
+--tb=short -q -s`
+
+Result:
+
+```text
+182 passed, 1 xfailed in 318.94s (0:05:18)
+```
+
+The xfailed case is linked to #50416 and validates that old-field search
+still works before the server returns the current internal QueryNode
+assert for newly added fields before refresh.
+
+---------
+
+Signed-off-by: Yanliang Qiao &lt;yanliang.qiao@zilliz.com&gt;
+
+- build(deps): update tikv client-go to tidb-8.5 (#50528)
+
+Update tikv client-go version because we depend on the committs of
+returned value by `txn.Get`. And previous grpc version used by client-go
+has some deprecated functions and 8.5 update grpc.
+
+---------
+
+Signed-off-by: sunby &lt;sunbingyi1992@gmail.com&gt;
+
+- fix: create marisa string index temp directory (#50500)
+
+issue: #50488
+
+Signed-off-by: Shawn Wang &lt;shawn.wang@zilliz.com&gt;
+
+- fix: preserve grouped binlog child field ids in sealed load path (#50538)
+
+Related to #49526
+
+Populate FieldBinlogInfo.child_field_ids during LoadBatchFieldData so
+grouped StorageV2 loads keep sibling field metadata through the real
+sealed segment load flow instead of depending on legacy fallback
+parsing.
+
+Add a regression test covering grouped binlog loading for both int64 and
+varchar primary keys.
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+Co-authored-by: sunby &lt;sunbingyi1992@gmail.com&gt;
+
+- enhance: add routing table abstraction (#50527)
+
+issue: #50463
+
+Add generic routing table interfaces and a map-backed hash
+implementation under `pkg/common`.
+
+Also add focused unit coverage for lookup, invalid table state, hasher
+errors, value uniqueness, single-use commits, value removal, and
+concurrent locate/update access.
+
+Signed-off-by: sunby &lt;sunbingyi1992@gmail.com&gt;
+
+- enhance: optimize null predicate for sealed chunked fields (#50558)
+
+issue: https://github.com/milvus-io/milvus/issues/50556
+
+https://github.com/milvus-io/milvus/pull/50436 uses BulkIsValid to
+replace get_batch_views in hoping to avoid cost of constructing views
+such as StringViews. However, BulkIsValid is random access where the
+cost of other staff exceed the benefits which leads to performance
+regression.
+
+Constructing any kind of views is still unnecessary, and this PR uses
+valid data in Chunk directly. Here benchmarks:
+1 million rows of string data, `is null` expression
+
+StringView: ~4300us
+BulkIsValid: ~8340us
+This PR: 1440us
+
+Signed-off-by: SpadeA &lt;tangchenjie1210@gmail.com&gt;
+
+- enhance: preserve field binlog metadata in snapshots (#50568)
+
+issue: #44358
+
+Introduce snapshot format V4 so manifest serialization keeps FieldBinlog
+child_fields and format instead of dropping them during snapshot
+write/read round trips.
+
+Keep V1/V2/V3 readers compatible, route new writes to V4, and extend
+snapshot tests to cover roundtrip correctness and legacy compatibility.
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- enhance: add boost score support (#50372)
+
+issue: https://github.com/milvus-io/milvus/issues/46565
+
+Implement boost score evaluation for the Go search reduce pipeline,
+including
+QueryNode task integration, segcore C API bindings, and score expression
+  combination support.
+
+Add boost score runner logic in core, expose segment-level boost scoring
+to Go,
+  and cover the new behavior with C++, Go, and Python client tests.
+
+Signed-off-by: junjie.jiang &lt;junjie.jiang@zilliz.com&gt;
+
+- fix: Normalize raw byte vector lists for external tables (#50489)
+
+issue: #50450
+
+## What changed
+
+Fixes [#50450](https://github.com/milvus-io/milvus/issues/50450).
+
+This updates external Arrow normalization so dense vector
+`list&lt;uint8&gt;` and `fixed_size_list&lt;uint8&gt;` inputs are treated as raw
+Milvus
+vector bytes and normalized to `FixedSizeBinary`.
+
+## Why
+
+External table function outputs can be written by Milvus and later read
+through
+schemaless storage paths, where vector bytes may surface as `uint8`
+lists. The
+old validation expected `FloatVector` list inputs to have `float`
+children, so
+valid raw-byte vector data failed with an element type mismatch.
+
+## Validation
+
+- `cmake --build cmake_build --target all_tests -j 8`
+- `DYLD_LIBRARY_PATH=&#34;$PWD/cmake_build/src:$DYLD_LIBRARY_PATH&#34;
+cmake_build/unittest/all_tests
+--gtest_filter=&#39;storage.ExternalFloatVectorByteListNormalizesToFixedSizeBinary:storage.ExternalFloatVectorFixedSizeByteListNormalizesToFixedSizeBinary:storage.ExternalFloatVectorListNormalizesToFixedSizeBinary:storage.ExternalBinaryVectorListNormalizesToFixedSizeBinary:storage.ExternalSampleSchemaValidationRejectsMismatchedVectorElementType&#39;`
+- `git diff --check`
+
+Note: reset was run before tests; this worktree has no `bin/milvus`, so
+standalone was not started. These C++ unit tests do not depend on a
+running
+Milvus process.
+
+---------
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- fix: align expression cursor with scalar index raw data (#50233)
+
+issue: #50197
+
+---------
+
+Signed-off-by: Shawn Wang &lt;shawn.wang@zilliz.com&gt;
+
+- fix: avoid access log trace id panic (#50223)
+
+issue:#50222
+
+Signed-off-by: lianyu.sun &lt;lianyu.sun@ly.com&gt;
+
+- enhance: remove unused C++ dependencies (rapidjson, OpenDAL backend) (#50552)
+
+## What this PR does
+
+Removes two unused C++ third-party dependencies from `internal/core` to
+reduce dependency count, comprehension cost, and link/build surface.
+
+### rapidjson
+Linked into `milvus_core` but has **zero `#include` usage** in the C++
+sources (only a stale comment in `common/Json.h`). knowhere v3.0.3 and
+milvus-storage do not depend on it. Removes the conan requirement,
+`find_package(RapidJSON)`, and the link target.
+
+### OpenDAL backend
+Experimental `ChunkManager` backend gated behind `USE_OPENDAL`
+(**default OFF**) — released binaries never built it. Removes
+`OpenDALChunkManager`, the vendored OpenDAL Rust dependency, and all
+`USE_OPENDAL` build plumbing (Makefile / core_build.sh /
+3rdparty_build.sh / CMake). The Go-side `&#34;opendal&#34;` storageType value
+remains a backward-compatible alias to the standard remote chunk
+manager.
+
+### Kept
+`simde` is **not** removed — knowhere v3.0.3 requires it
+(`find_package(simde REQUIRED)`, used in
+`src/index/sparse/codec/varintdecode.c`).
+
+issue: #50551
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix: support nullable vector array growing flush (#50540)
+
+issue: #50536
+
+## What changed
+
+This fixes growing-source flush for nullable `VECTOR_ARRAY` fields.
+`BuildVectorArrayForChunk` now preserves null logical rows as Arrow null
+list entries and maps valid logical rows to compact physical offsets
+before reading `ConcurrentVector&lt;VectorArray&gt;`.
+
+A regression test covers nullable vector-array round-trip flushing with
+`valid, null, valid, null` rows.
+
+## Why
+
+With StorageV3/Loon and growing-source flush enabled, dropping a
+collection can flush growing segment data through
+`FlushGrowingSegmentData`. Nullable StructArray ArrayOfVector subfields
+can contain null logical rows, but the previous vector-array builder
+rejected any `valid_data`, causing `VECTOR_ARRAY does not support null
+rows` and a server panic during drop collection.
+
+## Verification
+
+- `git diff --check`
+- `milvus-dev-cli cpp-ut local . -b master --allow-dirty --target
+all_tests --case
+FlushGrowingSegmentTest.FlushNullableVectorArrayRoundTrip -f`
+  - UT ID: `ut-cpp-local-zhuwenxi-zhuwenxing-b-3e34efd-705e9e04`
+  - Status: succeeded
+- `milvus-dev-cli build local -b master --allow-dirty -f`
+  - Build ID: `build-local-zhuwenxing-zhuwenxing-bug-m-3e34efd`
+- Image:
+`harbor.milvus.io/manta/milvus:local-zhuwenxing-zhuwenxing-bug-milvus-panics-when-dropping-nullable-structa-3e34efd`
+- Deployed with:
+  - `common.storage.useLoonFFI=true`
+  - `common.storage.enableGrowingSourceFlush=true`
+  - `--mq rocksmq`
+- Ran the issue repro with `pymilvus==3.1.0rc39` from TestPyPI:
+  - `drop_collection succeeded`
+  - `has_collection_after_drop=False`
+  - standalone pod restart count stayed `0`
+- no `panic: flush growing source data` or `VECTOR_ARRAY does not
+support null rows` in standalone logs
+
+Signed-off-by: zhuwenxing &lt;wenxing.zhu@zilliz.com&gt;
+
+- enhance: vectorize ApplyValidData and share it as ApplyValidMask (#50487)
+
+issue: #50486
+
+## What this PR does
+
+`ApplyValidData` masks null rows out of a filter result (clears `res`
+and
+`valid_res` wherever the column is null). It ran one branchy per-row
+loop; for
+the common no-null case it scanned every row for nothing, and the same
+loop body
+was duplicated across `SegmentExpr::ApplyValidData` and a couple of
+kernels.
+
+- Extract the masking into a shared free function **`ApplyValidMask`**
+(in
+`exec/expression/Expr.h`, `namespace milvus::exec`). It packs 64 rows
+into a
+  word (the fixed-trip loop vectorizes) and walks only the null bits via
+`std::countr_zero`, so an all-valid block costs nothing. Bit-identical
+to the
+  per-row clear (`if (!valid_data[i]) res[i] = valid_res[i] = false;`).
+- `SegmentExpr::ApplyValidData` now delegates to it, so its existing
+callers —
+the skip-index branch and the by-offsets gather paths — benefit
+automatically.
+- Converge the two separable &#34;mask after batch&#34; sites
+(`BinaryRangeExpr`,
+`BinaryArithOpEvalRangeExpr`) onto the shared helper for the
+**sequential**
+`FilterType`; the scattered by-offsets branch is a gather and keeps its
+  per-row loop.
+
+## Why only those two kernels
+
+`BinaryRange`/`BinaryArithOp` evaluate their predicate as a **vectorized
+batch
+op** (`inplace_within_range_val`) that processes all rows including
+nulls, so
+validity is necessarily masked in a separate pass afterward — a
+separable
+post-batch mask. The other kernels (JsonContains, GIS, Compare,
+Unary/Term JSON)
+have **per-row scalar predicates** and check nullity inline with
+`continue` to
+skip the expensive per-row work; they are not separable post-batch masks
+and are
+intentionally left as-is.
+
+## Benchmark
+
+`ApplyValidData`: 1.9x with no nulls, 2.14x at 50% nulls, break-even
+(~1.01x)
+around 1% null density; no scenario regresses. (Xeon Gold 6338.)
+
+## Tests
+
+- Full C++ build: clean (exit 0).
+- `Expr.*:ExprTest.*:*Null*:*Range*:*ArithOp*`: passing, 0 failures.
+- The new/old `ApplyValidData` implementations are bit-identical at
+0/0.1/1/50%
+  null densities.
+
+## Relation to other PRs
+
+Split out of #50447 (which is now the `IsNotNull()` caching only). The
+`OffsetMapping` `all()/none()` vectorization landed separately in
+#50468.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: xiaofanluan &lt;xiaofan.luan@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix: [Proxy] validate AlterCollection description only when changed (#50532)
+
+PR #50178 added an unconditional collection-description length check in
+proxy `alterCollectionTask.PreExecute`. The check runs on every incoming
+`collection.description` value, including values that are not actually
+changing.
+
+### Bug
+
+A collection created before the limit existed (e.g. a 2 KB description)
+gets rejected when a client resends that unchanged description alongside
+a genuine change (e.g. a TTL update). Proxy fails it with
+`ErrParameterInvalid`, even though the description is not being
+modified. This breaks the PR&#39;s own invariant: existing collection
+metadata is not re-validated.
+
+### Change
+
+Validate the description only when its value actually differs from the
+stored one. A pre-existing collection can resend its (possibly
+oversized) description unchanged while altering other properties; that
+unchanged value is now skipped. A new or genuinely changed oversized
+description still returns `ErrParameterInvalid`.
+
+This keeps the check in `alterCollectionTask.PreExecute`, the same layer
+as every other AlterCollection property validator (TTL, mmap,
+consistency level), so the fix stays minimal and consistent with the
+surrounding code.
+
+## Tests
+
+`internal/proxy/task_test.go` —
+`TestAlterCollectionTaskValidateDescription` rewritten as table cases:
+- resending an unchanged oversized description while altering TTL is
+accepted (the bug);
+- changing a valid description to an oversized one is rejected;
+- changing an oversized description to a different oversized value is
+rejected;
+- shrinking an oversized description to a valid value is accepted;
+- with duplicate description keys, a changed oversized value is still
+rejected per-property.
+
+related: #50173
+
+Signed-off-by: shaoting-huang &lt;shaoting.huang@zilliz.com&gt;
+
+- enhance: support timeout_ms for function model providers (#50228)
+
+issue: #50229
+
+## What this PR does
+
+Adds configurable request timeouts for external function model providers
+(embedding / rerank / highlight), and standardizes the timeout unit from
+**seconds → milliseconds** across all providers and clients.
+
+### Changes
+- New global config `function.model.timeout_ms` (default `30000`,
+refreshable, exported to `milvus.yaml`).
+- New per-function param `timeout_ms` which **overrides** the global
+setting (`models.ResolveTimeoutMs`). Invalid / non-positive values fall
+back to the `30000` default.
+- Converted every provider/client timeout argument from `timeoutSec` to
+`timeoutMs`; `PostRequest` now applies the value as milliseconds.
+- Zilliz gRPC client now applies a per-request deadline via
+`requestContext` (previously had no request timeout).
+- Bedrock embedding now derives its call context from the request `ctx`
+with the configured timeout (was `context.Background()`).
+
+## Tests
+- `models`: `TestParseTimeoutMs` (defaults, override, invalid,
+zero/negative, case-insensitive key), `TestResolveTimeoutMs` (global
+default + per-function override), and `TestZillizClient_RequestContext`
+(per-request deadline + metadata).
+- `rerank`: provider param validation for invalid / non-positive
+`timeout_ms`.
+- `paramtable`: `TestFunctionConfig` asserts the new default.
+- Updated zilliz client / rerank / embedding / highlight tests for the
+ms unit and the new test constructor.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: xiaofanluan &lt;xiaofan.luan@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- enhance: set external refresh segment level to L1 (#50525)
+
+External collection refresh created new segments without an explicit
+level, so the protobuf default marked them as Legacy. Set the level to
+L1 to align the stored metadata with the normal non-L0 segment semantics
+and keep metrics/observability consistent.
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- fix: backfill absent nullable vector fields when loading growing segment (#50508)
+
+issue: #50366
+
+### Root cause
+
+Both crashes in #50366 hit the same nullptr dereference in
+`SegmentGrowingImpl::bulk_subscript_impl&lt;FloatVector&gt;` (SIGSEGV, exit
+code 139).
+
+When a growing segment is recovered from binlogs
+(`delegator.LoadGrowing` after a StreamingNode restart or shard
+transfer), binlogs written before an `AddCollectionField` carry no data
+for the added column. The schema-change WAL message flushes and fences
+segments, but the flush is asynchronous: a restart in the seal→flushed
+window reloads the segment as growing, from old binlogs, under the new
+schema.
+
+The post-load backfill loop at the end of `SegmentGrowingImpl::Load()`
+excluded **all** vector fields (`!IsVectorDataType`), so an added
+nullable vector field ended up with rows &gt; 0 and an **empty validity
+bitmap**. For that state `FilterVectorValidOffsets` returns `valid_count
+== count` (its initial value) together with an empty `valid_offsets`
+vector, and `bulk_subscript` uses the empty vector&#39;s `data()` — nullptr
+— as the offsets array with a non-zero count, crashing in
+`bulk_subscript_impl` on `seg_offsets[i]`.
+
+The sealed-segment counterpart already handles this correctly: it only
+excludes non-nullable vector fields from default filling and backfills
+the rest.
+
+### Changes
+
+- Extract the post-load backfill into `FillAbsentFields()` and backfill
+the validity bitmap of nullable vector fields that had no data to load,
+giving the column all-null semantics (mirroring
+`Reopen`/`fill_empty_field` and the sealed segment behavior).
+Non-nullable vector fields keep the previous behavior.
+- Absence is detected via an **empty validity bitmap** rather than empty
+physical data: a legally loaded all-null column also has no physical
+data in mapping storage and must not be filled twice.
+- Run the backfill on the storage-v2 manifest load path
+(`LoadColumnsGroups`) as well, which previously skipped it entirely due
+to an early return in `Load()`.
+
+### Test
+
+New regression test
+`SchemaReopenTest.LoadWithAbsentNullableVectorFieldShouldReadAllNull`
+reproduces the production scenario: load binlogs that predate the
+AddField into a segment constructed with the new schema, backfill via
+`FillAbsentFields` (as `Load()` does), read the added nullable vector
+column, then replay old-schema inserts and read across both the loaded
+and replayed ranges — all rows must read as null and nothing crashes.
+
+### Non-goals (follow-ups)
+
+- `FilterVectorValidOffsets` can still return an inconsistent
+(`valid_count`, `valid_offsets`) pair if an upstream invariant is broken
+(e.g. the interim-index error-recovery path `recreate_index` swaps in a
+fresh index without resetting `sync_with_index_`/`index_cur_`). Those
+producer-side bugs and the schema publication atomicity are tracked
+separately.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: xiaofanluan &lt;xiaofan.luan@zilliz.com&gt;
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- fix: [RBAC] describe_user returns ghost empty role names after repeated grant/revoke (#50058)
+
+- Skip malformed RBAC catalog entries whose parsed etcd key segments are
+empty or whitespace-only when listing roles, user-role mappings, grants,
+and policies, so describe_user no longer surfaces ghost empty role names
+from historical trailing-slash keys.
+- Keep the fix read-side only and inline with the existing invalid-key
+handling; write, replay, restore, and cleanup paths remain unchanged.
+- Add regression coverage for empty-segment RBAC keys across
+describe-user role lookup, ListRole, ListUserRole, ListGrant, and
+ListPolicy.
+
+related: #49989
+
+Signed-off-by: shaoting-huang &lt;shaoting.huang@zilliz.com&gt;
+
+- test: include chaos checker error samples in assertions (#50509)
+
+## What this PR does
+
+When chaos checker assertions fail, the final pytest assertion message
+currently only includes normalized error text, which can drop useful
+values such as expected/actual row counts. This PR keeps a compact
+sample of the original error alongside the normalized error type so the
+useful failure detail appears at the end of the pytest output.
+
+## Verification
+
+- python3 -m py_compile tests/python_client/chaos/checker.py
+
+Signed-off-by: zhuwenxing &lt;wenxing.zhu@zilliz.com&gt;
+
+- enhance: [RBAC] support role descriptions (#50184)
+
+- Persist role descriptions when creating roles, expose them in role
+list/describe results, and support updating descriptions through the
+AlterRole path without changing role names.
+- Store role descriptions in the role value body while keeping role
+names in keys, and tolerate legacy empty role values plus undecodable
+stored values by returning an empty description for that role row.
+- Reject built-in/default roles and over-limit descriptions before WAL
+writes, and share the role-description length validator between proxy
+and rootcoord.
+
+related: #50183
+
+---------
+
+Signed-off-by: shaoting-huang &lt;shaoting.huang@zilliz.com&gt;
+
+- fix: struct hybrid collapse validation (#50399)
+
+issue: https://github.com/milvus-io/milvus/issues/42148
+
+fixing issues during review of
+https://github.com/milvus-io/milvus/pull/50369
+
+---------
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- enhance: Make max array capacity configurable (#50264)
+
+issue: https://github.com/milvus-io/milvus/issues/50263
+
+This PR makes max array capacity configurable, preparing for row level
+multi-user sharing
+
+---------
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- doc: add error-handling casebook; harden guide/convention docs and agent entry (#50515)
+
+Follow-up to #50221 (issue: #47420) — documentation only, no code
+change.
+
+## Why
+
+The 60+ error misclassifications corrected during the #50221 review all
+happened **with the rules documents already in place**
+(`error_handling_guide.md`, `error_sentinel_convention.md`). The rules
+layer was sufficient; what was missing was (a) a layer of real
+positive/negative examples showing how the mistakes actually look in
+code, and (b) a mandatory entry point so coding agents and new authors
+read the right things before touching error handling. Linters catch
+*bare* errors, but they cannot catch a *wrong* code or a *wrong*
+classification — that needs case-level documentation.
+
+## What
+
+- **`docs/dev/error_handling_casebook.md` (new).** The seven mistake
+patterns from the #50221 review, each with the actually-written wrong
+form (as first drafted, caught in review) and the merged fix, citing
+file + function:
+1. &#34;Looks like validation&#34; is not user input (coordinator task types,
+plan shapes)
+2. Internal component output is not user input (search-reduce, recovered
+panics)
+  3. `WrapErrXxxErr` is a relabel, not a context-adder (code masking)
+4. The cause goes in the error argument, never the format string
+(`errors.Is` chain destruction)
+5. InputError aborts `retry.Do`: scan before you mark (incl. the
+dual-identity boundary-stamp pattern)
+6. Converting an `errors.Is` control-flow sentinel to merr widens every
+guard (the `errIgnored*` near-miss)
+7. Boundary conversions that look wrong but are contracts (knowhere
+2006, segcore wire collapse)
+
+Plus a quick-reference table for commonly confused sentinels and a
+minimum procedure for coding agents.
+- **`error_handling_guide.md`**: pre-flight scan recipe (`retry.Do`
+consumers) before InputError marking; `errors.Is`-widening warning
+before converting a sentinel to merr; casebook cross-link.
+- **`error_sentinel_convention.md`**: code-range partition table (which
+100-range belongs to which family, what 65535 is, why segcore 2000–2099
+is table-owned); &#34;`milvusError.Is` matches by code&#34; consequences;
+casebook cross-link.
+- **`CLAUDE.md`**: a mandatory error-handling procedure for coding
+agents (blame test, `merr.Wrap`-only context rule, the two pre-flight
+greps, code-range rule, guard tests + full test-go on contract changes).
+
+All file/function citations were verified against current master
+(post-#50221).
+
+---------
+
+Signed-off-by: zhenshan.cao &lt;zhenshan.cao@zilliz.com&gt;
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- enhance: add proxy http server timeout config (#49951)
+
+issue: #49944
+
+## What this PR does
+
+Makes the proxy HTTP API server timeouts configurable so deployments can
+tune request, response, and keep-alive behavior without changing code.
+
+### Changes
+- New config under `proxy.http`: `readHeaderTimeout` (5s), `readTimeout`
+(30s), `writeTimeout` (30s), `idleTimeout` (300s), `maxHeaderBytes`
+(1048576). All exported to `milvus.yaml`.
+- Apply the settings to the proxy HTTP API server; the management HTTP
+server is left unchanged.
+
+## Tests
+- `paramtable`: `TestHTTPConfig_Init` (defaults) and
+`TestHTTPConfig_TimeoutOverrides` (override behavior) — verified
+locally.
+- `proxy`: `Test_NewServer_HTTPServer_TimeoutDefaults` /
+`Test_NewServer_HTTPServer_TimeoutConfigOverrides` assert the values are
+wired into the running `http.Server`.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: xiaofanluan &lt;xiaofan.luan@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- fix: return error instead of panic on malformed DumpMessages start_message_id (#50342)
+
+issue: #50341
+
+## Summary
+
+`DumpMessages` (data salvage, added in #47599) validated that
+`start_message_id`
+is non-empty but then passed the client-controlled `id` bytes straight
+into the
+panicking `message.MustUnmarshalMessageID`. A syntactically invalid id
+(e.g. a
+non-base64-decodable string for a Pulsar WAL) panicked the proxy and
+**crashed
+the whole process** — the client only saw `UNAVAILABLE: Socket closed`.
+
+This uses the non-panicking `message.UnmarshalMessageID` and rejects
+malformed
+input with an `InvalidParameter` error instead, keeping the server up.
+
+## Changes
+
+- `internal/proxy/impl.go`: `DumpMessages` now unmarshals
+`start_message_id` via
+`UnmarshalMessageID` and returns `merr.WrapErrParameterInvalidMsg` on
+failure.
+- `tests/integration/replication/data_salvage_test.go`: add
+`TestDumpMessagesWithMalformedStartMessageId`, asserting the RPC errors
+and a
+  follow-up RPC still succeeds (server stayed up).
+
+## Reproduction (before the fix)
+
+```python
+from pymilvus import MilvusClient
+client = MilvusClient(uri=&#34;http://localhost:19530&#34;)
+for _ in client.dump_messages(
+    pchannel=&#34;by-dev-rootcoord-dml_0&#34;,
+    start_message_id={&#34;id&#34;: &#34;not-a-valid-base64-msgid!!!&#34;, &#34;wal_name&#34;: &#34;Pulsar&#34;},
+):
+    break
+# -&gt; server panics in MustUnmarshalMessageID (message_id.go:45) and exits
+```
+
+```
+panic: unmarshal message id failed: decode pulsar fail when decode base64 ...
+  message.MustUnmarshalMessageID(...) pkg/streaming/util/message/message_id.go:45
+  (*Proxy).DumpMessages(...) internal/proxy/impl.go
+```
+
+## Test Plan
+
+- [ ] `TestDumpMessagesWithMalformedStartMessageId` passes (integration)
+- [ ] Existing `DataSalvageSuite` tests pass
+
+---------
+
+Signed-off-by: bigsheeper &lt;yihao.dai@zilliz.com&gt;
+Signed-off-by: Yihao Dai &lt;yihao.dai@zilliz.com&gt;
+
+- feat: [RBAC] support user description in credentials (#50186)
+
+- Wire credential descriptions through create/update/read paths,
+including proxy, HTTP v2, Go SDK options, length validation, optional
+update presence handling, and internal credential proto/model
+persistence.
+- Preserve existing encrypted passwords and descriptions during
+RootCoord credential updates when either field is omitted, reject
+all-empty or partial direct password updates, and keep sha256 passwords
+cache-only.
+- Skip auth-cache refresh for description-only credential updates so
+existing authentication state is not blanked, while still refreshing
+caches for password updates.
+- Return persisted user descriptions from select_user and HTTP v2
+describe_user, including include_role_info=false, and reuse
+already-loaded credential rows in user listing and RBAC backup to avoid
+duplicate etcd reads while ignoring malformed credential keys.
+- Use the upstream milvus-proto go-api/v3 version that includes the
+credential description proto change; the temporary fork replaces in
+root, pkg, client, and tests/go_client modules have been removed.
+
+design doc:
+docs/design-docs/design_docs/20260601-rbac-user-description.md
+
+related: #50179
+
+---------
+
+Signed-off-by: shaoting-huang &lt;shaoting.huang@zilliz.com&gt;</div>
+</div>
+
+<a href="../project/milvus-io_milvus.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

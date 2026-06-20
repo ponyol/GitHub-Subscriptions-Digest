@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (56 commits) - gastownhall/beads - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (56 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/gastownhall_beads.html">gastownhall/beads</a> /
+    Updates in main (56 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/gastownhall_beads.html">gastownhall/beads</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-20 06:14 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/gastownhall/beads/commits/main" target="_blank">https://github.com/gastownhall/beads/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This update primarily addresses `is_blocked` data consistency by introducing a `bd recompute-blocked` command and integrating repair into `bd doctor`. It also fixes a critical issue where `dolt pull` could block due to uncommitted configuration changes, now ensuring explicit config commits and auto-resolving conflicts. Additionally, many CLI commands gain proxied-server support, and `bd init` now features an idempotent `--init-if-missing` flag for easier setup.
+
+---
+
+Данное обновление в основном решает проблему согласованности данных `is_blocked`, представляя новую команду `bd recompute-blocked` и интегрируя исправление в `bd doctor`. Оно также устраняет критическую проблему, при которой `dolt pull` мог быть заблокирован из-за незакоммиченных изменений конфигурации, теперь обеспечивая явные коммиты конфигурации и автоматическое разрешение конфликтов. Кроме того, многие команды CLI теперь поддерживают режим прокси-сервера, а `bd init` получил идемпотентный флаг `--init-if-missing` для упрощения настройки.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix(is_blocked): cross-mode full recompute repair for stale is_blocked (bd-6dnrw.37) (#4423)
+
+* fix(is_blocked): cross-mode full recompute repair for stale is_blocked (bd-6dnrw.37)
+
+The post-pull is_blocked recompute (bd-6dnrw.3) is scoped to the merge diff and
+skips when a re-pull merges nothing (HEAD unchanged), so a recompute that failed
+AFTER its merge committed — or a conflicted pull resolved by hand (which skips
+the recompute) — left is_blocked stale with no repair: rerunning bd dolt pull
+merged nothing and recomputed nothing. bd ready trusts is_blocked, so stale
+values silently hide ready work or surface blocked work.
+
+Core (internal/storage/issueops/blocked_consistency.go):
+- RecomputeAllIsBlockedInTx: full mark/unmark fixpoint over every issue+wisp,
+  returns rows corrected. Idempotent. Reuses the existing pass functions.
+- CountIsBlockedInconsistenciesInTx: read-only COUNT of stale rows for detection.
+  Its predicate mirrors the mark/unmark templates and is pinned to the repair by
+  the dolt-package lockstep tests (a converged DB counts 0; any counted row is
+  one a recompute pass flips), so detection cannot silently drift from repair.
+
+Cross-mode repair:
+- storage.BlockedRecomputer capability; DoltStore + EmbeddedDoltStore
+  RecomputeAllBlocked (stage issues-only, matching the post-pull recompute).
+- New &#39;bd recompute-blocked&#39; command — works in BOTH embedded and server mode.
+  bd doctor is server-mode only, so embedded users need a non-doctor entry point.
+- bd doctor (server mode) gains a read-only &#34;Blocked State&#34; check and a
+  &#39;bd doctor --fix&#39; dispatch running the same repair. Warn-only (does not fail
+  OverallOK): new check shipping in a patch, is_blocked self-heals via the fix.
+
+Secondary item (server recomputeBlockedAfterPull commits via s.Commit, which can
+sweep a concurrent writer&#39;s changes) split to bd-6y5hx (P3, deferred): it is
+subtle (after an auto-resolved merge the working set holds the whole merge
+result, so a naive issues-only narrowing would drop merge results). The embedded
+path already stages issues-only; the new repair path stages issues-only too.
+
+Tests: 3 dolt lockstep tests (detect==repair, stuck-blocked, parent-child
+cascade) + embedded wiring test. Smoke-tested on a real ~2000-issue embedded DB:
+0 false positives. build/vet/gofmt/golangci-lint all clean.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs: regenerate CLI reference for `bd recompute-blocked`
+
+Run ./scripts/generate-cli-docs.sh + ./scripts/generate-llms-full.sh with
+the canonical CGO_ENABLED=0 gms_pure_go build to pick up the new
+`bd recompute-blocked` command. The adopted PR added the command but did
+not regenerate the CLI docs, failing the PR doc-flags freshness checks.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(is_blocked): guard full recompute against dirty graph; pin doctor blocked-state last
+
+Maintainer adoption fixes for PR #4423 review (bd-6dnrw.37):
+
+- Refuse a full is_blocked recompute when the committable graph tables
+  (issues, dependencies) carry uncommitted working-set changes, across the
+  server, embedded, and doctor-fix paths. The recompute derives flags from
+  the current graph and stages only `issues`, so running it dirty would
+  sweep unrelated issue edits into the repair commit or publish is_blocked
+  derived from uncommitted dependency state. Dolt-ignored wisp tables are
+  deliberately excluded from the guard: they are never committed and show
+  as perpetually modified in dolt_status, so guarding on them would refuse
+  the recompute in any workspace that uses wisps.
+
+- Pin the doctor &#34;Blocked State&#34; fix to an explicit terminal priority so it
+  provably runs after every graph-mutating fix (Dependency Keys,
+  Orphaned/Child-Parent Dependencies, Cross-Table Duplicates) instead of
+  relying on check-append order. This fixes a stale is_blocked left after
+  `bd doctor --fix --fix-child-parent` removed a child-parent edge.
+
+- Surface (no longer swallow) the doctor-fix Dolt stage/commit errors, and
+  tolerate only the benign nothing-to-commit case.
+
+Tests: dirty-issues and dirty-dependencies refusal, dirty-wisps still
+repairs, clean repair+commit idempotence (dolt server-mode); fix-ordering
+regression covering the --fix-child-parent case (cmd/bd); embedded wiring
+test now commits its seed to match the fresh-process clean-tree precondition.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+Co-authored-by: Eddie the Engineer &lt;ci@beads.test&gt;
+
+- Preflight graph apply blocking cycles (#4384)
+
+* fix: preflight graph apply blocking cycles
+
+* fix: maintainer review fixes for adopted graph-apply cycle PR
+
+Keep dep/link dependency targets read-only: resolveIDForMutation is used
+only for the mutated source issue, while the depends-on/link target is
+resolved via read-only resolveIDWithRouting so resolving a routed target
+never opens a foreign project writable or runs open-time migrations into
+its history (bd-6dnrw.32, GH#3231).
+
+Make the embedded graph-apply blocking-cycle preflight mirror the storage
+SQL cycle check: its existing-edge walk is restricted to blocking dep
+types, so a blocking edge whose return path runs only through an existing
+parent-child or waits-for dep is no longer rejected when bd dep add allows
+it. The parent-&gt;child blocking-path validator keeps the broader
+AffectsReadyWork traversal.
+
+Port the blocking-cycle preflight to the domain/proxied-server graph-apply
+path and drop the now-redundant per-edge HasCycle probe so embedded and
+server modes agree. Remove the dead graphApplyPlanCanSkipSQLCycleChecks
+helpers left by the strategy change.
+
+Restore the bulk --no-cycle-check whole-graph rollback test and add routed
+read-only-target, parent-child parity, and domain external-ID cycle tests.
+
+---------
+
+Co-authored-by: Eddie the Engineer &lt;ci@beads.test&gt;
+
+- fix(dolt): pre-pull commit must include config (kv.memory.* pull-wedge) (#4412)
+
+* fix(dolt): pre-pull commit must include config; auto-resolve convergent kv.memory.* config conflicts
+
+bd remember stores persistent memories as kv.memory.* rows in the synced
+config table. Commit() deliberately excludes config (GH#2455, to avoid
+sweeping a concurrent writer&#39;s stale issue_prefix into an unrelated commit),
+so the GH#2474 pre-pull auto-commit at pullFromRemote (store.go) and PullFrom
+(federation.go) leaves config permanently dirty once any memory exists. The
+&#34;clean the working set before merging&#34; step then leaves config dirty and
+DOLT_MERGE refuses to start (&#34;cannot merge with uncommitted changes&#34;). Two
+correct PRs colliding over config. Diagnosed from a live server-mode repro
+(Wyvern wy-71t); see PROPOSAL-pull-config-wedge.md.
+
+Fix (server mode): add commitBeforePull, which stages config explicitly via
+DOLT_ADD rather than relying on CommitWithConfig&#39;s DOLT_COMMIT(&#39;-Am&#39;). The
+proposal author observed -Am not staging config reliably under the server-mode
+stored-procedure path, and the new embedded test TestEmbeddedConfigCommitStagesConfig
+confirms -Am DOES stage config in the embedded engine — so the unreliability is
+server-mode-specific and explicit staging is the robust choice. Commit() and
+commitBeforePull now share commitWorkingSet(includeConfig bool).
+
+Hardening (both modes): making config a committed/synced table means two clones
+editing the same memory key collide on a config merge conflict. Extend
+TryAutoResolveMergeConflicts to auto-resolve config conflicts with --theirs ONLY
+when every conflicted row is a kv.memory.* key (machine-convergent, same policy
+as metadata); any other config key (issue_prefix above all) is left for the
+operator. Without this the primary fix would trade a silent pull wedge for an
+operator-visible conflict wedge on the exact bd remember workload.
+
+Embedded pre-pull (CommitPending -&gt; -Am) already stages config and is unchanged;
+it gains the resolver hardening.
+
+Tests: server-mode pull_config_wedge_test.go (commit-includes-config + resolver
+positive/negative, run under Docker in CI) and embedded pull_config_wedge_test.go
+(in-process: -Am-stages-config probe + resolver positive/negative, all green).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs: add pull-config-wedge diagnosis/proposal (PR #4412)
+
+The diagnosis-and-patch write-up behind this PR: how GH#2455 (Commit excludes
+config) and GH#2474 (pre-pull auto-commit) collide over the synced config table,
+leaving kv.memory.* rows permanently uncommitted so DOLT_MERGE refuses to start.
+Includes the live-DB validation (Wyvern wy-71t) and the rejected alternatives.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(dolt): adopt-pr maintainer fixes for pull/sync config wedge
+
+Maintainer review fixups for PR #4412, squashed into one commit on top of
+the contributor&#39;s branch.
+
+Pre-merge config wedge (sync): bd federation sync committed with the
+config-excluding Commit before its merge while this PR switched the pull
+paths to commitBeforePull, so any DB that ran `bd remember` carried dirty
+kv.memory.* config rows and hit the &#34;cannot merge with uncommitted changes&#34;
+wedge. Sync now uses commitBeforePull too, with a regression test.
+
+Pre-pull auto-commit safety (GH#2455): commitBeforePull no longer stages the
+whole config table. It auto-commits only convergent memory rows
+(kv.memory.*); if any other config key is dirty (issue_prefix above all) it
+refuses with operator guidance instead of sweeping a stale value into the
+merge basis, restoring the GH#2455 protection the broad pre-pull staging had
+reopened.
+
+Sync --strategy config commit: a config-only conflict resolution committed
+through the config-excluding Commit, so it could report success without
+creating the merge-resolution commit and re-wedge the next sync. Sync now
+commits resolutions through a config-inclusive path (commitMergeResolution).
+
+Embedded sync parity: EmbeddedDoltStore.Sync fetched and merged without the
+pre-merge CommitPending guard already used by embedded Pull/PullRemote/PullFrom
+and the new server Sync, so the same dirty kv.memory.* working set could still
+wedge `bd federation sync` in embedded mode. Sync now commits pending changes
+before fetch/merge (embedded Commit is DOLT_COMMIT(&#39;-Am&#39;), which stages
+config), with an embedded regression test that drives Sync with a dirty
+kv.memory.* row.
+
+KV/memory namespace collision: `bd kv set memory.*` stored to kv.memory.*,
+indistinguishable from a `bd remember` memory the merge resolver auto-resolves
+with --theirs. validateKVKey now reserves the memory. prefix so a generic KV
+value can&#39;t be silently overridden by the remote on pull.
+
+Shared prefix + tests: centralize the kv.memory. prefix in
+internal/storage/kvkeys (used by cmd/bd and the merge resolver) with a
+contract test; route the remaining cmd/bd kv. prefix literals (the doctor KV
+check, the validateKVKey nested-prefix guard, and the memory listing) through
+the kvkeys constants; and strengthen the server-mode non-memory config
+conflict test to prove a conflict materialized before the resolver declines it.
+
+Maintainer review fixup for PR #4412.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+Co-authored-by: Eddie the Engineer &lt;ci@beads.test&gt;
+
+- commit federation peer metadata before sync (#4190)
+
+Commit federation_peers writes from add-peer and auto-commit pending non-config changes before sync fetch/merge, matching PullFrom behavior.
+
+Refs gastownhall/beads #3852
+
+_codex-gpt-5.5-medium on behalf of matt wilkie_
+
+- fix: prefer wisp on cross-table dup; add CGO-free duplicate check (be-iabdi) (#4163)
+
+* fix(doctor): prefer wisp on cross-table dup; add CGO-free duplicate check (be-iabdi)
+
+Three fixes for the issues/wisps ID collision bug:
+
+1. Lookup robustness: replace hard-error with graceful dedup in all five
+   merge sites (search.go, ready_work.go, ready_work_counts.go,
+   search_counts.go, dependency_queries.go). When an ID is found in both
+   tables the wisp record is preferred (canonical source of truth).
+
+2. Doctor cross-table check: add CheckCrossTableDuplicates and the matching
+   fix.CrossTableDuplicates. Uses MySQL wire protocol so it works without
+   CGO on any dolt-server backend. Wired into bd doctor --check=validate
+   (and --fix for auto-repair). Reports as StatusError so the check blocks
+   a clean validate run until the dups are gone.
+
+3. Update three tests that previously asserted the hard-error behaviour to
+   instead assert graceful wisp-preferring dedup.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* fix(ready_work): remove dead error return from mergeReadyWisps (unparam lint)
+
+mergeReadyWisps always returned nil after the be-iabdi dedup refactor;
+unparam flagged the unused error return. Remove error from the signature,
+update GetReadyWorkInTx call site, and drop the matching test expectation.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Jim Wordelman &lt;jim@wordelman.name&gt;
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix(list): disable default truncation when stdout is piped (GH#4094) (#4158)
+
+- Add `case !ui.IsTerminal()` between allFlag and IsAgentMode in
+  list_input.go so piped stdout never applies the default limit
+- Suppress truncation hint on piped stderr (IsStderrTerminal check in
+  printTruncationHint)
+- Update limit_truncation_hint test to expect no hint in piped mode,
+  since bdListCapture always runs with buffered pipes
+
+Rebased onto current main; logic relocated from list.go Run() closure
+to list_input.go gatherListInput() following the refactor that landed
+since the original branch was cut.
+
+Co-authored-by: Jim Wordelman &lt;jim@wordelman.name&gt;
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix(stealth): keep --stealth out of the tracked .gitignore (#4375)
+
+Stealth mode was leaking into the tracked project-root `.gitignore`: `bd init --stealth` routed `.beads/` into `.git/info/exclude` but then ran `doctor.EnsureProjectGitignore` unconditionally, and `bd doctor --fix` re-created the same tracked file — both visible in `git status`, defeating stealth. This routes those Dolt-file patterns into `.git/info/exclude` instead (worktree-aware via `--git-common-dir`), leaves the non-stealth path unchanged, and additionally remediates repos that an older `bd` already leaked into by stripping the bd-managed section from the tracked `.gitignore`. The three exclude writers now share one `addExcludePatterns` core. Stealth is detected via the persisted `no-git-ops` flag (the same signal `bd prime` uses, #593).
+
+Co-authored-by: Michael Hackner &lt;HackAttack@users.noreply.github.com&gt;
+Co-authored-by: Claude (claude-opus-4-8-high) &lt;noreply@anthropic.com&gt;
+
+Agent-Signature: claude-opus-4-8-high on behalf of maphew
+
+- Merge pull request #4451 from gastownhall/db/config
+
+bd config proxied-server
+
+- /{cmd,internal}: bd config proxied-server
+
+- Merge pull request #4450 from coffeegoddd/db/dep
+
+/{cmd,internal}: wire bd dep to proxied-server use cases
+
+- /cmd/bd/dep_proxied_server.go: lint
+
+- /{cmd,internal}: bd dep proxied-server
+
+- Merge pull request #4174 from coffeegoddd/db/ready
+
+/{cmd,internal}: bd ready proxied server mode
+
+- test(domain/db): isolate readyOffsetSkipsLeadingRows with unique label
+
+Prefix-only filtering was insufficient: when prior subtests in the same
+TestIssueGetReadyWork suite leave ready rows behind, Offset=2 advances
+past the global sort and the prefix filter then returns 0 of our 5
+items. Use a unique label in the WorkFilter so only our 5 seeded rows
+participate in the offset window, matching the pattern already used by
+readyOffsetHasMoreSignaling and readyOffsetWalksAllPages.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- docs: regenerate CLI reference for `bd ready --offset`
+
+Run ./scripts/generate-cli-docs.sh + ./scripts/generate-llms-full.sh
+with the canonical CGO_ENABLED=0 gms_pure_go build to pick up the new
+--offset flag.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- /{cmd,internal}: support pages
+
+- test(ready proxied): cover --limit 0 (gascity&#39;s invocation)
+
+gascity always passes --limit 0 to defeat the default cap of 100. Verify
+the proxied path returns the full set, omits the truncation hint, and
+doesn&#39;t error.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) &lt;noreply@anthropic.com&gt;
+
+- /{cmd,internal}: bd ready proxied-server
+
+- Merge pull request #4447 from gastownhall/db/reopen
+
+bd reopen: proxied-server mode
+
+- /cmd/bd: pr feedback
+
+- test(cmd/bd): isolate TestCommitBeadsConfigSkipsGitHooks from ambient git config (#4448)
+
+This test inits a temp repo and commits via commitBeadsConfig, which uses the
+ambient git configuration. It read the developer&#39;s real ~/.gitconfig (and the
+shared global config), so under the full `make test` run it could flake:
+`commitBeadsConfig` failed with `exit status 128` and the follow-up assertion
+reported `your current branch &#39;master&#39; does not have any commits yet`,
+consistent with the global init.defaultBranch/config being clobbered or
+transiently rewritten by a concurrent test.
+
+Make the test hermetic, matching the pattern already used in init_hooks_test.go:
+pin HOME, XDG_CONFIG_HOME, and GIT_CONFIG_GLOBAL to a throwaway home, set
+GIT_CONFIG_NOSYSTEM=1, and create the branch explicitly with
+`git init --initial-branch=main` so the result never depends on the ambient
+init.defaultBranch.
+
+Verified: the test passes normally and, critically, still passes when run under
+a deliberately hostile global git config (init.defaultBranch=master, a failing
+global pre-commit hook, and no global identity) — confirming it no longer
+depends on ambient/shared git configuration.
+
+Agent-Signature: claude-opus-4-8-high on behalf of maphew
+
+- feat(init): add --init-if-missing for idempotent init (#3490) (#4332)
+
+* feat(init): add --init-if-missing for idempotent init (#3490)
+
+bd init aborts with exit 1 when the workspace is already initialized,
+forcing scaffold scripts to pre-stat .beads/embeddeddolt/&lt;prefix&gt; to tell
+&#34;already initialized&#34; (benign) apart from real errors. Add an opt-in
+--init-if-missing flag: when the workspace already exists, init prints a
+benign &#34;Skipping init: workspace already initialized.&#34; to stderr and exits 0.
+Default behavior (flag absent) is unchanged - exit 1 with the existing
+&#34;already initialized ... Aborting&#34; message.
+
+The flag is intercepted only at the existing checkExistingBeadsData guard
+call site; detection logic and the --force/--reinit-local paths are untouched.
+
+Docs regenerated via scripts/generate-cli-docs.sh and generate-llms-full.sh.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* fix(init): abort --init-if-missing on explicit prefix mismatch
+
+--init-if-missing silently skipped whenever a workspace already existed,
+even if the caller passed an explicit --prefix that differed from the
+existing workspace. That masked a real mismatch: `bd init --prefix bar
+--init-if-missing` against an existing `foo` workspace exited 0 and
+ignored the requested prefix.
+
+Now, when --prefix is set explicitly (and --database is not), compare the
+requested prefix against the existing workspace&#39;s recorded DoltDatabase
+and abort on a genuine mismatch; matching or undeterminable cases still
+skip benignly. Extracts the prefix-&gt;dbName normalization into shared
+helpers so the guard derives exactly the same name init records, and
+factors the decision into a pure, unit-tested helper.
+
+Refs #3490
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* fix(init): don&#39;t mask operational errors or --database mismatch under --init-if-missing
+
+Two idempotent-init correctness fixes on top of #4332 (reviewer Bernoulli):
+
+1. checkExistingBeadsData now distinguishes the benign &#34;already initialized&#34;
+   outcome (errWorkspaceAlreadyInitialized, carried by a workspaceExistsError
+   that keeps the user-facing message) from operational errors such as an
+   unreadable .beads/embeddeddolt directory. --init-if-missing skips only the
+   benign case; an operational error still aborts instead of being masked as a
+   successful idempotent skip.
+
+2. An explicit --database mismatch now aborts --init-if-missing, mirroring the
+   existing --prefix guard. --database is the authoritative database selector,
+   so it is checked even when --prefix is also set.
+
+Tests: initIfMissingDatabaseMismatch table; checkExistingBeadsDataAt returns a
+sentinel-matching error for an existing database and a non-matching
+(operational) error when embeddeddolt is unreadable.
+
+Agent-Signature: claude-opus-4-8-high on behalf of maphew
+
+---------
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+Co-authored-by: matt wilkie &lt;maphew@gmail.com&gt;
+
+- /{cmd,internal}: reopen
+
+- Merge pull request #4446 from coffeegoddd/db/close
+
+/{cmd,internal}: bd close proxied-server support
+
+- /cmd/bd/init.go: hard gate
+
+- /cmd/bd/close_proxied_server.go: pr feedback
+
+- /{cmd,internal}: bd close proxied-server
+
+- Merge pull request #4445 from coffeegoddd/db/show
+
+/{cmd,internal}: bd show proxied-server support
+
+- /{cmd,internal}: bd show proxied-server mode
+
+- Merge pull request #4444 from coffeegoddd/db/delete
+
+bd delete: support proxied-server mode
+
+- /cmd/bd/delete: more wisp tests
+
+- /{cmd,internal}: pr feedback
+
+- /cmd/bd/delete: error on cascade flag
+
+- /{cmd,internal}: bd delete support proxied-server mode
+
+- Merge pull request #4433 from coffeegoddd/db/update
+
+feat(cmd/bd): support bd update proxied-server mode
+
+- /cmd/bd/init.go: hard-gate
+
+- /{cmd,internal}: handle wisps
+
+- /{cmd,internal}: bd update proxied-server
+
+- fix(create): normalize trailing hyphen in dbPrefix before prefix validation (#4233)
+
+ValidateIDPrefixAllowed compared the raw dbPrefix against id via HasPrefix(id, dbPrefix+&#34;-&#34;), so a config.issue_prefix stored with a trailing hyphen (e.g. &#34;bd-&#34;) produced &#34;bd--&#34; and threw a false &#34;prefix mismatch&#34; on bd create. The allowedPrefixes branch already normalized each entry with TrimSuffix(allowed, &#34;-&#34;); this applies the same normalization to dbPrefix. Also fixes the error message (shows &#39;bd-&#39; not &#39;bd--&#39;). Adds trailing-hyphen regression cases.
+
+Fixes #4208
+
+Co-authored-by: kevglynn &lt;kevglynn@users.noreply.github.com&gt;
+
+- fix(issueops/dependencies): wrap EXISTS subquery in derived table for MySQL 8+ compat (#4168)
+
+markDirectBlockingDependencySourceInTx issued UPDATE &lt;T&gt; s ... WHERE EXISTS (SELECT FROM &lt;T&gt; t ...) after a dependency insert, which MySQL 8.0+ rejects with Error 1093 whenever sourceTable == targetTable (the common issue-&gt;issue case). Dolt&#39;s GMS parser is permissive, so it never surfaced on the default backend.
+
+Wrap the inner SELECT in a derived table (the canonical MySQL workaround) so MySQL treats it as an independent rowset; EXISTS semantics and the explicit updated_at self-assignment (bd-578h9.19) are preserved. No-op on Dolt.
+
+Follow-up: blocked_state.go&#39;s is_blocked recompute templates share the same self-referential UPDATE/EXISTS shape and need the same treatment for full MySQL compatibility.
+
+Co-authored-by: eric-jones &lt;eric-jones@users.noreply.github.com&gt;
+
+- fix(security): allow /Users/Shared in BEADS_DIR safe-boundary (SEC-003) (#4319)
+
+isPathInSafeBoundary rejected any /Users/* path outside the current user&#39;s home as a peer home, wrongly flagging macOS&#39;s OS-designated shared directory /Users/Shared and breaking deliberately-shared multi-user .beads checkouts placed there. This adds a carve-out mirroring the existing /var/home/ allowance.
+
+Because /Users/Shared is world-writable, the carve-out resolves symlinks before admitting (resolveLongestExistingAncestor / resolvedPathWithinRoot) so a planted symlink whose target escapes the boundary is rejected rather than followed into a system directory; not-yet-created BEADS_DIR paths still validate. The unsafePrefixes system-directory blocklist is untouched and genuine peer-home paths remain rejected.
+
+Reconciled onto the restructured isPathInSafeBoundary from #4343.
+
+Co-authored-by: cstar &lt;cstar@users.noreply.github.com&gt;
+
+- fix(setup): match beads plugin name exactly, not by substring (#4252)
+
+* fix(setup): match beads plugin name exactly, not by substring (#4244)
+
+bd setup claude decided whether the beads hook plugin was enabled with a
+substring test, strings.Contains(lower(key), &#34;beads&#34;). Any enabledPlugins
+key merely containing &#34;beads&#34; (e.g. design-to-beads@xexr-marketplace) was
+mistaken for the beads hook plugin, so the SessionStart hook write was
+skipped and the hook landed nowhere.
+
+enabledPlugins keys are &#34;&lt;pluginName&gt;@&lt;marketplace&gt;&#34;; match the plugin-name
+segment exactly instead. A real beads@&lt;marketplace&gt; still matches, so the
+GH#3192 double-fire prevention is preserved.
+
+- Split the key on the first &#34;@&#34; and compare the name == &#34;beads&#34;
+- Add regression subtests: design-to-beads alone is not detected; a real
+  beads plugin is still found alongside a *beads* decoy
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(setup): match codex beads plugin name exactly, not by substring (#4244)
+
+bd setup codex decided whether the beads hook plugin was enabled with a
+substring test, strings.Contains(lower(table), &#34;beads&#34;) on the TOML plugin
+table header. Any [plugins.&lt;name&gt;] whose name merely contains &#34;beads&#34; (e.g.
+design-to-beads) was mistaken for the beads hook plugin, so the hooks
+fallback write was skipped — the codex sibling of the claude.go bug already
+fixed in this PR.
+
+Codex plugin tables are [plugins.&lt;name&gt;] or [plugins.&#34;&lt;name&gt;@&lt;marketplace&gt;&#34;]
+(TOML quotes a key containing &#34;@&#34;). Strip the &#34;plugins.&#34; prefix and any
+quotes, then match the &lt;name&gt; segment of &lt;name&gt;@&lt;marketplace&gt; exactly,
+mirroring the claude.go fix. A real beads@&lt;marketplace&gt; still matches, so the
+GH#3192 double-fire prevention is preserved.
+
+- Exact-match the plugin-name segment instead of a substring test
+- Add TestCodexConfigEnablesBeadsPlugin: design-to-beads (quoted and bare) is
+  not detected; a real quoted/bare beads plugin still is, including alongside
+  a *beads* decoy; a disabled beads plugin is not detected
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(sec): harden isPathInSafeBoundary home-dir check (SEC-003) (#4343)
+
+Use os/user.Current().HomeDir instead of $HOME (os.UserHomeDir) when rejecting other users&#39; home directories, so the safe boundary is not affected by $HOME manipulation in multi-user / container setups.
+
+Maintainer hardening applied on merge:
+- Fall back to os.UserHomeDir() when user.Current() fails, so CGO-free builds keep enforcing the boundary instead of failing open.
+- Scope the lookup to /Users, /home, /var/home paths to avoid a needless (and on Windows potentially slow) account lookup.
+- Match the home directory on a path boundary so a sibling like /home/aliceXX is not treated as inside /home/alice, plus regression tests.
+
+Co-authored-by: quad341 &lt;quad341@users.noreply.github.com&gt;
+
+- fix(codex): correct hook path to resolve from plugin root (#4377)
+
+PR #4188 moved hook files from plugins/beads/hooks/ to
+plugins/beads/.codex-plugin/hooks/ to stop Claude from discovering
+Codex-only hooks. However, the hooks path in .codex-plugin/plugin.json
+remained &#34;./hooks/hooks.json&#34; which Codex resolves relative to the
+plugin root (plugins/beads/), not relative to .codex-plugin/. This
+caused a runtime error:
+
+  failed to read .../beads/1.0.5/hooks/hooks.json: No such file or directory
+
+Fix: update the hooks path to &#34;./.codex-plugin/hooks/hooks.json&#34; so
+it correctly resolves to plugins/beads/.codex-plugin/hooks/hooks.json.
+
+Update TestPluginLayoutUsesSharedBeadsRoot to assert the corrected path.
+
+Fixes #4210. Follow-up to #4188.
+
+- flake.lock: Update (#4279)
+
+Co-authored-by: steveyegge &lt;613744+steveyegge@users.noreply.github.com&gt;
+
+- docs(llms): drop removed `bd backup fetch-git` from recovery tips (#4330)
+
+`backup export-git`/`fetch-git` were removed in PR #2842 (backup is now
+Dolt-native only), but llms.txt still listed `bd backup fetch-git` as a
+recovery option. Point database recovery at `bd backup restore`.
+
+Refs #4126
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- Add bd-board to community tools (#4349)
+
+- build(deps): bump peter-evans/create-pull-request from 8.1.0 to 8.1.1 (#4262)
+
+Bumps [peter-evans/create-pull-request](https://github.com/peter-evans/create-pull-request) from 8.1.0 to 8.1.1.
+- [Release notes](https://github.com/peter-evans/create-pull-request/releases)
+- [Commits](https://github.com/peter-evans/create-pull-request/compare/c0f553fe549906ede9cf27b5156039d195d2ece0...5f6978faf089d4d20b00c7766989d076bb2fc7f1)
+
+---
+updated-dependencies:
+- dependency-name: peter-evans/create-pull-request
+  dependency-version: 8.1.1
+  dependency-type: direct:production
+  update-type: version-update:semver-patch
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+
+- docs: add beads.nvim to community tools (#4390)
+
+- Triage and clean up an unreviewed automated commit stream on main (#4418)
+
+* Revert &#34;test(cmd/bd): Seam B cross-mode list parity — embedded vs proxied CLI (bd-6dnrw.45)&#34;
+
+This reverts commit 93b186dcf91be0b8417cff3efef1664d2e93ec6f.
+
+* Revert &#34;test(ci): restore test-proxied-server-cmd lane behind a test-only init ungate (bd-6dnrw.44)&#34;
+
+This reverts commit 1425e7338e03dd06730d1b45defe5879e80fc74a.
+
+* Revert &#34;fix(cli): keep the autocommit sweep off read-only and inspection commands; attribute sweeps distinctly (bd-578h9.7)&#34;
+
+This reverts commit 81489b8c15986228549e144f2730aabc64fcc2bc.
+
+* Revert &#34;fix(autocommit): dirty-working-set safety net behind commandDidWrite (bd-6dnrw.11)&#34;
+
+This reverts commit d2b6cc5250c2127a9c3861e3e96a96e38a22a90f.
+
+* test: add proven born-failing regression tests for kept fixes
+
+For kept fixes whose shipped tests were characterization-only or absent, add
+born-failing regression tests (verified RED when the defect is reintroduced,
+GREEN with the fix in place):
+
+- internal/lockfile: IsLocked must detect a *wrapped* ErrLocked — guards the
+  errors.Is fix (was pointer-equality). (orig 1a83cb08c)
+- internal/storage/domain/db: GetDescendants with a level filter across edge
+  and dotted-ID branches — guards the dolt 2.1.6 named-CTE analyzer workaround;
+  the pre-existing dotted-orphans test used an empty filter and never built the
+  predicate. (orig 341c7a5a4)
+- cmd/bd: GOMODCACHE must be pinned outside the temp test HOME — guards the
+  testMainInner module-cache fix. (orig bc909834c)
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* revert(serverv2): restore the gated proxied-server layer to BASE
+
+The proxied / external-dolt-server subsystem (serverV2) is gated off and not
+running yet. This reverts the unreviewed changes to its schema-independent
+layers back to BASE 9a1c88b63, while keeping the parts welded to the published
+schema.
+
+Reverted to BASE (26 files):
+- internal/storage/dbproxy/*  (proxy/socket process mgmt: orphan-dolt reaping,
+  pidfile discovery, endpoint/shutdown hardening)
+- internal/storage/uow/*      (uow tx lifecycle, warmup-retry classification,
+  provider changes)
+- cmd/bd proxied glue: proxied_server, init_proxied_server, list_proxied_server,
+  uow_factory, store_factory(+nocgo), and main.go proxied-mode dispatch hunks
+
+Kept at HEAD (welded to the published migration 0051 / required by the data
+layer, consistent with the keep-the-schema-stack decision):
+- internal/storage/domain/db/* (mints app-side ids because 0051 dropped the DB
+  default; queries the live migrated schema) -- left identical to HEAD
+- the issueops Runner/DBTX widening + scan changes that HEAD domain/db requires
+
+A strict serverV2-&gt;BASE revert is impossible without breaking main: domain/db is
+welded to the published 0051 (BASE domain/db inserts without an id and relies on
+the DEFAULT(UUID()) that 0051 removed). This reverts everything that is NOT so
+welded.
+
+Verified: full `make test` green (60 ok packages, 0 failures); domain/db, uow,
+and dbproxy all ok.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: CI Bot &lt;ci@beads.test&gt;
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- Merge pull request #4359 from maphew/fix/gh4301-blame-scoped-doc-gate
+
+ci(docs): blame-scoped doc freshness gate + exact-fix patch artifact (#4301)
+
+- ci(docs): blame-scoped CLI docs freshness gate + fix patch artifact (#4301)
+
+The doc freshness gate regenerated all generated doc artifacts and failed
+the PR on any diff, even drift the contributor did not cause: staleness
+inherited from the base branch, or local regeneration environments that
+do not match CI&#39;s canonical build. Contributors ended up futzing with
+regeneration loops for docs unrelated to their change (#4300, #4301).
+
+New scripts/check-cli-docs-drift.sh keeps the strict regenerate-and-diff
+probe as the fast path, but on failure in a PR it attributes the drift
+before failing anyone: it regenerates the artifacts at HEAD and at the
+merge-base in scratch worktrees, each with the canonical pinned build
+(CGO_ENABLED=0 -tags gms_pure_go). If the PR neither changed the
+regenerated CLI surface nor touched generated files, the drift is
+inherited: warn and pass. Contributors only own docs for code they
+actually touched.
+
+When the drift IS attributable, CI now writes the exact regenerated fix
+as a patch and uploads it as the cli-docs-freshness-patch artifact, so
+the fix never depends on the contributor&#39;s local environment: download,
+git apply, push.
+
+Strict behavior is preserved wherever there is no PR base ref: pushes to
+main, releases, and plain local runs. The pr-policy wrapper picks up the
+same logic through check-doc-flags.sh.
+
+Refs #4301, #4203. Complements #4312 (docgen binary pinning).
+
+Agent-Signature: claude-unknown-model-high on behalf of matt wilkie
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- Merge pull request #4405 from maphew/fix/4365-cli-paper-cuts
+
+fix(cli): implement children --pretty and defer --reason
+
+- fix(cli): implement children pretty and defer reason
+
+Why: #4365 reports two documented CLI affordances that either fail or require a second command. children advertised --pretty but rejected it, and defer had no way to capture the reason at deferral time.
+
+What: add the children --pretty flag by delegating to list&#39;s existing tree renderer, add defer --reason by appending to notes during the status update, and refresh generated CLI docs.
+
+Agent-Signature: codex-unknown-model-unknown-reasoning on behalf of matt wilkie
+
+- Merge pull request #4302 from anisoptera/fix/jj-secondary-workspace-role
+
+fix: support jj secondary workspaces for .beads/ discovery and role detection
+
+- fix: honor jj secondary workspaces in path discovery
+
+Extend FindBeadsDirFrom, used by bd -C, to skip a jj secondary workspace&#39;s inherited config-only .beads directory when the primary workspace has the real database. This matches cwd-based FindBeadsDir behavior while preserving secondary workspaces that own a real local database.
+
+Agent-Signature: codex-gpt-5.5-xhigh on behalf of maphew</div>
+</div>
+
+<a href="../project/gastownhall_beads.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

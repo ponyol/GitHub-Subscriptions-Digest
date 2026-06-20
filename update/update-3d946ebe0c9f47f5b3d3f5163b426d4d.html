@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (23 commits) - deconstructo/curry - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (23 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/deconstructo_curry.html">deconstructo/curry</a> /
+    Updates in main (23 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/deconstructo_curry.html">deconstructo/curry</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-16 15:02 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/deconstructo/curry/commits/main" target="_blank">https://github.com/deconstructo/curry/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Этот журнал изменений описывает разработку и обширное исправление ошибок для нового двухпоколенческого сборщика мусора. Основные усилия включали реализацию механик поколенческого GC, таких как барьеры записи, малые и большие коллекции, а также точки синхронизации &#34;stop-the-world&#34;, наряду с добавлением инструментов настройки и мониторинга. Значительная часть работы была посвящена устранению многочисленных сложных ошибок, особенно тех, что приводили к &#34;висячим&#34; указателям при взаимодействии C++ со Scheme (Qt6) и в операциях виртуальной машины, тем самым стабилизируя новый GC. Эти исправления предотвращают такие проблемы, как ошибки &#34;not a number&#34;, обеспечивая корректное управление памятью и продвижение объектов между поколениями.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Collatz Conjecture example)
+
+- fix(gc/qt6): inhibit minor GC during C++→Scheme callbacks
+
+When gen_alloc fires a minor collection while a Qt6 event handler is on the
+call stack, it zeroes the nursery and leaves any val_t values held in C
+locals (argv copies in builtins like numeric_add) as dangling pointers.
+The next num_to_double call on a stale pointer reads type==0 from zeroed
+memory → &#34;not a number: #&lt;non-numeric&gt;&#34;.
+
+Fix: add gc_gen_inhibit() / gc_gen_uninhibit() API.  While the inhibit
+count &gt; 0, nursery exhaustion in gen_alloc promotes the object directly into
+tenured space rather than triggering a minor collection.
+
+Wire into qt6.cpp via SCHEME_CALL macro and the two direct SCM_PROTECT
+paint sites (paintEvent / canvas-save-png!).  Every C++→Scheme boundary
+in the Qt6 module is now covered.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- chore(release): update formula sha256 for v1.5.1
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- Release v1.5.1
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix(gc): reject false-positive card scan evacuations; mark generational GC experimental
+
+Guard gen_evacuate and gen_evacuate_obj against Boehm heap addresses that
+coincidentally fall in the nursery range by rejecting type==0 and type&gt;=T_OBJTYPE_COUNT.
+
+Mark --gc generational as experimental in docs/reference/gc.md and docs/roadmap.md.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix(gc/vm): two more write barrier bugs exposed by perturbation mode
+
+1. GC_WRITE_BARRIER marked the card of the OBJECT header, not the FIELD
+   being written.  For large objects (e.g. a reference orbit stored in a
+   vector with hundreds of elements), the mutated element can sit in a
+   different 512-byte card from the vector header — that card was never
+   scanned, leaving a stale nursery pointer after nursery zeroing.
+   Fix: mark the card containing field_ptr, not obj.  The obj parameter
+   is kept for call-site readability but is now unused (void-cast).
+
+2. OP_CLOSURE: the Chunk pointer ch was read from CONSTS[ci] before
+   vm_make_closure(), which calls gc_alloc() and can trigger a minor GC.
+   After GC the nursery is zeroed; ch (a C local) pointed into it and
+   cl-&gt;chunk was set to that stale address.  Subsequent execution would
+   read bytecode from zeroed memory → unknown ObjType abort in the
+   Cheney drain.
+   Fix: after vm_make_closure() returns, re-read cl-&gt;chunk from CONSTS[ci]
+   (which was updated by gen_minor_collect step 2 via the frame scan).
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix(vm): write barriers in OP_CLOSURE and open_upvalue for generational GC
+
+Two related bugs where nursery pointers were written into tenured objects
+without marking the card table dirty:
+
+1. OP_CLOSURE: BcClosure C local became stale after open_upvalue() triggered
+   a minor GC (CURRY_NEW inside open_upvalue can exhaust the nursery).  The
+   BcClosure was not yet on the VM stack, so GC could not find or update it.
+   Fix: push the BcClosure on the VM stack BEFORE the upvalue loop; re-read
+   cl from PEEK(0) after each open_upvalue() call (which may have promoted
+   cl to tenured).  Also mark cl&#39;s card dirty when writing a nursery
+   Upvalue pointer to a tenured BcClosure&#39;s upvals[].
+
+2. open_upvalue(): when inserting a new nursery Upvalue as prev-&gt;next where
+   prev is already in tenured space, the card for prev was not marked dirty.
+   The next minor GC&#39;s card scan would never find this old→young reference,
+   so prev-&gt;next remained a stale nursery pointer after nursery zeroing.
+   Fix: mark prev&#39;s card dirty before the assignment.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix(vm): GC_WRITE_BARRIER on OP_STORE_UP (set! through closed upvalue)
+
+OP_STORE_UP implements set! on a captured variable.  When the upvalue is
+closed, location == &amp;uv-&gt;closed.  Writing a nursery pointer there creates
+an old→young reference that the card-table write barrier was never told
+about, so the dirty-card scan missed it on the next minor GC, and after
+nursery zeroing uv-&gt;closed pointed to garbage — producing &#34;apply: not a
+procedure&#34; and &#34;not a number&#34; in any Qt6 paint handler that called set!
+on a captured variable (palette state, zoom level, perturbation reference
+orbit in the Mandelbrot explorer).
+
+For open upvalues (location points to a VM stack slot) the write barrier
+marks the upvalue object&#39;s card, which is harmless: the stack slot is
+scanned directly in gen_minor_collect step 2 regardless.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix(qt6): keep_alive returns registered slot pointer; lambdas dereference it
+
+The previous fix registered WinState proc fields as GC roots, but every
+QObject::connect lambda also captured curry_val proc BY VALUE — a copy of
+the nursery pointer integer. After a minor GC promoted the closure, the
+captured integer was stale (pointing into zeroed nursery memory), causing
+&#34;apply: not a procedure&#34; on the next button click, timer fire, key press,
+PNG save, or bookmark save.
+
+keep_alive() now:
+  - allocates a stable curry_val* slot on the C++ heap
+  - registers it with gc_register_root() so the generational collector
+    updates *slot when the proc is promoted
+  - returns the pointer for use in QObject::connect lambdas
+
+All QObject::connect call sites updated:
+  curry_val  proc = ...; keep_alive(proc);   [proc]() { ... proc ... }
+  →
+  curry_val *proc = keep_alive(...);          [proc]() { ... *proc ... }
+
+Affected: make-button, make-toggle, make-slider (optional cb), make-dropdown,
+make-radio-group, make-spin-box, make-text-field, menu-add-action,
+toolbar-add-action, make-timer, make-timer-dt, text-edit-on-change.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix(qt6): register WinState callback fields as GC roots for generational backend
+
+Under Boehm GC, s_proc_roots (a C static in the .so data segment) and
+WinState curry_val fields (C++ heap) are found conservatively. Under the
+generational backend only registered roots are updated after minor
+collection, so nursery closures stored in these locations were left
+pointing into zeroed nursery memory — producing &#34;apply: not a procedure&#34;
+when any Qt event fired after the first minor GC.
+
+Fix:
+- gc_register_root(&amp;s_proc_roots) in curry_module_init so the proc list
+  is updated when its nursery pairs are promoted to tenured space
+- ws_register_gc_roots(ws) at WinState creation registers all nine
+  callback fields (draw_proc, key_proc, mouse_proc, ...) as explicit
+  roots so they are updated when the stored closures are promoted
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- chore(formula): set real sha256 for v1.5.0
+
+- Release v1.5.0
+
+- docs: 1.5.0 release — generational GC documentation and changelog
+
+- docs/reference/gc.md: full generational backend section (architecture,
+  config flags, pinned types, known C-stack limitation, workaround)
+- CHANGELOG.md: 1.5.0 entry covering all milestones, CLI flags, gc-stats
+  shape, SICM results, and dynamic VM registry fix
+- docs/roadmap.md: update version marker to v1.5.0
+- src/version.h: bump to 1.5.0
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- refactor(gc): simplify + fix 8 findings from /simplify review
+
+Correctness:
+- actors.c: call vm_free() before pthread_cleanup_pop so actor VMs are
+  unregistered from gen_vms[] before the thread exits (was UAF on next GC)
+- workpool.c: call vm_free() before worker_loop return (same issue)
+- gc_generational.c: gc_gen_thread_unpark() increments thread_count BEFORE
+  calling gc_gen_safepoint() so a new STW starting in that window correctly
+  waits for this thread
+- builtins_curry.c: clear par_fn on all exit paths (normal + error) in
+  map/reduce/for-each-par so par_scan_roots guard cannot leave par_fn as a
+  stale nursery pointer
+
+Efficiency:
+- gen_minor_collect / gen_major_collect: memset only the used portion of
+  the nursery [nursery_base, nursery_hi) instead of the full nursery_size
+
+Cleanup:
+- gc_generational.c: remove nursery object-start bitmap (nursery_obj_bitmap,
+  nursery_bitmap_set/get, bitmap allocation in gc_gen_init); its only
+  consumer (gen_scan_calling_thread_stack) is disabled
+- builtins_curry.c: replace three identical CONS_STAT macro definitions in
+  prim_gc_stats with a single gc_stat_cons() helper
+- gc.h / gc.c / gc_semispace.c / gc_generational.c: remove the
+  write_barrier vtable slot from gc_ops_t; GC_WRITE_BARRIER inlines the
+  card-table logic directly and never dispatches through the vtable
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix(gc): dynamic VM registry — remove hard cap of 64
+
+gen_vms was a fixed-size array; gc_gen_register_vm silently dropped any
+VM beyond the 64th, leaving those threads stacks unscanned during minor
+collection and causing use-after-free once the nursery was zeroed.
+
+Replace with a GC_MALLOC_UNCOLLECTABLE-backed dynamic array (doubling
+realloc, same pattern as gen_roots and pinned_slots).
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- feat(gc): milestone 7 -- thread cooperation, WorkPool pinning, parallel-map GC roots
+
+Key changes:
+
+- gc_gen_thread_park/unpark: workers and POOL_WAIT call these around non-GC
+  condvar sleeps so STW does not wait for blocked threads
+- STW re-reads gc_gen_thread_count each iteration to handle concurrent park/unpark
+- workpool safepoints: workers call gc_gen_safepoint() between work items so they
+  participate in STW during parallel map/reduce
+- WorkPool and WorkItem changed from CURRY_NEW (nursery) to gc_alloc_raw_pinned
+  (Boehm); raw C pointers in static global and deque buf[] must not be stale
+- par_scan_roots ext_scanner: covers par_fn, elems[], results[], and all
+  WorkItem val_t fields (fn/result/exn) for the full lifetime of nursery pointers
+  during and after parallel dispatch
+- SymVar/SymFn/SymExpr pinned (CURRY_NEW_PINNED / gc_alloc_pinned); gen_scan_pinned
+  extended with T_SYMVAR/T_SYMFN/T_SYMEXPR cases so their name/params/args val_t
+  fields are updated during minor collection
+- T_OBJTYPE_COUNT sentinel added to ObjType enum for GC validity checks
+- Nursery object-start bitmap: set in gen_alloc, cleared on nursery reset;
+  infrastructure for the conservative C-stack scan (implemented but disabled
+  pending a safe write-back strategy for non-val_t stack slots)
+- obj_size case 0: returns h-&gt;fwd (allocation size stored by gen_alloc) so
+  partially-initialised nursery objects do not abort during evacuation
+- MCP tool/resource handlers registered as GC roots
+- Default GC backend remains boehm; --gc generational selects the two-gen
+  collector (tree-walking eval stack not yet conservatively scanned)
+
+30/30 tests pass.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- feat(gc): milestone 8 — gc-stats generational backend + --gc-nursery-size flag
+
+gc-stats now returns a generational alist when the generational backend is
+active: minor-collections, major-collections, nursery-bytes, nursery-used,
+tenured-used, tenured-capacity, pinned-count.
+
+main.c pre-scan loop extended to handle --gc-nursery-size N and
+--gc-tenured-size N (both support K/M/G suffixes via parse_size).  Both
+flags are silently ignored when backend is not generational.  Getopt
+long_opts table updated; help text documents the new flags.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- feat(gc): milestone 6 — major collection (full Cheney over tenured at &gt;85% fill)
+
+When tenured space exceeds GC_TENURED_FILL_PCT (85%) after a minor GC,
+gen_major_collect() runs a combined full Cheney collection over both
+nursery and the old tenured region.
+
+Key changes:
+- Adds extra_from_base/limit statics; modifies gen_evacuate and
+  gen_evacuate_obj to use in_from_space() instead of in_nursery() so that
+  during major GC the old tenured region is also treated as from-space
+- gen_major_collect() allocates a fresh mmap to-space, evacuates all roots
+  via the same root+Cheney+pinned+ext-scanner passes, swaps GC roots with
+  GC_remove_roots/GC_add_roots, munmaps the old region, resets nursery
+- gen_alloc() triggers gen_major_collect() when tenured &gt; 85% after minor GC
+- gen_collect() (,gc command path) also checks the fill threshold
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- feat(gc): milestone 5 — write barrier instrumentation at all mutation sites
+
+Instruments every post-construction val_t store in tenured-promotable objects:
+
+- builtins.c: GC_WRITE_BARRIER on Pair.car/cdr (set-car!/set-cdr!),
+  Vector.data[i] (vector-set!), and both Promise.val paths in prim_force
+- eval.c: GC_WRITE_BARRIER on Parameter.init in param_before_fn/after_fn
+  (parameterize) and both apply() code paths that call a parameter object
+- vm.c: GC_WRITE_BARRIER on Upvalue.closed in vm_close_upvalues
+
+Also adds the tenured-walk pass (step 6) in gen_minor_collect: T_ENV,
+T_SET, and T_HASHTABLE store their val_t arrays in Boehm-managed memory
+outside the tenured region, so the conservative dirty-card scan cannot
+reach them.  The walk calls gen_scan_object on every such object in the
+pre-collection tenured range, ensuring external arrays are always updated.
+
+SICM: 167/167 pass (previously 93/167 under semispace).
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- feat(gc): milestone 4 — minor collection (Cheney nursery→tenured + remembered set)
+
+Implements the full minor GC cycle in gen_minor_collect():
+- STW stop/start wrapping via gc_gen_stop_the_world/start_the_world
+- Evacuate registered val_t* roots and all VM stacks/frames/upvalue chains
+- Cheney scan loop over newly-promoted tenured objects (GEN_DRAIN_LOOP)
+- Pinned-object cross-heap scan (Actor, Mailbox, TVar, Channel, Continuation)
+- Remembered-set pass: conservative word-scan of dirty 512-byte cards
+- External root scanner callbacks (gc_gen_register_ext_scanner / gc_gen_evac)
+- Nursery zero-and-reset after collection; dirty card table cleared
+- gen_scan_object covers all ObjType variants including MPFR Interval
+- gen_evacuate/gen_evacuate_obj handle Upvalue interior pointer fixup
+
+Also wires gen_alloc to call gen_minor_collect on nursery exhaustion,
+falling back to Boehm only when tenured space is also full (milestone 6 path).
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- feat(gc): milestone 3 — polling safepoints for STW pause
+
+Implements the stop-the-world handshake used by minor and major collection:
+
+- gc_generational.c: gc_gen_safepoint() parks threads on gc_stw_mutex/cond
+  when gc_stop_world is set. gc_gen_stop_the_world() sets the flag and waits
+  for all registered threads to park; gc_gen_start_the_world() clears it and
+  broadcasts. Thread count tracked with _Atomic int gc_gen_thread_count;
+  gen_register_thread() increments, gc_gen_unregister_thread() decrements.
+- gc.c / gc_generational.h: gc_nursery_refill() calls gc_gen_safepoint()
+  before allocating — every allocation failure is a GC yield point.
+- actors.c: mailbox_pop_wait() calls gc_gen_safepoint() when a message
+  arrives (actor yield point). actor_thread() installs gc_gen_unregister_thread
+  as a pthread_cleanup_push handler so the thread count stays accurate on exit.
+- All 32 ctest suites pass; actors 9/9 under --gc generational.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- feat(gc): milestone 2 — age bits, tenured allocator, nursery refill hook
+
+- object.h: GC age bits in Hdr.flags bits 30-31 (GC_AGE_GEN0/GEN1/PINNED).
+  Type-specific flags must use bits 0-29. hdr_age()/hdr_set_age() accessors.
+- gc_generational.c: gen_tenured_alloc() — thread-safe bump pointer into the
+  128 MB tenured region (mutex-protected; returns NULL when full).
+- gc.h / gc.c: gc_nursery_refill_fn pluggable hook — NULL until milestone 4
+  installs the minor collector. gc_nursery_refill() calls the hook first,
+  falls through to gc_ops-&gt;alloc() if NULL.
+- gc_generational.h: declare gen_tenured_alloc, gen_tenured_used,
+  gc_gen_bump_minor/major for minor/major collection bookkeeping.
+- All 32 ctest suites pass; no new warnings.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- feat(gc): milestone 1 — card table and write barrier infrastructure
+
+Adds the foundation for the two-generation GC (Phase 6):
+
+- gc_ops_t gains a write_barrier(void *obj) vtable slot; Boehm and
+  semispace backends fill it with a no-op.
+- GC_WRITE_BARRIER(obj, field_ptr, new_val) macro added to gc.h:
+  under Boehm/semispace (gc_gen_active == 0) it compiles to a single
+  store; under the generational backend it marks the 512-byte card
+  containing obj dirty before the store.
+- gc_generational.{h,c}: new files — card table mmap, tenured region
+  placeholder, gc_gen_init(), GcGenStats, gc_gen_ops vtable (Boehm
+  fall-through for now, collection arrives in milestones 2–4).
+- --gc generational flag recognised in main.c.
+- All 32 ctest suites pass; r7rs 160/160 under --gc generational.
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;</div>
+</div>
+
+<a href="../project/deconstructo_curry.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

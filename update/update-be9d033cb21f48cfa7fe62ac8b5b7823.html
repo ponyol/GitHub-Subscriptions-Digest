@@ -1,0 +1,1774 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (97 commits) - vectorize-io/hindsight - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (97 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/vectorize-io_hindsight.html">vectorize-io/hindsight</a> /
+    Updates in main (97 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/vectorize-io_hindsight.html">vectorize-io/hindsight</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-19 14:30 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/vectorize-io/hindsight/commits/main" target="_blank">https://github.com/vectorize-io/hindsight/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Этот выпуск значительно расширяет интеграции с популярными инструментами и фреймворками ИИ, такими как OpenHands, Aider, Composio, Zapier и Continue.dev, предоставляя долговременную память Hindsight более широкой экосистеме. Основные функции управления памятью были улучшены за счет конфигурируемого структурированного разбиения на чанки, конечной точки для пробного извлечения фактов и &#34;общей&#34; области видимости наблюдений для улучшенной дедупликации. Производительность и надежность системы повышены благодаря параллельной миграции схем клиентов, улучшенному индексированию базы данных, надежной обработке тайм-аутов LLM и комплексным операционным метрикам для асинхронных рабочих процессов и очередей консолидации. Дополнительно внесены улучшения во взаимодействие с LLM (например, удаление тегов рассуждений), добавлена поддержка Intel XPU для эмбеддингов, а также обновлена документация и улучшен опыт разработчиков.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- blog(openhands): OpenHands persistent memory via native MCP (#2316)
+
+* blog(openhands): add OpenHands persistent memory post
+
+Walkthrough of the Hindsight OpenHands integration: native Streamable-HTTP
+MCP server wired into config.toml (recall/retain/reflect tools) plus a
+recall/retain rule written into AGENTS.md so the agent recalls at task
+start and retains durable facts. Covers Cloud + self-host setup, the CLI
+commands (init/status/uninstall), and per-project banks via --bank-id.
+Co-branded cover image.
+
+- fix(cache): prevent stale bank stats after invalidation (#2315)
+
+- perf(migrations): skippable extension reconcile + drop unused global vector index (#2309)
+
+Expose --skip-extension-reconcile on run-db-migration (gates the per-tenant ensure_* reconcile, default off) and stop ensure_vector_extension from creating the unused global memory_units vector index for per-bank backends (verified via EXPLAIN; scann unaffected).
+
+- fix(tests): eliminate test-api shard cross-test contamination (vchord cache, tenant schemas, maintenance routine TOCTOU) (#2310)
+
+* fix(tests): reset config cache after vchord vector-extension tests to stop cross-test contamination
+
+The ANN tests in test_link_utils.py monkeypatch
+HINDSIGHT_API_VECTOR_EXTENSION (e.g. to &#34;vchord&#34;). That env var is read
+through the process-global config cache (get_config()), and monkeypatch
+reverts only the env var on teardown — not the cache. Once get_config()
+caches &#34;vchord&#34;, it persists for the rest of the xdist worker.
+
+Every subsequent bank-creating test on that worker then builds per-bank
+vector indexes with `USING vchordrq` against the pgvector-only test DB
+and fails with:
+
+    asyncpg.exceptions.UndefinedObjectError: access method &#34;vchordrq&#34; does not exist
+
+cascading across dozens of unrelated tests in the test-api shard
+(test_list_documents, test_maintenance_routines, test_mental_models,
+test_observations, ...). Because the leak depends on which worker first
+populates the cache, the failure looked like a flaky, shard-specific
+infra problem.
+
+Fix: add an autouse fixture to the class that clears the config cache
+before and after each test, so the cache is rebuilt from the current
+env per test and &#34;vchord&#34; can&#39;t leak out.
+
+* fix(tests): create multi-tenant maintenance schemas atomically
+
+test_maintenance_multitenant provisions 100 tenant schemas by running
+CREATE SCHEMA + 5×CREATE TABLE per schema. Each statement autocommitted,
+so there was a window where a schema existed with only some of its
+tables. The global maintenance routines (public.schemas_with_expired_rows
+/ banks_needing_consolidation) discover schemas by table presence and are
+exercised concurrently by test_maintenance_routines on another xdist
+worker against the shared test DB. They would query a not-yet-created
+table in a half-built schema and fail with:
+
+    asyncpg.exceptions.UndefinedTableError: relation &#34;mt&lt;hash&gt;_NNN.memory_units&#34; does not exist
+
+Wrap the whole provisioning in a single transaction so the schemas
+become visible to other connections only once fully built.
+
+* fix(maintenance): skip schemas that vanish mid-scan in maintenance routines
+
+public.banks_needing_consolidation() and public.schemas_with_expired_rows()
+snapshot the schemas owning a target table from pg_class, then run a dynamic
+query against each schema in turn. That is a TOCTOU race: a schema (or its
+tables) can be dropped between the snapshot and the per-schema query — a tenant
+being deleted, a tenant migration recreating tables, or (in the test suite) the
+multi-tenant maintenance test creating/dropping ~100 schemas concurrently with
+test_maintenance_routines on the shared DB. The query then aborts the whole
+routine with:
+
+    relation &#34;&lt;schema&gt;.memory_units&#34; does not exist
+    relation &#34;&lt;schema&gt;.audit_log&#34; does not exist
+
+Forward migration c7e9f1a3b5d2 redefines both routines (CREATE OR REPLACE,
+public/base-run gated, PG-only) so each per-schema query runs in its own
+subtransaction that skips the schema on undefined_table / invalid_schema_name /
+undefined_column instead of failing the scan.
+
+Adds a deterministic regression test (schema with memory_units but no banks
+table) for the skip path.
+
+* fix(tests): clear config cache after none-provider engine build to stop chunks-mode leak
+
+test_memory_defense._make_minimal_engine() builds a MemoryEngine inside a
+patch.dict that sets HINDSIGHT_API_LLM_PROVIDER=none. Constructing the engine
+calls get_config(), repopulating the process-global config cache from the
+patched env — and provider=&#34;none&#34; forces retain_extraction_mode=&#34;chunks&#34;. When
+patch.dict restores the env, the cache still holds the &#34;none&#34;/chunks config.
+
+It then leaks to every later test on the same xdist worker: their retains run
+in chunks mode (raw text, NO entity extraction), so unrelated assertions fail —
+notably the test_observations entity tests (&#34;John/Alice/Nexora entity should
+exist&#34;), which presented as a flaky, shard-specific failure (whichever entity
+test landed on the poisoned worker).
+
+Drop the config cache after the patched env is restored so the next get_config()
+rebuilds from the real env. Reproduced deterministically:
+
+    pytest test_memory_defense.py::test_engine_memory_defense_shares_ext_ctx \
+           test_observations.py::test_entity_extraction_on_retain
+    # before: entity test FAILED (Insert unit_entities: 0 pairs)
+    # after:  passed
+
+- docs(monitoring): document worker operation metrics (#2296)
+
+- docs: drop removed &#39;opinion&#39; fact type from MCP tool docstrings and quickstart (#2302)
+
+The &#39;opinion&#39; fact type was removed (alembic
+g2h3i4j5k6l7_remove_opinion_fact_type; models.py CheckConstraint now allows
+only &#39;world&#39;, &#39;experience&#39;, &#39;observation&#39;), but a couple of agent-facing
+surfaces still advertised it:
+
+- hindsight-api-slim/hindsight_api/mcp_tools.py: the list_memories and
+  clear_memories docstrings tell agents to filter `type` by &#39;world&#39;,
+  &#39;experience&#39;, or &#39;opinion&#39;. An agent following the docstring now passes an
+  invalid fact-type filter.
+- hindsight-docs cookbook quickstart: the &#34;Memory Types&#34; list still presents
+  &#39;Opinion&#39; as a current type (&#34;four networks&#34;).
+
+Replace &#39;opinion&#39; -&gt; &#39;observation&#39; in the four MCP docstrings and drop the
+removed Opinion entry from the quickstart memory-types list (four -&gt; three
+networks).
+
+- chore(deps): resolve high/medium/low Dependabot alerts (#2303)
+
+High:
+- undici 7.24.x -&gt; 7.28.0 (root override; cloudflare-oauth-proxy via miniflare override) — GHSA-vmh5-mc38-953g / GHSA-pr7r-676h-xcf6
+
+Medium/Low (bulk):
+- aiohttp -&gt; 3.14.1 across 22 uv locks (root + 21 integrations)
+- idna -&gt; 3.18 (haystack), pypdf -&gt; 6.13.3 (superagent)
+- esbuild -&gt; 0.28.1 (chat, opencode, obsidian, cloudflare-oauth-proxy)
+
+Holdouts (upstream-pinned or no patch; left as-is, dev-only or non-applicable):
+- esbuild (root): tsup@8.5.1 pins esbuild ^0.27.0; advisory is dev-server file-read on Windows, not our bundling usage
+- postcss (root): vendored by next@16.2.9
+- js-yaml (root): gray-matter@4.0.3 uses the v3 safeLoad API; forcing v4 breaks the docs build
+- uuid (root): sockjs (webpack-dev-server, dev-only); v3/v5/v6 buf advisory not applicable to v4 usage
+- http-proxy-middleware (root): webpack-dev-server, dev-only; npm reports no fix
+- requests (dify): dify-plugin==0.8.0 pins requests&gt;=2.32.3,&lt;2.33.dev0
+- diskcache, nltk, torch: no upstream patch available
+- pipecat-ai: requires major-version (&lt;1.0 -&gt; 1.x) code migration
+
+- fix(retain): make chunk_text idempotent so raised structured chunk size doesn&#39;t fail retains (#2301) (#2308)
+
+Setting HINDSIGHT_API_RETAIN_STRUCTURED_CHUNK_SIZE above
+HINDSIGHT_API_RETAIN_CHUNK_SIZE and retaining a JSONL/conversation doc
+with a line/turn over the chunk size crashed with:
+
+    asyncpg.exceptions.CardinalityViolationError:
+        ON CONFLICT DO UPDATE command cannot affect row a second time
+
+The streaming retain pipeline pre-chunks each document once (one
+chunk_index per piece) and then re-chunks every piece during extraction,
+stamping all sub-chunks of a piece with that one chunk_index. When the
+structured cap exceeds the chunk size, a pre-chunk could legitimately
+exceed the re-chunk budget, so it re-split into several sub-chunks that
+all derived the same chunk_id = {bank}_{doc}_{index} and collided in a
+single upsert batch.
+
+Fix makes chunk_text idempotent — re-chunking any chunk it returns is a
+no-op:
+- A lone JSON object (one JSONL line handed back) is kept whole up to the
+  structured limit instead of falling through to plain-text splitting.
+- Oversized turns/lines are fragmented within min(structured_limit,
+  max_chars) so no fragment exceeds the re-chunk budget.
+
+Adds idempotency unit tests and an end-to-end regression test.
+
+- feat(aider): add Aider integration (session-bracketing memory wrapper) (#2297)
+
+hindsight-aider wraps the aider CLI: recalls project memory before each session (injected via --read) and retains the transcript after. Bank per git repo.
+
+- release(openhands): v0.1.0
+
+- release(continue): v0.1.0
+
+- blog(agent-framework): Total Recall — persistent memory for Microsoft Agent Framework (#2293)
+
+* blog(agent-framework): add Microsoft Agent Framework persistent memory post
+
+- fix(docs): correct agrasandhany integration icon and ownership (#2294)
+
+* fix(docs): use GitHub icon for agrasandhany integration
+
+The agrasandhany gallery entry reused the Obsidian logo. Its repo lives
+on GitHub, so point it at a GitHub mark instead.
+
+* fix(docs): mark agrasandhany as community integration
+
+It&#39;s authored by external contributor yugandhar-maram, not the Hindsight
+team — switch type official-&gt;community and credit the author.
+
+- test(retain): serialize multichunk sub-batch coverage test on worker_tests xdist group (#2272)
+
+* test(retain): serialize multichunk sub-batch coverage test on worker_tests xdist group
+
+test_subbatch_multichunk_coverage.py&#39;s async case submits via
+submit_async_retain, which inserts parent/child rows into async_operations.
+test_worker.py drives its own WorkerPoller.claim_batch() against the same pool,
+so on different xdist workers the two files steal each other&#39;s pending rows.
+Add the shared xdist_group(&#34;worker_tests&#34;) marker (matching
+test_async_batch_retain.py and the other async-queue tests) so they serialize
+on one xdist process. Follow-up to #2269.
+
+* test(worker): scope claim_batch count assertions to the test&#39;s own bank
+
+The xdist_group(&#34;worker_tests&#34;) marker only serializes the tagged
+async-queue test files among themselves. It cannot stop test_retain.py
+(not tagged) from scheduling a &#39;consolidation&#39; async_operation in the
+public schema while a worker poller test runs — WorkerPoller.claim_batch()
+scans the whole schema, so that stray op gets claimed and the global
+&#39;assert len(claimed) == N&#39; counts it (observed: assert 3 == 2 in
+test_poller_discovers_tenants_dynamically).
+
+Filter claimed tasks to the test&#39;s own bank_id before counting, matching
+the existing &#39;my_claims&#39; convention already used by ~10 tests in this
+file. Covers the remaining global-count assertions in the public-schema
+poller tests; the max_slots cap test and the isolated custom-schema test
+are unaffected (their global counts are robust by construction).
+
+- docs: changelog and blog post for v0.8.3 (#2290)
+
+* docs: changelog and blog post for v0.8.3
+
+* docs: drop Richer MCP Tools section from 0.8.3 blog
+
+- Release v0.8.3
+
+- Update version to 0.8.3 in all components
+- Regenerate OpenAPI spec and client SDKs
+- Python packages: hindsight-api, hindsight-dev, hindsight-all, hindsight-embed
+- Python client: hindsight-clients/python
+- TypeScript client: hindsight-clients/typescript
+- hindsight-all npm wrapper: hindsight-all-npm
+- Rust CLI: hindsight-cli
+- Control Plane: hindsight-control-plane
+- Helm chart
+- Sync documentation to version-0.8
+
+- feat(metrics): instrument async worker completion path with operation metrics (#2253)
+
+* Instrument async worker completion path with operation metrics
+
+The async worker never emitted hindsight_operation_operations_total /
+_duration_seconds — record_operation() was only called from the synchronous
+API layer. In prod, retain/reflect/consolidation run through the async worker,
+so the Operations dashboard showed no retain activity and there was no
+Prometheus signal for async throughput, latency or success/failure.
+
+Emit operation metrics from the worker on terminal outcomes:
+- Add MetricsCollector.record_operation_result(): direct (non-context-manager)
+  recording with an explicit success label, for paths that need success control
+  rather than the exception-based record_operation() CM. The CM now delegates
+  to it (no behaviour change, no duplication).
+- In WorkerPoller._execute_task_inner, record source=&#34;worker&#34; with success=true
+  on normal completion and success=false on failure. Deferrals (DeferOperation)
+  and retries (RetryTaskAt) are not terminal and are deliberately not counted.
+- Normalise the retain operation_type variants (batch_retain,
+  file_convert_retain) onto operation=&#34;retain&#34; so worker completions share the
+  API path&#39;s series, which the Operations dashboard keys off.
+
+This makes async retain visible on the dashboard and gives a Prometheus signal
+for async worker throughput and success/failure.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* Harden worker metric: record outside executor scope + cover defer/retry
+
+W1: recording the success metric inside the executor try meant a metrics
+failure could be caught by the broad except Exception and mark a completed
+task as failed. Record on terminal outcomes outside the exception scope and
+guard the call so instrumentation can never flip terminal task state.
+
+W2: add no-DB tests for _execute_task_inner asserting completion/failure emit
+the metric (with success true/false, retain normalised) and that
+DeferOperation/RetryTaskAt do not.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* style: apply ruff format
+
+Satisfy verify-generated-files: blank line after _metric_operation_label and
+single-line record_operation_result test call, per ruff format.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs: correct reflect coverage in worker metric comment
+
+reflect runs only on the synchronous API path (execute_task has no reflect
+branch), so operation=&#34;reflect&#34; never emits with source=&#34;worker&#34;. Reword the
+comment to list retain/consolidation and the other worker task types instead.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* metrics(worker): scope success label to completion-throughput, not failure-rate
+
+Address review: the worker success label infers success from raise/no-raise, but
+memory_engine.execute_task swallows deterministic failures (file_convert_retain,
+non-retryable errors) — it marks the op failed and returns normally — so those
+record success=true. Rather than re-engineer execute_task to thread status back,
+narrow this metric&#39;s documented meaning to a completion-throughput signal and
+defer authoritative failure visibility to the now-merged
+hindsight_async_operations{status=&#34;failed&#34;} gauge (#1987), which reads each
+operation&#39;s final DB status.
+
+- Reword the poller comment: success=false means the task raised to the poller
+  (unexpected / retry-exhausted); deterministic self-handled failures are not
+  captured here — point operators at the failed gauge.
+- Add test_executor_self_handled_failure_records_success_by_design to lock the
+  intentional behavior so any future change to the inference is deliberate.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* test(worker): fold self-handled-failure case into the completion test
+
+The separate test_executor_self_handled_failure_records_success_by_design
+asserted nothing the completion test didn&#39;t: at the poller boundary a
+self-handled failure is indistinguishable from a clean completion (both return
+normally), and with the executor mocked there is no real mark-failed / DB status
+to observe. Remove the duplicate and document the intentional scoping in the
+renamed test_executor_returning_normally_records_success docstring instead.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(mcp): restore custom tool instructions (#2288)
+
+Restore HINDSIGHT_API_MCP_INSTRUCTIONS for HTTP MCP servers.
+Append the extra guidance only to retain and recall tool
+descriptions, matching the original local MCP behavior without
+changing reflect or other management tools.
+
+- fix(tests): wait for testcontainers port mappings (#2283)
+
+- fix(tests): isolate backsweep migration pg0 state (#2282)
+
+- chore(deps): fix critical/high Dependabot alerts (#2278)
+
+Resolve all 50 fixable critical/high Dependabot alerts across the monorepo.
+
+Python (uv.lock):
+- starlette 1.0.1 -&gt; 1.3.1, python-multipart -&gt; 0.0.32, pyjwt -&gt; 2.13.0,
+  tornado -&gt; 6.5.7, urllib3 -&gt; 2.7.0 across root + integration projects.
+- cryptography -&gt; 49.0.0 (GHSA-537c-gmf6-5ccf, bundled-OpenSSL OOB read).
+  Lifted the hindsight-api-slim &lt;47 cap: 47/48/49 verified importing and
+  running RSA sign/verify cleanly on linux/arm64 (Docker on Apple Silicon)
+  and native arm64 macOS; the SIGILL of pyca/cryptography#14733 does not
+  reproduce on current tooling (upstream issue closed unconfirmed).
+- Root and haystack uv.lock pick up uv lockfile revision 3 (the format the
+  rest of the repo&#39;s locks and CI&#39;s setup-uv@v7 already use).
+
+npm:
+- shell-quote -&gt; 1.8.4 (critical); ws -&gt; 7.5.11 / 8.21.0; vite -&gt; 8.0.16
+  across root + integrations; embed control-center UI vite ^5 -&gt; ^6.4.3
+  (build verified); n8n form-data override -&gt; ^4.0.6.
+- zapier: overrides for form-data, serialize-javascript, tar, tmp,
+  yeoman-environment (dev-only zapier-platform-cli tree); npm audit clean.
+
+Not fixed (no safe path):
+- nltk (llamaindex, pipecat): no patched release exists upstream (&lt;=3.9.4).
+- pipecat-ai (pipecat): fix needs 1.2.0 but the integration is pinned &lt;1.0
+  pending a module-restructure migration.
+
+- feat(openhands): add OpenHands integration (native MCP config + recall/retain rule) (#2276)
+
+Long-term memory for OpenHands via native Streamable-HTTP MCP: hindsight-openhands init wires the Hindsight MCP server into config.toml + a recall/retain rule in AGENTS.md.
+
+- blog(freshness): Freshness-Aware Memory — knowing when a belief has gone stale (#2267)
+
+* blog(freshness): add freshness-aware memory post
+
+Concept deep-dive on how Hindsight tracks belief currency: the per-observation
+freshness trend (new/strengthening/stable/weakening/stale, computed from evidence
+timestamps over 30/90-day windows by density ratio) and the consolidation-lag
+signal (up_to_date/slightly_stale/stale from pending memories), plus how the
+reflect loop uses both to verify stale beliefs against raw facts.
+
+- fix(docs): make integrations.json strict-valid (drop trailing comma)
+
+The last entry had a trailing comma, so build-docs&#39; &#39;Check integrations&#39;
+step (strict JSON.parse) failed on main and every PR. Drop it.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- release(zed): v0.1.0
+
+- chore(dev): register continue/zed/openhands in changelog generator
+
+These new integrations were added to VALID_INTEGRATIONS / CI but not to the
+generate-changelog registry, so release-integration.sh failed at the changelog
+step. Add their package names so releases can be cut.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- feat(zed): add Zed editor integration (MCP context server + recall/retain rule) (#2153)
+
+MCP-only Zed integration: hindsight-zed init wires the Hindsight MCP server into Zed&#39;s settings.json (via mcp-remote) plus a recall/retain rule in AGENTS.md. Validated end-to-end in real Zed.
+
+- release(opencode): v0.2.6
+
+- docs(observations): stop claiming a per-observation freshness trend (#2271)
+
+The &#34;computed freshness trend (stable/strengthening/weakening/new/stale)&#34;
+described across the developer docs maps to code in
+reflect/observations.py that is unreferenced — not wired into recall,
+reflect, or the API, and absent from the OpenAPI schema. It is not a
+surfaced feature, so the docs overstated it.
+
+Replace those claims with the freshness behavior that IS shipped: when
+newer memories haven&#39;t been consolidated yet, reflect treats the affected
+observations as stale and verifies them against raw facts. Touches
+developer/index, observations, configuration, api/recall, and
+best-practices, plus the regenerated skills/hindsight-docs mirror.
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Update integrations.json (#2268)
+
+Add agrasandhany integration
+
+- Hide Windows netstat port probes (#2263)
+
+- fix(retain): stop dropping chunks when an oversized doc splits into multi-chunk sub-batches (#2269)
+
+Ingesting a large single document (~88k chars) dropped most of its body — and
+any fact past the first slice — when retained. Two bugs, both only triggered when
+an oversized item is split into sequential sub-batches whose slices each re-chunk
+into several extraction chunks (the default config: batch tokens 10k → ~30k-char
+slices, re-chunked at 3k → ~10 chunks/slice):
+
+1. chunk_index offset (sync + async). retain_batch_async advanced the
+   per-document chunk_index cursor by re-chunking item[&#34;content&#34;] AFTER the
+   orchestrator had consumed (popped) it. chunk_text(&#34;&#34;) returns [&#34;&#34;] (count 1),
+   so the cursor moved by 1 per sub-batch instead of by the real chunk count;
+   later slices restarted ~1 slot in, colliding chunk_id = {bank}_{doc}_{index}
+   and overwriting earlier chunks via upsert. Fix: count the slice&#39;s chunks
+   before handing it to the orchestrator, while content is still present.
+
+2. whole-document recovery skip (async only). All sub-batches of one submitted
+   operation share one operation_id; the first slice stamps the document into
+   result_metadata.facts_committed_document_ids. The crash-recovery fast-path
+   then saw every later slice&#39;s document already &#34;committed&#34; and skipped
+   extraction entirely, so only the first slice survived. Fix: only take the
+   whole-document skip when the call starts the document at chunk 0
+   (chunk_index_offset == 0); a non-zero offset means this call continues a
+   document another sub-batch already started. Per-chunk hash recovery
+   (existing_chunk_hashes) still provides crash-safety for those chunks.
+
+The existing #1888 coverage tests use RETAIN_BATCH_TOKENS=100 (a ~300-char
+budget, under the chunk size) so every slice collapses to ONE chunk, which masks
+both bugs. New test_subbatch_multichunk_coverage.py sizes the body so each slice
+fans out to ~6 chunks, with globally-unique tokens (no chunk-hash dedup), and
+asserts full coverage + contiguous chunk_index + a needle planted in a late slice
+across BOTH the sync (retain_batch_async) and async (submit_async_retain) paths.
+
+- test(retain): add retain_structured_chunk_size to quota-defer test config mock (#2265)
+
+extract_facts_from_text reads config.retain_structured_chunk_size (passed
+to chunk_text), but the test&#39;s SimpleNamespace mock only set
+retain_chunk_size, so the test raised AttributeError instead of exercising
+the quota-defer path. Add the field (None = plain chunking) to fix it.
+
+- test(openclaw): update agent_end hook tests for stripped context system message (#2266)
+
+#1968 moved routing metadata out of the transcript (it no longer prepends a
+&#39;[context]&#39; system message) and into the retain API context field, but left
+three agent_end integration assertions on the old shape:
+- transcript no longer starts with a {role:&#39;system&#39;, &#39;[context]...&#39;} entry
+- message_count reflects the structured turn length without the system pad
+  (1 for a single-user turn, 2 for the last user+assistant turn)
+
+Updates index.test.ts&#39;s sibling integration tests to match.
+
+- docs: document MCP trace and precheck content length (#2264)
+
+- feat(embeddings): detect Intel XPU for local embedding acceleration (#2260)
+
+Extend local device detection so sentence-transformers can use an Intel
+XPU (e.g. Arc A770) when a torch XPU build is loaded, falling back to CPU
+otherwise. Split out from #2233.
+
+Co-authored-by: Sveinbjörn Geirsson &lt;raudbjorn@github&gt;
+
+- Add Gemini service tier config (#2251)
+
+* Add Gemini service tier config
+
+* Format generated Gemini service tier files
+
+---------
+
+Co-authored-by: r266-tech &lt;r266-tech@users.noreply.github.com&gt;
+
+- fix(mcp): omit reflect tool_trace/llm_trace from responses by default (#2242)
+
+The MCP `reflect` tool returned the full `reflect_async` result, which
+includes `tool_trace` and `llm_trace` — the entire internal agent loop,
+including full mental-model text. A default reflect response measured
+59,657 chars (text 5,987 + tool_trace 52,711), silently consuming tens
+of KB of MCP-client context on every call, while the REST API omits the
+trace by default.
+
+Add a symmetric `include_trace: bool = False` flag (mirroring the
+existing `include_based_on`); the trace becomes opt-in for debugging.
+Applied to both the multi-bank and single-bank reflect registrations,
+with a regression test covering both.
+
+- fix(openclaw): strip runtime metadata from memory content (#1968)
+
+* feat(openclaw): pass retain context guidance to prevent routing metadata misattribution
+
+Hindsight&#39;s fact extraction LLM was misinterpreting routing identifiers
+(sender open_id, bank ID, channel, provider) as semantic actors, project
+names, or organizations. After many conversation turns, the bank name
+(e.g. saber-prod) would override the actual project being discussed
+(e.g. x-power-cli).
+
+This adds interpretation guidance via the retain API &#39;context&#39; field:
+- New DEFAULT_RETAIN_CONTEXT constant explains that [context] block
+  sender/channel/provider are routing identifiers, not human names
+- Bank IDs, session keys, agent IDs, thread IDs, and tags are also
+  marked as operational routing identifiers, not project names
+- Assistant-role first-person statements are attributed to the AI
+- Context is passed through the full chain: buildRetainRequest →
+  scopeClient.retain → Hindsight SDK API
+- RetainQueue persists and flushes context correctly
+- Backfill CLI also passes context
+- New &#39;retainContext&#39; config option allows customization
+
+includeSenderContext behavior is unchanged; the [context] block remains
+in transcript content, but extraction LLM now knows how to interpret it.
+
+7 files changed, 97 insertions(+).
+
+* fix(openclaw): remove platform-specific examples from DEFAULT_RETAIN_CONTEXT
+
+* test(openclaw): harden retain context handling
+
+* fix(openclaw): strip runtime metadata from memory content
+
+* refactor(openclaw): remove dead session-context surface
+
+Following the removal of transcript context-prepending, drop the now-unused
+formatRetentionSessionContext / RetentionSessionContext and the ignored
+prepareRetentionTranscript session-context parameter (and the discarded
+object built at the live call site). Remove the inert includeSenderContext
+config option (no longer read) from the type, manifest schema, and UI label.
+Collapse the session-context tests to two regression guards asserting that
+retained JSON/text content carries no context header.
+
+---------
+
+Co-authored-by: Nicolò Boschi &lt;boschi1997@gmail.com&gt;
+
+- fix(api): apply bank-config disposition + mission overlay in list_banks (#2101)
+
+list_banks now overlays resolved bank config (reflect_mission + disposition_*) on top of the legacy banks.disposition/banks.mission columns, matching get_bank_profile so the list and get paths agree for a bank.
+
+Overlay extracted into a shared helper returning a ResolvedDispositionMission dataclass. Config is resolved in one batch (single banks.config query + one tenant resolve) via ConfigResolver.get_bank_configs(), avoiding an N+1 of per-bank config resolves.
+
+Co-authored-by: Timur Khairutdinov &lt;PathKnower@users.noreply.github.com&gt;
+
+- feat(metrics): expose async-operation queue + consolidation backlog as gauges (#1987)
+
+* feat(metrics): expose async-operation queue + consolidation backlog as gauges
+
+The bank-stats endpoint already computes operations_by_status,
+pending_consolidation and failed_consolidation, but only as a point-in-time
+HTTP response per bank. There&#39;s no way to trend or alert on &#34;is the worker
+keeping up?&#34; / &#34;is the knowledge base caught up?&#34; from Prometheus.
+
+This adds three observable gauges, fed by a 30s background-refresh cache (the
+same pattern as the existing db-pool gauges, so the /metrics scrape path stays
+synchronous):
+
+- hindsight_async_operations{operation_type,status} -- worker queue depth for
+  non-terminal states. pending = queued backlog (e.g. retain / consolidation),
+  processing = in-flight, failed = stranded. Terminal states (completed,
+  cancelled) are deliberately excluded: a gauge of finished work grows without
+  bound and says nothing about current load. The processing series is the only
+  signal that surfaces a hung operation holding a worker slot.
+- hindsight_consolidation_backlog -- source memories (experience/world) not yet
+  consolidated into observations (pending_consolidation).
+- hindsight_consolidation_failed -- source memories whose consolidation
+  permanently failed, recoverable via the consolidation recovery endpoint
+  (failed_consolidation).
+
+The SQL is lifted from the bank-stats endpoint and is index-backed
+(idx_async_operations_status, idx_memory_units_unconsolidated). Per-bank labels
+are gated behind the existing metrics_include_bank_id flag (off by default);
+when off, counts aggregate per tenant/schema, bounding cardinality to a handful
+of series. All queries are PostgreSQL-specific (FILTER, information_schema),
+consistent with this collector already being bound to an asyncpg pool.
+
+* review: address feedback on backlog metrics
+
+- Split the consolidation backlog into two separate COUNT(*) queries, each with
+  a WHERE matching a partial-index predicate exactly (idx_memory_units_
+  unconsolidated / idx_memory_units_consolidation_failed), instead of one
+  aggregate with two FILTERs that seq-scans the whole memory_units table on
+  every 30s refresh across every schema. GROUP BY bank_id still composes
+  (bank_id is each index&#39;s lead column).
+- Type the gauge cache keys as NamedTuples (_AsyncOpKey, _BacklogKey) instead of
+  raw tuples.
+- Hoist `import asyncio` to module scope (was imported inside two methods).
+- Document that _backlog_task is process-lifetime and intentionally not
+  cancelled (no teardown hook to hang it on).
+- Add tests for the per_bank=True path (bank_id in the cache key + GROUP BY
+  bank_id in the SQL + bank_id gauge attribute) and assert the backlog queries
+  are index-matched, not FILTER scans.
+
+* fix(metrics): force index scan for the consolidation backlog count
+
+Splitting the consolidation count into two index-predicate-matched COUNT(*)
+queries fixed the failed count (index-only scan) but NOT the backlog count.
+Verified on a 114k-row memory_units via EXPLAIN ANALYZE: the backlog query still
+seq-scans (~92 ms) because `consolidated_at IS NULL` is true for ~40% of the
+table (every observation has a null consolidated_at), so the planner misjudges
+selectivity and won&#39;t use idx_memory_units_unconsolidated even though the
+predicate matches it exactly. ANALYZE doesn&#39;t change the plan (structural, not
+stale stats); `enable_seqscan=off` confirms the index is usable (~0.1 ms).
+
+Run the backlog count in a scoped transaction with SET LOCAL enable_seqscan=off
+to force the partial-index scan (verified ~0.07 ms, transaction-scoped, no
+leak). The failed count needs no nudge — consolidation_failed_at IS NOT NULL is
+rare, so its index is chosen on cost.
+
+* feat(metrics): gate consolidation backlog gauges behind config flag (off by default)
+
+Add HINDSIGHT_API_METRICS_BACKLOG_ENABLED (default false). The
+async-operation queue + consolidation backlog gauges run periodic
+per-schema COUNT queries on a background task, so they are now opt-in
+rather than always-on when a db pool is set.
+
+* chore: sync embed env template + prettify paperclip README after main merge
+
+---------
+
+Co-authored-by: Nicolò Boschi &lt;boschi1997@gmail.com&gt;
+
+- feat(extensions): expose Content-Length on PrecheckContext (#2247)
+
+Add an optional `content_length: int | None` field to `PrecheckContext`
+and populate it from the request&#39;s `Content-Length` header in the
+`_precheck_dep` FastAPI dependency wired by the billable POST routes.
+
+Surfacing the header lets a precheck make size-aware decisions — for
+example, computing an upper-bound cost estimate (`bytes / tokens-per-byte
+* per-op-rate`) and rejecting before the body is read or deserialised —
+without changing the contract that the precheck runs before body parse.
+
+The field is optional with a default of `None`, so existing
+`OperationValidatorExtension` implementations and `PrecheckContext`
+construction sites are unaffected. `None` also remains the value when
+the header is absent (e.g. chunked transfer encoding) or unparseable;
+`0` is preserved as a known empty body.
+
+Adds three tests in `TestPrecheckHttpWiring`:
+- header populated → validator sees the int
+- empty POST body → validator sees `0`, not `None`
+- header missing → validator sees `None`
+
+- fix(consolidation): handle single-value source_fact_ids from LLM (#2240)
+
+Some LLMs return source_fact_ids as a string instead of a list when there is only one source ID. Add field_validator on both  _CreateAction and _UpdateAction to auto-wrap into a single-element list.
+
+Relates-to: #1656
+
+- feat(mcp): add ToolAnnotations (read-only/destructive hints) to MCP tools (#2243)
+
+* feat(mcp): add ToolAnnotations (read-only/destructive hints) to MCP tools
+
+All MCP tools registered with bare @mcp.tool() and exposed no annotations,
+so clients (claude.ai, Notion, …) could not group read vs write tools,
+surface a destructive-action warning for delete_bank / clear_memories, or
+auto-approve safe reads.
+
+Add a _tool_annotations() helper that classifies each tool as read-only,
+destructive, or plain write, and apply it to every registration.
+openWorldHint=False throughout (closed memory store). Pure metadata — no
+behavioural change.
+
+reflect is classified as a (non-destructive) write because it can form and
+persist opinions during synthesis; flip it to readOnlyHint=True if the
+engine never persists on reflect.
+
+* fix(mcp): classify reflect as read-only (engine persists nothing)
+
+---------
+
+Co-authored-by: Nicolò Boschi &lt;boschi1997@gmail.com&gt;
+
+- log(consolidation): show call count + avg for each timing phase (#2238)
+
+The consolidation summary log used to print only the total time per phase:
+
+    [4] Timing breakdown: recall=15.425s, llm=43.181s, embedding=0.301s
+
+This makes it easy to misread the &#34;recall=15s&#34; line as a single slow query
+when it is actually the sum of many sequential sub-calls (e.g. 100 internal
+recalls at ~150ms each). Add a call counter to ConsolidationPerfLog and
+include both the count and a per-call average when count &gt; 1:
+
+    [4] Timing breakdown: recall=15.425s (100 calls, avg=154ms),
+                          llm=43.181s (12 calls, avg=3598ms),
+                          embedding=0.301s (3 calls, avg=100ms),
+                          db_write=0.829s
+
+Operators triaging &#34;the recall phase took 15s&#34; can now tell at a glance
+whether the cost is one slow query or many fast ones, which leads to very
+different diagnostic paths. Single-call timings keep the existing terse
+format (no `(1 calls, ...)` clutter).
+
+Backward-compatible: timing_counts is a new attribute; existing accessors
+on `timings` and `llm_calls` keep their current semantics.
+
+- fix(litellm): hard-cap completions with asyncio.wait_for so a hung call can&#39;t block forever (#2224)
+
+* fix(litellm): cap completions with asyncio.wait_for so a hung call can&#39;t block forever
+
+The LiteLLM provider issued completions as a bare `await self._acompletion(...)`.
+The only timeout was the `timeout=` kwarg handed to `litellm.acompletion()`,
+which is not always honored (e.g. a connection held open with no token
+progress). When that happens the coroutine awaits indefinitely, holding the
+worker slot and a concurrency-semaphore permit for the lifetime of the process.
+
+Fact extraction fans these calls out through `asyncio.gather`, so a single
+hung straggler stalls the whole operation even though its sibling calls
+returned — completion throughput collapses to zero while sibling calls keep
+succeeding, which makes the failure mode hard to diagnose.
+
+Wrap the request in `asyncio.wait_for(timeout=self.timeout)` in both `call`
+and `call_with_tools` (mirroring the Gemini provider, which already does this)
+and treat the resulting `TimeoutError` as a normal retryable attempt, so the
+task can retry or fail cleanly and release its slot. The existing
+`asyncio.gather(..., return_exceptions=True)` callers absorb the timeout with
+no extra handling.
+
+Also thread an optional `timeout` through `create_llm_provider` and
+`LLMConfigWrapper` into the LiteLLM/Bedrock/Router providers so the cap is
+configurable; `None` keeps the existing 300s default (never `None`, which
+would make `wait_for` wait forever).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(litellm): make the hard-timeout cap configurable and converge timeout handling
+
+Builds on the asyncio.wait_for cap added for the LiteLLM family:
+
+- Wire LLMProvider.from_env() to read HINDSIGHT_API_LLM_TIMEOUT (default
+  DEFAULT_LLM_TIMEOUT = 120s). The cap was threaded through the constructors but
+  never set by from_env(), so it silently defaulted to 300s and was not
+  configurable. This matches how the OpenAI-compatible provider already reads the
+  same var. Also fix the stale openai-compatible docstring that claimed 300s.
+
+- Converge timeout handling: litellm&#39;s own Timeout and the outer wait_for
+  TimeoutError are armed at the same deadline but previously flowed through
+  different except blocks (generic vs dedicated), so which one tripped was a race
+  producing different log lines and backoff. Catch both in one block so they
+  share a retry policy and log line; log the exception class name so the firing
+  mechanism stays visible.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor(litellm): hoist litellm Timeout import to module level
+
+Address PR review (r3421670469): litellm is a hard dependency already imported
+in __init__, so the per-call function-local `from litellm.exceptions import
+Timeout` in call/call_with_tools is unnecessary. Hoist to a module-level import,
+matching how gemini_llm imports its SDK.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- feat(api): add optional MarkItDown OCR support (#2145)
+
+MarkItDown advertises image extensions, but without OCR config it can
+fail screenshots or scanned images with low-level no-content errors.
+
+Add server-level MarkItDown OCR config that is off by default and
+independent from HINDSIGHT_API_LLM_*. When OCR is enabled, the OCR API
+key, base URL, and model are required explicitly.
+
+Wire those settings into MarkItDown&#39;s llm_client support with a built-in
+OCR prompt. Image uploads now fail fast with actionable errors when OCR
+is disabled or required settings are missing.
+
+Docs and front-end copy explain that image OCR depends on server config
+and requires an OpenAI-compatible OCR/vision endpoint.
+
+Closes #927
+
+- fix: template bank-id path segment in HTTP metric endpoint label (#2191)
+
+http_metrics_middleware normalizes only UUID and pure-numeric path
+segments, so non-numeric bank ids (e.g. user-123, tenant-acme) survive in
+the /banks/&lt;id&gt; segment of the `endpoint` metric label. Each distinct bank
+then becomes a never-evicted OTel series, growing process memory unboundedly
+on every per-bank request.
+
+Same unbounded-OTel-cardinality class as #850 (fixed in #898 for the
+record_operation bank_id attribute), via a code path #898 did not cover.
+
+Extract endpoint normalization into a pure, unit-tested normalize_http_endpoint()
+helper in metrics.py (next to get_token_bucket) that also templates the
+/banks/&lt;id&gt; segment, and call it from the middleware.
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- claude-code: case-insensitive directoryBankMap matching on Windows (#2183)
+
+derive_bank_id compared os.path.normpath(cwd) against the map keys with
+==, which is case-sensitive — but on Windows the drive-letter case of the
+cwd a session reports depends on the launcher: PowerShell and git-bash
+hand child processes an UPPERCASE drive (C:\...) while the VS Code
+extension spawn reports lowercase (c:\...). cmd.exe preserves whatever
+case was typed. A directoryBankMap entry can therefore silently miss for
+some launchers and fall through to the default bank, with no error —
+sessions quietly land in the wrong memory bank.
+
+Fix: wrap both sides in os.path.normcase, which lowercases and normalizes
+separators on Windows and is a documented no-op on POSIX — so POSIX path
+matching stays case-sensitive (pinned by a new test) and Windows matching
+becomes launcher-independent (pinned by a new test that fails without
+this change).
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- fix(claude-code-mcp): resolve venv interpreter in Windows Scripts/ layout (#2066)
+
+run_mcp.sh&#39;s resolve_py() probed only &lt;venv&gt;/bin/python and
+&lt;venv&gt;/bin/python.exe. A standard Windows CPython venv (python.org
+installer, Windows Store Python, `py -m venv`) puts the interpreter at
+&lt;venv&gt;/Scripts/python.exe, so resolve_py returned empty, the launcher
+fell through to venv re-creation, and re-creation failed whenever
+python/python3 were not on the spawning process&#39;s PATH (issue #1758, 3a).
+
+Add a Scripts/ elif branch and update the now-misleading &#34;venv create
+failed&#34; message to mention both layouts. POSIX behaviour is unchanged.
+
+Adds a hermetic pytest that invokes the real bash resolve_py against a
+fabricated venv tree: RED on the Scripts/ layout before this change,
+plus a bin/ regression guard for the POSIX path.
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- fix(openclaw): always session-scope retained documents (#2259)
+
+retainDocumentScope was always meant to be &#39;session&#39;; the &#39;turn&#39; option
+just disabled document accumulation. Remove the config field entirely so
+retains always use a stable per-session document id (falling back to
+per-turn ids only on legacy APIs that lack update_mode: &#39;append&#39;).
+
+- Honor CODEX_HOME for Codex auth.json location (#1874)
+
+Codex authentication previously hardcoded ~/.codex/auth.json in several
+places. Route all Codex auth/LLM/embeddings paths through a single
+default_codex_auth_file() helper that honors the CODEX_HOME environment
+variable (matching the upstream @openai/codex CLI), falling back to
+~/.codex when unset or empty.
+
+Adds tests for the resolution logic and hardens an existing embeddings
+test against CODEX_HOME leaking in from the environment.
+
+Co-authored-by: Nicolò Boschi &lt;boschi1997@gmail.com&gt;
+
+- chore(ci): disable Dependabot version updates (#2257)
+
+Remove .github/dependabot.yml to stop Dependabot from opening
+automated version-update PRs (github-actions ecosystem).
+
+Note: Dependabot security updates are controlled by a repository
+setting, not this file, and must be disabled separately in repo
+settings if desired.
+
+- fix(api): defer provider quota reset retries (#2194)
+
+- Add Python client get_version helper (#2256)
+
+Adds HindsightClient.get_version()/aget_version() convenience wrappers for
+the existing /version endpoint, re-exports VersionResponse for typed callers,
+and tests both paths against a mocked MonitoringApi.
+
+Python parity for #2252 (TypeScript getVersion). Fixes #2248.
+
+- docs(paperclip): document dynamicBankId / bankId / user granularity (#1761) (#1803)
+
+* docs(paperclip): document dynamicBankId / bankId / user granularity
+
+* docs(paperclip): mirror dynamicBankId / bankId / user granularity in integration README
+
+- docs(embed): document control center commands (#2151)
+
+- fix(api): reject empty/whitespace content in dry-run extraction before the LLM call (#2246)
+
+* fix(api): reject empty/whitespace content in dry-run extraction before the LLM call
+
+* test(api): assert dry-run extraction rejects empty content (422)
+
+- Strip reasoning tags on non-structured output + unclosed blocks (#2195)
+
+The reasoning-tag strip in OpenAICompatibleLLM.call() only ran inside the
+`if response_format is not None:` (structured/JSON) branch. The `else:` branch
+that returns free-form, non-structured output (e.g. consolidated mental-model
+markdown) returned the raw provider content with no strip at all. Reasoning
+models that emit their chain-of-thought in the response body — confirmed with
+MiniMax-M3 — therefore leaked `&lt;think&gt;...&lt;/think&gt;` verbatim into stored mental
+models.
+
+Additionally, every existing strip regex used the lazy `&lt;tag&gt;.*?&lt;/tag&gt;` form,
+which requires a closing tag. When output is truncated mid-thought the closing
+tag never arrives, so a dangling `&lt;think&gt;` slipped through even on the JSON path.
+
+Fix:
+- Factor a module-level `_strip_reasoning_tags(text)` helper covering the full
+  tag set (think, thinking, thought, reasoning, |startthink|...|endthink|).
+- For each tag, strip closed blocks (`&lt;tag&gt;...&lt;/tag&gt;`, DOTALL) and then any
+  remaining unclosed block (`&lt;tag&gt;.*` to end-of-string).
+- Call it from BOTH branches: the structured path (replacing the inline regex
+  block) and the free-form path (which previously had no strip).
+
+Adds tests/test_strip_reasoning_tags.py covering closed/unclosed blocks, all
+tag styles, multi-line and multi-block input, and the real-world mental-model
+markdown contamination case.
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- Add TypeScript client version helper (#2252)
+
+- chore(control-plane): format bank-selector.tsx (lint drift from #2212) (#2250)
+
+Applies eslint/prettier formatting that #2212 missed, unblocking verify-generated-files for all open PRs. No behavior change.
+
+- release(composio): v0.1.0
+
+- feat(composio): add Composio integration (Hindsight memory as custom tools) (#2180)
+
+* feat(composio): add Composio integration (Hindsight memory as custom tools)
+
+Exposes Hindsight retain/recall/reflect as Composio in-process custom tools via
+register_hindsight_tools(). The Hindsight bank for each call is the Composio
+session&#39;s user_id, so one registered tool set isolates memory per user
+automatically. Also ships memory_instructions() for pre-recall system-prompt
+injection (Composio doesn&#39;t auto-inject context).
+
+- hindsight_composio/: tools.py, config.py (dataclass + env fallback), errors.py.
+- tests/: 50 tests using a FakeComposio (mirrors the real tool decorator +
+  SessionContext) + mocked Hindsight client — exercises the framework wiring.
+- CI: test-composio-integration job (uv build/sync/ruff/pytest) + path filter.
+- Gallery card + doc page + official Composio icon; release-integration.sh entry.
+
+* fix(composio): register in changelog generator + test memory_instructions
+
+- Add composio to generate_changelog.py INTEGRATIONS dict (release would
+  otherwise fail at the changelog step; it was only in release-integration.sh).
+- Add TestMemoryInstructions covering formatting, max_results cap, empty/error
+  fallback, tag passthrough, and missing-config error.
+
+* address review: Literal config types, typed generics, debug log, real-LLM E2E
+
+- Type budget as Literal[low|mid|high] and tags_match as Literal[any|all|
+  any_strict|all_strict] across config + tools (matches autogen/continue)
+- Parameterize bare list -&gt; list[Any] on register_hindsight_tools
+- _ensure_bank: logger.debug the swallowed create_bank failure so a real
+  auth/network error is visible rather than only surfacing later on retain
+- Add requires_real_llm E2E bucket exercising retain/recall/reflect through
+  the (input, ctx) tool call path against a live Hindsight server; exclude
+  from PR CI via -m &#39;not requires_real_llm&#39;
+
+- blog(obsidian): Chat With Your Obsidian Vault, grounded in your notes (#2237)
+
+* blog(obsidian): add Obsidian persistent memory post
+
+Walkthrough of the Hindsight Obsidian plugin: one-way vault sync into a
+memory bank, grounded chat panel backed by reflect with note citations
+and a reasoning disclosure, implicit vault/folder/date scoping, and the
+&#34;vault stays the source of truth&#34; design rule. Includes a beta/BRAT
+install callout (plugin v0.1.2) and Cloud vs self-hosted setup.
+
+- fix(control-plane): expose &#34;shared&#34; observation scope in the Add Document UI (#2212)
+
+* fix(control-plane): expose &#34;shared&#34; observation scope in the Add Document UI
+
+#2202 added the &#39;shared&#39; observation-scopes mode and synced it across the server,
+HTTP model, retain types, and every client (incl. the control-plane client type in
+api.ts), but missed the GUI component itself, so users could not select &#39;shared&#39;
+from the Add-Document form. Wire it through bank-selector.tsx: state union, dropdown
+item, request build, and a dedicated preview line (&#39;shared&#39; is tag-independent and
+maps to a single global scope [[]] server-side). No locale/generated-file changes.
+
+* fix(control-plane): translate shared observation scope copy
+
+---------
+
+Co-authored-by: r266-tech &lt;r266-tech@users.noreply.github.com&gt;
+
+- docs: fix stale documentation links (#2221)
+
+Update integration and installation documentation URLs so they point
+to the public Hindsight docs site instead of stale Cloud docs paths.
+
+- docs: update configuration guidance (#2228)
+
+- revert(worker): trust schemas_with_pending_work() result, drop per-poll re-scan (#2236)
+
+Reverts the stale-routine fallback added in #1666. That change re-ran the
+per-schema EXISTS scan whenever the default schema was absent from the
+routine result — i.e. on every idle poll, since public is almost always in
+scope and usually has no pending work. The scan covered ALL schemas, so it
+reintroduced the exact N-query storm the routine exists to avoid, precisely
+in the large multi-tenant deployments the optimisation targets.
+
+The routine is now trusted wholesale: any schema it does not return is
+treated as having no work this cycle (its documented contract). The #1555
+concern (an operator routine scoped to tenant_% starving a single-tenant
+public deployment) is addressed by guidance instead: do not install the
+routine in single-schema deployments — the per-schema fallback is a single
+cheap EXISTS check that covers public correctly and cannot starve.
+
+The only piece kept from #1666 is the harmless public-&gt;None normalisation
+of the routine&#39;s output, so a returned &#39;public&#39; still counts as work.
+
+- test: unregister engine span recorder on fixture teardown (#2229) (#2231)
+
+LLM-trace recorders live in a process-global registry and providers fan every
+call out to ALL registered recorders. The engine test fixtures&#39; teardown gated
+`mem.close()` — the only thing that unregisters the recorder — on
+`mem._pool and not mem._pool._closing` and swallowed exceptions, so when close()
+was skipped or raised before the unregister step, the recorder leaked. A leaked,
+still-enabled recorder from an earlier test then recorded a later test&#39;s LLM
+calls into the shared DB, making test_disabled_writes_no_rows flaky
+(`assert 6 == 0`).
+
+Route all four engine fixtures through a `_teardown_memory_engine` helper that
+always unregisters the recorder in a `finally` (idempotent — no-op when close()
+already did it). Add a fast regression test asserting the registry is left clean
+even when close() is skipped.
+
+- fix(migrations): merge two divergent alembic heads (#2234)
+
+#2209 (d4f6a8c2e1b3, drop archive embedding column) and #&lt;links-index&gt;
+(2071c7518f88, add memory_links index) were authored off the same parent and
+merged in parallel, leaving the DAG with two heads. `alembic upgrade head`
+is ambiguous in that state and CI&#39;s test_single_head fails for everyone.
+
+Add a no-op merge revision unifying both heads.
+
+- feat(tags): officially surface tags_match=exact across UI, docs, clients (#2230)
+
+The `exact` set-equality match mode landed in the API + generated clients
+in #2149 but was never exposed in the control plane, documented, or added
+to the hand-maintained SDK wrappers. This completes the feature.
+
+Control plane: add `exact` to the TagsMatch type/unions and to the
+tags_match dropdowns in think-view, search-debug-view, and both
+mental-model trigger forms; add translated labels to all 10 locales.
+
+Docs: document `exact` in the recall tags_match table + tag_groups,
+the reflect tags value list, and the observations scope-listing guide;
+regenerate the docs skill mirror.
+
+Clients: add `exact` to the hand-maintained Python and TypeScript wrapper
+Literals/unions and docstrings (generated clients already had it; Rust is
+generated from openapi.json at build time).
+
+Supersedes #2159.
+
+- test(control-plane): validate t() keys resolve against the catalog (#2232)
+
+Add a vitest guard that walks every src .ts/.tsx file, resolves each
+useTranslations(&#34;ns&#34;) binding, and asserts every static t(&#34;key&#34;) /
+t.rich(&#34;key&#34;) reference maps to a leaf key in en.json. This closes the
+gap between the two existing i18n checks: messages.test.ts only compares
+locale catalogs against each other (a key missing from *every* catalog,
+en included, passes parity), and find-untranslated.ts does the inverse
+(flags strings *not* wrapped in t()). Neither walked from a t() call
+site back to the catalog, so a missing key only surfaced as a runtime
+next-intl error in the browser.
+
+Runs under the existing `npm test` step in the build-control-plane CI
+job, so no workflow change is needed.
+
+The guard immediately surfaced 14 keys referenced by the curation
+feature (#1976) but missing from all 10 catalogs (filterActive,
+filterInvalidated, invalidatedHint, invalidatedFactsTitle, and the
+memoryDetailPanel curation*/editField* set). Add translations for all
+locales so the suite is green. Supersedes #2226, which patched only
+filterActive.
+
+- fix(mcp): give update_memory/invalidate_memory non-empty descriptions (#2215)
+
+* fix(mcp): give update_memory/invalidate_memory non-empty descriptions
+
+update_memory and invalidate_memory (added in #1976) used an f-string as
+their docstring:
+
+    f&#34;&#34;&#34;{_EDIT_DOC}
+    Args:
+        ...
+    &#34;&#34;&#34;
+
+An f-string is an expression, not a string literal, so Python never assigns
+it to the function&#39;s __doc__ (it stays None). FastMCP derives a tool&#39;s
+description from __doc__, so both tools — and their bank_id variants — were
+registered with an empty description.
+
+Amazon Bedrock&#39;s Converse API rejects any toolSpec whose description is an
+empty string, so every Bedrock request that advertised these tools failed
+mid-stream (surfacing to clients as a generic &#39;internal error occurred while
+processing the stream&#39;). Providers that tolerate empty descriptions were
+unaffected, which is why this only showed up on Bedrock.
+
+Fix: pass the shared doc constant explicitly via @mcp.tool(description=...),
+matching how retain/recall already register, and keep a plain-literal
+docstring for the Args section. Add a regression test asserting every
+registered tool exposes a non-empty description (both registration paths).
+
+* test(mcp): statically reject @mcp.tool definitions without a description
+
+AST-parse mcp_tools.py and fail if any @mcp.tool-decorated function
+lacks both a description= kwarg and a real string-literal docstring
+(an f-string docstring leaves __doc__ None). Complements the runtime
+description test by also covering flag-gated tools and pointing at the
+offending line; needs no engine mocking.
+
+* chore(lint): enable ruff B021 (f-string used as docstring)
+
+Catches the f-string-docstring footgun repo-wide at lint time — the
+root cause of the empty update_memory/invalidate_memory descriptions.
+Clean across hindsight-api-slim; tests/** are excluded from lint so the
+static test guards that surface instead.
+
+---------
+
+Co-authored-by: Nicolò Boschi &lt;boschi1997@gmail.com&gt;
+
+- test: pin migration-remaining-bankid tests to one xdist worker (#2225)
+
+test_migration_remaining_bank_id_text.py runs two tests that share a
+module-scoped pg0 instance on a fixed port (5568). CI runs pytest with
+`--dist loadgroup`, which — with no xdist_group on the module — can scatter
+those two tests across workers that each instantiate the module fixture and
+race to provision the SAME instance. That surfaced as recurring flakes:
+&#34;Instance already running&#34;, a pg_type UniqueViolation (concurrent CREATE
+EXTENSION during migrate-to-head), and &#34;server closed the connection&#34;.
+
+Pin the module to a single worker with a shared xdist_group so the fixture
+provisions the instance exactly once. Test-only change.
+
+- fix(docs): deflake memories.py example by draining async ops between curation steps (#2152)
+
+The memories.py API doc example ran update_memory edit → edit-fields →
+invalidate → restore back-to-back on the same unit. Each edit re-embeds and
+re-consolidates in the background (a tracked consolidation op), so a later
+step could race that work and 404 on a unit mid-rewrite — the restore
+intermittently failed with &#34;Memory unit not found&#34;. The fixed sleep(3) after
+the seed retains was also unreliable under CI load with a live LLM.
+
+Replace the sleep with a wait_for_idle() helper that polls list_operations
+until the bank has no pending/processing operations, and drain between each
+curation step. All waits sit outside the [docs:...] blocks, so the rendered
+documentation snippets are unchanged.
+
+- fix(api): gate dry-run extraction behind the operation precheck (#2211)
+
+POST .../memories/dry-run-extract (added in #2205, enabled by default) makes a
+real LLM call but was the only enabled-by-default LLM-billable route with no
+OperationValidator gating. Wire Depends(precheck_for(&#34;dry_run_extract&#34;)) like
+retain/recall/reflect/mental_model_*/files_retain, and move the feature-flag
+check into a dependency declared before the precheck so a disabled route still
+returns 404 first. No behavior change when no validator is configured.
+
+- perf(api): index memory_links.bank_id on PostgreSQL (#2223)
+
+* perf(api): index memory_links.bank_id on PostgreSQL
+
+bank_id was added to memory_links in c5d6e7f8a9b0 so bank-scoped reads could
+filter the link table directly instead of joining memory_units (an 18s+ JOIN on
+large banks), but it landed without an index, so every bank_id = $1 predicate
+still sequential-scans the whole table.
+
+Add the missing btree, built CONCURRENTLY inside an autocommit_block with IF NOT
+EXISTS for idempotency across retries and re-migrated tenant schemas. The Oracle
+baseline (o1a2b3c4d5e6) already creates idx_ml_bank_id on memory_links(bank_id);
+this brings the PostgreSQL dialect in line. PG-only by design, so the Oracle
+slot is intentionally absent.
+
+* fix(migration): drop invalid leftover index before recreating bank_id index
+
+CREATE INDEX CONCURRENTLY can leave an INVALID index behind if a prior
+build is interrupted (lock conflict, disk pressure, signal). IF NOT EXISTS
+would then skip recreation, leaving bank_id queries on a seq scan forever.
+Drop only an invalid leftover of this name (never a healthy index) before
+the concurrent (re)build, mirroring b8c9d0e1f2a3.
+
+* perf(api): composite (bank_id, link_type) index + drop dead entity filter
+
+The stats endpoint&#39;s bank-scoped link query is
+  SELECT link_type, COUNT(*) ... WHERE bank_id = $1 GROUP BY link_type
+A composite (bank_id, link_type) index serves the filter, grouping and
+count as an index-only scan, vs a bank_id-only index that still heap-reads
+every row to recover link_type. link_type is low-cardinality so the extra
+column barely grows the index.
+
+Also remove the now-dead &#39;link_type &lt;&gt; entity&#39; predicate from the stats and
+graph-expansion queries: entity edges were deleted from memory_links and are
+no longer written (migration e9b2c7d1f3a4); they&#39;re derived on demand from
+unit_entities. Removing the predicate also lets the composite index cover
+the stats query.
+
+---------
+
+Co-authored-by: zommiommy &lt;zommiommy@users.noreply.github.com&gt;
+Co-authored-by: Nicolò Boschi &lt;boschi1997@gmail.com&gt;
+
+- feat(api): improve Chinese temporal query parsing (#2220)
+
+Move explicit period extraction out of DateparserQueryAnalyzer. The analyzer
+now delegates range parsing to temporal_periods, which keeps the public API and
+non-Chinese rules while Chinese-specific rules and boundary handling live in
+chinese_temporal_periods.
+
+Handle simplified and traditional Chinese expressions for relative days,
+weeks, months, years, weekends, half-year periods, Chinese month names,
+quarters, and rolling past/future windows.
+
+Separate precise point expressions from fuzzy range expressions so phrases such
+as 两天前, 前两天, 几天前, and 一两周前 map to the intended constraint shape
+instead of relying on dateparser fallback behavior.
+
+Keep open future starts such as 明天起, 下周起, and 三天后开始 unconstrained
+because the API only represents closed ranges.
+
+Guard Chinese matching so non-CJK queries skip the Chinese regex path, while
+Chinese substring checks avoid treating ordinary names and words as temporal
+constraints.
+
+- fix(curation): drop the embedding column from invalidated_memory_units (#2209) (#2210)
+
+* fix(curation): drop embeddings from invalidated_memory_units archive (#2209)
+
+Invalidating a memory copied the live row — including its embedding —
+into the invalidated_memory_units archive via INSERT … SELECT. After an
+embedding-model switch, the live tables are re-dimensioned but the
+archive is not, so the move failed with &#34;expected 384 dimensions, not
+1536&#34;.
+
+The archive is cold storage and never a recall surface, so it has no
+business keeping an embedding. Instead of also migrating its dimension,
+stop storing the embedding there at all:
+
+- invalidate: project NULL into the embedding slot on the move
+- revert: recompute the embedding from text/dates/entities (mirroring
+  how an edit re-embeds) so the reverted unit is searchable again
+
+This makes the archive&#39;s embedding-column dimension irrelevant, so a
+model switch can no longer trip a dimension mismatch. A forward
+migration clears any embeddings earlier versions already stored.
+
+* refactor(curation): drop the archive embedding column instead of NULLing it
+
+Make &#34;the invalidated_memory_units archive holds no embedding&#34; a
+schema-enforced invariant rather than a convention the move queries must
+remember. The embedding column is dropped (migration d4f6a8c2e1b3, PG +
+Oracle), so:
+
+- invalidate moves every memory_units column EXCEPT embedding into the
+  archive
+- revert moves them back (live embedding defaults to NULL) and recomputes
+  the embedding from text/dates/entities
+
+This structurally prevents #2209 — there is no archive vector to fall out
+of sync with the live model&#39;s dimension, so a model switch can&#39;t reintroduce
+the dimension mismatch via a future code change. DROP COLUMN is metadata-only
+on both dialects.
+
+The archive&#39;s readers (get_memory_unit/list enumerate columns; export does
+SELECT * then strips derived columns) never referenced embedding, so nothing
+breaks.
+
+* refactor(curation): never create the archive embedding column
+
+Remove the embedding column at its creation sites rather than creating it
+and dropping it afterward:
+
+- PG: c9a1b2d3e4f5 drops the LIKE-inherited embedding right after cloning
+  invalidated_memory_units from memory_units
+- Oracle: the baseline CREATE TABLE no longer lists the embedding column
+
+The forward drop migration (d4f6a8c2e1b3) stays as a no-op (DROP … IF EXISTS /
+Oracle ORA-00904 swallow) on fresh databases and does the real drop on
+databases created before the column was removed here.
+
+- fix(skill-docs): convert all admonition keywords in the docs→skill generator (#2218)
+
+The MDX→skill converter in scripts/generate-docs-skill.sh only handled
+:::tip / :::warning / :::note, and each rule required an inline title.
+So :::info and :::caution admonitions — and any title-less opener (e.g.
+a bare :::note) — were left as raw `:::` markdown in the CI-enforced
+agent-facing skill mirror (skills/hindsight-docs/references/**), where the
+generic `:::\s*\n` cleanup then ate the closing fence and the admonition
+body bled into the following section.
+
+Most visibly, #2202 added a :::caution &#34;shared vs [[]] vs []&#34; warning to
+retain.mdx, which now renders as broken raw markdown in retain.md.
+
+Teach the converter every supported keyword (tip/note/warning/info/caution)
+with an optional inline title, mapping each to a blockquote (title-less
+openers fall back to the capitalized keyword). Regenerated the skill mirror;
+this also repairs pre-existing :::info/:::caution/title-less leaks across the
+core API reference docs.
+
+Note: source files that are plain .md (e.g. configuration.md) are copied
+verbatim by the generator rather than run through this converter, so their
+admonitions are unaffected here — happy to extend the converter to that
+copy path in a follow-up if desired.
+
+- feat(continue): add Continue.dev integration via HTTP context provider (#2213)
+
+Adds hindsight-continue: Hindsight memory for Continue.dev via its native http context provider (@hindsight recall) plus an optional MCP-server + rules setup. Includes the adapter package, tests against Continue&#39;s HTTP contract + a gated E2E, CI job, release registration, docs, and registry entry.
+
+- feat(zapier): add Hindsight Zapier app (actions + REST Hook triggers) (#2119)
+
+* feat(zapier): add Hindsight Zapier app (actions + REST Hook triggers)
+
+A Zapier Platform CLI app that brings Hindsight memory into Zaps.
+
+Actions:
+- Retain Memory (create) -&gt; POST /v1/default/banks/{bank}/memories
+- Recall Memories (search) -&gt; POST .../memories/recall
+- Reflect (search) -&gt; POST .../reflect
+
+Triggers (instant, via Hindsight&#39;s webhook API — subscribe POSTs /webhooks,
+unsubscribe DELETEs it):
+- Retain Completed, Consolidation Completed, Memory Defense Triggered
+
+Auth: API key as Bearer token, Cloud default with self-hosted override; the
+Bank field is a dynamic dropdown from GET /v1/default/banks.
+
+Built on zapier-platform-core 19; &#39;private&#39;: true so the npm release path can
+never publish it (Zapier publishing is manual via zapier push/promote, not
+release-integration.yml — and zapier is intentionally NOT in VALID_INTEGRATIONS).
+
+Adds test-zapier-integration CI job (npm install -&gt; zapier validate -&gt; npm test)
+and a repo README row. 15 mocha/nock unit tests; &#39;zapier validate&#39; is
+structurally clean.
+
+Docs-site gallery card + doc page + icon are a follow-up (need the official
+Zapier brand asset; omitted here to keep build-docs green).
+
+* fix(zapier): make apiKey optional for no-auth self-hosted + prettier-clean
+
+- authentication.js: apiKey now optional (required: false). The middleware only
+  adds the Bearer header when a key is present, so you can connect to a
+  self-hosted instance running without auth by leaving it blank; Cloud still
+  requires a working key (blank -&gt; 401 fails the connection test).
+- README: document self-hosted / localhost usage, the optional key, and correct
+  the CLI binary name to &#39;zapier-platform&#39; (v19 renamed it from &#39;zapier&#39;); show
+  the .env approach so &#39;zapier invoke&#39; needs no global install.
+- Run prettier across the integration (fixes pre-existing format drift that was
+  failing verify-generated-files on this branch).
+
+zapier validate still structurally sound; 15 tests pass.
+
+* fix(zapier): correct reflect answer field + recall output shape (found via live test)
+
+Extensive live testing against Hindsight Cloud surfaced two response-shape bugs
+the mocked unit tests missed (they mocked the wrong shapes):
+
+- reflect: the synthesized answer is in the response&#39;s `text` field, not
+  `answer`. searches/reflect read `data.answer` (undefined), so a Zap got no
+  answer. Now reads `data.text` and surfaces it as `answer`. Test mock fixed to
+  use the real `text` field so it actually guards this.
+- recall: results carry no numeric `score`, and the fact-type field is `type`
+  (not `fact_type`). Corrected the sample + outputFields so the Zap editor only
+  advertises fields that actually populate; test mock made realistic.
+
+Verified live end-to-end: auth, bank dropdown, retain (full + minimal), recall
+(real fact extraction), reflect (now returns the grounded answer), and the
+webhook subscribe/list/delete lifecycle. 15 unit tests pass; zapier validate clean.
+
+* docs(zapier): correct .env auth-field prefix to authData_ in README
+
+zapier invoke reads .env auth fields with the authData_ prefix (e.g.
+authData_apiKey, authData_apiUrl), not bare apiKey/apiUrl. Confirmed against a
+working local .env during live testing.
+
+* docs(zapier): add integrations gallery card + doc page
+
+- gallery entry in integrations.json (id zapier, official, category framework)
+- doc page docs-integrations/zapier.md (actions + REST Hook triggers, setup)
+- official Zapier logo at static/img/icons/zapier.png
+
+check-integrations passes (forward: entry → doc page); JSON valid; prettier-clean.
+
+* feat(zapier): verify webhook HMAC signatures + optional async retain (review notes 2 &amp; 4)
+
+#2 — Webhook signature verification (was: relying only on Zapier&#39;s unguessable URL):
+- performSubscribe now generates a random 32-byte secret and registers it with
+  the webhook; the secret is stored in subscribeData.
+- perform verifies the X-Hindsight-Signature: sha256=&lt;hmac&gt; header (HMAC-SHA256
+  of the raw body) and rejects mismatches. (Corrected the header name — the API
+  sends X-Hindsight-Signature, not X-Webhook-Signature; body is delivered
+  byte-for-byte via content=, so the recomputed HMAC matches.)
+
+#4 — Optional &#39;Process asynchronously&#39; toggle on Retain (default false). Lets
+users with very large content avoid Zapier&#39;s action timeout; pairs with the
+Retain Completed trigger.
+
+17 unit tests pass (added valid/invalid signature cases); zapier validate clean.
+
+- blog(gemini-spark): Gemini Spark persistent memory via MCP (#2208)
+
+* blog(gemini-spark): add Gemini Spark persistent memory post
+
+Walkthrough of the config-only Hindsight + Gemini Spark integration:
+agent-initiated recall/retain over MCP (no plugin host, no hooks),
+Hindsight Cloud direct path vs self-hosted OAuth proxy, setup for both
+the Antigravity desktop mcp_config.json and the antigravity.yaml manifest.
+
+- fix typescript shared observation scope (#2207)
+
+- feat(api): dry-run fact extraction endpoint (preview, no persistence) (#2205)
+
+Add POST /v1/default/banks/{bank_id}/memories/dry-run-extract — a
+read-only tool that previews what the retain step would extract from
+text WITHOUT changing the bank: extraction only, no entity resolution,
+links, embeddings, or persistence. The &#34;dry-run-extract&#34; path makes the
+non-mutating nature explicit.
+
+Returns a dedicated DryRunExtractionResult: the candidate facts plus the
+aggregated LLM token usage. Each fact (ExtractedFact) is a subset of the
+memory-unit shape — only what a fresh extraction produces: text,
+fact_type, occurred_start/end, entities[] (raw, unresolved names).
+
+Every prompt-affecting setting is overridable per call (retain_mission,
+extraction_mode, custom_instructions, chunk_size, entity_labels,
+entities_allow_free_form, llm_output_language) plus the narrator
+(agent_name), so a candidate config can be A/B&#39;d against the bank&#39;s
+current one. The reference date field is named `timestamp` to match the
+retain item payload. The engine authenticates the tenant before reading
+any bank-scoped config.
+
+Gated by a static server-level flag HINDSIGHT_API_ENABLE_DRY_RUN_EXTRACT
+(default true). Since extraction makes a real LLM call, set it to false
+to remove the endpoint (returns 404) on cost/abuse-sensitive deployments.
+
+Control plane: a &#34;Dry-run extraction&#34; dialog opened from the Memory Bank
+actions menu (text input + raw JSON output, side-by-side).
+
+Regenerated OpenAPI spec + Python/TypeScript/Go client SDKs.
+
+- feat(retain): make structured chunk size configurable (#2139)
+
+Add retain_structured_chunk_size as an explicit retain chunking knob
+for structured inputs. When unset, structured inputs follow the
+effective retain_chunk_size instead of the hidden 1.5x overflow factor.
+
+Thread the setting through retain extraction, append/prepend chunking,
+bank config resolution, templates, MCP docs, maintained clients,
+generated OpenAPI artifacts, the control-plane retain strategy UI, and
+the Rust CLI set-config command.
+
+Validate retain_chunk_size and retain_structured_chunk_size as positive
+integers while allowing either value to be smaller. Keep the existing
+retain_max_completion_tokens check scoped to retain_chunk_size.
+
+Preserve upstream validation details for client errors through the
+control-plane proxy so UI alerts and toasts can show concrete
+configuration errors without exposing server-side failure details.
+
+Update chunking, config, hierarchical config, template, MCP, client
+payload, control-plane serialization, SDK-response, API-client, and
+retain UI validation tests for the new behavior.
+
+- feat(migrations): parallelize tenant schema migrations (#2203)
+
+Add HINDSIGHT_API_MIGRATION_CONCURRENCY to migrate tenant schemas concurrently (each in its own spawn process; per-schema work stays sequential). NullPool on migration engines bounds per-worker connections. Validated at 20k schemas: no-op resweep ~60min-&gt;~11min (5x) at concurrency=12, peak 29 connections, 0 errors. Default 1 (sequential).
+
+- feat(api): omit null fields from JSON responses where wire-safe (#2204)
+
+* feat(api): omit null fields from JSON responses where wire-safe
+
+API responses included every optional field as `&#34;x&#34;: null`. Install a
+custom route class (ExcludeNoneRoute) that enables response_model_exclude_none
+for routes whose response model has no required-and-nullable field, so those
+nulls are dropped.
+
+Routes whose model carries a required-nullable field (e.g. DocumentResponse
+.content_hash, OperationResponse.error_message) keep emitting nulls — omitting
+a key the OpenAPI `required` set declares would break strict generated clients
+(the Rust progenitor client decodes those without serde defaults). Detection is
+recursive over nested models/generics, so it stays correct as models evolve.
+
+The OpenAPI schema is unchanged (exclude_none is runtime-only), so the spec and
+all generated clients are byte-identical and existing clients remain compatible.
+Verified the published 0.8.2 client deserializes recall/retain/reflect/list
+responses against a server running this change.
+
+* test(api): tolerate omitted null fields in response assertions
+
+Responses now omit null optional fields (ExcludeNoneRoute). Update the four
+tests that read these keys via direct indexing to use `.get(...) is None`,
+which holds whether the key is absent or explicitly null:
+- operations progress (OperationStatusResponse / OperationsListResponse)
+- bank-health latency_ms (when LLM not configured)
+- reflect based_on (null when facts not requested)
+- bank export bank/mental_models/directives (empty bank)
+
+- fix(api): mental model delta refresh (prompt size, JSON, consolidation) (#2170)
+
+* fix(api): shrink mental model delta LLM prompts for provider limits
+
+Delta refresh (scope mental_model_delta_ops) was sending the full
+structured document, reflect synthesis, and every fact ever merged into
+based_on. That payload grew on each refresh and triggered Z.ai HTTP 400
+code 1261 (Prompt exceeds max length).
+
+- Send only facts from the current reflect to the structured-delta LLM;
+  accumulated based_on remains stored for audit.
+- Budget and truncate user prompt sections (~24k cl100k tokens default).
+- Use compact JSON for the current document block.
+- Keep normal APIStatusError retries for 1261.
+
+Tests: prompt budget, retry behavior, delta plumbing assertion update.
+
+* chore(control-plane): knip ignore react-dom (Next.js peer, no direct import)
+
+* fix(api): delegate with_config on ConfiguredLLMProvider
+
+Consolidation calls _consolidation_llm_config.with_config(...) after an
+initial with_config bind; without delegation, Python raised TypeError for
+bank_id/operation kwargs on the wrapper class.
+
+Add regression test for re-bind trace attribution.
+
+* fix(api): robust mental model delta JSON + lint sync
+
+- parse_delta_operation_list: parse_llm_json + balanced-object extract
+- Prompt: JSON escaping rules for glm-style invalid output
+- Ruff format on touched files (verify-generated-files)
+- Tests: test_delta_operation_parse.py
+
+* fix(api): skip invalid delta ops instead of full-synthesis fallback
+
+When the model omits required fields (e.g. replace_block without index),
+validate operations one-by-one and apply the rest. Tighten structured-delta
+prompt on index requirement.
+
+* fix(api): drop dead with_config, guard delta facts + all-invalid ops
+
+- Remove redundant ConfiguredLLMProvider.with_config: the __getattr__ proxy
+  already forwards to LLMProvider.with_config (which accepts bank_id), and
+  every caller (_retain/_reflect/_consolidation_llm_config) is an LLMProvider,
+  so the method was never reached. Drop its test (passed against main too).
+- Add regression test locking the delta supporting-facts fix: only THIS
+  refresh&#39;s facts go to the structured-delta prompt, while based_on still
+  accumulates all facts for grounding. Fails on the pre-fix code.
+- Harden parse_delta_operation_list: when the model emits ops but every one
+  fails validation, raise DeltaAllOpsInvalidError so the caller falls back to a
+  full rewrite instead of applying zero ops and silently dropping new facts.
+  A genuine empty operations array stays a valid no-op.
+- knip.json: restore trailing newline (prettier).
+
+---------
+
+Co-authored-by: Nicolò Boschi &lt;boschi1997@gmail.com&gt;
+
+- fix(db): widen remaining live bank_id columns to TEXT on PostgreSQL (#2106 follow-up) (#2175)
+
+* fix(db): widen remaining live bank_id columns to TEXT on PostgreSQL (#2106 follow-up)
+
+* fix(db): drop mental_model_versions from bank_id widen migration
+
+mental_model_versions is created in j5e6f7g8h9i0 but dropped (DROP TABLE
+... CASCADE) in o0j1k2l3m4n5 and never recreated on the upgrade path, so
+it does not exist at head. ALTER TABLE mental_model_versions therefore
+raised UndefinedTable and -- because migrations run inside the
+lifespan-startup transaction -- rolled the whole migration back, bricking
+API startup (the exact failure class this repair targets).
+
+Widen only the live tables that exist at head and still carry VARCHAR(64)
+bank_id: directives and mental_models. Update the test accordingly (it
+previously could not pass: the head migration crashed before any
+assertion, and the now-removed FK insert referenced the dropped table).
+
+---------
+
+Co-authored-by: Nicolò Boschi &lt;boschi1997@gmail.com&gt;
+
+- feat(consolidation): add &#34;shared&#34; observation_scopes keyword (#2202)
+
+* feat(consolidation): add &#34;shared&#34; observation_scopes keyword
+
+Add a &#34;shared&#34; value for observation_scopes that resolves to a single
+global, untagged scope ([[]]). Memories consolidate into one observation
+regardless of their tags, while the tags stay on the source facts for
+recall filtering.
+
+This is the supported way to deduplicate observations across volatile
+per-call provenance tags (e.g. per-session ids): with combined/per_tag,
+a unique session tag puts every retain in its own scope, so near-identical
+facts never dedup and accumulate one observation per session. &#34;shared&#34;
+keeps recall and the dedup probe on the same (empty) scope, fixing
+consolidation quality rather than only the duplicate count.
+
+- consolidator: _resolve_obs_tags_list -&gt; [[]], _resolve_write_scopes -&gt; [frozenset()]
+- API/engine type literals + OpenAPI + regenerated Python/TS/Go/Rust clients
+- CP client type kept in sync
+- docs: retain.mdx &#39;shared&#39; section (+ shared vs [[]] vs [] caveat),
+  observations.mdx dedup pointer; regenerated hindsight-docs skill mirror
+- tests: unit scope-resolution + e2e parallel-consolidation scope correctness
+
+* chore(opencode): apply prettier formatting to plugin.test.ts
+
+Pre-existing lint drift unrelated to this PR — CI&#39;s verify-generated-files
+job reformats all integrations (LINT_ALL_INTEGRATIONS) and flagged this file.
+Folding the one-line reflow in here to get the gate green.
+
+- docs(reflect): align reflect_async docstring with read-only tool set (#2200)
+
+The docstring listed a &#39;learn: Create/update mental models with new insights&#39;
+step that is not wired into the reflect agent. reflect_async only hands the
+agent read tools (search mental models, recall, search observations, expand),
+so reflect synthesizes an answer from stored memories and persists nothing.
+Update the docstring to match the actual implementation.
+
+Co-authored-by: Kuba Odias &lt;kubaodias@users.noreply.github.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix(metrics): don&#39;t count a client-disconnect cancellation as a failed operation (#2185)
+
+run_cancellable_on_disconnect (added in #2127/#2131 for #2122) converts the
+engine&#39;s OperationCancelledError into HTTPException(499), which propagates out
+through record_operation&#39;s blanket `except Exception: success = False`, so every
+abandoned recall/reflect was counted as a failure on hindsight.operation.total.
+
+Exclude a client cancellation from the counter entirely (neither success nor
+failure), detecting it via the exception&#39;s __cause__ chain so an unrelated 499
+is still recorded as a failure. Adds regression tests.
+
+- fix(opencode): drop utility re-exports from plugin entry to satisfy legacy loader (#2193)
+
+OpenCode&#39;s legacy plugin loader (getLegacyPlugins) iterates Object.values(mod)
+and calls every function export as a Plugin factory. It deduplicates by
+reference, so default and HindsightPlugin (same fn) are fine. But the entry
+also re-exported loadConfig and deriveBankId, which the loader invokes as
+plugins and registers as hooks — returning a string and a config object
+respectively, neither of which is a valid hooks object.
+
+Earlier versions of the dist (e.g. 0.2.1) additionally exported
+DEFAULT_HINDSIGHT_API_URL as a string constant, which the loader would call
+as a function and crash on with &#39;Plugin export is not a function&#39;. That was
+fixed in 0.2.2 by dropping the string re-export, but the function re-exports
+remained and would still produce silently-wrong hook objects on every session.
+
+The plugin itself imports loadConfig and deriveBankId directly from their
+submodules, so removing the re-exports is backwards-compatible: no internal
+callers change, no public API is removed (these were undocumented
+convenience re-exports), and the default export remains a callable function
+for direct import.
+
+Add a regression test that asserts the entry has exactly two function
+exports, both pointing at the same reference. This is the legacy-loader
+invariant: anything else will be incorrectly invoked.
+
+Closes the use case for the local plugins/hindsight.js wrapper required to
+load the package as an npm plugin.
+
+Co-authored-by: mdbenito &lt;mdbenito@users.noreply.github.com&gt;
+
+- fix(search): use effective-time fallback (mentioned_at, occurred_end) for recency scoring (#2197)
+
+* fix(search): use effective-time fallback for recency scoring
+
+* test(search): cover mentioned_at/occurred_end recency fallback
+
+* style: apply ruff format (collapse multi-line ternaries within 120c)
+
+Clears verify-generated-files CI: ruff format collapses the recency
+effective-time fallback (reranking.py) and a main-drift one-liner in
+consolidator.py that both fit the 120-char line length.
+
+- docs(litellm): replace removed `opinion` fact-type with `observation` (#2198)
+
+* docs(litellm): replace removed opinion fact-type with observation
+
+* style: apply ruff format to consolidator.py (CI generator-sync)
+
+verify-generated-files requires committed files match ruff format output;
+collapses a main-drift multi-line ternary that fits the 120-char limit.
+
+- docs(models): register the nous provider so the Models page lists it (#2128)
+
+#2102 added the native Nous Portal provider to config.py
+PROVIDER_DEFAULT_MODELS and the models.mdx prose, but not to
+hindsight-docs/src/data/llmProviders.json -- the single source of truth
+that renders the Models page provider grid, default-models, and
+capabilities tables -- so Nous is documented in prose but invisible on
+the canonical Models grid.
+
+Add the nous entry and regenerate the CI-enforced skill mirror via
+scripts/generate-docs-skill.sh. Same pattern as #1911 (fireworks).
+
+Co-authored-by: r266-tech &lt;r266-tech@users.noreply.github.com&gt;</div>
+</div>
+
+<a href="../project/vectorize-io_hindsight.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

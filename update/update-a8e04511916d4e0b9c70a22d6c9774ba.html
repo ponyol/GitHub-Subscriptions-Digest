@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (31 commits) - gi-dellav/zerostack - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (31 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/gi-dellav_zerostack.html">gi-dellav/zerostack</a> /
+    Updates in main (31 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/gi-dellav_zerostack.html">gi-dellav/zerostack</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-19 19:48 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/gi-dellav/zerostack/commits/main" target="_blank">https://github.com/gi-dellav/zerostack/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Ключевые изменения в этом обновлении сосредоточены на улучшении управления контекстом и надежности. Новая опциональная функция позволяет проводить сжатие контекста прямо посреди хода диалога, динамически уменьшая его во время длительных взаимодействий, чтобы предотвратить превышение лимитов модели. Оценка размера контекста была значительно откалибрована с использованием реальных данных о потреблении провайдера и улучшенным взвешиванием CJK-токенов, что привело к более точному пониманию контекста. Операции файловой системы для вывода инструментов теперь атомарны, что предотвращает повреждение данных при прерванных записях, а исправление устраняет проблемы с симлинками `resolv.conf` в WSL.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Merge pull request #110 from hal-eisen/pr/mid-turn-compaction
+
+Opt-in mid-turn compaction with a hard ceiling
+
+- Merge branch &#39;main&#39; into pr/mid-turn-compaction
+
+- Merge pull request #116 from qznc/fix-resolv-conf
+
+fix: resolv.conf may be a symlink
+
+- fix: resolv.conf may be a symlink
+
+In WSL /etc/resolv.conf can be a symlink to /mnt/wsl to get that
+information from the host. This broke zerostack using bubblewrap.
+
+- Merge pull request #111 from xavierforge/fix/cjk-token-estimation
+
+fix: improve CJK token estimation and calibrate context size with real usage
+
+- Merge pull request #112 from xavierforge/fix/fs-atomic-write
+
+fix(fs): write edit/write tool output atomically
+
+- fix(fs): write edit/write tool output atomically
+
+The edit and write tools used tokio::fs::write, which truncates the
+target then streams the new contents. A process killed mid-write
+(terminal closed -&gt; SIGHUP, or a crash) could leave an existing file
+truncated or destroyed.
+
+Add fs::atomic_write: write to a temp file in the same directory, then
+rename(2) over the target. rename is atomic, so a reader or an
+interrupted process only ever observes the complete old or complete new
+file. Original permissions are preserved, and symlinks are written
+through to their target instead of being clobbered.
+
+No fsync: atomicity comes from rename alone; fsync would only add
+power-loss durability at ~20-50x the per-write cost, which is out of
+scope for this failure mode.
+
+- fix(session): keep recent messages when keep_recent exceeds history size
+
+Extract the compaction cut-point selection into a pure, testable
+`select_compaction_cut`. Its loop initialized `cut_idx` to `messages.len()`,
+so when keep_recent was larger than the sum of per-message estimates the
+threshold never fired and the whole history was summarized, keeping nothing
+recent. The usage-calibrated compaction gate makes this reachable: the real
+context can exceed the budget (system prompt, context files) while the
+messages themselves stay small. Initialize to 0 instead, so an oversized
+`keep_recent` falls through to the existing &#34;entire context is recent&#34; path.
+
+The selection stays in the per-message estimate scale on purpose: it is a
+relative comparison among messages, so a uniform estimator bias cancels,
+calibration only matters for the absolute total.
+
+- feat(session): calibrate context-size accounting against provider usage
+
+`total_estimated_tokens` summed a per-message heuristic estimate over the whole
+history, so the estimator&#39;s error accumulated across every message and never
+accounted for the system prompt or context files at all.
+
+Anchor context size to the provider&#39;s reported usage instead. After each
+completed turn, `set_calibration` records the real input + output tokens as a
+high-water mark covering every message sent so far (system prompt and context
+files included). `effective_context_tokens()` returns that anchor plus an
+estimate of only the messages appended since, so the heuristic&#39;s error applies
+to the recent delta rather than the whole history. `needs_compaction`, the
+status-bar percentage and the manual `/compress` gate all read it.
+
+The anchor is dropped on compaction (message indices shift) and `/clear`, and a
+zero usage report is ignored so providers that don&#39;t report usage fall back to
+the running estimate. New fields are serde(default) for backward-compatible
+session loading.
+
+- fix(session): weight CJK/wide chars in tokenizer-free estimate_tokens
+
+The `estimate_tokens` heuristic used `bytes / 4`. That works for Latin text (~1 byte/char, ~4 chars/token) but is fragile for CJK: it only lands in a sane range because a CJK codepoint is 3 UTF-8 bytes, giving ~0.75 tokens/char, the low end of the real range. The obvious &#34;fix&#34; of swapping `len()` for `chars().count()` is a trap: it drops to ~0.25 tokens/char and underestimates CJK by ~3x.
+
+Classify each char as wide (CJK ideographs, kana, hangul, fullwidth forms) or narrow instead.
+Wide chars are weighted ~0.9 token each, slightly conservative, since underestimating context delays compaction, which is worse than overestimating, and narrow chars keep the /4 rule. Pure-ASCII input yields the exact same number as before.
+
+This only affects context-window accounting (the compaction trigger and the status-bar percentage); billing is untouched, as it uses the provider&#39;s exact usage.
+
+- Add opt-in mid-turn compaction with a hard ceiling
+
+Phase 2 of docs/COMPACTION_PLAN.md. Phase 1 wired real provider token
+usage (CompletionCall); this adds the trigger that acts on it.
+
+New config key `mid_turn_compact_threshold` (Option&lt;f64&gt;, fraction of the
+context window). Unset by default, so behavior is unchanged out of the
+box. When set and `compact_enabled` is true (the master switch), zerostack
+compacts *during* a turn once real provider prompt pressure crosses the
+threshold, not just between turns. A single long turn can otherwise blow
+past the model&#39;s real context limit, because in-flight tool traffic never
+enters the session&#39;s token estimate and so is invisible to the existing
+between-turn check.
+
+- config: `mid_turn_compact_threshold` field + `resolve_*` that returns
+  None for values outside (0.0, 1.0]; `load()` warns once at startup on an
+  out-of-range value (the resolver runs per call and must not log).
+- ui: on an over-threshold CompletionCall, abort the run at that clean
+  boundary (the model&#39;s just-returned tool calls have not executed, so no
+  half-applied edits), record a turn-progress recap, compact, and respawn
+  on the compacted history with a hardcoded continuation prompt. The
+  dominant relief is dropping the aborted run&#39;s in-flight tool context.
+- runaway guard: if the next provider call after a compaction is still
+  over the ceiling, compacting again is futile (the irreducible floor
+  exceeds the budget), so stop the turn and print the full arithmetic
+  (window, ceiling, post-compaction prompt, overflow, reserve, kept-recent)
+  with concrete options. A relief flag distinguishes &#34;compaction failed&#34;
+  from later fresh growth, so healthy long turns can still compact again.
+- docs: CONFIG.md key, examples, and a Mid-turn compaction section.
+- tests: threshold validation and the exhaustion-report arithmetic.
+
+- updated README
+
+- chore: bump version to 1.5.0
+
+- fixed tap submodule
+
+- fixed warnings
+
+- move `no matches` string rendering
+
+- redesigned chain-of-prompt UI
+
+- send git-conflict signal on unstaged/staged edits on worktree merges
+
+- fixed compile warnings
+
+- bump to v1.5.0-rc6
+
+- fixed enable_exa_mcp
+
+- revamped status bar
+
+- added `just` family of themes
+
+- fixed markdown tables rendering issues
+
+- fixed worktree implementation
+
+- added more tests
+
+- improved `code` prompt
+
+- fixed banner
+
+- allow temperature setting
+
+- switched advisor config to model profiles
+
+- fixed &#39;ask for permissions&#39; rendering</div>
+</div>
+
+<a href="../project/gi-dellav_zerostack.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

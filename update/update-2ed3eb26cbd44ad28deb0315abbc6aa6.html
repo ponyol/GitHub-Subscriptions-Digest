@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (17 commits) - FluidInference/FluidAudio - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (17 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a> /
+    Updates in main (17 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-19 22:42 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/FluidInference/FluidAudio/commits/main" target="_blank">https://github.com/FluidInference/FluidAudio/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This comprehensive update significantly improves both ASR and TTS functionalities. For ASR, key enhancements include opt-in controls to reduce short-keyword over-firing and per-term vocabulary thresholds, improved offline transcription by eliminating chunk-merge artifacts, and new word-level timestamps and lower-latency streaming tiers. TTS advancements feature shared text processing for number normalization and initialisms, auto-chunking for long text in both KokoroAne and StyleTTS2, and audio quality fixes, including a new Japanese variant for KokoroAne with corrected output levels.
+
+---
+
+**Russian Translation:**
+
+Это всеобъемлющее обновление значительно улучшает функциональность как систем автоматического распознавания речи (ASR), так и систем синтеза речи (TTS). В ASR ключевые улучшения включают возможность отключения агрессивного акустического спасения для уменьшения ложных срабатываний по коротким ключевым словам и пороги схожести для каждого термина словаря, улучшенную офлайн-транскрипцию за счет устранения артефактов при слиянии фрагментов, а также новые метки времени на уровне слов и потоковые уровни с меньшей задержкой. Достижения в TTS включают общие утилиты для нормализации чисел и инициализмов, автоматическое разбиение длинного текста на фрагменты в KokoroAne и StyleTTS2, а также исправления качества звука, в том числе новый японский вариант KokoroAne с скорректированными уровнями вывода.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- feat(asr/vocab): opt-in to disable the acoustic spotter-rescue (#724) (#725)
+
+## Summary
+
+Addresses #724 (follow-up to #702 / #722). Adds an **opt-in** to disable
+the CTC vocabulary rescorer&#39;s **spotter-anchored acoustic rescue** pass,
+which is the dominant source of the short-keyword over-firing reported
+in #702.
+
+Default behavior is unchanged — this is a new `false`-able knob, off by
+default.
+
+## Root cause
+
+While validating #722, I bisected the over-fire against the last good
+release (**0.14.5**) and found:
+
+- **0.14.5 has no acoustic rescue at all.** The spotter-anchored rescue
+is the mechanism #634 added on top of the pre-0.14.5 pipeline. It
+proposes a vocabulary term whenever the CTC keyword spotter detects it
+acoustically — *even at near-zero string similarity* — which is exactly
+what lets short terms colliding with common English (`ran`→`CRAN`,
+`ready`→`Redis`) replace ordinary words.
+- **Normalization is not the lever.** 0.14.5 and `main` use identical
+per-token normalization, so the score-scale idea floated in #702
+(per-frame normalization) doesn&#39;t separate true/false here — I tried it
+and it made over-fire *worse*. The regression is the rescue pass itself.
+- Reproducing 0.14.5 (skipping the rescue pass) restores 0.14.5&#39;s
+behavior **exactly**, down to the per-term false-positive breakdown.
+
+## Change
+
+- `VocabularyRescorer.Config.spotterRescueEnabled: Bool` — default
+`true` (no behavior change). `false` skips
+`collectSpotterAnchoredCandidates` entirely.
+- `--vocab-disable-spotter-rescue` flag on `transcribe`.
+- `FLUID_SPOTTER_RESCUE` env override (`0`/`false` disables) for sweeps.
+- Docs section in `Documentation/ASR/CustomVocabulary.md` + a default-on
+unit test.
+
+## Measured effect
+
+90-clip / 3-voice short-distractor over-fire set (none of the 8 short
+brand/acronym terms is spoken) + a 100-pair distinctive-name biasing set
+as the recall guard:
+
+| setting | over-fire (false positives) | biasing recall |
+|---|---|---|
+| **on (default)** | ~94 | 0.92 |
+| `spotterRescueEnabled = false` | **~19** | **0.97** |
+
+For short colliding vocabularies, disabling the rescue **both** lowers
+over-fire to the pre-#634 level **and** raises recall (spurious
+replacements no longer clobber correct words). It&#39;s a bigger, cleaner
+lever than the #722 per-term similarity floors for the short-vocab case
+— those reach a similar over-fire floor only at a steep recall cost
+(≈0.87). The two compose: this is the on/off switch, the floors gate the
+in-between firings.
+
+Default is unchanged, so distinctive-name vocabularies (the earnings22 /
+FDA profiles the rescue was built for) are unaffected.
+
+## When to use
+
+- **Disable** for small vocabularies of short terms that collide with
+ordinary English (brand names, acronyms).
+- **Keep on (default)** for distinctive-name vocabularies where the
+acoustic rescue recovers heavily-mangled terms that string matching
+misses.
+
+## Testing
+
+- `swift test` — all CustomVocabulary suites pass (77 tests), incl. the
+new `testSpotterRescueEnabledByDefault`.
+- I have a self-contained Swift + `say` over-fire + recall benchmark and
+am happy to run any further candidates.
+
+Closes #724.
+
+---------
+
+- Added Feature Provider Classes for unified parakeet ASR (#713)
+
+Dictionary Feature Providers are slow. I added overly optimized feature
+provider classes for the Parakeet Unified model to replace them. This
+will probably reduce inference times by a few nanoseconds to a few
+hundred microseconds.
+
+- fix(asr/vocab): opt-in controls for short-term CTC over-firing (#702) (#722)
+
+Addresses #702.
+
+## Problem
+
+PR #634&#39;s blank-aware DP returns a **per-token-normalized** score, and
+the replacement gate adds a flat `cbw` boost (`vocabScore + cbw &gt;
+originalScore`). A **short** keyword (few tokens) can free-start align
+to its single best-matching frame-run and score close to zero per token,
+so the flat boost lets it beat a correctly transcribed common word.
+Vocabularies of short terms that collide acoustically with ordinary
+English over-fire badly (`ran` → `CRAN`, `Hall of Q4.` → `Snyk`). The
+dominant source is the **spotter-anchored rescue**, which fires on
+acoustic evidence with *no* similarity gate (observed matches at
+similarity 0.00).
+
+## Why this is opt-in, not a default-on fix
+
+I reproduced the over-fire and validated candidate fixes on the cached
+**earnings22-kws** set (200 files; baseline **F 97.8% / recall 95.7% /
+precision 100%**). A short-distractor repro on ordinary speech starts at
+**12 false-positive insertions**.
+
+| Default-on lever | repro FP | earnings22 recall |
+|---|---|---|
+| baseline | 12 | 95.7% |
+| cbw taper (pivot 4 / 5) | 8 / 6 | 92.0% / 90.5% |
+| spotter sim-floor 0.30/0.50 | **0** | 86.5% |
+| spotter floor, multi-word only | 7 | 92.6% |
+
+**Every default-on gate trades earnings22 recall ~1:1**, because the
+over-fire and the genuine KWS recall on distinctive-name vocabularies
+come from the *same* mechanisms (the flat boost + acoustic rescue), and
+neither string similarity nor token length separates them. This matches
+the reporter&#39;s own sweep conclusion (&#34;nothing approaches 0.14.5;
+tightening the gates only destroys recall&#34;) and their diagnosis that the
+real fix is the DP score scale (their ask #3 — a larger,
+separately-benchmarked effort needing the FDA + FDA-extended suites).
+
+So this PR ships the reporter&#39;s ask #1/#2: the levers as **opt-in
+config, defaulting to disabled (zero behavior change)**.
+
+## Changes
+
+- `VocabularyRescorer.Config`:
+- `shortTermCbwTaperPivot` / `shortTermCbwTaperExponent` — taper the cbw
+boost down for terms with fewer than `pivot` tokens (`cbw *
+(tokenCount/pivot) ** exponent`). Disabled when `pivot &lt;= 1` (default).
+- `spotterRescueMinSimilarity` / `spotterRescueMultiWordMinSimilarity` —
+require a minimum string similarity before the acoustic spotter-rescue
+may fire (higher for multi-word spans). Disabled at `0.0` (default).
+- `transcribe` CLI flags: `--vocab-short-term-taper-pivot`,
+`--vocab-spotter-min-sim`, `--vocab-spotter-min-sim-multi`.
+- `FLUID_CBW_TAPER_PIVOT` / `FLUID_CBW_TAPER_EXP` /
+`FLUID_SPOTTER_MIN_SIM` / `FLUID_SPOTTER_MIN_SIM_MULTI` env overrides
+for sweeps.
+- Docs section in `Documentation/ASR/CustomVocabulary.md`.
+
+## Verification
+
+- **Defaults reproduce baseline earnings22 exactly**: F 97.8%, recall
+95.7%, precision 100%, FP 0 (200 files).
+- **Recommended short-vocab opt-in** (taper pivot 5, spotter floors
+0.30/0.50): short-distractor repro **12 → 0** false-positive insertions.
+- Unit tests for the taper math and the disabled-by-default guarantee.
+
+## Not included (follow-up)
+
+The deeper score-scale rework (ask #3) and exposing
+`TDT_EMISSION_DELAY_FRAMES` as proper API (the reporter&#39;s bonus) are
+left for a separate change; the score-scale fix needs the full FDA /
+FDA-extended benchmark suites to validate safely.
+
+- feat(asr/vocab): per-term custom vocabulary CTC thresholds (#647) (#721)
+
+Closes #647.
+
+## Summary
+
+Adds an optional per-term `minSimilarity` to `CustomVocabularyTerm`, so
+each
+vocabulary term can tune its own recall/precision tradeoff instead of
+sharing a
+single vocabulary-wide threshold. Additive and fully backward
+compatible: omit
+the field and behavior is unchanged; existing simple-text and JSON vocab
+files
+keep decoding.
+
+This lets one vocabulary mix aggressive and strict terms — the issue&#39;s
+use case:
+- `Caivex`: low threshold for aggressive correction of a distinctive
+name.
+- `Andre`: high threshold so short/common-sounding spans don&#39;t
+over-match.
+
+```json
+{
+  &#34;terms&#34;: [
+    { &#34;text&#34;: &#34;Caivex&#34;, &#34;minSimilarity&#34;: 0.45 },
+    { &#34;text&#34;: &#34;Andre&#34;,  &#34;minSimilarity&#34;: 0.85 },
+    { &#34;text&#34;: &#34;Mobius&#34; }
+  ]
+}
+```
+```bash
+fluidaudiocli transcribe audio.wav --custom-vocab vocab.json
+```
+
+## Changes
+
+- **`CustomVocabularyTerm`**: new optional `minSimilarity: Float?`
+(Codable,
+clamped to `[0, 1]`); falls back to the vocabulary-level / size-aware
+default
+  when nil.
+- **Rescoring**: per-term threshold resolved in the term-centric path,
+the
+word-centric/BK-tree path (with a vocabulary-wide *search floor* so a
+lower
+per-term override widens recall instead of being pruned), the
+linear-scan
+  fallback, and the acoustic spotter-rescue path (the last only when an
+  override is explicitly set).
+- **Loader / CLI**: `loadWithCtcTokens` now auto-detects structured JSON
+config
+vs simple text, so `transcribe --custom-vocab` can pass per-term
+thresholds
+  (previously JSON was never read on this path). JSON vocabulary-level
+thresholds are preserved; the CLI honors a JSON vocab-level
+`minSimilarity` as
+  a floor (mirrors `SlidingWindowAsrManager`).
+- **Safety guards unchanged**: short-word, stopword-span, multi-word,
+and
+`minTermLength` floors still clamp on top, so an override can only
+loosen
+  matching down to those floors.
+
+## Verification
+
+Verified end-to-end via `transcribe --custom-vocab` on real audio +
+models. Same
+audio, same term `Arnav`, conservative global `0.80` — only the per-term
+value
+differs:
+
+| per-term `minSimilarity` | output |
+|---|---|
+| `0.50` | &#34;Today we&#39;re here with **Arnav** and Chas Englander&#34;
+(corrected) |
+| `0.90` | &#34;Today we&#39;re here with **Arnie** and Chas Englander&#34;
+(suppressed) |
+
+No collateral over-matching in either run. Achieving the same correction
+by
+lowering the *global* threshold instead smears the term over unrelated
+words;
+per-term gets the one correction without the damage.
+
+## Tests
+
+Unit tests for per-term init/clamping, Codable round-trip, JSON decode
+(present
++ omitted), `load(from:)` preservation, and JSON-vs-simple format
+detection
+(incl. leading whitespace) + vocabulary-level threshold preservation.
+Build and
+swift-format lint pass.
+
+- feat(tts/styletts2): adopt shared text utilities — number normalization, initialisms, long-text chunking (#716, #712) (#720)
+
+Brings the StyleTTS2 English frontend up to parity with KokoroAne by
+adopting the shared TTS text utilities. Supersedes #718 and #719
+(combined into one PR per review preference).
+
+Two independent, complementary changes:
+
+## 1. Number normalization + initialisms in the phonemizer (#716)
+
+`StyleTTS2Phonemizer` now reuses the shared utilities from #715:
+
+- **`EnglishTextNormalizer`** runs before tokenization — standalone
+numbers/ordinals/decimals/12-hour times → words (`26` → `twenty six`,
+`3.14` → `three point one four`, `1:49 PM` → `one forty nine p m`);
+ambiguous/structured forms (`1.2.3`, `1,234`, `word26`, loose `1:49`, …)
+left untouched.
+- **`EnglishInitialisms`** in the per-word order: `AI`/`US` overrides
+before the lexicon, all-caps spell-out (`FBI`, `ATP`) after a lexicon
+miss before G2P. The spell-out passes `expandMisakiShorthand` as the
+render closure so single-letter entries expand correctly (`I` → /aɪ/):
+
+| Input | Output |
+|-------|--------|
+| `AI` | `ˈeɪ ˈaɪ` |
+| `US` | `jˈu ˈɛs` |
+| `FBI` | `ˈɛf bˈi ˈaɪ` |
+| `us` (lowercase) | `ˌʌs` (pronoun, unchanged) |
+| `NASA` | `nˈasə` (lexicon-backed, unchanged) |
+
+A missing per-letter entry logs and falls through to the bundled
+pronunciation. All outputs verified end-to-end through the public
+`phonemize` API.
+
+## 2. Long-text auto-chunking in the high-level synthesize (#712)
+
+StyleTTS2 caps at its largest bert/sampler bucket — **256 tokens**
+(`resolveBucket` throws `noBucketAvailable`; the synthesizer throws
+`textTooLong`), so `synthesize(text:referenceAudioURL:)` failed on long
+input.
+
+- New `StyleTTS2Constants.maxPhonemeChunkChars` =
+`bucketTokenSizes.max() − 1` (255). `TextCleaner.encode` prepends one
+pad + ≤1 token/char, so a ≤255-char chunk always fits the bucket.
+- `synthesize(text:)` phonemizes, then `PhonemeChunker.chunk(...)` (the
+shared chunker from #717). Single chunk → existing path. Multiple chunks
+→ compute the reference mel **once**, reuse it for every chunk
+(consistent speaker style, no repeated FFT/mel work), concatenate
+samples in order.
+- The low-level `ipa:` and `tokenIds:` paths stay strict.
+
+## Tests
+
+- `StyleTTS2PhonemizerTests` — initialism + normalization cases;
+case-sensitive-precedence test retargeted off the now-overridden `AI`
+example onto a `Read`/`read` homograph.
+- `StyleTTS2ChunkingTests` — the char cap stays under the largest bucket
+and every chunk of a long string encodes within it (`resolveBucket`
+never throws). Split mechanics covered by the existing
+`PhonemeChunkerTests`.
+
+Builds cleanly; swift-format passes. XCTest can&#39;t run in my local env
+(CommandLineTools only); the phonemizer outputs were verified via the
+public API and the chunk/encode invariant is asserted directly.
+
+- feat(tts): auto-chunk long text in KokoroAne high-level synthesize (#712) (#717)
+
+Closes #712.
+
+The high-level KokoroAne **text** API now handles moderately long input
+itself instead of throwing `phonemeSequenceTooLong` and making each
+downstream caller (chat assistant, reading app) reimplement its own
+chunker.
+
+## Shared, frontend-agnostic chunker
+
+New `PhonemeChunker` under `Sources/FluidAudio/TTS/Shared/` (alongside
+the `EnglishTextNormalizer` / `EnglishInitialisms` shared utils from
+#715). It&#39;s pure string logic, so **StyleTTS2 can adopt it** for its own
+long-text path in a follow-up — that&#39;s why it lives in `Shared/` rather
+than inside KokoroAne.
+
+- Splits at the **latest** whitespace / pause-punctuation boundary
+within the cap window → chunks stay as full as possible without
+splitting a word.
+- Punctuation stays attached to the preceding chunk (clause boundaries
+kept as prosody cues).
+- A boundary-less run longer than the cap is hard-split at the cap (rare
+for real phoneme strings).
+- Returns the input unchanged when it already fits; length counted in
+`Character`s to match the cap TTS vocabs enforce.
+
+## KokoroAne wiring
+
+- `synthesizeDetailed(text:)` resolves the full phoneme string, then
+chunks with `maxLength: KokoroAneConstants.maxPhonemeLength` (510). One
+chunk → existing path untouched; multiple chunks → synthesize each and
+concatenate.
+- **Chunking runs after normalization / G2P**, so decimals,
+abbreviations, and quote delimiters are never split at the raw-text
+layer (per the issue&#39;s constraint).
+- Sample concatenation joins in order; per-stage timings and token/frame
+counts are summed.
+- **Per-variant audio normalization is preserved** — it still runs once
+over the *concatenated* samples at WAV conversion (`wavData(from:)`), so
+English/Mandarin peak-normalization stays consistent across the join and
+Japanese keeps its native level. No per-chunk normalization that would
+cause level jumps.
+- `synthesizeFromPhonemes(_:)` (low-level IPA API) **stays strict** and
+throws past the cap — unchanged contract, as the issue requested.
+
+## Tests
+
+`PhonemeChunkerTests` — fast path (within cap / blank / exactly at cap),
+whitespace splitting without breaking words, latest-boundary fill
+preference, punctuation attachment, per-chunk cap invariant, hard-split
+of an over-long run, and content round-trip.
+
+Builds cleanly; swift-format passes. XCTest can&#39;t run in my local env
+(CommandLineTools only, no full Xcode); the chunker outputs were
+verified out-of-band against an exact algorithm replica and assertions
+hand-traced.
+
+- fix(asr): remove chunk-merge seam artifacts in offline transcription (#706) (#708)
+
+## Problem (#706)
+
+Long-form offline audio is transcribed in overlapping 15 s windows whose
+token streams are merged on a 2 s overlap. A window that begins
+mid-sentence biases the RNNT decoder to capitalize its first word as a
+*false sentence start*. The exact-token-ID overlap matcher couldn&#39;t
+align that with the previous window&#39;s lower-cased copy, leaving
+**duplicated, mis-cased words at chunk seams** — e.g. `...the meeting
+Meeting was...` or a word capitalized in the middle of a sentence.
+
+## Fix
+
+Two merge-level changes, shared across the Unified, TDT and dual-decode
+paths:
+
+1. **Case-folded overlap matching** (`caseVariantCanonicalIds` +
+`tokenIdsMatch`) — case-only token twins (`Meeting`≈`meeting`) align at
+the seam, so the word collapses to the left window&#39;s
+contextually-correct casing.
+2. **Word-level seam-duplicate collapse** (`collapseSeamWordDuplicates`)
+— reconstructs SentencePiece words from the token stream and drops an
+adjacent case-only duplicate within the overlap window. Word-level is
+required for the **1024-piece Unified subword vocab**, where whole words
+span several tokens and a token-level check never sees them as a unit.
+Genuine repeats (`that that`), same-case duplicates and legitimate
+sentence boundaries (`...thank you. You said...`) are left untouched.
+
+**Silence-aligned chunk starts were prototyped and dropped:** on the 15
+s offline encoder they measured as a **~1 WER point regression**
+(Earnings-22 long-form) with no artifact benefit. The chunk grid is
+therefore identical to baseline, so short-form WER is unaffected — the
+merge fixes only ever *remove* duplicate/mis-cased seam words.
+
+## Validation — Earnings-22 long-form (45 files / 44 h, scored vs
+references)
+
+| Path | Aggregate WER | seam case-dupes (before→after, 5-file subset) |
+|---|---|---|
+| Unified batch | **13.01%** (beats TDT v3) | 16 → 2 |
+| Parakeet TDT v3 | 14.46% | 66 → 4 |
+
+- No WER regression on either path; remaining &#34;dupes&#34; are
+sentence-boundary false-positives of the metric, not artifacts.
+- Spot-checked: `have Have`→`have`, `either Either`→`either`,
+`implementation Implementation`→clean.
+
+## Also included
+
+- Reproducible long-form benchmark: `unified-benchmark --longform-dir
+&lt;dir&gt;` (WER + seam artifacts vs TDT v3) and `--input &lt;file&gt;`
+(single-file seam comparison).
+- `Scripts/materialize_earnings22_longform.py` to fetch full-length
+Earnings-22 audio + references.
+- Unit tests for the matcher, the word-level collapse (incl. multi-token
+words, sentence boundaries, genuine repeats), and the case-variant
+builder.
+
+## Notes
+
+- Unit tests are compile-checked and hand-traced locally (no
+Xcode/XCTest on the dev machine) — they execute in CI.
+
+- feat(tts): shared English text normalization for raw numbers/times (#711) + shared initialism helpers (#710) (#715)
+
+Closes #711. Refactors the #710 letter-name initialism logic into a
+shared module so both KokoroAne and (in a follow-up) StyleTTS2 English
+frontends can reuse it.
+
+Per maintainer guidance on #711, both utilities now live under
+`Sources/FluidAudio/TTS/Shared/` (alongside `LexiconAssetCache`, already
+shared by both frontends).
+
+## New shared modules
+
+**`EnglishTextNormalizer` (#711)** — a conservative pre-tokenization
+pass for the English raw-text path. Raw chat text carries no caller
+annotation, so it rewrites only *strict standalone* numeric forms and
+leaves anything ambiguous/structured alone. Reuses `SayAsInterpreter`
+for the actual spelling.
+
+| Input | Output |
+|-------|--------|
+| `I am 26 years old.` | `I am twenty six years old.` |
+| `Today is June 13th.` | `Today is June thirteenth.` |
+| `The score is 3.14.` | `The score is three point one four.` |
+| `The current time is 1:49 PM.` | `The current time is one forty nine p
+m.` |
+| `Agent 007` | `Agent zero zero seven` |
+
+Left **unchanged**: version strings (`1.2.3`), grouped numbers
+(`1,234`), embedded digits (`word26`, `26word`), loose colon numbers
+without a meridiem (`1:49`), invalid times (`1:99 PM`), and 24-hour
+forms (`13:49`).
+
+**`EnglishInitialisms` (#710)** — the `AI`/`US` override set, the strict
+all-caps candidate check, and the lexicon-driven letter-name spell-out,
+extracted from `KokoroAneEnglishPhonemizer`. Now parameterized over a
+per-letter lookup + render closure so each frontend supplies its own
+lexicon and IPA rendering; KokoroAne delegates to it (behavior unchanged
+from #710).
+
+## Wiring
+
+`KokoroAneManager.phonemize(text:)` runs
+`EnglishTextNormalizer.normalize` before tokenization.
+`KokoroAneEnglishPhonemizer` delegates initialism handling to
+`EnglishInitialisms`.
+
+**StyleTTS2 is unchanged here** — structure-only, as requested. A
+follow-up issue (#716) tracks wiring the StyleTTS2 English frontend to
+both shared utilities.
+
+## Tests
+
+- `EnglishTextNormalizerTests` — supported forms + negative cases for
+every ambiguous/structured shape above.
+- `EnglishInitialismsTests` — candidate boundaries (length 2–5, strict
+ASCII all-caps) and spell mechanics (custom render/separator, nil on
+missing letter).
+- `KokoroAneEnglishPhonemizerTests` — updated for the delegated path.
+
+Builds cleanly; swift-format passes. XCTest can&#39;t run in my local env
+(CommandLineTools only, no full Xcode), so regex boundaries and
+`SayAsInterpreter` spellings were verified out-of-band against the real
+lexicon and assertions hand-traced.
+
+- fix(tts/kokoro-ane): read uppercase initialisms as letter names (#710) (#714)
+
+Closes #710.
+
+## Problem
+
+Uppercase initialisms read poorly through the KokoroAne English frontend
+(verified against the real `us_lexicon_cache.json`):
+
+- `AI` hit the bundled blended entry `[&#39;ˈ&#39;,&#39;A&#39;,&#39;ˌ&#39;,&#39;I&#39;]` (`ˈAˌI`) and
+sounds too joined.
+- `US` hit `[&#39;ˌ&#39;,&#39;ʌ&#39;,&#39;s&#39;]` — the lowercase-pronoun `ʌs` shape.
+- `FBI` / `ATP` are absent from the lexicon and fell through to BART
+G2P, which sounds them out as a word.
+
+## Change
+
+`KokoroAneEnglishPhonemizer.resolveWord` now follows the safe rule
+proposed in #710, inserting two steps without disturbing existing
+behavior:
+
+1. **Custom lexicon** — unchanged, still first authority.
+2. **Letter-name overrides** (`AI`, `US`, exact uppercase only) — bypass
+the bad bundled entries and spell out from the per-letter lexicon names.
+Lowercase `us`/`ai` are untouched (override matches exact spelling
+only).
+3. **Case-sensitive / lowercased Misaki lexicon** — unchanged. Keeps
+`NASA`, `NATO`, `FIFA`, `OK`, `COVID` lexicon-backed.
+4. **Initialism spell-out** — after a *full* lexicon miss, strict ASCII
+all-caps tokens of length 2–5 (`FBI`, `ATP`) spell as letter names
+instead of reaching G2P. Digits/hyphens/non-ASCII disqualify (`MP3`,
+`COVID-19`).
+5. **BART G2P fallback** — unchanged.
+
+Spelling is data-driven from the loaded single-letter lexicon entries
+(no hardcoded IPA). `spellAsLetterNames` returns `nil` if any letter is
+missing (e.g. the G2P-only degraded path), so the word falls through
+cleanly rather than emitting a partial.
+
+## Results
+
+| Input | Before | After |
+|-------|--------|-------|
+| `AI`  | `ˈAˌI` | `ˈA ˈI` |
+| `US`  | `ˌʌs` (pronoun) | `jˈu ˈɛs` |
+| `FBI` | BART G2P (word) | `ˈɛf bˈi ˈI` |
+| `ATP` | BART G2P (word) | `ˈA tˈi pˈi` |
+| `us`  | `ˌʌs` | `ˌʌs` (unchanged) |
+| `NASA`/`OK` | lexicon shape | unchanged |
+
+## Tests
+
+Updated `KokoroAneEnglishPhonemizerTests` fixtures to mirror the real
+lexicon (blended `AI`/`US`, per-letter names, `NASA`/`OK` acronyms) and
+added cases for: `AI`/`US` overrides, lowercase `us` pronoun,
+`FBI`/`ATP` spell-out, `NASA`/`OK` staying lexicon-backed, the G2P-only
+fall-through, and the `isInitialismCandidate` length/charset boundaries.
+
+Library builds cleanly; swift-format passes. The XCTest suite could not
+be executed in my local environment (CommandLineTools only, no full
+Xcode, so `swift test` can&#39;t link `XCTest`) — assertions were
+hand-traced against the real lexicon values and the test file parses
+clean.
+
+- feat(asr/parakeet-unified): Swift mel, word-level timestamps, lower-latency streaming tiers (#705)
+
+Closes #704.
+
+## Summary
+
+Addresses all three asks from #704 for the Parakeet Unified 0.6B
+backend:
+
+1. **Word-level timestamps** — `consumeWordTimings()` on the streaming
+manager, plus public `WordTiming` + `buildWordTimings`, built on
+token-level `consumeTokenTimings()` (#701).
+2. **Native Swift mel replaces the CoreML preprocessor** (now the only
+mel path). `UnifiedMelExtractor` = `AudioMelSpectrogram` + NeMo
+`per_feature` normalization; the preprocessor bundle is no longer
+downloaded or loaded.
+3. **Lower-latency streaming tiers** — three new `StreamingModelVariant`
+cases backed by new encoders on HuggingFace.
+
+## Mel parity
+
+Matches NeMo `FilterbankFeatures` exactly: `pad_mode=&#34;constant&#34;`,
+`CONSTANT=1e-5`, symmetric hann, `preemph=0.97`, `mag_power=2.0`, and
+`get_seq_len = floor(L/hop)` (no `+1`) — the mel tensor has
+`floor(L/hop)+1` frames but the valid length used for per-feature stats
+/ encoder `mel_length` / masking is one less, so the final frame is
+always zeroed. Off-by-one here is benign at large chunks but doubles WER
+at tiny chunks (decoded frames sit at that boundary), which is why
+getting it right matters for the low-latency tiers.
+
+## Streaming latency tiers (LibriSpeech test-clean)
+
+`[left, chunk, right]` in 80 ms encoder frames; latency = (chunk +
+right) × 80 ms. The checkpoint is multi-context trained (chunk ∈
+{1,2,7,13}, right ∈ {0,1,2,3,4,7,13}), so these are re-exports of the
+same weights with a different baked attention mask. Encoders (fp16 +
+int8) uploaded to `FluidInference/parakeet-unified-en-0.6b-coreml`; each
+tier loads its own encoder by `UnifiedConfig.contextSuffix`. Verified
+end-to-end from HF (download → load → decode).
+
+| Variant | `[L,C,R]` | Latency | WER (agg) | RTFx | Notes |
+|---------|-----------|---------|-----------|------|-------|
+| `parakeet-unified-320ms` | 70,2,2 | 0.32 s | ~2.4% | ~10x | lowest
+latency |
+| `parakeet-unified-640ms` | 70,7,1 | 0.64 s | ~2.4% | ~27x | efficiency
+— same WER as 320ms, big chunk re-encodes less |
+| `parakeet-unified-1120ms` | 70,7,7 | 1.12 s | ~2.2% | ~33x | best
+streaming WER |
+| `parakeet-unified-2080ms` (default) | 70,13,13 | 2.08 s | ~1.8% | ~54x
+| unchanged default |
+| `parakeet-unified-offline-15s` | full-attention 15 s | batch | best |
+~150x | unchanged |
+
+Look-ahead (right) drives WER; chunk size drives RTFx. The saturation
+past right≈2 means intermediate tiers (e.g. 0.48 s) add latency without
+WER gain and were dropped. Default unchanged; new tiers opt-in via
+`--parakeet-variant`.
+
+## Full test-clean (2620 files, int8, default 70,13,13)
+
+| Mode | Swift mel | CoreML preprocessor (prev) |
+|------|-----------|----------------------------|
+| batch | 2.16% / 1.68% agg / 144x | 2.15% / 1.68% / 123x |
+| streaming | 2.21% / 1.79% agg / 66x | 2.20% / 1.78% / 54x |
+
+WER parity, ~17–21% higher RTFx, one fewer model downloaded.
+
+## Changes
+
+- New `UnifiedMelExtractor.swift`; both Unified managers drop
+`preprocessor`, compute mel in Swift, context-aware encoder filename +
+download.
+- `ParakeetModelVariant`: `parakeet-unified-1120ms` / `-640ms` /
+`-320ms` cases + `unifiedConfig`.
+- `consumeWordTimings()` + `WordTiming` / `buildWordTimings`
+(`AsrTypes`) + `WordTimingTests`.
+- `ModelNames.streamingEncoderFile(precision:contextSuffix:)`;
+preprocessor removed from `requiredModels`.
+- `unified-benchmark`: `--context` / `--models-dir`; `benchmark.md`
+regenerated; `ModelNamesTests` assertion; variant-count test updated.
+
+## Notes
+
+- Builds clean; `swift format lint` passes. Test target needs `XCTest`
+(full Xcode) — not in the dev box; CI runs it.
+- A fresh non-default-tier download also pulls the default 70_13_13
+streaming encoder (it&#39;s in `requiredModels`); the tier-specific encoder
+is fetched via `additionalModelNames`. Minor over-fetch, can be
+tightened later.
+
+- fix(asr): repair stale corrupt Nemotron multilingual latin tokenizer on download (#690)
+
+Fixes #687.
+
+## Problem
+
+Two distinct issues were reported:
+
+1. **The word &#34;there&#34; is dropped / two `&lt;blank&gt;` tokens in the latin
+vocab.** Latin `tokenizer.json` files published before 2026-05-31 had id
+2224 corrupted to `&lt;blank&gt;` (duplicating the real blank at id 2828)
+instead of `▁there`, so the model emits the token correctly but every
+&#34;there&#34; decodes as the literal text `&lt;blank&gt;`. The HuggingFace repo file
+was fixed upstream on May 31, but `downloadVariant()` reuses any cached
+variant whose `metadata.json` exists — it never revalidates — so users
+who downloaded before the fix kept the corrupt tokenizer indefinitely.
+
+2. **Punctuation becomes increasingly sparse at the 560 ms chunk tier.**
+Reproduced with the issue&#39;s attached audio. This is model-side behavior
+of the small-chunk build, not a pipeline bug: shorter chunks give the
+encoder less right context at sentence boundaries than the published
+builds&#39; `att_context_size` assumes, and greedy RNN-T decoding compounds
+the miss over a continuous session. Verified the streaming state
+handling is correct (`cache_len` saturates at 42 as expected; a fresh
+session on the same audio restores punctuation; explicit language vs
+auto prompt makes no difference).
+
+## Fix
+
+- `downloadVariant()` now detects the corruption signature in a cached
+tokenizer (`&lt;blank&gt;` piece at an id other than `blank_idx`) and
+re-fetches the fixed file. The corrupt copy is restored if the
+re-download fails, so offline users keep a working variant.
+- Documented the 560 ms punctuation behavior in
+`Documentation/ASR/NemotronMultilingual.md` and on the `chunkMs`
+parameter: prefer 1120 ms+ when punctuation matters, or reset the
+session on silence boundaries.
+
+## Verification
+
+- 4 new unit tests for the corruption detector (corrupt latin, fixed
+latin, full-vocab, missing-file cases).
+- End-to-end on a real pre-fix cache: the repair pass detected the
+corrupt `latin/2240ms` tokenizer, re-fetched the fixed file, and the
+variant then transcribed every &#34;there&#34; in the issue&#39;s audio correctly.
+- Reporter&#39;s exact config (latin 560 ms, auto mode) against the issue&#39;s
+ground truth: all six &#34;there&#34; instances present post-fix; remaining
+deltas are normalization-grade (&#34;T-H-E-R-E&#34; → &#34;THERE&#34;, &#34;they&#39;re&#34; → &#34;they
+are&#34;) plus the documented small-chunk punctuation sparsity.
+
+- feat(tts/kokoro-ane): Japanese variant + PyTorch-matched output level (#699)
+
+Adds `KokoroAneVariant.japanese` (phoneme-bypass synthesis via
+`synthesizeFromPhonemes`) and fixes the KokoroAne output level so
+Japanese matches the PyTorch reference. Resolves #698.
+
+## Japanese variant
+- `KokoroAneVariant.japanese` → `Repo.kokoroAneJa` (`ANE-ja/`), default
+`jf_alpha`, nested `voices/`. Reuses the language-agnostic 7-stage chain
++ shared vocab (no reconversion — only voice packs are new, extracted
+via `mobius/.../convert-voices.py`).
+- No in-process text frontend: `phonemes(for:)` throws for `.japanese`;
+callers feed pre-computed IPA. `--variant ja` + `--phonemes` in the CLI.
+- The `ANE-ja/` bundle is published to
+`FluidInference/kokoro-82m-coreml/ANE-ja/`.
+
+## Output level (match PyTorch)
+`AudioWAV.data` peak-normalized every output to 0 dBFS, making KokoroAne
+~3x hotter than the PyTorch reference (raw peak ~0.30 → slammed to 1.0).
+Added an opt-out `normalize` flag (defaults `true`;
+PocketTTS/StyleTTS2/ASR unchanged); Japanese now writes at native level.
+
+This also surfaced a genuine iSTFT bug: `CoreMLCustomSTFT` (KokoroTail)
+omitted the overlap-add/COLA normalization `torch.istft` applies,
+leaving output **exactly 1.5× too loud** (measured: interior per-sample
+ratio 1.5000, std 0, corr 1.0 — pure scalar, no spectral change). Fixed
+in mobius `convert-coreml.py`; the re-converted `KokoroTail`
+(re-uploaded to `ANE-ja/`) brings the raw level to **1.02× PyTorch**.
+
+End-to-end (M5 Pro, jf_alpha): fixed tail + no-normalize → peak 0.306 vs
+PyTorch 0.299.
+
+**Scope:** Japanese only for now. English/Mandarin keep
+peak-normalization (and their current tails) until they get the same
+COLA-corrected iSTFT — tracked as a follow-up. The `normalize` flag and
+the mobius iSTFT fix are the reusable pieces for that.
+
+## Validation
+`swift build` + `swift-format lint` clean; variant config tests; JA
+renders end-to-end through the shipped path at PyTorch-matched level.
+
+- Make SenseVoice downloads precision-aware (#703)
+
+## Summary
+
+Make SenseVoice downloads honor the requested encoder precision.
+
+`SenseVoiceModels.download(precision:)` already accepts `.fp16`,
+`.int8`, and `.fp32`, and the loader validates only the selected
+encoder. The download path still called
+`DownloadUtils.downloadRepo(.senseVoiceSmall, ...)` without forwarding
+the precision, so the repo selection included every encoder variant.
+
+This PR passes `precision.rawValue` through to `downloadRepo` and maps
+the SenseVoice required model set by variant:
+
+- default / `fp16`: `SenseVoicePreprocessor.mlmodelc` +
+`SenseVoiceSmall.mlmodelc`
+- `int8`: `SenseVoicePreprocessor.mlmodelc` +
+`SenseVoiceSmall_int8.mlmodelc`
+- `fp32`: `SenseVoicePreprocessor.mlmodelc` +
+`SenseVoiceSmall_fp32.mlmodelc`
+
+The shared `vocab.json` continues to be included by the existing JSON
+handling in `DownloadUtils.downloadRepo`.
+
+## Testing
+
+- `swift build --package-path /tmp/FluidAudio-verify --scratch-path
+&#34;$HOME/Library/Caches/muesli-spm/fluidaudio-precision-aware&#34; --target
+FluidAudio`
+- Attempted `swift test --package-path /tmp/FluidAudio-verify
+--scratch-path
+&#34;$HOME/Library/Caches/muesli-spm/fluidaudio-precision-aware&#34; --filter
+CITests/testSenseVoice`, but the test build stops before executing tests
+on an unrelated existing `FluidAudioCLI` type-check issue in
+`Sources/FluidAudioCLI/Commands/ASR/Parakeet/Streaming/NemotronMultilingualFleursBenchmark.swift:790`.
+
+- feat(asr): expose per-token timings from StreamingUnifiedAsrManager (#701)
+
+## Summary
+
+`StreamingUnifiedAsrManager` (Parakeet Unified 0.6B) currently returns
+only a
+`String` from `finish()` / `getPartialTranscript()`. The greedy RNNT
+decoder
+already records each emission&#39;s **global encoder frame**
+(`UnifiedRnntDecoder.Emission.frame`, via `globalFrameOffset`), but the
+manager
+appends only token ids + a text cache and drops the frame/prob.
+
+This surfaces that data as per-token timings so downstream consumers can
+do
+word-level alignment / word→speaker attribution without re-decoding:
+
+- accumulate a `[TokenTiming]` alongside the transcript — `startTime =
+frame *
+frameSamples / sampleRate`, `endTime = +1 frame`, `confidence =
+emission.prob`
+- expose `currentTokenTimings()`; clear it in `reset()`
+
+No change to text output. Mirrors the `(token, frame, prob)` the batch
+`UnifiedAsrManager` already computes internally (and likewise discards).
+
+## Validation
+
+Offline, against LibriSpeech-derived clips (16 kHz), int8 encoder:
+
+- transcript unchanged (WER 0.0–0.03 across 10 multi-speaker clips, 2–88
+s)
+- per-token timings group into words whose **count matches the reference
+within
+  ±1** (e.g. 91/91, 116/116, 258/259) and whose times span the audio
+start→end with correct ordering (e.g. first word @0.80 s, last @26.80 s
+on a
+  27.6 s clip)
+
+## Notes
+
+Token-level timings (one per emitted subword); `▁` word-start markers
+are
+preserved as a leading space so callers can group into words. Happy to
+adjust
+naming or also surface timings on the partial callback if preferred.
+
+- fix(tts/kokoro-ane): KokoroNoise v2 — atan2 phase fix (removes HF sharpness) (#700)
+
+## What
+
+Point the KokoroAne noise stage at `KokoroNoise_v2.mlmodelc` across all
+variants (English, Mandarin, Japanese).
+
+## Why
+
+The noise-source STFT computed phase as plain `atan2(imag, real)`,
+hitting a CoreML branch bug at the DC/Nyquist bins: when `real &lt; 0` and
+`imag` is exactly 0 (DC) or at the fp32 noise floor ~1e-15 (Nyquist),
+CoreML returns `0` instead of `+π`. That π flip propagates through
+`noise_convs[0]` (a strided conv mixing ~11 frequency bins) into all 256
+channels of `x_source_0`, smearing broad-spectrum high-frequency noise
+across the output — audible as sharp/clicky speech.
+
+- **English + Mandarin** exhibited it (this PR fixes both via v2).
+Japanese shares the same language-agnostic noise model and is covered
+too.
+- Mandarin&#39;s `ANE-zh/` chain had already shipped the equivalent
+correction in its own conversion; v2 unifies it under the shared name.
+
+## Fix
+
+Conversion-side (mobius `laishere-coreml/convert-coreml.py`,
+`CoreMLForwardSTFT.transform`): clip computational-zero imag
+(`eps=1e-5`), then apply PyTorch&#39;s branch convention `(imag==0 &amp; real&lt;0)
+-&gt; π`. Ported from the `kokoro-v1.1-zh` Trial 11 fix.
+
+## Deployment
+
+`KokoroNoise_v2.mlmodelc` (+ `.mlpackage`) uploaded to `ANE/`,
+`ANE-ja/`, `ANE-zh/` of `FluidInference/kokoro-82m-coreml`. **Renamed
+rather than overwritten** so cached clients re-download instead of
+silently keeping the buggy file. The noise stage is language-agnostic —
+`model.mil` + `weight.bin` are byte-identical across `ANE/` and
+`ANE-ja/`.
+
+## Verification
+
+Reconvert (`--stages noise`) → recompile → swap cached model →
+regenerate. HF &gt;=10 kHz band power drop:
+
+| variant | HF rel | HF abs |
+|---|---|---|
+| English | -3.2 dB | -4.7 dB |
+| Japanese | -4.7 dB | -3.5 dB |
+
+Conversion fix + full trial log documented in mobius `laishere-coreml`
+(`README.md`, `docs/trials-and-errors.md`).
+
+- fix(tts/kokoro-ane): synthesis correctness + doc accuracy (#697)
+
+Lean review-driven fixes for the KokoroAne (Kokoro 82M 7-stage CoreML)
+path. No behavioral change to phoneme output — verified on the M5 Pro
+MiniMax-English benchmark (100 phrases complete, quality matches the
+post-#691 lexicon path).
+
+## Changes
+
+**Synthesizer — cancellation + timing + error fidelity**
+- `Task.checkCancellation()` between each of the 7 stages, useful for
+the longer/multi-second synth cases.
+- `predict` rethrows `CancellationError` unwrapped instead of
+mislabeling it as `predictionFailed`.
+- Stage timings use monotonic `ContinuousClock` instead of `Date()`.
+- Style-length `precondition`s become thrown `invalidVoicePack` errors
+(no traps in production).
+
+**MandarinG2P — Han coverage**
+`looksLikeHanzi` widened to cover CJK Compatibility Ideographs,
+Extensions B–G, and U+3007, so rare-character names route through G2P
+instead of being passed through and dropped.
+
+**Docs**
+- Fixed the stale `KokoroAneManager` class header: compute placement now
+reflects the #667 default (Prosody on ANE, Noise + Tail iSTFT on GPU —
+the old text wrongly put Prosody on GPU), and corrected the &#34;single
+voice per variant&#34; claim.
+- Corrected the voice-pack row-index comments (raw phoneme count,
+BOS/EOS excluded).
+
+## Intentionally not included
+An earlier draft also added in-flight load dedup (ModelStore + English
+phonemizer) and an MLMultiArray contiguity guard. Those were dropped:
+the actor already guarantees safety, the dedup only avoids duplicate
+work in a narrow concurrent-cold-start case, and the contiguity guard
+defends against a layout these models never produce — added complexity
+without carrying its weight for a local on-device library.
+
+## Verification
+`swift build` + `swift-format lint` clean; English MiniMax benchmark (M5
+Pro) synthesizes 100/100 with unchanged RTFx and quality.
+
+- fix(tts): treat KokoroAne quote delimiters as punctuation (#696)
+
+Fixes #695.
+Follow-up to #691 and #692.
+
+## Summary
+
+- Treat ASCII apostrophe as a KokoroAne English word character only when
+it is internal to a word.
+- Preserve contractions such as `there&#39;s` and `don&#39;t`.
+- Let quoted words such as `&#39;to&#39;` resolve through the same Misaki
+lexicon key as `to` instead of falling through to BART G2P.
+- Add regression tests for quoted `to` and a quoted sentence containing
+`there&#39;s`.
+
+## Root cause
+
+After #692, lexicon-first lookup fixes ordinary `to`, but `splitWords`
+still kept every ASCII apostrophe inside the current word token. A
+quoted example word like `&#39;to&#39;` could therefore miss the Misaki lexicon
+and fall back to BART G2P.
+
+## Validation
+
+- `swift build --target FluidAudio`
+- `git diff --check --
+Sources/FluidAudio/TTS/KokoroAne/G2P/English/KokoroAneEnglishPhonemizer.swift
+Tests/FluidAudioTests/TTS/KokoroAne/KokoroAneEnglishPhonemizerTests.swift`
+
+`swift test --filter KokoroAneEnglishPhonemizerTests` currently does not
+complete on `main` in this checkout because the package build hits an
+existing CLI compile error in
+`Sources/FluidAudioCLI/Commands/ASR/Parakeet/Streaming/NemotronMultilingualFleursBenchmark.swift`
+(`the compiler is unable to type-check this expression in reasonable
+time`).</div>
+</div>
+
+<a href="../project/FluidInference_FluidAudio.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

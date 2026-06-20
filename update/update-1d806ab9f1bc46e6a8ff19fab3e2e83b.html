@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (43 commits) - jundot/omlx - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (43 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/jundot_omlx.html">jundot/omlx</a> /
+    Updates in main (43 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/jundot_omlx.html">jundot/omlx</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-19 03:56 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/jundot/omlx/commits/main" target="_blank">https://github.com/jundot/omlx/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление значительно улучшает управление движком LLM и моделями, в частности, за счет сохранения арендных прав на движок до полного завершения HTTP-ответов, что предотвращает преждевременную выгрузку моделей и повышает стабильность при нагрузке на ресурсы, обработке кеша и допуске запросов. Также оно включает масштабный рефакторинг пользовательского интерфейса macOS для перехода на нативные компоненты SwiftUI, что улучшает согласованность и удобство поддержки. Кроме того, в выпуске добавлена поддержка и оптимизации для моделей GLM и MiniMax M3, а также реализована возможность предоставления профилей моделей в качестве видимых через API сущностей.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- test: accept lease in responses preflight mock
+
+- fix: enforce SSD cache limit across model switches (#1915)
+
+- fix: protect in-flight models from unsafe unload
+
+Keep LLM engine leases alive until the HTTP response body finishes, including streaming generators. This prevents the pool from treating a model as idle while server code still holds the engine, tokenizer, scheduler, or KV state.
+
+Behavior matrix:
+
+| Scenario | Before | After |
+| --- | --- | --- |
+| Idle model, model switch exceeds ceiling | Evict idle LRU and load target | Same |
+| Multiple idle models under soft pressure | Evict idle LRU when useful | Same |
+| Final idle non-pinned model under hard pressure | Could be kept loaded | Unload immediately |
+| Active or leased model under hard pressure | Could remain loaded, or be exposed to unsafe teardown races | Abort requests, mark pending unload, unload after activity drains |
+| Leased model before scheduler request exists | Could look idle to eviction paths | Mark abort requested, reject before scheduling, unload on release |
+| Streaming response | Endpoint function returned before body finished, weakening pool protection | Lease stays held until generator finally runs |
+| Non-streaming JSON response | Engine could be considered idle before body delivery finished | Lease stays held until response body generator finishes |
+| Runtime-settings reload while busy | Could unload and reload an in-use model | Reject with ModelBusyError / HTTP 409 |
+| VLM-to-LM force reload while busy | Could unload and reload an in-use model | Reject with ModelBusyError / HTTP 409 |
+| Competing model load while current model is in-flight | Could unload the current model during the request | Refuse the competing load with 507/409 when needed |
+| Prefill memory guard thresholds | Unchanged | Unchanged |
+
+The intent is not to wait for busy work to finish normally. Under hard pressure, busy models are asked to abort immediately. Only the destructive engine unload is deferred until no endpoint lease or scheduler activity can still reference the engine.
+
+This preserves the fast pressure-relief path for idle models while avoiding the race where a model is unloaded during an active response.
+
+Verified with focused unit/integration coverage, before/after smoke scenarios, and real Gemma model switching under a constrained memory guard.
+
+- fix: improve GLM MLA memory guard estimation
+
+Estimate resident KV growth from compressed MLA cache tensors instead of the standard expanded K/V formula.
+This fixes GLM-5.2 preflight false positives where 32k context KV was estimated at ~74 GiB instead of ~2.9 GiB.
+
+- feat: support GLM FP8 oQ sensitivity streaming
+
+Implement streaming sensitivity proxy generation for GLM FP8 sources so large checkpoints can be quantized without mlx_lm.convert.
+Support GLM MoE DSA sanitize replay, partial FP8 block scales, and previous top-k state during sensitivity calibration.
+
+Based on ml-explore/mlx-lm#1410 by @pcuenca (Pedro Cuenca), upstream head 3cb18b51892a7800678923116f5b4920a7666208.
+
+- feat: add GLM MoE DSA pre-load patch
+
+Based on ml-explore/mlx-lm#1410 by @pcuenca (Pedro Cuenca):
+[transformers-to-mlx skill] glm_moe_dsa: DSA cross-layer indexer sharing (GLM-5.2)
+
+Upstream PR: https://github.com/ml-explore/mlx-lm/pull/1410
+Upstream head: 3cb18b51892a7800678923116f5b4920a7666208
+
+Port the GLM-5.2 model patch into oMLX as a pre-load monkey patch so
+the pinned mlx-lm runtime can load glm_moe_dsa checkpoints with native
+full/shared DSA indexer sharing. Keep post-load IndexCache limited to
+DeepSeek DSA and cover CacheList hot/cold round trips.
+
+- fix(profiles): advertise VLM capabilities for exposed profiles
+
+- fix(profiles): refine API-visible model profiles after #1838
+
+Separate internal profile IDs from API-visible names so random profile IDs do not leak into model lists, and keep display names as the primary UI label.
+
+Move API exposure editing into the profile edit form, add API profile pills and tooltips to model lists, and preserve saved profile settings when editing only metadata or exposure.
+
+Load API-exposed profiles with transient runtime settings so DFlash, VLM MTP, native MTP, TurboQuant, SpecPrefill, and IndexCache variants can reload without mutating the base model&#39;s persisted settings.
+
+- feat(profiles): expose profiles as API-visible models (#1838)
+
+Expose per-model profiles as API-visible virtual model IDs that share the base engine, including server resolution, /v1/models discovery, admin UI, macOS UI, documentation, and tests.
+
+- fix(omlx-mac): preserve native popup width
+
+- refactor(omlx-mac): replace custom controls with native SwiftUI equivalents (#1891)
+
+* refactor(omlx-mac): replace custom controls with native SwiftUI equivalents
+
+Consolidates a sequence of refactoring and build changes whose shared goal is
+to remove hand-rolled UI primitives in favor of their first-party SwiftUI
+counterparts. The app&#39;s visual language aligns more closely with macOS system
+conventions, and the component surface that needs ongoing maintenance shrinks
+substantially. No user-visible behavior is changed unless noted.
+
+* refactor(omlx-mac): migrate deprecated copy symbols to &#39;document.on.document&#39;
+
+- Replace deprecated SF Symbol &#39;doc.on.doc&#39; with its modern counterpart
+  &#39;document.on.document&#39; across multiple screens and shared components.
+- Affected views: AccuracyBenchScreen, IntegrationsScreen, SecurityScreen,
+  ThroughputBenchScreen, and CodeChip.
+
+* refactor(omlx-mac): adopt PreferenceKey for adaptive LazyVGrid height in AccuracyBenchScreen
+
+- Remove hardcoded and error-prone gridHeight row-estimation logic.
+- Introduce GridHeightKey to measure exact runtime content height via a
+  background GeometryReader.
+- Animate height transitions smoothly on preference change to prevent layout
+  jarring.
+
+* refactor(omlx-mac): replace custom checkmark button with SwiftUI Toggle in BenchmarkCard
+
+* refactor(omlx-mac): migrate model settings back button to native navigation toolbar
+
+- Remove custom back button actions from inner Header component.
+- Implement native toolbar placement for the &#34;Back to Models&#34; navigation item
+  using an icon-only style via ToolbarItem(placement: .navigation).
+
+* refactor(omlx-mac): migrate section titles and log actions to native navigation bar and toolbar
+
+- Replace the sectionTitleHeader() custom view in ContentScaffold with
+  .navigationTitle(titleText), delegating title placement to SwiftUI&#39;s native
+  toolbar machinery.
+- Move log line selection popup and reload action button from the inline view
+  header into ToolbarItemGroup(placement: .primaryAction).
+
+* refactor(omlx-mac): extract and globalize LinkRow component with generic support
+
+- Move LinkRow from AboutScreen to a shared Row.swift component file.
+- Support generic &lt;Icon: View&gt; using @ViewBuilder to allow custom icons like
+  Squircle.
+- Align button styles to .plain and icon-only across different use cases.
+
+* refactor(omlx-mac): replace custom Popup control with SwiftUI Picker
+
+- Drop the bespoke Menu-backed label rendering in favor of Picker with
+  .pickerStyle(.menu) and .labelsHidden().
+- Implementation shrinks from ~60 LOC to ~10 while preserving the existing
+  call-site API.
+
+* refactor(omlx-mac): replace custom Segmented control with SwiftUI Picker
+
+- Replace the custom HStack-based Segmented component with SwiftUI Picker
+  using .pickerStyle(.segmented).
+- Remove obsolete .frame(width:) constraints across multiple screen views
+  (AccuracyBenchScreen, DownloadsScreen, IntegrationsScreen,
+  ModelSettingsScreen, ProfileViews, QuantizationScreen, StatusScreen) to
+  allow the native control to handle its layout adaptively.
+
+* refactor(omlx-mac): migrate custom section headers to navigationTitle
+
+* feat(omlx-mac): introduce unified ProgressBar utilizing ProgressViewStyle
+
+- Implement a single shared ProgressBar backed by OMLXLinearProgressViewStyle.
+- Accepts a single tint color or a gradient color array; defaults to .tint for
+  callers that do not require custom coloring.
+- Replaces three independent private implementations with one canonical type.
+
+* refactor(omlx-mac): migrate private progress bars across multiple views to shared ProgressBar
+
+- Remove local ProgressBar from DownloadsScreen and QuantizationScreen.
+- Replace custom UsageBar in StatusScreen with common ProgressBar.
+
+* refactor(omlx-mac): streamline API key setup in WelcomeWindow using TextInput and inline key generator
+
+- Replace the bespoke keyField(@ViewBuilder) conditional between TextField and
+  SecureField with a single TextInput call carrying isSecure.
+- Move the Generate key button inline beside the field so first-run users can
+  create a ready-to-use key without leaving the wizard.
+
+* refactor(omlx-mac): migrate API key field in SecurityScreen to updated TextInput
+
+- Drop the 30-line hand-rolled focus-ring field in APIKeyEditorRow in favor
+  of TextInput, inheriting native focus ring styling and isSecure toggle at no
+  extra cost.
+
+* refactor(omlx-mac): upgrade TextInput component with native styling and stepper support
+
+- Adopt .textFieldStyle(.roundedBorder) for consistent system-native rendering;
+  remove the manual focus-ring overlay.
+- Add isNumeric, range, and step parameters backed by a native Stepper rendered
+  as an inline trailing overlay.
+
+* style: clean up trailing whitespace from previous commit
+
+* fix(omlx-mac): restore `AppConfig.httpURL` in `WelcomeWindow` to fix accidental rollback
+
+* fix(omlx-mac): resolve UI regression and unreliable toggle interaction
+
+Removes the nested Button from `AccuracyBenchCard`. The custom layout is
+now properly passed as the Toggle&#39;s label instead of nesting a labeled
+Toggle inside a separate Button element.
+
+* fix(omlx-mac): restore changes in `ModelSettingsScreen` to fix failing tests
+
+- fix(tool-calling): parse Gemma 4 parenthesized tool calls (#1886)
+
+Parse Gemma 4 parenthesized call:name(...) kwargs tool calls by extending the hardened fallback scanner/transcoder path while keeping malformed cases on the clean-drop path.
+
+Refs #1846.
+
+- fix: make dense Qwen3.5 VLM MTP compatible with verifier
+
+- fix: support ranged macOS DMG update assets
+
+- formula: bump to 0.4.4
+
+- chore: bump version to 0.4.4
+
+- fix: hide MarkItDown model by default
+
+- fix(scheduler): reset stale admission blockers
+
+Clear memory and store-cache admission blockers once the head-of-line request passes admission gates, before any cache freshness defer can keep it queued.
+
+- fix(scheduler): keep cache stalls responsive
+
+Fail persistent non-memory store-cache admission stalls instead of leaving the head-of-line request waiting forever. Move hard-pressure hot-cache shrinking off the FastAPI event loop.
+
+- fix(cache): cap SSD preload by hot-cache capacity
+
+- fix: defer cache freshness waits to admission
+
+Delay prefix cache lookup until scheduling so same-prefix requests can wait for in-flight store_cache without blocking active decode or chunked prefill work.
+
+- fix: correct MiniMax M3 partial cache resume (#1888)
+
+- formula: bump to 0.4.4rc2
+
+- fix: allow rc formula updates
+
+- chore: bump version to 0.4.4rc2
+
+- fix: defer native MTP late joins (#1879)
+
+- fix(api): bound Gemma 4 JSON arg parsing
+
+Route Gemma 4 fallback args through the bounded transcoder so valid JSON cannot bypass depth checks and surface RecursionError. Keep malformed deep calls on the existing clean drop path.
+
+- fix(scheduler): preserve hot-cache preflight diagnostics (#1452)
+
+Keep binding-aware preflight rejection messages on the same hot-cache-reserved basis as the scheduler hard limit, without changing the original ceiling values displayed in advice.
+
+- fix: handle missing tool descriptions and malformed Harmony channels (#1876)
+
+- feat(scheduler): binding-ceiling-aware prefill rejection messages (#1452)
+
+Improve prefill memory guard rejection diagnostics by identifying whether the static, dynamic, or Metal cap ceiling is binding and pointing operators at the relevant setting.
+
+- fix(api): parse Gemma 4 namespaced tool calls (#1854)
+
+Fixes #1830.
+
+Handle Gemma 4 MCP-namespaced tool names, single-quoted arguments, and quote-aware argument span scanning in the fallback parser. Remap namespaced emitted tool names to a unique registered suffix after parsing.
+
+- fix: use &#39;hermes chat&#39; subcommand in Hermes launch integration (#1878)
+
+Use Hermes chat TUI launch and pass the model via the short model flag so the config-defined oMLX provider is used.
+
+- oq: expose language_model on the sanitize-plan proxy for nested VLMs (#1881)
+
+oQ&#39;s streaming sanitize-plan discovery uses a lightweight _Proxy instead of
+instantiating the model, so it can quantize models too large to fit in RAM.
+Nested-VLM Model.sanitize implementations (e.g. minimax_m3_vl) read
+self.language_model.args.{num_hidden_layers,num_local_experts} for MoE expert
+stacking, which the proxy didn&#39;t provide — discovery failed with
+&#34;&#39;_Proxy&#39; object has no attribute &#39;language_model&#39;&#34;.
+
+Expose a language_model proxy carrying text_config so VLM sanitize plans work
+without instantiating the model.
+
+Complementary to #1875 (MiniMax-M3 serving): this is the quantization side —
+without it there&#39;s no way to produce an M3 oQ checkpoint. Produced and tested
+with unigilby/MiniMax-M3-oQ4 (4-bit), which loads on the M3 mlx-vlm code #1875 pins.
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- feat: support MiniMax M3 from in-progress mlx-vlm PR (#1875)
+
+- fix: keep menubar responsive under server load (#1880)
+
+- fix: add macOS memory stats compat layer
+
+Introduce omlx.utils.psutil_compat for the small virtual_memory() surface oMLX needs. On macOS it reads HOST_VM_INFO64 with an oversized host_info64_t buffer so macOS 27 layout changes do not route memory guard decisions through psutil&#39;s stale adapter.
+
+Use the compat layer from the process memory enforcer, settings, and admin memory telemetry. When the fast Mach stats path is unavailable, the enforcer now keeps a live available-memory fallback instead of immediately freezing dynamic ceiling decisions at the static limit.
+
+Keep the slower vm_stat fallback cached so it is only a last-resort compatibility path, not a repeated hot-path subprocess call.
+
+Refs #1749, #1835.
+
+- fix: honor request max_tokens with force_sampling (#1857)
+
+- fix(scheduler): realign rows before native MTP decode
+
+- fix(scheduler): realign per-row samplers and logits processors by uid (#1824)
+
+Fixes #1823.
+
+Co-authored-by: efortin &lt;3702769+efortin@users.noreply.github.com&gt;
+
+- fix(api): harden /v1/completions thinking_budget (#1821)
+
+- fix: harden TurboQuant cache eligibility (#1842)
+
+Allow TurboQuant on hybrid cache layouts by converting only full-attention KVCache layers while leaving rotating/sliding and state-array caches in their native representation.
+
+Keep the skip-last full KV layer stable after restoring a partially TurboQuant prefix cache, so subsequent stores do not change the live layer signature and truncate later cache hits.
+
+Detect attention-sink modules from the loaded model structure and keep those models on fp16 KV cache because TurboQuant&#39;s quantized attention kernels do not implement sink logits. Also preserve correctness in the patched attention path by falling back to sink-aware dequantized SDPA if a TurboQuant cache receives sinks.
+
+Update the TurboQuant, prefix-cache, memory-accounting, and prefill-abort tests for the restored TQ cache behavior and the additional cleanup sync.
+
+- fix: stabilize TurboQuant prefix cache handling (#1842)
+
+Improve TurboQuant prefix-cache restore, suffix prefill, and cache handoff paths so restored long-context prefixes stay quantized and avoid unnecessary full-state materialization.
+
+- restore TurboQuant prefix-cache entries as TurboQuantKVCache instead of dequantizing them back to fp16 KVCache
+
+- route long TQ suffix prefill through bounded quantized attention with a dequantize fallback
+
+- add singleton passthrough methods for plain TurboQuantKVCache and convert exact singleton TQ layers to BatchTurboQuantKVCache only when batching requires it
+
+- reclaim stale Metal cache before the first prefill chunk in both prefill loops
+
+- ignore sub-minimum tail chunks in adaptive transient samples
+
+- concatenate MSE TurboQuant restore blocks in bulk
+
+- add focused regression tests for TQ restore, singleton passthrough, chunk cleanup, and long-prefill attention routing
+
+- fix: reserve hot-cache headroom in memory guard (#1833)
+
+Keep process-level pressure accounting on full phys_footprint while propagating scheduler limits with dynamic hot-cache reservation. Under hard pressure, shrink shared/local hot cache by LRU before falling through to request abort or model eviction.
+
+Also fail persistent memory-gated admission stalls cleanly after the timeout so requests do not wait indefinitely when pressure cannot recover.</div>
+</div>
+
+<a href="../project/jundot_omlx.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
