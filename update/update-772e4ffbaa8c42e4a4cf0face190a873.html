@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (9 commits) - cuga-project/cuga-agent - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (9 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/cuga-project_cuga-agent.html">cuga-project/cuga-agent</a> /
+    Updates in main (9 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/cuga-project_cuga-agent.html">cuga-project/cuga-agent</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-25 13:00 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/cuga-project/cuga-agent/commits/main" target="_blank">https://github.com/cuga-project/cuga-agent/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Основное обновление касается тайм-аута выполнения кода в песочнице, который был сначала увеличен до 60 секунд из-за проблем с производительностью у медленных поставщиков LLM, а затем стал настраиваемым (по умолчанию 30 секунд), что позволяет операторам регулировать его. Среди других значительных изменений — внедрение механизма подтверждения &#34;человек в контуре&#34; (Human-in-the-Loop, HITL) для простого исполнителя и настраиваемый тайм-аут HTTP-запросов к LLM. Обновление также включает исправления различных ошибок, таких как обеспечение распространения параметров аутентификации и корректировка трассировки Langfuse, а также важные меры по устранению уязвимостей безопасности в зависимостях.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- refactor(executors): make sandbox code-execution timeout configurable (default 30s) (#365)
+
+* perf(executors): bump sandbox code-execution timeout from 30s to 60s
+
+The 30s cap on asyncio.wait_for(_async_main(), timeout=...) was tight
+for slower model providers. Analysis of a GPT-OSS-120B AppWorld run
+(non-Groq provider) showed 21 sandbox TimeoutErrors across 15 of 43
+tasks (35%), with 6 of those 15 failing — meaningfully above the
+overall 28% failure rate.
+
+The sandbox block wall-clock includes embedded LLM calls (find_tools
+shortlister, MCP/skill tools that internally call an LLM) and a chain
+of sequential API requests. On Groq the same workload fits well under
+30s; on GPU-based providers (vLLM/TGI/standard inference) it routinely
+hits the cap.
+
+Bump the budget so the model has room to complete typical pagination +
+find_tools + a few API calls in one block on slower providers, while
+still bounding runaway loops.
+
+- base_executor.py / local_executor.py: timeout default 30 -&gt; 60
+- code_executor.py: both explicit callers (cuga_lite path and
+  CodeAgent path) pass timeout=60 instead of 30
+- e2b_executor.py / e2b_sandbox.py: generated-code template
+  timeout=30 -&gt; 60
+- test_e2b_direct.py: example template literal aligned to 60
+
+OpenSandbox already runs with opensandbox_timeout_seconds=600 and is
+unchanged.
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+Signed-off-by: Sergey Zeltyn &lt;sergeyz@il.ibm.com&gt;
+
+* test(executors): align test_code_execution_timeout with new 60s sandbox budget
+
+The test was hardcoded against the previous 30s sandbox timeout: it
+slept 35s and asserted a TimeoutError fired. After the executor budget
+was raised to 60s, the 35s sleep now completes successfully and the
+print runs, breaking the assertion.
+
+Bump the sleep to 65s and update the inline comments. Test now runs
+~67s locally (up from ~37s) — the cost of validating the actual 60s
+ceiling. Caught by CI on PR #365.
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+Signed-off-by: Sergey Zeltyn &lt;sergeyz@il.ibm.com&gt;
+
+* refactor(executors): make sandbox code-execution timeout configurable
+
+Per maintainer feedback on #365: replace the hardcoded sandbox timeout
+with a Dynaconf-managed setting at the standard location, so operators
+can tune per deployment via env var without touching code. Default
+stays at 30s — no behavior change for users on defaults, only the
+ability to override.
+
+Changes
+- Add `advanced_features.sandbox_execution_timeout = 30` to settings.toml
+- Add corresponding Validator in config.py for type/default safety
+- Replace the two hardcoded `timeout=60` call sites in code_executor.py
+  with `settings.advanced_features.sandbox_execution_timeout`
+- For the e2b path, where the timeout is embedded in a generated-code
+  template string sent to the e2b sandbox, read the value once into a
+  local and substitute via f-string — done in both e2b_executor.py and
+  e2b_sandbox.py
+- Cast the e2b-side reads to int() as defense-in-depth: prevents a
+  misconfigured env var (coerced to string by Dynaconf) from producing
+  syntactically broken Python at sandbox runtime; instead raises a
+  clear TypeError at the read site
+- Revert the type-hint defaults in base_executor.py and local_executor.py
+  back to 30 — cosmetic, signature defaults never consumed in production
+- Update the test_e2b_direct.py example template literal back to 30
+- Fix test_code_execution_timeout: use monkeypatch.setattr on
+  settings.advanced_features.sandbox_execution_timeout to 2s and
+  sleep 3s; test runs in ~3s instead of waiting on the production
+  default
+
+Deployments that want the +10pp gain measured on gpt-oss-120b/AWS
+medium can opt in via
+`DYNACONF_ADVANCED_FEATURES__SANDBOX_EXECUTION_TIMEOUT=60` in their
+environment. The configurability lands now; ramping the global default
+can come in a follow-up if/when warranted.
+
+Closes #350.
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+Signed-off-by: Sergey Zeltyn &lt;sergeyz@il.ibm.com&gt;
+
+* test(executors): patch sandbox_execution_timeout in MagicMock settings
+
+CI surfaced a failure in test_eval_with_e2b_disabled after the previous
+commit made the local-executor path read settings.advanced_features
+.sandbox_execution_timeout. The test patches code_executor.settings
+with a MagicMock and explicitly sets a handful of advanced_features
+attributes — but not sandbox_execution_timeout, so attribute access
+returned a fresh MagicMock object. That MagicMock then propagated into
+asyncio.wait_for(timeout=&lt;MagicMock&gt;), which raised a TypeError, was
+caught by the executor&#39;s try/except, and produced an empty new_vars
+dict that failed the assertion.
+
+Add `mock_settings.advanced_features.sandbox_execution_timeout = 30`
+to all three patch setups in test_e2b_lite.py with a sentinel comment
+explaining that any positive number works (the test code runs in
+microseconds; the value just needs to satisfy asyncio.wait_for). Two
+of the three sites don&#39;t strictly need it today since the e2b path
+doesn&#39;t read the setting via code_executor.settings, but adding it
+defensively prevents the same paper cut if anyone refactors the
+routing in either direction.
+
+Co-Authored-By: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+Signed-off-by: Sergey Zeltyn &lt;sergeyz@il.ibm.com&gt;
+
+* fix(config): enforce int and gt=0 on sandbox_execution_timeout Validator
+
+CodeRabbit review on #365 flagged the Validator entry as Major
+Stability &amp; Availability: no type or range constraint meant a typo&#39;d
+DYNACONF_ADVANCED_FEATURES__SANDBOX_EXECUTION_TIMEOUT (e.g. &#34;abc&#34;,
+or -5, or 0) would silently propagate through to
+asyncio.wait_for(timeout=&lt;bad value&gt;) and surface as a cryptic
+runtime TypeError instead of a clear startup ValidationError.
+
+Add `is_type_of=int` and `gt=0` so misconfiguration fails at Dynaconf
+init time. Composes with the int() casts already applied at the e2b
+template sites for belt-and-suspenders defense.
+
+
+---------
+
+Signed-off-by: Sergey Zeltyn &lt;sergeyz@il.ibm.com&gt;
+
+- fix: propagate auth query params to MCP transport URLs (#213) (#345)
+
+* fix: propagate auth query params to MCP transport URLs (#213)
+
+apply_authentication populates query_params for api-key and query auth
+types, but _create_transport only forwarded headers to SSE and HTTP
+transports. URL-encode and append query params before constructing the
+transport, matching the pattern used in _call_mcp_server_tool.
+
+* fix: merge auth query params with existing URL query strings
+
+Parse and merge existing query params via urlparse/parse_qsl in both SSE
+and HTTP transport branches. Add regression tests for URLs that already
+carry query parameters.
+
+* fix: extract auth query merge helper and use quote encoding
+
+- fix(tracing): make TraceScopedLangfuseCallbackHandler override reachable (#358)
+
+* fix(tracing): make TraceScopedLangfuseCallbackHandler override reachable
+
+Override the public on_llm_start/on_chat_model_start entry points instead
+of the name-mangled private __on_llm_action. The double-underscore method
+mangles to this class&#39;s own name, so the base handler&#39;s calls to
+self.__on_llm_action(...) never reached the subclass override — orphan
+LLM calls were never attached to the eval trace id, silently no-op.
+
+Add regression tests using a fake base class that mirrors the real
+handler&#39;s private-dispatch shape to prove the override is reachable.
+
+Fixes #357
+
+* fix(tracing): clear stale trace state and flatten callback managers for Langfuse dedup
+
+sync_langfuse_callbacks_from_config only updated _langfuse_trace_id when the
+new config had a truthy trace id, leaving the old trace id/primary handler
+in place for a later invocation in the same async context with no trace id —
+get_langfuse_invoke_config would reattach nested LLM calls to the stale
+previous trace. Always set (or clear) the trace id and primary handler.
+
+CugaAgent._apply_callbacks&#39;s per_call_langfuse check used _as_list, which
+wraps a callback manager in a single-item list without flattening it, so a
+Langfuse handler nested inside a manager was never detected — the
+agent-level Langfuse handler was kept alongside it, duplicating root traces.
+Use collect_langfuse_callbacks_from_config, which already flattens via
+_flatten_callbacks.
+
+Fixes #359
+
+- fix(security): remediate Dependabot alerts (#337) (#344)
+
+* fix(security): remediate Dependabot alerts across Python and npm lockfiles
+
+Bump litellm, langchain-core, starlette, and transitive deps in root uv.lock;
+add pnpm overrides for shell-quote, form-data, ws, tmp, and vite; restore demo
+tool pyproject.toml files and refresh their lockfiles (drops python-jose/ecdsa).
+
+Resolves dependabot#483
+Resolves dependabot#366
+Resolves dependabot#375
+Resolves dependabot#376
+Resolves dependabot#478
+Resolves dependabot#480
+Resolves dependabot#408
+Resolves dependabot#457
+Resolves dependabot#423
+Resolves dependabot#396
+Resolves dependabot#451
+Resolves dependabot#359
+Resolves dependabot#324
+Resolves dependabot#363
+Resolves dependabot#362
+Resolves dependabot#443
+Resolves dependabot#445
+Resolves dependabot#448
+Resolves dependabot#450
+Resolves dependabot#295
+Resolves dependabot#296
+Resolves dependabot#297
+
+Fixes #337
+
+* chore: remove separate pyproject.toml and uv.lock from demo tools
+
+CRM and email MCP demo subprojects resolve from the root lockfile; drop
+per-subproject manifests and lockfiles added in the prior commit.
+
+* fix(security): correct advisory comments and bump mako to 1.3.12
+
+Document langchain-core GHSA-pjwx-r37v-7724, remove invalid mako GHSA ID,
+and raise mako floor to 1.3.12 for GHSA-2h4p-vjrc-8xpq per PR review.
+
+- fix(cuga-lite): normalize numpy types at producer boundaries for checkpointing (#341)
+
+Fixes #229. Sanitize numpy scalars in find_tools schemas, variable ingestion,
+and tool-call recording so LangGraph msgpack checkpoint writes no longer fail.
+
+- feat(a2a): human-in-the-loop approval round-trip for the simple runner (#361)
+
+* fix(a2a): surface HITL interrupts as terminal input_required events
+
+- Honor the event `final` flag in the HITL branch so an interrupt can end the task in input_required instead of emitting a spurious trailing completed update.
+- Attach the pending action_id to the status message metadata so callers can correlate an approval response.
+
+* feat(a2a): export Artifact type
+
+- Re-export Artifact from the a2a v0.3 compat module so the router can attach agent answers as task artifacts.
+
+* feat(a2a): add HITL approval round-trip to the simple runner
+
+- Parse CUGA&#39;s real SSE wire format (event:/data:) instead of a fictional JSON envelope, so answers/errors are detected (fixes empty &#39;Agent completed processing&#39; responses).
+- Detect graph interrupts via graph state; auto_approve resumes with a confirmed ActionResponse, otherwise surface a terminal input_required prompt.
+- On a parked thread, treat the inbound message as the approval: structured {action_id, confirmed} preferred, text approve/deny fallback, ambiguous replies re-ask; tolerate callers that echo the whole transcript.
+- Add settings.a2a.auto_approve (default false) and wire it through build_a2a_router_for_settings.
+
+* feat(a2a): return answers via artifacts and terminal status message
+
+- Populate the Task&#39;s terminal status.message and an answer artifact so A2A clients (which read artifacts/status, not history) actually receive the answer.
+- Add _extract_approval to read a structured approve/deny signal from a DataPart or message metadata and forward it to the runner.
+
+* test(a2a): cover HITL round-trip, approval parsing, and response shape
+
+- Update integration mocks/doubles to the real SSE wire format and the new approval kwarg.
+- Add unit tests for auto-approve resume, input_required surfacing, structured/text/ambiguous approval decisions, transcript-echo replies, and _extract_approval parsing.
+
+* ci(a2a): run the A2A test suite in the unit-tests workflow
+
+- Add tests/integration/a2a/ and tests/unit/test_a2a_simple_runner_hitl.py to src/scripts/run_tests.sh so the A2A wire, HITL round-trip, and response-shape tests run in CI (they were previously never executed).
+
+* style(a2a): apply ruff format
+
+- Run ruff format on the A2A runner/router/task_adapter and the simple-runner integration test so &#39;ruff format --check&#39; (CI gate in run_tests.sh) passes.
+
+- fix: fall back to base_tools in ChatAgent.execute_tool when tools is None (#340)
+
+Prevents TypeError in regular chat mode (e.g. cloud deployments without SSE)
+where tools are loaded into base_tools but self.tools is not yet populated.
+
+Closes #334
+
+- feat: add full supervisor policy runtime for tool approval and output formatter (#349)
+
+* feat: add full supervisor policy runtime for tool approval and output formatter
+
+* fix: address PR #349 review on supervisor HITL contract and SDK resume
+
+- feat: make LLM HTTP timeouts configurable (#257) (#346)
+
+* feat: make LLM HTTP timeouts configurable via env and TOML
+
+Allow callers to override the hardcoded 61s timeout for OpenAI, Azure,
+and OpenRouter clients through per-model settings, CUGA_LLM_HTTP_TIMEOUT,
+or connections.llm_http_timeout in settings.toml.
+
+Fixes #257
+
+* fix: harden LLM HTTP timeout parsing per PR review
+
+Reject non-finite timeout values, log TOML resolution failures instead of
+silently swallowing them, deduplicate the 61s default, and document that
+the setting applies to OpenAI, Azure, and OpenRouter only.</div>
+</div>
+
+<a href="../project/cuga-project_cuga-agent.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

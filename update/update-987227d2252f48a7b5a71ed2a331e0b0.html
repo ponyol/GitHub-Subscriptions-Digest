@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (33 commits) - charmbracelet/crush - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (33 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/charmbracelet_crush.html">charmbracelet/crush</a> /
+    Updates in main (33 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/charmbracelet_crush.html">charmbracelet/crush</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-26 13:42 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/charmbracelet/crush/commits/main" target="_blank">https://github.com/charmbracelet/crush/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This release introduces significant stability and performance enhancements, including fixes for stale reasoning effort leaking between model providers, preventing concurrent Crush instances from invalidating each other&#39;s logins, and ensuring race-free configuration access. Key performance improvements make model selection and config reloads much faster, alongside more reliable UI rendering for elements like the pills box. Additionally, provider interactions are improved through tool call JSON validation, accurate model discovery for local providers, and a faster, bounded glob tool for large directories.
+
+---
+
+Этот релиз представляет значительные улучшения стабильности и производительности, включая исправления утечки устаревших параметров ReasoningEffort между поставщиками моделей, предотвращение взаимной аннуляции логинов между конкурирующими экземплярами Crush и обеспечение безопасного доступа к конфигурации без гонок данных. Ключевые улучшения производительности значительно ускоряют выбор модели и перезагрузку конфигурации, а также повышают надежность рендеринга элементов пользовательского интерфейса, таких как панель &#34;pills&#34;. Дополнительно, улучшено взаимодействие с поставщиками благодаря валидации JSON для вызовов инструментов, более точному обнаружению моделей для локальных поставщиков и более быстрому, ограниченному инструменту glob для работы с большими директориями.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- chore: auto-update files
+
+- fix(config): prevent stale ReasoningEffort from leaking across providers (#3209)
+
+When a user selects a model from a different provider than the auto-detected default, the default provider&#39;s ReasoningEffort (e.g. anthropic&#39;s &#34;high&#34;) was leaking into the selected model. Now when the user doesn&#39;t explicitly set reasoning_effort, the selected model&#39;s own DefaultReasoningEffort is used instead.
+
+- chore(legal): @feizhuzheng has signed the CLA
+
+- v0.80.0
+
+- fix: render pills box reliably when todos or queue appear mid-session
+
+The pills panel only drew when layout.pills had vertical space, but
+that space was reserved by updateLayoutAndSize which ran only on
+explicit triggers (toggle, resize, in-progress flip). When the model
+created new todos while the panel was collapsed, the layout never
+recomputed and the box stayed invisible until ctrl+t forced it.
+
+Re-render pills on every Draw pass so the box appears as soon as
+content exists, regardless of whether the layout footprint changed.
+
+- fix(auth): stop two Crush instances from invalidating each other&#39;s login
+
+When two Crush instances shared one OAuth login (for a provider that
+rotates refresh tokens, like Hyper), they could each refresh the token
+on their own schedule. Because each refresh retires the previous token,
+the two instances kept revoking the credential the other was using,
+producing endless &#34;authentication failed&#34; errors even though every
+refresh reported success.
+
+Token refresh is now coordinated so only one refresh happens at a time,
+both within a single process and across processes sharing the same login.
+Any instance that finds the credential was just refreshed by another
+adopts that result instead of refreshing again, so concurrent instances
+converge on one working token instead of cannibalizing each other.
+
+- fix(config): make concurrent config access race-free via copy-on-write
+
+Reading the active config raced with writes that mutated it: Config() handed out a pointer with no synchronization while reloads swapped it and typed setters (compact mode, preferred model, docker MCP, ...) mutated its fields in place. The race detector flagged both during concurrent startup and settings changes.
+
+Config is now published copy-on-write. Reads are guarded so they always see a fully constructed snapshot, and every mutation clones the current config, changes the clone, and atomically swaps it in. Because published configs are never mutated in place, a reader holding an older pointer keeps reading a consistent snapshot instead of racing a writer.
+
+A single write lock now serializes all config-producing operations (typed setters and reloads), replacing the narrower reload-only lock, so two writers can no longer lose each other&#39;s updates. This keeps model selection fast — it still skips the expensive full reload — while closing the remaining data races.
+
+- perf(config): make model selection and config reload fast
+
+Model selection wrote config and then triggered a full reload of every config file, the provider catalog, and agents on each pick, which scaled with the number of configured models and made switching sluggish.
+
+Selecting a model now persists without the redundant full reload, since the in-memory state is already updated and agents are rebuilt separately. The reload path itself is also much faster: the static LSP defaults catalog and the git worktree root are cached instead of recomputed, literal config values skip shell expansion entirely, the working directory is resolved only when a command substitution needs it, and AWS credential file probing no longer stats the filesystem during tests.
+
+- perf(ui): skip theme rebuild when provider keeps the same theme
+
+- feat(ui): optimize model ui rendering
+
+- fix: validate tool call JSON before storing to prevent stuck conversations
+
+Malformed tool call arguments from providers (e.g. GLM-5.2 via vLLM)
+were persisted as-is, causing every subsequent resend to fail with a
+parse error. Sanitize input at the streaming callback boundary,
+replacing invalid JSON with an empty object and logging a warning.
+This matches the existing fallback pattern for unfinished tool calls.
+
+💘 Generated with Crush
+
+
+Assisted-by: Crush:qwen3.7-max
+
+- chore: auto-update files
+
+- fix(glob): keep file search fast and bounded on large directories
+
+Pointing the glob tool at a huge or symlink-heavy directory (a home
+folder, a module cache) could peg every CPU core, balloon memory to
+several GB, and freeze the session until manually interrupted. It could
+also wander outside the project by following symlinks.
+
+Glob now applies a timeout, streams results instead of buffering the
+whole listing, scopes the walk to the pattern&#39;s literal prefix, and no
+longer follows symlinks. A search over a giant tree now returns quickly
+or times out cleanly instead of hanging.
+
+- chore(legal): @vismaytiwari has signed the CLA
+
+- chore(deps): bump actions/checkout from 6.0.3 to 7.0.0 in the all group
+
+Bumps the all group with 1 update: [actions/checkout](https://github.com/actions/checkout).
+
+
+Updates `actions/checkout` from 6.0.3 to 7.0.0
+- [Release notes](https://github.com/actions/checkout/releases)
+- [Changelog](https://github.com/actions/checkout/blob/main/CHANGELOG.md)
+- [Commits](https://github.com/actions/checkout/compare/df4cb1c069e1874edd31b4311f1884172cec0e10...9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+
+---
+updated-dependencies:
+- dependency-name: actions/checkout
+  dependency-version: 7.0.0
+  dependency-type: direct:production
+  update-type: version-update:semver-major
+  dependency-group: all
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+
+- chore(legal): @notno has signed the CLA
+
+- feat(providers): add llamacpp enricher
+
+- chore: fix lint on interp.ExecHandler (#3200)
+
+- chore: bump golangci version to fix lint issues in ci
+
+- chore: bump fantasy to 0.33.2
+
+- fix: prevent flaky diffview golden tests on Windows CI
+
+Chroma&#39;s regexp2 engine has a hardcoded 250ms match timeout. On Windows
+CI with -race and 110+ parallel subtests, CPU contention causes regex
+matches to exceed this timeout, silently skipping rules and producing
+different token types (NameOther instead of NameFunction). Remove
+t.Parallel() from innermost subtests to reduce contention while keeping
+parent-level parallelism.
+
+- fix(scrolling): stale scrolling acceleration (#3197)
+
+- chore(legal): @chardoncs has signed the CLA
+
+- chore(legal): @truffle-dev has signed the CLA
+
+- chore(legal): @calyptobai has signed the CLA
+
+- chore(legal): @andrinoff has signed the CLA
+
+- feat: log provider warnings from fantasy step results
+
+Surface CallWarning messages from fantasy OnStepFinish via slog so
+malformed tool call input sanitization and other provider warnings
+are visible in logs instead of silently discarded.
+
+💘 Generated with Crush
+
+Assisted-by: Crush:qwen3.7-max
+
+- fix(docs): set proper auto discovery models flag
+
+- chore(legal): @macro-ss has signed the CLA
+
+- chore(legal): @sithglan has signed the CLA
+
+- fix: correct model discovery enrichment for local providers
+
+Local provider enrichers (oMLX, Ollama, LM Studio, LiteLLM) failed to
+populate context window sizes, so sessions showed 0% usage and
+auto-summarization was silently skipped.
+
+Two root causes:
+- Enricher request paths doubled the /v1 prefix because base URLs
+  already include it. Strip /v1 for providers whose metadata endpoints
+  live at the server root (Ollama, LM Studio, LiteLLM); keep it for
+  oMLX, whose status endpoint lives under /v1.
+- LM Studio&#39;s model list was decoded from the wrong JSON key, so no
+  models matched and nothing was enriched.
+
+Tests now exercise the real wire formats and /v1-prefixed base URLs.
+
+- fix(hooks): bridge Claude Code additionalContext onto HookResult.Context
+
+- chore(legal): @xorangekiller has signed the CLA</div>
+</div>
+
+<a href="../project/charmbracelet_crush.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

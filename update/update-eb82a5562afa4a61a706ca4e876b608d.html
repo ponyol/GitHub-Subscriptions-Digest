@@ -1,0 +1,1916 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (73 commits) - osaurus-ai/osaurus - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (73 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/osaurus-ai_osaurus.html">osaurus-ai/osaurus</a> /
+    Updates in main (73 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/osaurus-ai_osaurus.html">osaurus-ai/osaurus</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-27 04:20 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/osaurus-ai/osaurus/commits/main" target="_blank">https://github.com/osaurus-ai/osaurus/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Osaurus значительно улучшил стабильность и надежность, представив режим `--supervise` для автоматического перезапуска сервера, надежную обработку поврежденных файлов блокировки и исправив многочисленные зависания приложения и сбои при параллельных операциях на GPU, связанные с новыми функциями. Ключевое обновление — это появление встроенной генерации и редактирования изображений на устройстве, а также улучшенная система делегирования агентов (`spawn`, `local_delegate`) и усовершенствованные запросы разрешений. Кроме того, релиз включает в себя обширные улучшения качества жизни, повышенную безопасность и прозрачность удаленных агентов, более гибкий фильтр конфиденциальности и полную корейскую локализацию.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Add `osaurus serve --supervise` keep-alive loop to survive app quit (#1712)
+
+The Osaurus server (and the in-app scheduler that only ticks while the app is
+running) lives inside Osaurus.app. `osaurus serve` is a one-shot client: it
+launches the app, requests serving, polls /health once, and exits. If the app
+later quits, crashes, or the machine logs out, nothing brings it back.
+
+Add a long-lived supervise mode. `osaurus serve --supervise` runs a loop that
+probes /health every `--interval` seconds (default 15) and, whenever the server
+is down, relaunches it (the same launch + serve-notification path the one-shot
+mode already uses). It never exits, so it can run under a launchd KeepAlive
+LaunchAgent — launchd keeps the supervisor alive, the supervisor keeps the
+server alive — giving the server quit/crash/logout/reboot resilience.
+
+The loop is a small `ServerSupervisor` value whose collaborators (health check,
+relaunch, sleep, log) are injected, so its behavior is unit-tested without a
+real server or app: it relaunches on every down tick, never relaunches while
+healthy, and stops relaunching once the server recovers. `--port`/`--expose`
+are honored in supervise mode exactly as in one-shot mode.
+
+Deploy as a LaunchAgent (~/Library/LaunchAgents/ai.osaurus.serve.plist) with
+RunAtLoad + KeepAlive running `osaurus serve --supervise`, then
+`launchctl bootstrap gui/$(id -u) &lt;plist&gt;`.
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- Accept an omitted args in desktop-format MCP bundle manifests (#1692)
+
+fix: desktop-format MCP bundle manifest should accept an omitted args
+
+The standard MCPB `EntryPoint` has a custom decoder that defaults a missing
+`args` to `[]`, but the parallel desktop-client format `ServerConfig.MCPConfig`
+relied on the synthesized Codable, which makes `args` a required key.
+`getEntryPoint()` treats the two formats interchangeably, so a valid
+desktop-format manifest whose server command takes no arguments (omits `args`)
+failed to decode with `keyNotFound(&#34;args&#34;)` and `bundle load` rejected it as an
+invalid manifest.
+
+Give `MCPConfig` the same custom decoder as `EntryPoint` so a missing `args`
+defaults to `[]`. Decoding only loosens (accepts more inputs); the with-args
+path is unchanged.
+
+Adds tests for a desktop manifest with and without `args`.
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- Tolerate and reap corrupt coordinator lock files (#1690)
+
+fix: tolerate and reap corrupt coordinator lock files
+
+`loadLock` decoded each lock file with `try decoder.decode(...)` and let a
+DecodingError propagate. One empty/truncated/corrupt lock file (a process
+crashing mid-write, a short write, external tampering) therefore broke
+`list()`, `reapExpired()`, and `coord status` for *every* resource — and
+because `reapExpired()` calls `list()` first, it threw before it could delete
+anything, so the poison file could never be cleaned up automatically.
+
+- `loadLock` now treats an undecodable file as absent (returns nil) instead of
+  throwing, so `list()`/status skip it.
+- `reapExpired()` garbage-collects undecodable lock files in addition to
+  expired ones, so a poison file is removed rather than lingering forever.
+
+Adds a regression test that plants a corrupt lock file alongside a valid one
+and asserts list() returns only the good lock, reapExpired() does not throw,
+and the corrupt file is removed.
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- Fix MCP schema proxy miscasting JSON integers 0 and 1 as booleans (#1687)
+
+fix: MCP schema proxy miscasts JSON integers 0 and 1 as booleans
+
+When the `osaurus mcp` stdio bridge proxies a tool&#39;s `inputSchema`, it parses
+the schema with JSONSerialization (which decodes every JSON number and boolean
+as NSNumber) and converts it with `toMCPValue`. The conversion tried
+`value as? Bool` before inspecting the NSNumber, but in Foundation&#39;s bridging
+both `NSNumber(value: 0) as? Bool` and `NSNumber(value: 1) as? Bool` succeed —
+so any JSON integer 0 or 1 in a tool&#39;s schema (`&#34;minimum&#34;: 0`, `&#34;default&#34;: 1`,
+`&#34;maxItems&#34;: 1`, `&#34;exclusiveMinimum&#34;: 0`, ...) was emitted to the MCP client as
+a JSON boolean, corrupting the advertised schema.
+
+Inspect the NSNumber first and use the CFBoolean type id to tell a real JSON
+boolean apart from the integers 0/1. The charType check at the bottom was
+already correct but unreachable because the `as? Bool`/`as? Int` shortcuts
+consumed the value first.
+
+Adds a regression test covering integers 0/1, a larger integer, a double, and
+real booleans.
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- Don&#39;t treat a bare `tools uninstall` name as a CWD path (avoid deleting the wrong directory) (#1713)
+
+`tools uninstall &lt;target&gt;` resolved `target` as a filesystem path FIRST, via
+`URL(fileURLWithPath: target)`, before trying the tools-root / plugin-id
+lookup. `URL(fileURLWithPath:)` resolves a relative string against the current
+working directory, so `osaurus tools uninstall foo` run from a directory that
+happens to contain a subdirectory named `foo` would match `&lt;cwd&gt;/foo` and
+`removeItem` it — deleting an unrelated local directory instead of the
+installed plugin, with no confirmation. Silent data loss triggered by a normal
+plugin-id argument.
+
+Gate the path interpretation behind an explicit path indicator (leading `/`,
+`./`, `../`, `~`, or any embedded `/`), mirroring ToolsInstall&#39;s existing
+convention, so a bare name can only ever resolve to a folder under the tools
+root or a plugin whose receipt.json id matches. Explicit paths
+(`./plugin`, `/abs/path`, `~/path`) still work.
+
+The resolution logic is extracted into a testable
+`resolveTargetDirectory(_:root:fileManager:)`; adds ToolsUninstallTests
+covering the bare-name-must-not-hit-CWD case, explicit-path mode, `./name`
+path mode, and folder-under-root resolution. `tools uninstall` had no prior
+test coverage.
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- Add Computer Use forensic evidence runner (#1671)
+
+* Add computer use forensic evidence runner
+
+* Strengthen computer use web form evidence
+
+* Clarify computer use evidence dependencies
+
+- Unify sub-agent delegation under one registry + per-agent Sub-agents tab (#1731)
+
+* updated subagent system
+
+* view cleanup
+
+* updated logic
+
+* updated ui/ux
+
+- fixed app hangs (#1730)
+
+fix app hang from blocking local model lookup during greeting load
+
+- hide non-MLX models that local engine can&#39;t load (#1729)
+
+* grey out and block non-mlx models in the catalog and picker
+
+* add tests for non-mlx model format detection
+
+* bias mlx detection toward allow and trust osaurusai provenance
+
+* filter non-mlx local models out of the picker popup
+
+* warm mlx-format verdict off main to avoid catalog and picker hangs
+
+* alert that a model cannot be used when a greyed non-mlx card is tapped
+
+- fixed tools page layout hang (#1724)
+
+* flatten tools list groups into lazy rows to avoid layout hang
+
+* replace per-row spacer with expanding info column to cut layout work
+
+* cap large tool groups behind a show all disclosure
+
+- Fix same-turn capability tool activation (#1725)
+
+Implement same-turn capability schema activation
+
+- Fix LFM2 tool-calling: repin vmlx native &#39;List of tools&#39; format (#1723)
+
+* Repin vmlx-swift: LFM2 native tool format (fix LFM2 tool-calling)
+
+Repins to vmlx main 9e0b60f8288c which restores the native LFM2
+&#39;List of tools: [JSON]&#39; tool template (vmlx #90). Fixes LFM2 models not
+picking up tools (regression vmlx 46973d1, 2026-05-29).
+
+Live-proven on the dev app through the real bridge (lfm2.5-230m-mxfp8):
+auto -&gt; get_weather{Tokyo}; required -&gt; get_weather{Paris}; multiturn -&gt;
+consumes tool result (&#39;sunny ... 22C&#39;).
+
+* Tests: bump vmlx pin SHA to 9e0b60f + update LFM2 tool-format test to native
+
+- ImageGenerationBridgeContractTests / RuntimePolicySourceTests: pin assertion
+  29d05174 -&gt; 9e0b60f (the LFM2-fix vmlx main).
+- lfm2LocalTokenizerUsesStrictRequiredToolFallback: assert native
+  &#39;List of tools: [JSON]&#39; format (the test had encoded the regression by
+  asserting &#39;Available functions:&#39; + !&#39;List of tools:&#39;).
+
+---------
+
+Co-authored-by: Eric &lt;eric@exploit.bot&gt;
+
+- updated chinese translations (#1720)
+
+- fix: use veryShortWeekdaySymbols for schedule weekday display (#1722)
+
+- improved settings ux (#1716)
+
+- fix app hang watchdog stalls across folder, tool listing, permissions, and launch (#1699)
+
+* derive folder hasActiveFolder instead of publishing it separately
+
+* sort listTools with locale-independent compare to avoid main-thread stall
+
+* resolve tool-gate permission checks off the main actor to avoid eventkit xpc hang
+
+* defer launch chat-history open when it would block on an uncached keychain key
+
+- improved plugin discovery for smaller local models (#1685)
+
+* tier the compact enabled-capabilities manifest to one line per plugin
+
+* fix small-window budget test for tiered manifest and trim the compact intro
+
+* fix two tests broken by the new plugin/ load type
+
+- Repin vmlx-swift: fix Mistral3/Pixtral VLM model-load crash (#1686)
+
+* Mistral3/Pixtral VLM: load, chat, tools, vision, reasoning native
+
+Repin vmlx-swift to 41caf0af (osaurus-ai/vmlx-swift #84 + #85 + #86) and add the
+osaurus tokenizer-bridge Mistral case so Mistral 3.x models work natively end to
+end, not just load:
+- #84: flat rope_theta + split processor-config load crash (Sentry EXC_BREAKPOINT).
+- #85: load the model&#39;s own chat_template.json for Mistral/Pixtral VLMs.
+- #86: complete native Mistral template (grounds [AVAILABLE_TOOLS] + [INST]/[IMG]
+  + reasoning) and a tool parser that reads 2503/2506&#39;s JSON-array tool format.
+
+osaurus SwiftTransformersTokenizerLoader.TokenizerBridge: add a Mistral case
+(detected by [INST]+[SYSTEM_PROMPT]+[AVAILABLE_TOOLS] tekken tokens) that applies
+ChatTemplateFallbacks.mistral3CompleteMinimal, mirroring the existing per-family
+selectors (Zaya/LFM2/Step37/Nemotron/Gemma3). Other families untouched.
+
+Live-proven on mlx-community/Mistral-Small-3.1-24B-Instruct-2503-4bit: load,
+plain + multi-turn chat, single-image VL, reasoning (no leaks), and tools
+(call + full round-trip with [TOOL_RESULTS]) all native. qwen3-4b tools
+unaffected.
+
+* Bridge: make Mistral detection a token round-trip, not convertTokenToId != nil
+
+convertTokenToId returns the &lt;unk&gt; id (non-nil) for any absent token on a
+BPE/Unigram tokenizer that declares an in-vocab &lt;unk&gt; (BPETokenizer:
+tokensToIds[t] ?? unknownTokenId), so the previous
+convertTokenToId(&#34;[INST]&#34;)/[SYSTEM_PROMPT]/[AVAILABLE_TOOLS] != nil sentinel
+was true for every tokenizer with an &lt;unk&gt; and mis-applied the native Mistral
+template to non-Mistral packs (e.g. Gemma-4-26B-A4B-JANG_4M-CRACK rendered as
+&#39;You are Mistral Small ... [INST]&#39;). The sibling Laguna/Nemotron/DSV4
+detections avoid this only because they also gate on bosToken/eosToken.
+
+Detect via a round-trip — convertIdToToken(convertTokenToId(t)) == t — which is
+true only when the tekken token genuinely exists (unk-mapped strings decode
+back to &lt;unk&gt;, real tokens to themselves), and additionally require
+[TOOL_CALLS]. Real Mistral-3.x packs carry all four as added special tokens so
+they still route to the native template; Gemma/other packs no longer misfire.
+
+---------
+
+Co-authored-by: Eric &lt;eric@exploit.bot&gt;
+
+- added file diff cards for folder and sandbox edits (#1683)
+
+* add FileDiff model parsing folder-tool edit results into diff lines
+
+* add NativeFileDiffView diff card with composed CodeNSTextView body
+
+* render folder file edits as diff cards in place of the tool-call row
+
+* add preview string for the file diff card badge
+
+* syntax-highlight diff card lines via the shared highlighter
+
+* capture before/after in sandbox_write_file so edits render diff cards
+
+* make diff card header taller, always show code glyph, toggle on header click
+
+* fix diff card toggle by using a transparent header button overlay
+
+* make diff card toggle reliable by flipping state locally and always remeasuring
+
+* fix diff card toggle by matching tool-group layout (drop bottom constraint)
+
+* move diff card copy button to sit right after the change counts
+
+* add temporary file-diff toggle tracing to /tmp/osaurus-filediff.log
+
+* log diff card button mouseDown to isolate frozen-click event delivery
+
+* log hit-tested view for every click to locate frozen-click target
+
+* log full hit-test view chain (fix monitor coords) for frozen clicks
+
+* log diff card + header button window-frames vs click point to find frozen-click cause
+
+* comprehensive diff card click/geometry/teardown tracing in one pass
+
+* fix diff card freeze after scroll by pinning card bottom so the cell keeps height
+
+* fix diff card hit-testing by pinning cell to fill its row
+
+the cell view lagged its row height after async noteHeightOfRows and could
+end up 0pt tall after a collapse, which dropped it out of hit-testing so the
+diff card stopped toggling. pin the cell to track the row via viewDidMoveToSuperview.
+
+* remove temporary diff card debug instrumentation
+
+* fix sandbox edit test mock for diff-capture before/after reads
+
+- fix context budget popover crash on System Prompt drill-down (#1684)
+
+* fix context budget popover crash on system prompt drill-down
+
+The Context Budget popover is a native SwiftUI .popover (NSPopover). Expanding
+the &#34;System Prompt&#34; group animated its content height (withAnimation + a
+.move/.opacity transition), forcing AppKit to animate the popover window resize,
+which it mishandles and crashes (EXC_BAD_ACCESS at 0x0).
+
+Toggle the disclosure without animation, and host the content in a height-capped
+ScrollView so a long drill-down scrolls inside a stably-sized popover instead of
+driving an animated/oversized AppKit resize.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* localization stuff
+
+---------
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- Native image generation/editing + agent delegation (spawn / local_delegate) (#1682)
+
+* bump vmlx-swift to vendored mflux image engine and add vMLXFlux product
+
+* add image generation engine bridge through exclusive metal gate lane
+
+* add openai compatible image generation http endpoints with sse progress
+
+* surface on-device image models in the model picker catalog
+
+* route chat sends for image models through image generation service
+
+* re-pin vmlx-swift to qwen vae scalar overload fix
+
+* loop-bind image sse writer to satisfy sendable capture
+
+* re-pin vmlx-swift to merged main
+
+* add image model download service staging mflux bundles
+
+* add images tab to models window for downloading image bundles
+
+* Pin image bridge to proven vMLXFlux
+
+* Pin image bridge to extended vMLX proof
+
+* Update native image integration proof status
+
+* Document native image API live proof
+
+* Document image cancel reload proof
+
+* Wire native image composer controls
+
+* extract image tab localization strings
+
+* parallelize image bundle downloads with live speed and eta
+
+* route image repos through the global import button to the image store
+
+* rebuild images tab as a card grid and drop the redundant download field
+
+* render image cards through modelrowview for parity with the other tabs
+
+* extract image card and import localization strings
+
+* add image model detail modal with delete and re-download
+
+* Document image agent job handoff
+
+* Document local delegate agent requirements
+
+* Add agent delegation settings scaffolding
+
+* Add native image generation agent tool
+
+* Record native image agent proof status
+
+* Add native image edit agent tool
+
+* Add chat residency handoff for native image jobs
+
+* Add native image job progress context
+
+* Record native image progress context proof
+
+* Add native image agent e2e proof matrix
+
+* Bridge native image results into chat artifacts
+
+* Gate image delegation tools behind settings
+
+* Record delegation settings proof status
+
+* Clamp Qwen image delegation steps
+
+* rework image composer controls into themed chips
+
+* fix image cell top padding and add hover download button
+
+* hide insights and read-aloud actions for image results
+
+* copy actual image for image-only results
+
+* show toast on image copy and save with reveal in finder
+
+* center title-only toasts and reword image copy toast
+
+* Image-job + local-delegate wiring: strict resolver, model-resolution-before-permission
+
+- NativeImageJobModelResolver: reject stale/incomplete/wrong-kind image models
+  before touching chat-model residency.
+- NativeImageTools: resolve image_generate/image_edit model before the permission
+  prompt and before reading edit source files.
+- LocalTextDelegateTool + AgentDelegationApprovalArguments: resolved-model
+  permission payloads; resolve local_delegate model before the ask.
+- ToolRegistry: keep local_delegate gated alongside image tools.
+- Tests for strict image resolver + local-delegate gating; status docs updated.
+
+Checkpoint of the source-wired (E2E-proof-pending) state before syncing main.
+
+* surface image delegation tools in capability manifest
+
+* stop models re-sharing generated images and quiet tool resolve log
+
+* Re-add vMLXFlux product dep dropped in the main merge (OsaurusCore needs it for ImageGenerationService)
+
+* docs: record green build + correct verified built-state (text subagent + settings ARE built; gaps are local text handoff, RAM preflight, e2e)
+
+* strip leaked tool-call json from assistant display content
+
+* add friendly labels for image generate and edit tool chips
+
+* Wire local-orchestrator → text subagent handoff (unload/reload)
+
+Replaces the local-to-local rejection in LocalTextDelegateTool with a single-
+residency handoff when the new `localTextDelegationEnabled` setting is on:
+- ChatResidencyHandoff (new, shared): wait-for-idle → unload resident chat models
+  → reload. Extracts the proven core NativeImageJobCoordinator uses for image jobs.
+- LocalTextDelegateTool: unload orchestrator → run AgentToolLoop on delegate →
+  reload orchestrator. Restore runs on every exit (success + error), so the
+  orchestrator is never left unloaded (covers ModelRuntime&#39;s load-refusal path).
+- AgentDelegationConfiguration: `localTextDelegationEnabled` (+ derived
+  localOrchestratorTextHandoffActive / textDelegationToolAvailable) through
+  init/normalized/CodingKeys/decoder.
+- Tool availability + settings: `local_delegate` now exposed for a local
+  orchestrator too; new &#34;Local Orchestrator Handoff&#34; toggle in the panel.
+
+RAM safety = single-residency (no double-load) + ModelRuntime&#39;s existing model-fit
+refusal on load + restore-on-failure. Proactive pre-unload preflight = follow-up.
+OsaurusCore compiles clean.
+
+* left-align agent delegation dropdowns with their labels
+
+* docs: portable subagent machine (call_agent) design — generalize local_delegate over Agent personas
+
+* docs: record change-of-plans (call_agent generalization) across all subagent docs + extensive operational lifecycle/cache/tokenizer/image/progress nuances
+
+* docs: fix stray quote in updated-direction banner
+
+* docs: name the primitive spawn(name,input); per-agent spawnable flag (default off); process-kind registry + privacy-loop kind; many process-spawning kinds
+
+* Build spawn(agent,input) framework: runner + tool + per-agent gate + registration
+
+- AgentSubagentRunner: shared bounded text-subagent loop (extracted from the proven
+  local_delegate path; AgentToolLoop on a chosen model, text-only, returns a digest).
+- SpawnTool (`spawn`): resolve a spawnable Agent persona by name → gate (global +
+  per-agent) → resolve model → ChatResidencyHandoff when swapping local models →
+  AgentSubagentRunner → compact digest. Re-entrancy guarded; restore on every exit.
+- AgentDelegationConfiguration.spawnableAgentNames (per-agent opt-in, default empty)
+  + isAgentSpawnable / anyAgentSpawnable; threaded through Codable.
+- ToolRegistry: register SpawnTool; expose `spawn` only when an agent is spawnable.
+
+Clean spec sheet (SUBAGENT_TEAM_SPEC.md) of stale objectives. OsaurusCore compiles
+clean (release). Settings UI for marking agents spawnable + app build next.
+
+* spawn: gate residency handoff on actual GPU residency, not orchestrator name
+
+The first live e2e of `spawn` (POST /agents/default/run, orchestrator
+qwen3-4b spawning a different-model agent) SIGABRT&#39;d: the subagent&#39;s model
+load (GPU eval under the exclusive enterModelLoad gate) raced the resident
+orchestrator&#39;s KV-cache disk store (mlx::core::save_safetensors,
+MLXLMCommon/KVCache.swift) on MLX&#39;s shared Metal command stream — &#34;A command
+encoder is already encoding to this command buffer.&#34;
+
+Root cause: SpawnTool decided needsHandoff from parentChatModel() name
+resolution, which returns nil on the /agents/{id}/run path (no active-agent
+default model). needsHandoff was false, so the subagent loaded concurrently
+with the still-resident orchestrator instead of going through the
+single-residency handoff.
+
+Gate on actual residency instead: query ModelRuntime.cachedModelSummaries();
+if the subagent model is local and ANY other chat model is resident, run
+ChatResidencyHandoff.unloadResidentChatModels first. unload() ends with
+Stream.gpu.synchronize() + Memory.clearCache(), a full GPU barrier that drains
+the in-flight cache store before the subagent loads — restoring single
+residency. Remove the now-unused parentChatModel() helper.
+
+E2E re-run on the rebuilt app: unload orchestrator -&gt; load+run Sparky
+(qwen2.5-3b) -&gt; unload -&gt; reload orchestrator -&gt; digest relayed; only qwen3-4b
+resident at end; no crash.
+
+Doc: record the e2e + the latent engine-side cache-store GPU-gate race (the
+save_safetensors eval is not serialized against model load; tracked as the
+model-churn disk-store edge).
+
+* spawn: record matrix run 2 (inline / deny / re-entrancy / coherence all pass)
+
+Headless /agents/default/run on the rebuilt app:
+- same-model inline path (needsHandoff=false): runs on the resident model, no
+  extra load, no crash.
+- permission deny gate: spawn returns the .rejected envelope; no subagent load.
+- re-entrancy guard: triple-guarded by construction (tools:nil, executeTool
+  rejects, LocalTextDelegateContext.isActive early-return).
+- coherence across handoff: orchestrator recalls a pre-spawn fact after the
+  unload/reload; coherent, no crash.
+
+Also documents a SEPARATE, pre-existing crash surfaced (not spawn): the
+capabilities_discover tool&#39;s Model2Vec embedding pass SIGSEGVs on a freed Metal
+pipeline state (concurrent-GPU resource race, same family as the model-churn
+disk-store edge). Flagged for follow-up; orthogonal to the spawn feature.
+
+* spawn: image-model scan finds ~/models/image + RAM-safety preflight
+
+GAP 1: ImageGenerationService.imageModelsRoot() returns the first populated
+candidate among &lt;modelsDir&gt;/image, ~/models/image, legacy .mlxstudio — so the
+image-model picker finds manually-placed bundles without an env var/bookmark.
+Scan + load stay single-root and consistent.
+
+GAP 2: refuse-before-evict RAM-safety preflight. New ramSafetyPreflightEnabled
+config field (default on) + &#39;Memory Safety&#39; settings toggle.
+ChatResidencyHandoff.memoryPreflight checks reclaimable RAM + resident-chat
+bytes vs spawn-model bytes x1.3 + 3GB headroom and throws .insufficientMemory
+BEFORE any unload. Wired into NativeImageJobCoordinator generate + edit
+(model resolved before unload). Text/spawn path preflight is the next increment.
+
+Build green. Docs updated with the full gap audit + this increment.
+
+* docs: record image-job live-trigger blocker (tool_choice not forcing image_generate)
+
+* spawn: RAM-safety preflight on the text/spawn handoff too
+
+Adds ChatResidencyHandoff.estimatedChatModelBytes(named:) (catalog size +
+directory-size fallback) and wires memoryPreflight into LocalTextDelegateTool
+and SpawnTool before unloadResidentChatModels — refuse-before-evict on the
+text/spawn handoff, matching the image path. Build green.
+
+GAP3 reassessed: imageJobLoadPolicy.unloadImageAfterAgentJob is correct
+(keep-chat + unload-image via the two predicates), not a dead branch.
+
+* docs: root-cause the image-job trigger (composeChatContext adds image tools as prompt hint, not callable schema)
+
+* spawn: inject active AgentDelegation tool schemas into agent-run surface
+
+Root fix for the image-job trigger: composeChatContext only surfaced the
+built-in image tools as a prompt-hint capability, so agent-run/HTTP
+orchestrators never got image_generate/image_edit/local_delegate/spawn as
+callable schemas in their &lt;tools&gt; block. enrichWithAgentContext now appends
+the active delegation tool specs (specs(forTools:) applies the same active
+gating; name-deduped against composeChatContext&#39;s surface). Agent-run-only
+(chat surface unaffected).
+
+Live-proven: default agent now calls image_generate -&gt; NativeImageJobCoordinator
+handoff -&gt; FLUX generates -&gt; PNG saved (flux1-schnell, 512x512). Exercises the
+GAP2 RAM preflight (passes with ample RAM) + GAP1 image scan (flux model found).
+
+* docs: §5.A image-job E2E live-proven (image_generate -&gt; FLUX -&gt; PNG)
+
+* docs: add Spawn/Image-Gen product requirements (spawn-as-tool, RAM-safety auto-unload, 4 surfaces, cohesion)
+
+* docs: matrix A image handoff verified (unload-&gt;image-&gt;reload); note concurrent-request-during-job queue gap
+
+* docs: rewrite status doc to current state (remove stale NOT-DONE/NONE-passed/blocker sections so agents aren&#39;t confused)
+
+* spawn: surface orchestrator-restore failures (GAP 5) instead of silent try?
+
+* docs: drop GAP 5 from known-gaps (fixed this increment)
+
+* docs: image_edit live-proven (qwen-image-edit, real 1024 PNG); note MCP-direct image-tool load gap
+
+* Add manual image gen/edit panel + spawn usage info
+
+ImageGenerationPanelView: a direct manual image generation/editing surface
+driven by ImageGenerationService — prompt, negative prompt, size, seed, and
+(for edit bundles) a source-image picker → live progress (loadingModel → step
+bar) → result card with Reveal / Save-As. Manual panels keep their own loading
+behavior and do not run the chat residency handoff. Launched from
+ImageModelDetailView&#39;s footer for ready imageGen/imageEdit bundles.
+
+AgentDelegationSettingsSection: add a &#39;How It Works&#39; usage/info subsection
+explaining the spawn flow (local vs cloud orchestrator handoff) and the tools
+exposed when delegation is enabled. RAM-safety and spawn settings share the one
+AgentDelegationConfiguration, so they stay synced by construction.
+
+Docs: mark the four UI surfaces&#39; status in the requirements + status docs.
+
+* Record fresh-binary regression proof for image panel engine path
+
+* Promote spawn/delegation to its own sidebar page
+
+The Agent Delegation settings (incl. the spawn How-It-Works info) were buried
+deep in the Settings tab&#39;s scroll, so they were effectively undiscoverable.
+Add a dedicated Spawn sidebar page (SpawnSettingsView, ManagementTab .spawn,
+wand.and.stars icon) sitting next to Computer Use, mirroring that page&#39;s chrome.
+
+It wraps the existing AgentDelegationSettingsSection and binds the same
+AgentDelegationConfigurationStore, re-syncing on .agentDelegationConfigurationChanged
+— so the page and the in-Settings copy stay two-way synced (one backing store).
+
+* Record live spawn/image matrix results (A,B,C,D,E,F proven)
+
+* Matrix G (cancel/restore) + H (6-turn coherence) PASS — behavioral matrix complete
+
+* Gap triage (concurrent-chat + MCP-direct = not bugs) + per-agent delegation design
+
+* Add per-agent Spawn &amp; Delegation feature toggle
+
+Make spawn/delegation a per-agent capability (like Computer Use / Code
+Execution) instead of only a global section. Each agent now has an explicit
+opt-in; the global AgentDelegationConfiguration still supplies the defaults
+(models, load policy, RAM safety, permissions, budgets).
+
+- AgentSettings.spawnDelegationEnabled (+ AgentCapabilities), default off,
+  Codable with back-compat decodeIfPresent.
+- AgentConfigSnapshot.spawnDelegationEnabled + AgentManager.effectiveCapabilities.
+- SystemPromptComposer.resolveTools: authoritative per-agent strip of spawn /
+  local_delegate / image_generate / image_edit when the flag is off (ANDs with
+  the global config gates), mirroring the computer_use gate.
+- HTTPHandler.enrichWithAgentContext: gate the agent-run delegation-schema
+  injection on the per-agent flag too.
+- ToolRegistry.agentDelegationAllToolNames helper.
+- AgentsView: &#39;Spawn &amp; Delegation&#39; Features toggle next to Code Execution
+  (custom agents only), load + debouncedSave wiring.
+
+Live-proven: agent with flag off -&gt; 0 image_generate tool-calls, no image;
+flag on -&gt; tool-call + real PNG.
+
+* Doc: per-agent Spawn &amp; Delegation toggle done + live-proven
+
+* Doc: UI-automation harness + verified spawn surfaces (tab, page, text)
+
+* Doc: Codex computer-use verified per-agent toggle + image panel (all 4 UI surfaces render-verified)
+
+* Doc: full spawn UX spec (main-chat spawn + first-use perm w/ model picker + inline render)
+
+* Surface spawn/image tools to the main/default chat under the global delegation gate
+
+The native chat (default agent) was hard-restricted to an 8-tool baseline, so the
+main chat could never call image_generate/spawn. Exempt the default agent from the
+per-agent spawn strip and add the delegation tools to its allow-list when the global
+Agent Delegation switch is on. Live: the main chat now invokes image_generate
+(follow-up: chat-triggered job cancels mid-generation — separate fix).
+
+* Doc: main-chat spawn WORKING (Codex live) + remaining (intermittent cancel + first-use perm)
+
+* Harden chat-triggered image jobs against incidental cancellation
+
+A native chat triggers image_generate/image_edit mid-turn; the residency handoff
+(unloading the chat model) can incidentally cancel that turn task. The image
+tool&#39;s stream consumer was structurally a child of the turn task, so its
+cancellation cascaded via the stream onTermination chain down into the engine
+drain — aborting generation at ~step0 and returning &#39;finished without a result&#39;
+(the chat model then refused). Consume the coordinator stream in a detached task
+so the engine drains to completion regardless of incidental parent cancellation;
+explicit user cancel still works via the jobID soft-cancel path.
+
+* First-use spawn permission prompt with model picker (image_generate)
+
+On first image_generate use (no default image model chosen yet), the standard
+Yes/No/Always tool-permission prompt now also shows a spawn-model picker, so the
+user chooses the image model the same time they grant permission. The choice +
+permission decision persist to AgentDelegationConfiguration (Settings -&gt; Spawn
+reflects it; Always Allow stops further prompts). ToolPermissionView gains
+optional model-picker params; ToolPermissionPromptService.requestSpawnApproval +
+a shared presentPanel helper drive it without touching the existing requestApproval.
+
+* Add authoritative image-generation system-prompt directive + coherence/default-off notes
+
+Schema-gated imageGenerationGuidance (renders only when image_generate actually
+resolved into the agent&#39;s schema, so KV-cache stable) telling the model it CAN
+and SHOULD call image_generate when asked and must not claim it is text-only —
+counters a persona-led refusal. Docs: default-off + invisible-at-baseline
+confirmed; native-chat coherence across the unload/reload handoff verified
+(memory + no looping + no tag leaks).
+
+* Fix spawn/image-gen reliability: config-decode fragility, result bloat, tool/ prefix
+
+Stress-testing the main-chat image flow (objective chat-history transcript mining +
+controlled live matrix) surfaced four real defects; this lands three fixes (the
+fourth was already resolved upstream).
+
+BUG D (root cause of the intermittency): AgentDelegationConfiguration.init(from:)
+decoded permissionDefaults / load / sharing-policy enums with decodeIfPresent, which
+THROWS on a single invalid raw value, so the whole config init throws and silently
+falls back to all-defaults (agentDelegationEnabled=false). image_generate then never
+surfaces and the model refuses or degenerates. One bad/renamed/hand-edited field
+invisibly disabled the entire feature. Now decode every enum field leniently
+(invalid or absent maps to the safe default), so a single bad value can never
+discard the config. Config-load errors 14+ to 0; tool now surfaces every session.
+
+BUG C (post-handoff degeneration): the native image tool result fed back to the
+model was ~9KB including a 27-entry per-step progress telemetry array the model
+never needs; on a 4-bit chat model this context noise helped trigger a channel-marker
+degeneration loop after the handoff. Drop the progress array from
+NativeImageJobCoordinator.toolPayload (the render bridge reads only job_id/images;
+the live UI consumes progress via NotificationCenter). Result 9028 to 762 bytes;
+channel-loops in the re-run: 0.
+
+BUG A (default-agent refusals): the capabilities manifest lists deferred tools as
+tool/&lt;name&gt;; some models copy that prefix and call tool/image_generate, which yields
+tool_not_found, and the default agent cannot self-heal (capabilities_load is gated
+off) so it gives up. ToolRegistry.execute now strips a tool/ prefix and re-resolves
+when the bare name is registered, mirroring CapabilityTools.
+
+Validated live on the default main chat: tool fires every session, 0 refusals,
+0 loops, 0 tag leaks, memory preserved across the unload/reload handoff, and prompt
+pass-through to the spawned model clean.
+
+* Align agent-run delegation surface with native chat for the default agent
+
+HTTPHandler.enrichWithAgentContext gated delegation-spec injection purely on the
+per-agent spawnDelegationEnabled (always false for the default agent), while the
+native-chat resolveTools surfaces the delegation tools to the default agent on the
+GLOBAL agentDelegationEnabled flag. So /agents/default/run silently lacked
+image_generate/image_edit/local_delegate/spawn even with delegation globally
+enabled, a real HTTP-API vs chat-UI behaviour split. Mirror native chat: default
+agent uses the global flag, custom agents use their per-agent flag.
+
+Also documents the all-paths coherence sweep: image_generate, image_edit,
+local_delegate and spawn all produce coherent output (no looping, no incoherence,
+no tag/channel leaks) with context preserved across every model load/unload
+handoff, verified objectively from the chat-history transcript.
+
+Native-chat non-regression proven (the image_edit/text-spawn/spawn live runs ran
+on this binary). Full HTTP E2E of the default-agent injection is gated by a
+separate agent-run context-window overflow on the default agent (follow-up).
+
+* Document toggle-combination matrix: all delegation gates isolate cleanly
+
+Deterministic sweep of the default-agent delegation-tool surfacing across five
+toggle configs (all-on, image-off, text-off, spawn-off, global-off). Each gate
+removes exactly its own tool family; global-off is the master kill; no toggle
+clashes with another. Config decoded cleanly every restart (BUG D fix holds).
+
+* Document pre-existing default-agent agent-run context overflow as a known limitation
+
+Reproduces on the clean binary independent of this branch&#39;s changes; native chat
+is unaffected. Root cause not yet verified (likely heavyweight agent-run
+enrichment vs the memory-safety window cap). Tracked as a separate follow-up
+rather than speculatively fixed here.
+
+* Fix default-agent agent-run context overflow: resolve to loaded model
+
+/agents/{id}/run with model=default and no pinned default model left the literal
+string &#34;default&#34; as the model, which resolveContextWindow could not map to a
+ModelInfo, collapsing the window to the 4096 chat-config fallback. The default
+agent&#39;s own system prompt + tools then tripped .overBudget on a one-word message.
+Fall back to the currently-loaded model (as /health reports) when effectiveModel
+is nil. Verified: window 4096-&gt;128000, overflow gone, coherent response. Unblocks
+HTTP E2E of the default-agent delegation injection.
+
+* Document HTTP agent-run E2E: delegation tools work on both surfaces
+
+After BUG E + BUG F, /agents/default/run fires image_generate (FLUX ran + saved),
+local_delegate (haiku) and spawn (Sparky) end-to-end and coherently. The
+delegation feature is now proven on both the native chat and HTTP agent-run
+surfaces; six bugs fixed across the campaign, all root-caused.
+
+* Document deep context-carry stress: SWA, handoff resume coherence, image carry-over
+
+Deterministic multi-turn HTTP stress: text context and user-provided images both
+carry across image_generate + local_delegate handoffs with exact early-fact
+recall; context grown past gemma&#39;s sliding_window (1024) stays coherent with no
+looping/incoherence and accurate deep-context recall after a handoff.
+
+* Confirm deep context-carry to ~8.7k tokens (8.5x SWA window): coherent + exact recall
+
+* Document BUG G: concurrent-GPU crash on image handoff after chat turn (engine-level)
+
+Verified via two crash reports (SIGSEGV in command-encoder coalescing; SIGABRT
+&#39;addCompletedHandler after commit&#39;). Root cause: BatchEngine&#39;s async MLX GPU tail
+can still be finalizing command buffers on the shared Metal device after it
+releases the MetalGate, racing vMLXFlux&#39;s encoders. Timing-dependent (qwen3-8b
+trips it; gemma&#39;s timing did not across extensive runs). A foreign-thread
+Stream.gpu.synchronize() after acquiring the image gate was tried and reverted:
+it still crashed and prematurely commits the BatchEngine buffer, causing the
+addCompletedHandler assertion. Correct fix is engine-level (vmlx BatchEngine must
+finalize its GPU tail before releasing the gate), same class as #60.
+
+* BUG G fixed at engine level + proven: drain GPU before BatchEngine stream finish
+
+vmlx BatchEngine.finishSlot finished the generation stream (releasing osaurus&#39;
+GPU gate) while the end-of-turn cache-store eval was still async-in-flight,
+racing the next exclusive producer on the shared Metal command buffer. Fixed in
+vmlx (commit 107c467b) by draining on the engine&#39;s own thread before finishing.
+Proven: the qwen3-8b-&gt;image handoff that crashed iter 1 now survives 6/6, 0 new
+crashes. Likely also fixes #60 (same race class). Landing needs canonical-vmlx
+carry + repin (local fork is DO_NOT_PUSH).
+
+* BUG G fix proven for mainstream (gemma/qwen3/lfm2); minimax residual tracked (#77)
+
+Multi-arch crash-repro: qwen3-8b + lfm2 survive 3/3 on the fixed binary (qwen was
+iter-1 crash pre-fix). minimax-m2.7 still races on its linear-attention decode
+path (same class, copy_gpu_inplace) — not OOM, not the disk store (already
+synchronized). Honest residual, tracked #77, not claimed fixed.
+
+* Document minimax (#77) as a multi-layer GPU-concurrency cascade (deep #60 work)
+
+Root-caused via 3 crash reports: layer 1 decode/cache-store tail (FIXED+PROVEN,
+finishSlot drain, mainstream 6/6+3/3); layer 2 cache-store-vs-FLUX (barrier closed
+it but revealed layer 3, reverted to keep only proven fixes); layer 3 model
+unload buffer-dealloc/fence racing FLUX load (unload not MetalGate-serialized;
+async dealloc/fences outlive synchronize). Layers 2-3 are the #60 device-
+serialization architecture (deadlock-prone to patch blindly: unload runs inside
+the image gate). Mainstream/default (gemma) + qwen3/lfm2 solid+proven; minimax is
+edge/slow/in-dev (#58).
+
+* WIP: proper GPU serialization for chat-&gt;image handoff (3 fixes); verifying model matrix
+
+vMLXFlux is a 2nd MLX graph racing the LLM&#39;s async GPU tails at the handoff
+(engine is fine LLM-only). Fixes: (1) BatchEngine finishSlot drain [proven],
+(2) image-gen barrier via MLXCacheIOLock+clearCache, (3) unload teardown
+double-synchronize. Verifying gemma/qwen3/lfm2/minimax-m2.7/laguna through
+load-&gt;chat-&gt;image-handoff-&gt;recall.
+
+* Proper GPU serialization: secure + smooth chat&lt;-&gt;image handoff across model set
+
+3 fixes: (1) BatchEngine finishSlot drain [vmlx], (2) image-gen MLXCacheIOLock
+barrier + clearCache, (3) ModelRuntime.unload teardown double-synchronize.
+Model matrix (gemma/qwen3/lfm2/minimax-m2.7/laguna) load-&gt;chat-&gt;image-handoff-&gt;
+recall: 0 new crash reports (minimax-m2.7 no longer crashes), gemma+qwen recall
+exact, laguna+minimax coherent (matrix no-replies were timeouts, proven via
+no-handoff isolation tests). lfm2 empty output is a pre-existing model/template
+issue (reproduces with no image), tracked separately.
+
+* docs: clean authoritative GPU-handoff FINAL STATE summary at top
+
+Supersedes the scattered BUG-G/minimax/serialization log sections: handoff is
+secure+smooth across 5 models; 3-part fix (BatchEngine drain [vmlx, needs canonical
+landing] + image-gen barrier + unload drain [osaurus, committed]); lfm2 empty output
+is a separate pre-existing model bug (#78).
+
+* docs: reconciliation-with-main status + live things-to-address list
+
+Merged origin/main (753a5de4): 43 commits, 5 conflicts resolved keeping both,
+vmlx pin -&gt; 4453909e (still lacks finishSlot drain, re-applied), build SUCCEEDED.
+List: E2E re-test in progress; only non-durable item is the vmlx drain needing
+canonical landing; lfm2 empty output (#78) separate.
+
+* docs: merged-branch E2E results — secure+smooth+delegation all hold
+
+gemma/qwen3/minimax-m2.7 survive the handoff on the merged tree (0 new crashes);
+coherent chat+context; BUG E/F fixes survived (local_delegate coherent with a
+warmed model). Reconciled branch builds clean and is secure+smooth.
+
+* docs: exhaustive 18-model E2E results + empty-output root-cause/fix
+
+0 crashes across all 18 models (GPU serialization holds at fleet scale). lfm2 +
+vibethinker empty-output root-caused to missing inline chat_template (template
+ships only as standalone chat_template.jinja) and fixed in vmlx JangLoader;
+both now coherent + lfm2 tool-calls. vibethinker tool-calling stays policy-gated
+(known &lt;assemble&gt; quirk). zaya jangtq4 = broken bundle quant (jangtq_k works);
+dsv4 = intentional policy block.
+
+* docs: lfm2 + vibethinker empty-output FIXED (chat_template.jinja fallback, vmlx#82)
+
+Both confirmed coherent live after the fix; residual short-budget empty was a
+test artifact (reasoning models truncated inside &lt;think&gt;). lfm2 tool-calls;
+vibethinker tools stay policy-gated.
+
+* docs: coverage sweep (35+ model/quant combos) — all in-scope coherent, 0 crashes
+
+3 non-passes all explained (MM3 incomplete port; kanana-2601 raw fused-experts MoE
+unsupported w/ working jang_4m sibling; zaya1-vl-jangtq_k intentional policy block
+w/ working jangtq4 sibling). Confirms the chat_template.jinja fix has no gaps.
+
+* docs: delegation refusal triage — classify every refusal (settings/code/tool-pass/model/harness)
+
+R1 (raw endpoint, no tools) = harness error, PROVEN. R2 (image_edit no source path)
+= reconstructed-history artifact, PENDING continuous-run proof. R3 (display_note may
+over-steer chaining) = UNVERIFIED risk. Open: cross-model image/edit/spawn matrix.
+
+* docs: triage R4 (gemma channel leak on chained gen+edit, CODE) + R5 (qwen3 image refusal = MODEL, proven by elimination)
+
+R5: qwen3-8b hallucinates &#39;image model not installed&#39; (phrase absent from code),
+never calls the tool (3s, 0 PNG), while gemma generates with same config and qwen3
+spawn works + directive is surfaced model-agnostically. Classified MODEL, not
+settings/code/tool-pass. Spread test across 6 drivers running to quantify.
+
+* docs: image_generate spread (6/8 drivers generate; only small qwen refuse) + R6 text-boundary seam
+
+Proves wiring sound: gemma 12b/26b/e4b, qwen3.6-27b, minimax, laguna all generate;
+only qwen3-8b + qwen2.5-3b refuse (MODEL). R6: mid-word seam joining pre/post tool-call
+text (minimax/laguna/qwen3.6-27b) = CODE, shares root with R4 channel leak.
+
+* Repin vmlx-swift to 6b77b1ee (merged #82: GPU-drain + chat_template.jinja)
+
+Updates the requirement, all three Package.resolved lock files, and the
+RuntimePolicySourceTests hardened-revision guardrail to the canonical merged SHA.
+Builds clean (Release) against the real canonical commit; no longer depends on a
+local DerivedData edit.
+
+* docs: confirm tool-passing mechanism (AgentToolLoop) + scope what&#39;s NOT verified
+
+Read AgentToolLoop end-to-end: tool result envelope (incl image path) is appended to
+history and fed to the next model step — the pass-through that makes edit-chaining work.
+Correct qwen2.5-3b: its message is the loop emptyTurnFallback (empty turn), distinct from
+qwen3-8b&#39;s hallucinated refusal. Explicitly list NOT-verified: R4/R6 root (modelStep
+streaming), local_delegate, multi-turn DB-persisted image path.
+
+* docs: production-readiness assessment (living) — chained/repeated image path under investigation
+
+Single-op image/spawn/edit/delegate + GPU-safety proven; chained gen+edit failing
+under stress (cancellation/empty, 0 PNGs) = #1 blocker, isolating. R4 non-issue
+(0/3 repro). Settings audit: maxElapsedSeconds/maxToolCalls already user-facing.
+
+* Fix image→model-load concurrent-GPU crash: drain GPU before releasing image gate
+
+Stress testing surfaced a SIGABRT (MTLReleaseAssertionFailure in
+IOGPUMetalCommandBuffer setCurrentCommandEncoder) on the image_edit→model-reload
+handoff: ImageGenerationService released the exclusive image MetalGate while
+vMLXFlux&#39;s async Metal tail (VAE decode/teardown) was still in flight, so the next
+enterModelLoad raced the command buffer. Reverse direction of the BatchEngine drain
+(vmlx#82, chat→image); this closes image→model-load. Add the symmetric
+MLXCacheIOLock/Stream.gpu.synchronize drain before exitImageGeneration (all paths).
+
+* docs: image→model-load drain fix STRESS-PROVEN (6/6 handoffs, 0 crashes)
+
+Post-fix 6 back-to-back image→model-reload handoffs: 6/6 survived, 0 crashes, all PNGs,
+all coherent (pre-fix: reliable SIGABRT). Shared image-job wrapper covers gen + edit.
+
+* docs: #89 crash FIXED+PROVEN on edit path too; image path de-risked
+
+Direct qwen-image-edit→model-load (original crash scenario) survives. Matrix updated:
+repeated-load + image_edit now Ready; chained-one-turn yellow (model tool-selection #88).
+Direct /images/edits API is a reliable model-independent edit path.
+
+* docs: cache-window investigation for chained image loop (#88)
+
+Image tool result (with path) IS appended to messages + persists; suspect is
+composeIterationMessages trimming it against a too-small resolveContextWindow fallback.
+Codex engaged for second opinion.
+
+* docs: probe REFUTES prompt-compaction-drop (imgRes survives 1-&gt;1); failure is model tool-selection/truncation in minimal case. KV-cap angle still open
+
+* Fix chained image gen→edit: stop steering the model to halt after generate
+
+Root cause (instrumented probe + Codex second opinion, converged): NOT the cache window.
+The image_generate tool-result (with path) survives compaction; the model had it but
+the display_note (&#39;just briefly confirm&#39;) + imageGenerationGuidance (&#39;after creation just
+briefly confirm&#39;) steered it to STOP, and AgentToolLoop exits on first final text — so it
+never chained image_edit. Make both steers conditional: continue with image_edit (using
+the saved images[].path) when the user asked for a follow-up edit, else confirm. Revert
+the temp cache-window probe.
+
+* docs: chained-image RESOLVED — steering prompt (not cache window), fixed conditionally
+
+* docs: HONEST steer-fix validation — correct fix but one-turn chaining still model-limited
+
+gemma-12b + qwen3.6-27b both fail to emit the 2nd tool call (narrate/plan/stop). Steer fix
+is right (probe+Codex) but insufficient alone; reliable edit = direct /images/edits API or
+separate-turn. Cache-window refuted.
+
+* Fix chained image gen→edit: bias the model to image_edit after image_generate
+
+The real cause (Codex 2nd opinion, code-verified; NOT cache window, NOT parser): after an
+image_generate tool result, AgentTaskState.nextStepBias() had no case for native-image
+results, so the loop staged no continuation nudge and the model defaulted to narrating
+&#39;I will now edit...&#39; as a final answer — AgentToolLoop exits on first final text, so
+image_edit never fired. Add a nativeImageGeneration(paths:) result class + a nextStepBias
+continuation notice (guarded to image_generate only, not image_edit) steering the model to
+call image_edit with source_paths set to the saved path. Works via the existing transient
+-notice path; no forced tool_choice. Restored the 34 pre-existing AgentTaskState tests +
+added 2 (Codex had inadvertently replaced the file).
+
+* docs: corrected root cause — nextStepBias missing native-image case (not model limit), fixed
+
+* Chained image gen→edit: inject the edit-continuation nudge as a USER turn, not tool-role
+
+The nextStepBias fix staged the right nudge, but appendingTransientNotices injected it as a
+tool-role message (to keep the KV prefix stable). gemma-4-12b treats a 2nd tool-role message
+after a tool result as low-salience environment feedback and ignores it → stops instead of
+calling image_edit. Narrowly promote ONLY the image_generate→edit continuation notice to a
+transient user turn (gated on: trailing result is a native image_generate job AND the notice
+is the image_edit/source_paths continuation). All other post-tool notices stay tool-role;
+KV-prefix behavior for non-image flows unchanged; the user turn is transient (not persisted).
+
+* docs: chained one-turn gen→edit FIXED+PROVEN (image_edit fires, edited PNG produced)
+
+* docs: production-readiness — chained gen→edit now FIXED+PROVEN (3 re-injection fixes)
+
+* Image API: make model optional + fall back to configured per-tool default
+
+The two image tools (image_generate, image_edit) are already separate with their own
+settable default model (defaultImageGenerationModelId / defaultImageEditModelId, Settings
+→ Agent Delegation), used by the agent tools. This extends the SAME default-resolution to
+the direct HTTP API: /images/generations + /images/edits now accept an omitted/empty model
+and fall back to the configured default (with a clear error if neither is set), matching
+the agent tools so &#39;set a default once in Settings&#39; works on every surface.
+
+* Harden chained gen→edit nudge: explicitly forbid re-generate, cover add/recolor/transform
+
+Reliability fix for the additive-edit case (e.g. &#39;add a moon&#39;) where gemma re-called
+image_generate instead of image_edit. The continuation nudge now: (1) enumerates the edit
+verbs (modify/edit/change/add to/recolor/transform), (2) explicitly says do NOT call
+image_generate again (it makes a new unrelated image), (3) keeps the &#39;only confirm if no
+follow-up was requested&#39; escape so generate-only still works. Non-forcing (no tool_choice).
+
+* Fix model-load concurrent-GPU SIGSEGV: drain GPU before releasing the model-load gate
+
+Under sustained chained gen→edit model churn, the app crashed with EXC_BAD_ACCESS in
+AGXG17XFamilyCommandBuffer tryCoalescingPreviousComputeCommandEncoder (the BUG-G
+concurrent-GPU signature). Root cause: the model-load path released the exclusive
+MetalGate (exitModelLoad) the moment loadModelContainer returned, but weight dequant +
+kernel compile submit async Metal work whose tail was still in flight — the next exclusive
+producer (another load / image job) then raced the command buffer. This is the third
+uncovered drain (unload already drains; BatchEngine #82 covers chat→image;
+ImageGenerationService #89 covers image→model-load; this covers model-LOAD→next-producer).
+Add Stream.gpu.synchronize() before exitModelLoad on success + catch paths — symmetric, so
+&#39;gate released&#39; means &#39;GPU idle&#39;.
+
+* Comprehensive concurrent-GPU drain/serialization for sustained chained-image churn
+
+Codex-mapped remaining races under sustained gen→edit churn (after the BatchEngine #82 /
+ImageGenerationService #89 / model-load #91 drains, two crashes persisted: SIGSEGV
+tryCoalescing + SIGABRT addCompletedHandler-after-commit):
+- MetalGate: add exclusive modelUnload lane — model unload/eviction was UNGATED and raced.
+- ModelRuntime.unload: hold the modelUnload lane around the (already-draining) teardown.
+- ImageGenerationService: replace the hard task.cancel() in the stream onTermination with
+  the SOFT jobID cancel — the hard cancel tore down a committed command buffer mid-eval,
+  the source of the addCompletedHandler-after-commit SIGABRT. Also gate+drain image unload().
+- MetalSafeEmbedder (#60): Stream.gpu.synchronize() before exitEmbedding (both paths).
+- MLXBatchAdapter + ModelRuntime generation exit: drain before exitGeneration.
+Every GPU producer now drains before releasing its MetalGate lane; no producer runs ungated.
+
+* Revert &#34;Comprehensive concurrent-GPU drain/serialization for sustained chained-image churn&#34;
+
+This reverts commit a80cb1d46c1c5d59e7b8e56492e6ef650ad088a5.
+
+* Revert &#34;Fix model-load concurrent-GPU SIGSEGV: drain GPU before releasing the model-load gate&#34;
+
+This reverts commit 809ecd5750518801242d621e5ec4323834dfd98c.
+
+* Reapply &#34;Fix model-load concurrent-GPU SIGSEGV: drain GPU before releasing the model-load gate&#34;
+
+This reverts commit 8d760e638443724de42825aaa25f3aff04aa41d2.
+
+* docs: converged honest state — single ops + handoff crash fixes solid; one-turn chained-edit hang + churn crash are deeper residuals (not drain-fixable), reliable paths = direct API + separate-turn
+
+* docs: correct earlier overclaim — chained one-turn edit is non-deterministic (handoff stall), not &#39;FIXED+PROVEN&#39;; churn crash row added
+
+* Wire up 3 delegation-settings cohesion gaps (spawnable UI, RAM-safety persistence, dead tool-call knob)
+
+Cohesion audit of the image/spawn/delegation settings found three knobs that
+didn&#39;t mind each other end-to-end:
+
+1. spawnableAgentNames had NO UI anywhere — nothing wrote it, so anyAgentSpawnable
+   was always false and the spawn tool was never registered, while the How-It-Works
+   blurb advertised spawn and SpawnTool&#39;s error pointed users to a control that did
+   not exist. Add a &#39;Spawnable Agents&#39; subsection (per-persona toggles over
+   AgentManager.shared.agents, case-insensitive de-duped membership in
+   spawnableAgentNames). Spawn is now reachable from the UI.
+
+2. ramSafetyPreflightEnabled was dropped by .normalized (it reconstructed the config
+   without that field, so it fell back to the init default true). Since the store
+   runs .normalized on every save AND load, turning the RAM-safety preflight OFF was
+   silently reverted. Preserve it through normalize. Regression test added.
+
+3. budgets.maxToolCalls was UI-exposed but enforced nowhere — spawned subagents are
+   text-only (AgentSubagentRunner passes tools:nil and rejects any tool call), so it
+   was a no-op control. Remove the stepper and mark the field reserved/forward-compat
+   so the field isn&#39;t a hidden knob and the UI isn&#39;t a lie.
+
+Release build green. Per-tool image defaults, the two-tool separation, the shared
+GPU-drain, and the agent-loop steering were all audited and confirmed already
+cohesive (no change needed).
+
+* docs: cohesion pass + 2026-06-23 live production gate (3 fixes proven, 0 crashes)
+
+* docs: add canonical REMAINING_WORK backlog (image/spawn/delegation)
+
+Consolidates open work that was scattered across 6+ docs with contradictions, plus the
+undocumented gaps surfaced by a skeptical audit: the &#39;Delegate Tool Use&#39; UI no-op,
+text-only subagents vs the design docs, the success-path restore that can strand the
+orchestrator, unclamped public /v1/images endpoints, stale spawnableAgentNames on
+rename/delete, the unreachable upscale endpoint, the jpeg/webp-accepted-but-PNG-only
+writer, large untested surface, and the localization gate. Marks the doc-rot to fix and
+records one refuted finding (the pinned vmlx finishSlot drain IS present).
+
+* docs: add living COMPLETION_TRACKER (pre-merge proven/confirmed status)
+
+* docs(tracker): base-chat no-regression DUAL-CONFIRMED + setting clash matrix C1/C3/C4 proven
+
+* Fix P0 production-readiness items + unblock localization gate
+
+P0 code fixes (REMAINING_WORK):
+- Remove the no-op &#39;Delegate Tool Use&#39; permission picker — permissionDefaults
+  .localTextDelegateToolUse is read by zero runtime paths (subagents are text-only),
+  so the control did nothing. Field kept reserved.
+- SpawnTool + LocalTextDelegateTool: success-path restore now uses restoreBestEffort
+  (logs on failure) instead of a bare try?, so a reload failure can&#39;t silently strand
+  the orchestrator chat model unloaded with no diagnostic.
+- Clamp the public /v1/images generations+edits width/height (256-1024, /16), steps
+  (1-50), and n (1-4) to the same envelope the agent image tools enforce — the REST
+  endpoints previously passed caller values through unclamped (OOM/GPU-watchdog risk
+  on the exclusive Metal lane).
+
+Localization gate (was failing test-core):
+- Add the 53 feature-branch image/spawn UI strings missing from Localizable.xcstrings
+  (en-only entries, the repo&#39;s normal newly-extracted state; translation is the i18n
+  pipeline&#39;s async pass) + &#39;Save As…&#39;.
+- Wrap 6 un-localized literals (Label Reveal/Save As…, Text Image/LLM/VLM) in L().
+- Full scripts/i18n/check.sh now passes (catalogs OK, 0 suspect literals).
+
+Release build green.
+
+* Cap image n=1 (multi-image CommandEncoder race) + tracker update
+
+Multi-image (n&gt;1) reliably crashes the app via the MLX tryCoalescingPrevious
+ComputeCommandEncoder assertion (reproduced clean at n=2): the service generates
+N images sequentially in one job with no GPU drain between them. Cap REST
+/v1/images generations and the agent image_generate tool to numImages: 1 until the
+per-image drain lands (tracked in REMAINING_WORK). Single-image is stable + proven.
+
+* Fix test-core compile: AgentTaskStateTests native-image test needs throws
+
+The feature branch&#39;s nativeImageResultBiasesFollowUpEditToSavedPath test uses
+try #require(...) but wasn&#39;t marked throws — it never compiled in CI because the
+feature branch never ran CI. Surfaced via local build-for-testing on the
+OsaurusCoreTests scheme (which my Release builds don&#39;t compile).
+
+* docs(tracker): test-core compile fixed (:677 throws) + touched tests pass locally (146 cases)
+
+* docs(tracker): test-core failure is CI scheduler-starvation flake (4589 local pass, main green, 0 assertion failures)
+
+* Fix test-core: update stale vMLX revision in ImageGenerationBridgeContractTests
+
+The ONLY failing test (per the CI xcresult) was sourceContractMatchesProvenVMLXRevision()
+— a contract test that hardcodes the &#39;proven&#39; vmlx-swift revision and greps the lockfiles
+for it. It still expected the old d725c63f… pin, but Package.swift + all three
+Package.resolved files were correctly repinned to 6b77b1ee… (vmlx PR #82). Updated the four
+expectations to 6b77b1ee… to match the actual proven pin. Verified: the suite passes
+(xcodebuild test, macOS destination). This was a stale assertion, not a crash/flake —
+earlier &#39;flaky&#39; reads were a misdiagnosis (the failure-summary grep missed the Swift-Testing
+failure format; the xcresult bundle named it definitively).
+
+---------
+
+Co-authored-by: Raajeev Chandran &lt;raajeevchandran787@gmail.com&gt;
+Co-authored-by: Eric &lt;eric@erics-m5-max2.tailcd5195.ts.net&gt;
+Co-authored-by: Eric &lt;eric@erics-m5-max2.tail89fb0f.ts.net&gt;
+
+- Fix #1680: surface (not silently truncate) multi-step tool tasks on a premature-EOS empty turn (#1681)
+
+Fix #1680: don&#39;t silently truncate multi-step tool tasks on a premature-EOS empty turn
+
+When a tool-using model returns an empty, no-tool-call completion at large context
+(premature EOS), osaurus previously returned it as a normal successful completion — so an
+external agent harness driving /v1/chat/completions saw an empty no-tool turn and ended the
+task silently mid-multi-step. Now:
+- /v1(+/chat)/completions (stream + non-stream): an empty/no-tool assistant response that
+  arrives AFTER tool history (a tool message or prior tool_calls) is rejected with an
+  OpenAI-style 503 server_error instead of a silent empty 200, so the truncation is visible.
+  Gated so normal empty first-turns and normal text responses are unaffected.
+- AgentToolLoop: empty-turn recovery exhausting AFTER tool work returns a distinct
+  .emptyResponseExhausted exit with a clearer message (&#39;task may be incomplete; retry with
+  less context or continue from the latest tool result&#39;); /agents/{id}/run emits a distinct
+  SSE error. All exhaustive-switch consumers updated.
+
+The premature EOS itself (qwen3.6 *-mtp at large context) is a separate vmlx/MTP follow-up;
+this makes the osaurus-side symptom non-silent regardless of the early-EOS cause.
+
+Closes #1680.
+
+Co-authored-by: Eric &lt;eric@erics-m5-max2.tail89fb0f.ts.net&gt;
+
+- Update appcast for 0.20.9 (release)
+
+- Add Computer Use regression scorecards (#1648)
+
+- make agent run honor agent temperature (#1678)
+
+* honor agent configured temperature and max tokens on http agent run endpoint
+
+* add test for agent-run sampling resolution via extracted seam
+
+- stop wasted iterations on repeated failing capabilities_load calls (#1679)
+
+* mark deterministic capabilities_load failures non-retryable and add to replay guard
+
+* add tests for capabilities_load non-retryable failures and replay guard
+
+- persist per tool disable state for MCP provider tools (#1677)
+
+preserve per-tool disable state for mcp provider tools across re-discovery
+
+- Surface host-side remote-agent (p2p) activity (#1676)
+
+* Surface host-side remote-agent (p2p) activity
+
+Make inbound remote-agent calls fully visible on the host:
+
+- Add a `p2p` Insights source category for all inbound Secure-Channel peer
+  traffic (remote chat completions + agent runs). Resolved at one chokepoint
+  (`InsightsService.inboundSource`) and wired through the filter pill, source
+  badge, detail-pane icon, and telemetry token.
+- Enrich the `/agents/{id}/run` Insights row with the full assistant answer
+  (`responseBody`) and every executed tool (`toolCalls` with args/results),
+  accumulated via the agent loop&#39;s `modelStep`/`onBatchComplete` hooks and
+  logged on the success and error paths. The calling peer still sees only the
+  sanitized SSE trace.
+- Light the menu-bar &#34;generating&#34; indicator for host-side server inference
+  (agent runs and both `/chat/completions` paths) via balanced
+  `ServerController.signalGenerationStart/End`.
+- Add a debounced per-peer `PeerCallNotifier` that shows a `ToastManager` toast
+  when an authenticated remote peer drives one of the host&#39;s agents.
+- Localization (`P2P` + toast copy) and `InsightsP2PSourceTests` covering
+  source resolution, category labels, and the enriched RequestLog shape.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* Fix i18n CI gate for new p2p strings
+
+The `Check localizations` CI step (scripts/i18n/check.sh) failed:
+
+- Korean (`ko`) is now a required locale alongside `de`/`zh-Hans`, so add
+  `ko` units for the three new keys (`P2P`, `Agent in use`, and the peer-call
+  toast message).
+- The catalog-key checker compares Swift `L(...)` literals to catalog keys
+  textually and does not decode Swift escapes, so swap the escaped
+  `\u{201C}…\u{201D}` in PeerCallNotifier for the literal “ ” curly quotes to
+  match the catalog key. Runtime behavior is unchanged.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+---------
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- fixed app hangs (#1672)
+
+* memoize ToolRegistry.listTools to avoid main-thread hang on preview pipeline
+
+* cache MLXModel.isVLM to avoid per-row disk reads on the model grid
+
+* resolve folder bookmark off main thread in ExecutionContext
+
+* resolve and create folder bookmarks off main thread in FolderContextService
+
+- QoL improvements (#1655)
+
+* show router balance on composer chip with session spend in popover
+
+* drive top picks carousel arrows from live scroll position
+
+* hide top picks left arrow at leftmost edge despite content inset
+
+* preview composer image attachments on tap
+
+* add overflow menu with response timestamp and inspect action to assistant turns
+
+* keep overflow button last in assistant action row after speaker
+
+* key context budget lists by position to avoid duplicate-id foreach crash
+
+* preview sent document attachments on tap
+
+* show empty state when settings search has no matches
+
+* highlight matched settings sections while searching
+
+* flash a brief pulse when a settings section becomes a search match
+
+* make matched settings section glow breathe for two seconds
+
+* soften matched section glow to a single graceful breath
+
+* make matched section glow breathe from nothing to a visible halo
+
+* scope settings search glow to the matching field instead of the whole card
+
+* glow the matched settings control only with no border
+
+* disable fuzzy matching in settings search so glow tracks the query
+
+* decode composer image preview off the main thread to avoid app hangs
+
+* add cross-tab settings search with results list (phase 1)
+
+* make ManagementTab sendable for settings search index
+
+* scroll to and glow the matched control on settings search landing (phase 2)
+
+* tag remaining settings sections for search scroll-to and glow
+
+* wire server tab settings search to scroll and glow target section
+
+* wire remaining settings tabs to glow on search landing
+
+* propagate landing glow through environment so it fires in every tab
+
+- add Korean (ko) localization (#1660)
+
+Translate both string catalogs into Korean and promote ko to a
+supported, CI-enforced locale.
+
+- Localizable.xcstrings: 4,097 ko entries (full de/zh-Hans maintained
+  set, including plurals); InfoPlist.xcstrings: 12 ko privacy strings
+- New i18n helpers: export-untranslated.py (batch export) and
+  apply-ko.py (placeholder + coverage validation, Xcode-exact write so
+  the diff is purely additive)
+- check.sh now requires de,zh-Hans,ko; docs mark ko Maintained
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- updated chinese translations (#1659)
+
+- Polish remote agent connect UX (#1657)
+
+polish remote agent connect UX
+
+- Turn the empty-state &#34;End-to-end encrypted&#34; badge into a morphing connect
+  loader (&#34;Securing connection…&#34; spinner -&gt; lock); drop the separate connecting
+  chip above the composer.
+- Hide the model-selector row + balance while a remote agent is connecting and
+  ease them back in on connect.
+- Advertise the agent&#39;s Action Bar (chat_quick_actions) on GET /agents/{id},
+  fetch + sanitize it client-side, and surface it in the remote empty state
+  (falls back to neutral defaults).
+- Show the remote agent&#39;s mascot + transport badge (network/antenna) in the
+  agent dropdown rows and the selected pill; carry the avatar on
+  PairedRelayAgent.
+
+Adds parseAgentMetadata + endpoint round-trip tests for chat_quick_actions.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- Harden Bonjour discovery (security, reliability, discoverability) (#1658)
+
+Closes the gaps from the Bonjour audit. The Secure Channel core is
+unchanged; these target the discovery/advertisement layer around it.
+
+- Advertiser: update live TXT records in place via setTXTRecord when only
+  the payload changes, so description/address edits actually reach the
+  wire; advertise osc=1 only when the agent has a derived address so
+  addressless peers don&#39;t falsely claim Secure Channel support.
+- Pairing: surface the pinned crypto fingerprint in the pairing sheet and
+  refuse osc=1 peers that advertise no address (fail closed instead of
+  silently skipping server identity verification).
+- Reliability: handle browse didNotSearch/didStopSearch and publish
+  didNotPublish with logging and bounded exponential backoff.
+- Privacy/resource: start the mDNS browse lazily when the agent picker is
+  opened instead of always-on at launch.
+- Discoverability: fall back to a resolved IP when the .local hostname is
+  missing or unresolvable on the current network.
+- Tests: cover the TXT republish decision, osc gating, unverifiable-peer
+  refusal, IP parsing, and retry backoff.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- unify local and remote agent detail views (#1656)
+
+Share the detail chrome between the local AgentDetailView and the paired
+RemoteAgentDetailView so the two surfaces read as one product, and round
+out the remote-agent UX.
+
+- Extract shared chrome into AgentDetailChrome.swift: header bar, identity
+  label, circular action buttons, section card, metadata/status rows, the
+  scrollable tab strip, the agent-switcher popover, and RemoteAvatarBadge.
+- Refactor local AgentDetailView and rebuild RemoteAgentDetailView on that
+  chrome; remote gains a tabbed Overview/Activity shell and a unified
+  header (avatar + switcher + connection status + Chat/Remove).
+- Agent switcher now lists local and remote agents and works from both
+  detail headers; Memory hands remote picks off to the Agents tab.
+- Remote &#34;Chat&#34; opens/focuses a chat window and auto-selects that agent
+  via the relay-agent path (ChatWindowManager.openChat).
+- Mark remote agents with an antenna glyph on the avatar instead of a
+  free-floating &#34;Remote&#34; pill.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- Update appcast for 0.20.8 (release)
+
+- disable broken tools (#1650)
+
+Disable native agent channel (Discord) tool registration and update DiscordConnectionTests to assert the tools are absent while remaining on the external-surface deny list.
+
+- updated onboarding flow (#1649)
+
+* updated onboarding flow
+
+* fix localization string
+
+- Add Computer Use evidence pack (#1631)
+
+- Add Computer Use diagnostics (#1643)
+
+- Add Screen Context capture lab (#1644)
+
+- show pasted content preview in chat (#1645)
+
+* make sent pasted-content chips open a preview sheet
+
+* use pointing-hand cursor on hover for pasted-content chips
+
+* add copy button to pasted content preview sheet
+
+- Add Agent Channel Connection Center (#1616)
+
+Add hidden Agent Channel connection center
+
+- Privacy filter: opt-in on-device model, no-regex rule builder, settings polish (#1641)
+
+privacy filter: opt-in on-device model, no-regex rule builder, settings polish
+
+Decouple the deterministic regex layer from the on-device AI classifier so
+the filter is fully usable with zero download:
+
+- Add aiDetectionEnabled (off for fresh installs; legacy configs missing the
+  key decode to true so existing model users are preserved). The pipeline
+  fails closed on a missing model only when AI detection is on; regex-only
+  sends never block on the bundle. Remove the dead confidenceThreshold no-op.
+- Custom rules gain a Simple (no-regex) builder -- exact word, any-of-terms,
+  starts/ends/contains, number sequence, between-markers -- plus a per-rule
+  case flag and an optional custom placeholder label. Simple mode generates
+  and escapes the pattern so a malformed rule is impossible by construction.
+
+Settings UI/UX/IA polish:
+- All four sub-tabs (Overview/Rules/Providers/Model) always render; the model
+  install hero moves into the Model tab. Overview gains an AI-detection toggle
+  and a no-detector note; Rules gains a live dry-run tester.
+- Rebuild the custom-rule editor and tab surfaces on the shared design system
+  (AgentSheetHeader/Footer, StyledTextField, SettingsButtonStyle,
+  SettingsEmptyState, unified row cards + status-pill badge).
+
+Cleanup: collapse the EntityCategory localization-key mapping (duplicated
+across 5 sites) into localizationKey/localizedName on the model; dedupe the
+review-sheet icon mapping and the editor card chrome.
+
+Tests: add DecouplingAndBuilderTests (regex-only path, RuleBuilder.compile,
+case flag, custom-label mint + unscrub round-trip); extend the rule-config
+tests for safeCompile/EffectiveRuleSet and Codable + legacy-decode defaults.
+Update docs (FEATURES, PRIVACY_FILTER) for the two-layer architecture.
+
+- agent db upgrade (#1640)
+
+* agent db upgrade
+
+* fix CI: localize db_import labels and drop empty_count lint
+
+- add de/zh-Hans catalog entries for the new db_import tool labels
+  (&#34;Importing/Imported data into the database&#34;) so the i18n catalog
+  check passes
+- rename TypeSampler.ColumnStats.count -&gt; samples so SwiftLint&#39;s
+  empty_count rule no longer flags the plain sample counter
+
+- fixed app hangs (#1638)
+
+* memoized notch task ordering instead of sorting on every render
+
+* deferred chat-history open on launch instead of blocking main thread during key rotation
+
+* guarded chat-session rotation-recovery reload against test runs
+
+- make plain-text answers the primary agent-loop exit (#1639)
+
+Agents were ending turns with a bare `complete()` (&#34;done&#34; banner) instead of
+actually answering the user. Re-steer the loop so the model always writes its
+answer as plain text (which ends the turn on every surface); `todo` is optional
+for multi-step work and `complete` is only an optional closure for todo-tracked
+tasks, never a substitute for the answer itself.
+
+- SystemPromptTemplates: rewrite todo/complete guidance (full + compact)
+- AgentLoopTools: todo/complete tool descriptions + todo result nudge
+- AgentLoopEvaluator: grade the visible answer prose, fall back to summary
+- evals: add answer-direct-no-complete agent_loop case
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- qol improvements (#1637)
+
+* gate foundation model contextSize behind 26.4+ sdk flag
+
+* group context budget popover with drill-down and fix hover dismiss
+
+* make context budget percentages share-of-total and bar fill with full breakdown
+
+* auto-save settings tab instead of requiring save changes button
+
+* persist config writes off the main thread for settings auto-save
+
+* match themes filter row to shared segmented control
+
+* flatten voice models tab and drop search and section headers
+
+* tighten voice setup hero spacing
+
+* move user message actions below the bubble like chatgpt
+
+* split agent pill into dropdown and standalone settings button
+
+* show session spend on composer chip with balance only in popover
+
+* move providers filter to header and add filtered empty state
+
+* cross-fade agent grid to detail navigation instead of sliding
+
+- updated chinese translations (#1633)
+
+* updated chinese translations
+
+* updated chinese translations
+
+- Fix Computer Use main-thread hangs (#1634)
+
+* Fix Computer Use main-thread hangs
+
+Move all NativeMacDriver Accessibility reads and input synthesis off the
+main thread onto one shared serial executor, and bound every AX call, so a
+slow or wedged target app can no longer block the UI.
+
+- Add AccessibilityManager.runOffMain + a serial dispatch queue; route the
+  driver reads (availability, listApps, listWindows, activeWindow,
+  focusedContent, capture, find) and the action path (perform, coordinate)
+  through it. narrate stays on the main actor (AutomationSession UI state).
+- Apply the per-app messaging timeout via axApp(pid:) at every app-element
+  site (it did not propagate from the system-wide element) and lower it
+  from 3.0s to 1.5s.
+- Add a wall-clock traversal deadline so traverse/traverseElement bail early
+  (truncated) on huge or wedged trees even when each call stays under the
+  per-call timeout.
+
+Fixes the production AppHangs APPLE-MACOS-NK (find) and APPLE-MACOS-NG
+(listWindows), and the latent input-path hang (per-character Thread.sleep in
+type_text).
+
+* Fix Computer Use crash when capturing Osaurus&#39;s own UI
+
+The off-main driver queue turned a latent bug into a crash: resolving our OWN
+process&#39;s accessibility tree re-enters AppKit/SwiftUI accessibility in-process
+(it evaluates SwiftUI `body`), which trips SwiftUI&#39;s main-thread assertion
+(`_dispatch_assert_queue_fail`, EXC_BREAKPOINT) when it runs on the background
+queue. The Computer Use loop seeded its target pid from the frontmost app, so
+starting a task while the Osaurus chat window (FloatingInputCard) was frontmost
+captured Osaurus itself.
+
+- AccessibilityManager never resolves the current process&#39;s AX tree now: add
+  isSelf(_:)/selfPid and short-circuit traverse, prepareAndAwaitTree,
+  prepareForAccessibility, computeFocusedContent, computeFocusDelta,
+  listWindowsForPid, and getActiveWindow for our own pid (returning the empty
+  contract). We never want to perceive or drive our own UI anyway, and doing so
+  also leaked our chat UI back as screen context.
+- ComputerUseLoop seeds currentPid from the frontmost app but never self
+  (activeWindow() now returns nil for self), falling back to the last
+  non-Osaurus app — the same working-app hint screen context uses.
+- Add AccessibilitySelfGuardTests pinning the self-identity check and the
+  empty/nil contract each AX entry point returns for our own pid.
+
+- Fix and harden remote agent (Mode 2) runs (#1636)
+
+Mode 2 routing was driven entirely by request.model, so a stale
+selectedModel (e.g. a local &#34;fugu/...&#34; prefix) could route a remote-agent
+run to the wrong local provider, which forced model:&#34;default&#34; on the wire
+and produced an opaque upstream 404. Tool calls also never streamed to the
+UI and there were no useful logs on either side.
+
+- Route Mode 2 by the selected agent&#39;s provider id, never the model string
+  (new local-only ChatCompletionRequest.remoteAgentProviderId; ChatEngine
+  resolves the RemoteProviderService directly). Stamped on the post-cap
+  summarization request too.
+- Omit model on the wire for agent runs; the host tolerates a missing model
+  and resolves the agent&#39;s effective model, failing fast with a clear error
+  if none is configured.
+- Defense-in-depth: a runAsRemoteAgent request against a non-.osaurus
+  provider throws a typed error instead of POSTing /chat/completions.
+- Render the remote tool-call stream as persistent per-turn rows
+  (running -&gt; done/failed) from sanitized osaurus_agent_tool traces, without
+  leaking raw args/results or polluting history.
+- Add always-on, metadata-only structured logging (RemoteAgentRun) on both
+  client and server.
+- Extend RemoteAgentRoutingTests and add RemoteToolActivityTests.
+
+- fix /memory/ingest distillation and harden launch crashes (#1632) (#1635)
+
+fix /memory/ingest distillation and harden launch crashes
+
+Fixes #1632, where POST /memory/ingest accepted turns but never
+distilled: the handler fired off flushSession (requireResident: true),
+the coordinator&#39;s residency gate short-circuited a non-resident core
+model, and the request still returned {&#34;status&#34;:&#34;ok&#34;} with no
+processing_log row and signals left pending.
+
+Workstream A - make ingest actually distill:
+- Add DistillOutcome; thread it through performDistillSession -&gt;
+  distillSession -&gt; DistillationCoordinator.runReturning&lt;T&gt; (the legacy
+  Void run() is now a thin wrapper so existing call sites are unchanged).
+- Add MemoryService.flushSessionAndWait (forces requireResident: false /
+  on-demand cold load) and have handleMemoryIngest await it, reporting
+  {&#34;distillation&#34;: &#34;...&#34;, &#34;episode_id&#34;: N} in the response.
+
+Workstreams B/C - launch crash hardening:
+- Make the redaction .mouseMoved tracking area AppKit-managed in
+  SelectableNSTextView.updateTrackingAreas() (owner = the view), with
+  deterministic detach on cell reuse and an autorelease pool around
+  prewarmChatView; defer hover-driven configureCell off mouseMoved:
+  dispatch and clear table hover closures in dismantleNSView. Stops the
+  -[_NSTrackingAreaAKManager mouseMoved:] SIGABRT.
+- Gate ModelRuntime.preencodeLiveVoiceAudioIfResident GPU eval with
+  MetalGate.enterGeneration/exitGeneration on all paths so live-voice
+  audio can&#39;t race a concurrent generation and trip AGX asserts.
+
+Workstreams D/E - robustness + observability:
+- D1: mark terminal outcomes processed and add pending_signals.attempts
+  (schema v10) + bounded retries + dead-lettering so failing sessions
+  stop re-distilling forever; cancellation logs as skipped, not error.
+- D2: mark only the snapshotted signal ids processed so turns buffered
+  mid-distill survive.
+- D3: resolve canDistillCheaply via CoreModelService.resolveStatus() so
+  an unroutable model fails fast instead of looping error rows.
+- I1/I3/I4: per-conversation_id idempotency, UUID agent_id
+  canonicalization, and turn/char caps in buildDistillPrompt.
+- U3: memory_entry_count reflects episodes + pinned facts; GET
+  /agents/{id} no longer hardcodes 0.
+
+Add MemoryIngestRobustnessTests and update memory/runtime docs.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- Update appcast for 0.20.7 (release)
+
+- improved remote agent ux (#1628)
+
+improved remote agent ux and updated management interface
+
+- Add Agent Channels with Discord connection (#1606)
+
+* Add native Discord read write plugin
+
+* Harden chat stop async test waits
+
+* Isolate chat history tests from default tools
+
+* Add agent channel abstraction for Discord
+
+* Tighten native Discord channel registration
+
+* Add Agent Channel message state store
+
+* Align Discord with agent channel surface
+
+* Hide WIP Discord settings panel
+
+- Add permission-gated screenshot slash command (#1570)
+
+- Harden Computer Use privacy, autonomy gate, and consent UX (#1627)
+
+* improve computer use privacy
+
+* add localization keys for computer use confirm/consent UI
+
+The confirm overlay, just-in-time cloud-vision consent card, and the new
+cloud-vision settings toggle introduced 8 L(...) strings that weren&#39;t in
+Localizable.xcstrings, failing the i18n catalog check in test-core. Add
+them with de + zh-Hans translations.
+
+- Add schedule automation history (#1583)
+
+* Add schedule automation run history
+
+* Load schedule history summaries off the UI path
+
+- Add shared global proxy controls (#1565)
+
+* Add shared global proxy controls
+
+* Keep proxy sessions stable across refresh
+
+- Add Business Document Studio service (#1557)
+
+* Add business document studio service
+
+* Allow registered document emitters to own package targets
+
+* Check document export containment first
+
+- Add system prompt injection proof trace (#1527)
+
+* Add system prompt injection proof trace
+
+* Use shared prompt rendering for injection traces
+
+- updated computer use docs (#1626)
+
+- add lossless tool-output compressor, per-task context-token telemetry, and real remote completion tokens (#1625)
+
+* add lossless tool-output compressor + per-task context-token telemetry
+
+Telemetry (OsaurusEvals): thread deterministic, provider-independent
+input-token accounting through the agent loop — promptTokensTotal,
+peakContextTokens, totalModelTokens, modelSteps — and surface it in the
+matrix, diff (advisory token-savings / regression flags), and history,
+plus optional scoredMaxPromptTokens/scoredMaxTotalTokens budgets. Makes
+&#34;tokens per task&#34; measurable and gateable for local and frontier.
+
+Baseline finding: input tokens are 95-99% of model-token cost and the
+cost is model-agnostic (Qwen3-4B and grok-4.3 within ~2% on identical
+AgentLoop cases) — driven by the re-sent prefix + accumulated tool
+results, not the model.
+
+ToolOutputCompressor: lossless, deterministic compaction at the
+ToolRegistry.normalizeToolResult ingest boundary — JSON whitespace crush
+(validated-JSON only, string-aware; preserves key order, number lexemes,
+escaping) and trailing-whitespace strip. Runs after the secret-prompt
+guard and before the universal cap, so oversized external pretty-JSON
+can crush back under the cap instead of being truncated. Default-on with
+an OSAURUS_DISABLE_TOOL_OUTPUT_COMPRESSION escape hatch; idempotent so
+the KV-prefix stays byte-stable. Measured 36% fewer tokens on pretty
+JSON, 10% on trailing-whitespace logs; no-op on already-compact envelopes.
+
+Gates: 14 new compressor unit tests; deterministic eval suites 28/28
+(incl. PrefixHash KV-stability, ToolEnvelope normalization) with the
+compressor active; prompt-budget pinning 8/8 unchanged.
+
+* surface real remote completion tokens via provider usage
+
+Remote OpenAI-compatible runs (xAI/Grok, Azure OpenAI) reported 0
+completion tokens: the outbound stream never requested usage, and the
+parser decoded the `usage` chunk but never acted on it — unlike local
+vmlx, which emits a StreamingStatsHint with real token counts. The eval
+matrix&#39;s completion/total-token columns were blank for every frontier row.
+
+Fix, scoped to the proven /chat/completions wire (.openaiLegacy +
+.azureOpenAI; router/Anthropic/Gemini/Responses/Codex untouched):
+
+- Request: set stream_options.include_usage on streaming requests so the
+  provider emits a final usage chunk. Encoded only when set, so every
+  other provider/path keeps byte-identical wire output.
+- Capture: OpenAICompatibleStreamParser records the usage chunk into
+  StreamingState (strict + lenient); usage:null on normal chunks no-ops.
+- Defer: a tool-call finish no longer short-circuits for usage-enabled
+  upstreams — the call is held so the trailing usage chunk (which OpenAI
+  sends AFTER finish_reason) lands first, then dispatchFinal dispatches
+  it. Bounded-safe: the existing post-loop dispatchFinal always emits the
+  held call at [DONE]/stream-end, so a provider that omits [DONE] cannot
+  hang or drop the call. Mirrors the local path, which already forwards a
+  tool-call step&#39;s decode stats before finishing-by-throw.
+- Emit: dispatchFinal yields a StreamingStatsHint with the real
+  completion_tokens + finish_reason before resolving the turn, so the
+  eval harness and chat token count see it the same way as local. No
+  fabricated throughput: tps is the provider&#39;s value when present, else 0
+  (the eval skips 0 for its tok/s mean; the chat UI uses its rolling
+  observer for visible tok/s).
+
+Proof:
+- 12 new tests (9 streaming/telemetry: usage capture, scoped defer
+  on/off, hint emission for text AND deferred tool turns, no-usage -&gt;
+  no-hint, end-to-end .openaiLegacy wiring; 3 request-encoding:
+  stream_options encode/omit + requestsStreamUsageOptions truth table).
+  Full Provider/streaming/ChatEngine/router suites pass (217 tests).
+- Live xAI grok-4.3 re-measurement (53 cases): agent_loop completion
+  tokens now populated on 44/45 cases, 0 zero-valued (mean 312, up to
+  1868 on a 22-step loop); AgentLoop 17/17; 0 errored. The 8 failures
+  are pre-existing model-behavior/rubric cases (grok refusals + byte-
+  exact file asserts), unrelated to this path.
+
+Bonus: remote chat turns and proxied /v1/chat/completions usage now also
+reflect real completion tokens.
+
+- harden remote agent security and reliability (#1623)
+
+* harden remote agent security and reliability
+
+* per agent workspace and live models
+
+* updated docs
+
+* fix localization
+
+- improved screen context evals (#1620)
+
+* improved screen context evals
+
+* fix lint
+
+* updated computer use context chat view
+
+* fix consistency
+
+* minor change
+
+- Repin vmlx-swift -&gt; 643fde27: Kanana-2-30B-A3B (deepseek_v3) support (#1622)
+
+* Repin vmlx-swift -&gt; 643fde27 (deepseek_v3 q_lora=null + qwen JSON tool calls)
+
+Enables Kanana-2-30B-A3B-Instruct-JANG_4M (deepseek_v3, MLA + 128-expert
+MoE). vmlx 643fde27 adds: DeepseekV3Configuration.qLoraRank optional
+(q_lora_rank=null direct q_proj) and XMLFunctionParser JSON-form fallback
+(qwen &lt;tool_call&gt;{json}&lt;/tool_call&gt; wire form). Live-proven in-app:
+load+coherence (EN/KO), multiturn recall, tool-call round-trip (temp 0),
+reasoning-in-content; default KV native fp16 (no TurboQuant).
+
+* Repin vmlx-swift -&gt; 4453909e (vmlx-swift#80 merged to main)
+
+Fast-forward the pin from the PR branch commit to the squash-merge SHA on
+vmlx-swift main: deepseek_v3 q_lora=null + qwen JSON tool-call wire form.
+
+---------
+
+Co-authored-by: Eric &lt;eric@erics-m5-max2.tail89fb0f.ts.net&gt;
+
+- Repin vmlx-swift: L2 disk-cache orphan-row + solo seed-boundary fix (#1619)
+
+* Repin vmlx-swift to the L2 disk-cache orphan-row + solo seed-boundary fix
+
+Picks up osaurus-ai/vmlx-swift#79:
+- DiskCache: delete the cache_entries row when removing a corrupt safetensors
+  file (stops SUM(file_size) eviction-quota drift / unbounded on-disk growth).
+- Solo TokenIterator path now honors the required-tool disk-backed
+  seed-boundary suppression that previously only ran on the batched path.
+
+No osaurus code changes required: TurboQuant KV already defaults off
+(shouldUseTurboQuantByDefault == false), and model detection/loading/cache/
+multiturn were live-verified unaffected (gemma + zaya flagships, model
+switch/eviction, warm prefix reuse, accounting delta 0).
+
+* Repin to vmlx-swift #79 merge commit (1b7d3ef)
+
+* Repin OsaurusCore manifest + pin-hardening test to vmlx #79 merge (1b7d3ef)
+
+---------
+
+Co-authored-by: Eric &lt;eric@erics-m5-max2.tail89fb0f.ts.net&gt;
+
+- Update appcast for 0.20.6 (release)
+
+- improved screen context distiller (#1618)
+
+- updated themes view design (#1617)
+
+- gemma 4 12b optimization loop (#1614)
+
+* added gemma4 baseline
+
+* updated metrics
+
+* fix tests
+
+- added additional migration hardening (#1615)
+
+- fixed issue with memory distill failure (#1613)</div>
+</div>
+
+<a href="../project/osaurus-ai_osaurus.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

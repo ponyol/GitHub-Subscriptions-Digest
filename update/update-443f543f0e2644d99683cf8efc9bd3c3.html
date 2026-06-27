@@ -1,0 +1,1454 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (100 commits) - modular/modular - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (100 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/modular_modular.html">modular/modular</a> /
+    Updates in main (100 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/modular_modular.html">modular/modular</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-06-27 07:36 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/modular/modular/commits/main" target="_blank">https://github.com/modular/modular/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Этот выпуск включает значительные улучшения ядер GPU, особенно для моделей MiniMax-M3, квантования MXFP8 и архитектур Mixture-of-Experts (MoE), а также добавление новых целей для фаззинга, обеспечивающих надежность и корректность. Основное внимание уделено оптимизациям обслуживания, включая интеграцию Enhanced Per-Layer Balancing (EPLB) для динамического переназначения нагрузки, совместное использование префиксного кеша между параллельными репликами данных и улучшенную обработку мультимодальных запросов. Архитектурные обновления включают перенос различных моделей LLM и VLM на унифицированный пакетный процессор, добавление поддержки Multi-Token Prediction (MTP) для MiniMax-M3 и улучшения C-API.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- [Release] Pin lockfiles to Mojo 1.0.0b3.dev2026062706, MAX 26.5.0.dev2026062706
+
+- [SERVOPT] EPLB log2phy remap on dispatch (max_replicas=1)
+
+Adds the on-device log2phy remap on the EP dispatch path plus the
+per-device log2phy/logcnt buffers used to translate router_idx into
+physical-slot indices. The remap kernel is currently gated to
+max_replicas == 1; the multi-replica round-robin path remains
+NotImplementedError.
+
+Active only when --eplb-stats &lt;snapshot.json&gt; is passed at startup:
+KimiK2_5Model._build_eplb_plan loads the snapshot, builds an
+EplbPlacement, and EPBatchManager binds the resulting log2phy /
+logcnt buffers into the EP graph&#39;s input_types.
+Also fixes EPBatchManager.fetch_buffers offset arithmetic for the
+logcnt buffer slice (previously reused the log2phy start_idx).
+
+MODULAR_ORIG_COMMIT_REV_ID: 5f2bd6026029ac5bd78ce8a3132345709ca61785
+
+- [stdlib] remove duplicated AllCopyable, etc impl
+
+since `conforms_to` are now parametric, all code duplication can be
+collapsed into one single implementation that takes a trait as a
+parameter.
+
+MODULAR_ORIG_COMMIT_REV_ID: ce4a03697e195fccbba1e35901bc9acb3fa4ed0c
+
+- [Kernels] Add MiniMax-M3 block-sparse decode attention fuzz target
+
+Add a fuzz target for `msa_sm100_decode` -- the block-sparse decode attention
+that attends the indexer-selected blocks (QK . softmax . V). Distinct from the
+indexer block-selection (covered by `sparse_indexer_decode`) and the dense MLA
+decode (`mla_decode`).
+
+It targets the partial-local-block tail-mask class (the long-context decode
+runaway): the indexer force-keeps the local block FULL (BN rows) but only
+`[block*BN, cache_length]` is valid, so a decode mask that does not bound the
+loaded slot by logical position leaks the unwritten tail into the softmax
+whenever `cache_length + 1` is not BN-aligned. The target fuzzes batch +
+per-batch `cache_length` (biased non-BN-aligned) + topk, makes the last selected
+block a partial local block, and fills its tail (logical position &gt;
+`cache_length`) with a 1e4 poison sentinel. The `ref` oracle is an f64 block-max
+softmax that masks `k_logical &gt; cache_length`; a leaked tail blows the output
+~1e4 out of band (plus a NaN/Inf guard). `head_dim`/`group` are compile-time
+(`-D`, default 128 / 8; group &gt;= 8 keeps a single head&#39;s poison dot sign-stable).
+B200-only.
+
+Validated both directions on B200: RED on a kernel without the tail mask
+(max_abs ~1e4, the poison V) and GREEN (20/20) once the mask is present.
+
+MODULAR_ORIG_COMMIT_REV_ID: 9297dc04f8b20e1cf901db88b85546d5dad59b2c
+
+- [Kernels] Zero-init reference scratch in fused-SwiGLU dispatch fuzz target
+
+Under a pool-off `initcheck`, the fully-fused dispatch target reported an
+uninitialized __global__ read: the reference chain&#39;s standalone SwiGLU epilogue
+vector-loads the bf16 matmul scratch in 32-byte chunks, and the grouped matmul
+leaves a tile-tail region of that scratch unwritten. The read never reaches the
+compared output (the byte-exact fusion-equivalence check still passes) and the
+fused production path never touches the scratch in GMEM, so this is a
+harness-hygiene gap, not a kernel bug.
+
+Zero-initialize the bf16 scratch and the scale-output tiles so `initcheck` is
+clean and any scale-pad row that neither path writes compares equal.
+
+MODULAR_ORIG_COMMIT_REV_ID: c90e743419554ebea9b92fa360add47901f1b2c5
+
+- [Kernels] Make MoE router fuzz oracle tie-tolerant
+
+A longer fuzz run surfaced a `ref` index mismatch on a sparse-score case: the
+kernel and the host reference disagreed on the order of two experts whose biased
+scores (score + bias) were within fp32 tie tolerance. Top-k routing is invariant
+to tie-breaking, so an exact index-sequence comparison false-positives on
+near-ties.
+
+Replace the exact-sequence check with a tie-tolerant one: verify every
+kernel-selected expert is genuinely within the top-k (its biased score is &gt;= the
+k-th largest minus a tolerance) and that the returned weights match the kernel&#39;s
+OWN selection (unbiased score, normalized over the selection if norm_weights,
+scaled). This still catches a real mis-route (selecting an expert below the
+top-k threshold) while ignoring benign tie swaps.
+
+MODULAR_ORIG_COMMIT_REV_ID: dc29642d54b293d30e92837d1dd15f71de50375b
+
+- [Kernels] Add fully-fused SwiGLU+MXFP8 up-projection fuzz target
+
+Add a fuzz target for `grouped_matmul_swiglu_mxfp8_dispatch` -- the
+fully-fused MiniMax-M3-MXFP8 MoE up-projection (grouped MXFP8 matmul +
+SwiGLU + re-quantize in one kernel, the in-register/SMEM epilogue path).
+The matmul and the epilogue are covered in isolation by the
+grouped-matmul-mxfp8 and fused-swiglu-mxfp8 targets; this target covers the
+fusion itself.
+
+The oracle is a byte-exact fusion-equivalence check: the same kernels run
+unfused (grouped matmul -&gt; BF16 -&gt; standalone SwiGLU+quant epilogue) must
+produce bit-identical fp8 output and E8M0 scales (the fused path uses
+`match_bf16=True`). Because this is an equivalence -- independent of the
+operand values -- it never false-positives on a value distribution; the
+fuzz axis is the ragged token split + active-expert count, which sweeps the
+dispatch&#39;s regime selection (decode / small-prefill / large-prefill) and
+the ragged tile/scale-slab boundaries. B200-only.
+
+MODULAR_ORIG_COMMIT_REV_ID: e7020d546e846610469573f6a4867868ab1dde05
+
+- [Kernels] Add fused SwiGLU+MXFP8 epilogue fuzz target
+
+Add a fuzz target for `fused_silu_mxfp8_interleaved_kernel` -- the SwiGLU +
+MXFP8 re-quantize epilogue of the MiniMax-M3-MXFP8 MoE up-projection. The
+grouped matmul writes an interleaved [g0, u0, g1, u1, ...] result per token;
+this kernel applies the activation and re-quantizes back to MXFP8
+(fp8_e4m3fn + E8M0 block scale) so the down-projection runs without a BF16
+round trip. Defaults to the clamped swigluoai variant (alpha=1.702,
+limit=7.0); `-D clamp_activation=False` selects plain SiLU.
+
+H and num_active_experts are compile-time (the kernel reads the group count
+from the static scales-offsets shape); the ragged token split + value
+distribution are the runtime fuzz axes. The `ref` oracle is a host-SwiGLU
+dequant round-trip; `contract` checks finiteness for blocks whose host
+activation is finite (a finite input can drive the activation intermediate
+past the f32 max to Inf then NaN, which the kernel reproduces; production
+matmul outputs are bounded, so that path is exempt). B200-only.
+
+MODULAR_ORIG_COMMIT_REV_ID: b3123bde6940ea1782674969484246d07de6a0d7
+
+- [driver] Fix `DeviceContext` function cache key
+
+`DeviceContext.load_function` now keys its runtime function cache on the
+entry-point name as well as the blob, so loading two entry points from
+one PTX/cubin blob no longer collides (the second load previously
+returned the first). With no module name it keys on a short hash of the
+blob instead of the whole blob, avoiding a per-call copy/hash/compare
+and a retained duplicate. The win scales with blob size.
+
+MODULAR_ORIG_COMMIT_REV_ID: c1dbdb8a1f4686ccc42c03df59dc3650aebc4e02
+
+- [Kernels] Add MXFP8 dynamic-quantize fuzz target
+
+Add a fuzz target for the MXFP8 dynamic block-scaled quantization
+(`quantize_dynamic_scaled_fp4fp8` with SF_VECTOR_SIZE=32) -- the BF16 -&gt;
+`float8_e4m3fn` + per-32-block `float8_e8m0fnu` (E8M0) scale step that
+narrows MiniMax-M3-MXFP8 activations at every matmul input boundary.
+
+M + the input value-distribution are the fuzz axes; N is compile-time
+(`-D`, multiple of 32). The default `contract` oracle checks the finiteness
+guard: for every 32-block whose inputs are all finite, the fp8 outputs and
+the E8M0 scale must be finite -- a finite-but-large input cast to e4m3
+without clamping yields NaN, so this locks in the clamp-before-cast behavior
+(driven hardest by the `large` value distribution). A secondary `ref` oracle
+is a coarse dequant round-trip that catches gross scale/layout errors.
+B200-only.
+MODULAR_ORIG_COMMIT_REV_ID: 366006176645ff230eed6f66a584a2f69e5f20ea
+
+- [Kernels] Add MoE router fuzz target
+
+Add a fuzz target for `single_group_router` -- the MiniMax-M3 `n_groups=1`
+MoE routing path (one block per token, one thread per expert, warp-bitonic
+top-k). It selects the top `n_experts_per_tok` experts by `score + bias`,
+then returns the unbiased score normalized over the selected set and scaled
+by `routed_scaling_factor`. A wrong index sends a token to the wrong expert
+-- a large, discrete accuracy error, not a rounding error. Single-GPU and
+hardware-independent (the expert-parallel dispatch happens after routing).
+
+Fuzzes num_tokens + the score value-distribution; n_routed_experts/
+n_experts_per_tok/norm_weights are compile-time (`-D`, default 128/4/True).
+Two oracles: `ref` (a host top-k reference comparing the selected index
+sequence and the weights) and `contract` (indices in-range always, distinct
+for finite-score tokens -- NaN/Inf scores break the sort&#39;s total order and
+cannot occur in production, where the router input is a sigmoid output).
+
+MODULAR_ORIG_COMMIT_REV_ID: 51ab7c2b5b978473448c24f4ed292736d0f4e535
+
+- [Kernels] Add grouped MXFP8 matmul fuzz target
+
+Add a fuzz target for the structured grouped block-scaled MXFP8 matmul
+(`grouped_matmul_block_scaled`) -- the routed-expert FFN of MiniMax-M3-MXFP8
+(the dominant FLOP count at ep-size=8).
+
+The accuracy-critical axis for a grouped matmul is the ragged per-expert
+token distribution: per-expert offsets, scale-group offsets
+(SF_MN_GROUP_SIZE=128), partial tiles, the cp.async-vs-TMA scale path, and
+`expert_ids` indexing the right weight/scale slice. The orchestrator carries
+only integer spec fields, so the distribution is encoded as
+`num_active_experts` + `tok_seed` and expanded deterministically with the
+boundary-aware generator (per-expert counts biased around 128). N/K/
+num_experts are compile-time (`-D`). The `ref` oracle compares per active
+expert against cuBLAS with the same E8M0 scales and per-expert alpha.
+B200-only.
+
+MODULAR_ORIG_COMMIT_REV_ID: 37d6acb9a6fd9d9b98b08a7b5e7f505bf517c7ff
+
+- [Kernels] Add block-scaled MXFP8 dense matmul fuzz target
+
+Add a fuzz target for the SM100 block-scaled MXFP8 dense matmul
+(\`blackwell_block_scaled_matmul_tma_umma_warp_specialized\`) -- the kernel
+behind MiniMax-M3-MXFP8 attention (q/k/v/o) and the shared-expert MLP:
+\`float8_e4m3fn\` operands with one \`float8_e8m0fnu\` (E8M0) scale per
+32-element K block, fp32 accumulation, bf16 output.
+
+M (the token dim) is the boundary-aware runtime fuzz axis; N/K/mma_n/
+cta_group are compile-time (\`-D\`) so the tuned tensor-core path engages.
+The \`ref\` oracle compares against cuBLAS with the same E8M0 scales (the
+reference the in-tree MXFP8 unit test uses); memcheck also applies for the
+K-tail / scale-tensor over-read class. B200-only.
+
+MODULAR_ORIG_COMMIT_REV_ID: dbd15661ebb6b294b049f6b117298a39e1ca62e8
+
+- [SERVOPT] Add NumPy EPLB rebalance and EplbPlacement
+
+In this commit we NumPy port the DeepSeek EPLB hierarchical
+rearrangement algorithm
+in eplb_rebalance.py, plus EplbPlacement in eplb_stats.py — the
+dataclass that turns an EplbStatsSnapshot into a static log-&gt;phy
+permutation usable by the dispatcher. Pure-Python / NumPy module,
+no GPU dependencies; parity-tested against the torch reference at
+speed-of-light/speed_of_light/eplb/rebalance_algo.py.
+
+MODULAR_ORIG_COMMIT_REV_ID: 3da45abc816e4d9423a20a0fd0d9a265c672b8f7
+
+- [MAX] Add C-API MEF capture example using the new experimental API
+
+Add `test_capi_v3.py`, a new-API counterpart to `test_capi.py`. It
+builds the vector-add graph as a `max.experimental.nn.Module`, compiles
+it, and exports the compiled artifact to a MEF file via the public
+`CompiledModel.export_mef()`.
+
+`export_mef()` serializes straight from the compiled artifact, so it
+does not require the model to be initialized on a live device, which is
+what serving via the MAX C API relies on.
+
+MODULAR_ORIG_COMMIT_REV_ID: d29bbd7a4c69d46cc37d644d29c47e8de3771318
+
+- [SERVOPT] HTTP endpoints to fetch and reset EPLB stats
+
+This commit adds GET /max_internal/eplb_stats and POST
+/max_internal/eplb_stats_reset in the API process. Both routes return
+404 unless settings.eplb_profile is set; the GET handler fetches a
+snapshot via EplbStatsFrontend and returns it as JSON, the POST handler
+enqueues a fire-and-forget reset via EplbStatsResetFrontend.
+
+MODULAR_ORIG_COMMIT_REV_ID: 338221378c0ed5146299588d3993aa78830bfcf4
+
+- [SERVOPT] Capture per-layer EPLB histograms in Kimi 2.5
+
+This commit Implements on-device router_idx histogram capture in the
+language
+graph via scatter_nd_add into per-(layer, device) int64 counter
+buffers owned by EplbStatsAccumulator. Active only when
+pipeline_config.runtime.eplb_profile is True; the accumulator is
+constructed in KimiK2_5Model.load_model and the worker reads it back
+via getattr in get_eplb_stats_accumulator. The eplb_profile_enabled
+field on DeepseekV3Config gates the matching input_types extension.
+
+MODULAR_ORIG_COMMIT_REV_ID: 55199ee0b06261ecefe9752ec7fac71a77c41cfc
+
+- [docs] DOCS-2150: Fixes missing constant definition bug
+
+MODULAR_ORIG_COMMIT_REV_ID: fdecd36af7c9d625dc3ac68a2561a044c34731c7
+
+- [benchmarks] fix nemotron dataset decoding
+
+MODULAR_ORIG_COMMIT_REV_ID: 8b87a9652b0acd320aa9e9c7673277049124e12f
+
+- [Serve] Allow non-object-root structured output schemas
+
+Previously, structured output requests with a non-object type in the
+root of their schemas were rejected with an HTTP 400. Grammar backends
+like xgrammar and llguidance do support non-object types in the root of
+their schemas. Non-object types were rejected for consistency with the
+OpenAI API spec - we do not need to limit clients here.
+
+MODULAR_ORIG_COMMIT_REV_ID: cf04a29c900a071ab54e47a48ea6c67cc4ae7416
+
+- [SERVOPT] Wire EplbStatsAccumulator into the model worker
+
+This commit adds get_eplb_stats_accumulator helper that retrieves the
+pipeline&#39;s
+pre-built accumulator when MAX_SERVE_EPLB_PROFILE is on, plus the ZMQ
+frontend/backend pair the API process uses to fetch snapshots and
+request resets. Snapshots now carry hostname so multi-worker deploys
+can attribute them. No pipeline implements the accumulator yet.
+
+MODULAR_ORIG_COMMIT_REV_ID: cd7de76765e0373f475b297d9d9c71921ca4f92b
+
+- [Kernels] Port MiniMax MSA block-sparse attention to AMD (gfx950)
+
+Port the MiniMax block-sparse attention (MSA) stack to AMD CDNA4
+(gfx950):
+the wave-64 device reverse-CSR builder, the LSE-merge combine, the
+block-major prefill forward, the block-sparse decode, and paged-KV
+support
+throughout. The graph-compiler op mo.msa.attention.ragged.paged is now
+dual-arch -- it comptime-branches on the accelerator so the SM100 and
+AMD
+kernels never cross-compile -- gaining a device-CSR prefill_run and a
+multi-kv-head decode. Validated on MI355 against an f64 block-sparse
+oracle
+across the topk / GQA-group / varlen / causal / paged matrix; the NVIDIA
+SM100 path is unchanged.
+
+MODULAR_ORIG_COMMIT_REV_ID: 8ceb53edb92961a2a60d507de141e788d90dfaaf
+
+- [stdlib] stablelizing `AnyType`
+
+MODULAR_ORIG_COMMIT_REV_ID: 74cde99b291d56b338e7211e020fb104a398519c
+
+- [SERVOPT] ADD MAX_SERVE_EPLB_PROFILE env variable
+
+This commit adds an opt-in boolean to MAX Serve Settings and
+PipelineRuntimeConfig
+that gates EPLB MoE routing histogram profiling. Pipeline code reads
+pipeline_config.runtime.eplb_profile as the single canonical flag,
+while Settings.eplb_profile remains the entry point for the API
+process. Both default-load from MAX_SERVE_EPLB_PROFILE so they stay
+in sync without explicit propagation. Defaults to False.
+
+MODULAR_ORIG_COMMIT_REV_ID: b4ede8e8d7e19b2b3caa562f57abada105bcc223
+
+- [KVCache] Share prefix cache across data-parallel replicas
+
+When serving with data parallelism, each replica had an isolated prefix
+cache
+(one `BlockManager` and one connector per replica). A multi-turn
+conversation
+whose later turn was scheduled on a different replica than the previous
+turn
+missed the cache entirely, and the host/disk offload tiers were
+duplicated per
+replica. This makes the prefix cache replica-aware so it is shared
+across all
+replicas.
+
+Much of it is refactoring BlockManager and KVConnector to handle
+replicas.
+We no longer have N BlockManager/KVConnector for N replicas.
+
+MODULAR_ORIG_COMMIT_REV_ID: 983c4702ff4a3ca50ffd5b11b9ba8e0916dca967
+
+- [SERVOPT] ADD EplbStats schema and accumulator
+
+This commit defines
+1. EplbStatsMetadata, EplbStatsSnapshot for cleaner eplb stats
+   maintainence and movement.
+2. EplbStatsAccumulator which defines GPU counter buffers that contain
+   the main historgram stats and which can later be drained into
+   immutable snapshots on demand.
+These are pure data structures
+
+MODULAR_ORIG_COMMIT_REV_ID: 78e8358be8f9294162ff89a34aa6039339790cee
+
+- [Kernels] [Metal] Add MHA and 2-D convolution fallbacks for pre-M5
+systems
+The newly-introduced accelerated paths for MHA and 2-D convolution on
+M5+ Apple silicon systems prevented LLM and text-to-image models from
+running on older Macs. This adds fallbacks for pre-M5 systems to
+re-enable those models.
+
+MODULAR_ORIG_COMMIT_REV_ID: 10093b04865f06e988768337849e475a9b4edc32
+
+- [Pipelines] Stop mutating pipeline_config.runtime.max_batch_size (#89873)
+
+MODULAR_ORIG_COMMIT_REV_ID: 7b47cb065bf1e78f46dc02e2cceed8060a521e00
+
+- [Kernels] Add MiniMax-M3 prefill sparse-indexer fuzz target
+
+Add a fuzz target for the MSA indexer prefill path
+(`sparse_indexer_prefill_score` + `sparse_indexer_prefill_topk`): for each
+ragged query token it block-max-scores every KV block up to that token&#39;s
+causal boundary (prefix_len + local_index + 1), applies init/local
+forcing, and selects the top-k blocks. On B200 the scorer is the SM100
+tensor-core (SS-UMMA) kernel with TMA-staged, software-pipelined K -- the
+heaviest surface in the indexer family.
+
+The target boundary-fuzzes the ragged shape across two regimes (wide
+extend for diagonal causal masking across query tiles; deep prefix with
+few query rows for the block-stride path), plus topk and init/local
+forcing. Oracles, each canary-proven: an f32 per-token causal block-max +
+forcing reference (`ref`) with a planted-key causality probe (a large key
+just past a token&#39;s causal bound, so an intra-diagonal-block masking
+violation reads it and scores too high), an always-on top-k validity
+contract, and a split-K determinism check (`schedule`). The kernel config
+is compile-time `-D`, defaulting to the M3 config (4 / 128 / 128). Runs on
+B200 and MI355, matching the kernel&#39;s own test.
+
+MODULAR_ORIG_COMMIT_REV_ID: 13da79b8e881a8e4e257e2505fa4c766884ca283
+
+- [Models][CI] Update MiniMax-M3-MXFP8 default serving config
+
+MODULAR_ORIG_COMMIT_REV_ID: a0d6343c6dd0702e8a0b2658094e9a00fae51603
+
+- [Kernels] Add MiniMax-M3 decode sparse-indexer fuzz target
+
+Add a fuzz target for the MSA indexer decode path
+(`sparse_indexer_decode_score` + `sparse_indexer_decode_topk`): the
+per-step indexer that block-max-scores every KV block, applies init/local
+forcing, and selects the top-k blocks. This is a richer surface than the
+block_select_topk selection core fuzzed already -- split-K over the KV
+blocks, a lane-split f32 dot reduction, and partial-final-block handling.
+
+The target boundary-fuzzes the ragged shape (batch, per-batch sequence
+lengths around the block-size and KEYS_PER_ITER-remainder edges), topk,
+and init/local block counts. Three oracles, each canary-proven:
+an f32 host block-max + forcing reference (`ref`), an always-on validity
+contract on the top-k output (in-range / distinct / -1 tail, on a poisoned
+buffer), and a split-K determinism check (`schedule`). The kernel config
+(num_index_heads / idx_head_dim / block_size) is a compile-time `-D`,
+defaulting to the M3 config (4 / 128 / 128); build with
+`-D sidx_num_heads=1` to fuzz the SM100 register-tensor-core score path.
+Runs on B200 and MI355, matching the kernel&#39;s own test.
+
+MODULAR_ORIG_COMMIT_REV_ID: b7bf839d918155a273cd1daa63d5844c847ba441
+
+- [MAX] Add Index Share feature for GLM 5.2
+
+MODULAR_ORIG_COMMIT_REV_ID: 71a453f561197c0a26f56bdaca995791988f1034
+
+- [Kernels] Add cross-width determinism oracle to sparse-indexer fuzz
+
+The block_select_topk fuzz target gains a `schedule` oracle: re-run the
+same score row across several CTA launch widths and flag any non-bit-exact
+index output. block_select_topk documents a width-independent contract
+(&#34;ties broken by smallest index&#34;), so a reduction-order / tie-break leak
+through block_dim is a real violation that the diff / ref / memcheck
+oracles cannot see. Driven by `--oracle schedule` (the target reads
+`--schedule N`); proven able to fail via a canary perturbation.
+
+MODULAR_ORIG_COMMIT_REV_ID: a24d785e1f7afece8cfaab219627895d26427ed9
+
+- [Kernels] Add sparse-indexer fuzz target (block_select_topk)
+
+Add a GPU kernel fuzz target for `block_select_topk`, the MiniMax-M3
+sparse-attention (MSA) indexer&#39;s top-k block-selection core that both the
+prefill and decode indexer phases share. It is hardware-independent (a
+pure value-&gt;index selection step, no SM100/tensor-core machinery), so it
+runs on any non-Apple GPU.
+
+The target boundary-fuzzes the runtime shape (num_rows, num_blocks, k),
+the launch width, and the score distribution (including all-equal,
+specials, all-dead, and boundary-tie rows). Two oracles cover the
+kernel&#39;s two failure faces: an always-on validity contract (selected
+indices are in-range, distinct, point at selectable blocks, with a -1
+tail and an all--1 no-winner row, on a poisoned output plus an OOB scores
+guard) and `ref` (the tie-robust top-k correctness invariant). Both are
+proven able to FAIL via the built-in `--inject` canary.
+
+Wires the target into BUILD.bazel and the fuzz.py registry.
+
+MODULAR_ORIG_COMMIT_REV_ID: 35c4607fd3413f1b00227a216db44d1625d5c602
+
+- [Kernels] Fix sparse MLA indexer bug when using prefix-cached values
+
+MODULAR_ORIG_COMMIT_REV_ID: 6b62ca744cabd183a89de894d94ce7ccc425576d
+
+- [docs] DOCS-2150: Adds Traits cheat sheet
+
+- Expands page
+- Adds assets
+- Adds tests
+
+MODULAR_ORIG_COMMIT_REV_ID: 05ceb11c817798394aa7e72b19f5180b22c14d38
+
+- [Models] Add GLM5.1 FP8 to logit verification
+
+MODULAR_ORIG_COMMIT_REV_ID: 92591223b59472d822a76d13209f9c73198550ab
+
+- [docs] DOCS-2168: Add conversions cheat sheet
+
+- Assets
+- Updates cheat-sheets.mdx
+- Tests
+- Updated tooling
+- Reloads optimized assets at lower sizes
+
+MODULAR_ORIG_COMMIT_REV_ID: 3c67aa42588c635a4f47db6ba61b962f2d6c2d6b
+
+- [Integrate] Bump LLVM to 933aa3e1c2face96ca268f2ce412000764b03111
+
+- Drop `llvm-xtensa-assert-isuint-call.patch` (upstreamed,
+llvm/llvm-project#204731).
+- Rebase `llvm-amd-relax-alloca-verifier.patch` onto
+`VerifierAMDGPU.cpp` (llvm/llvm-project#204284).
+- Migrate `ConstantFoldBinaryIntrinsic` to `ConstantFoldIntrinsic`
+(llvm/llvm-project#204967).
+- Replace removed `IRBuilder::CollectMetadataToCopy` with an
+`IRBuilderCallbackInserter` (llvm/llvm-project#202280).
+- Update AMD compile-test triple CHECKs for `amdgcn-amd-amdhsa-unknown`
+normalization.
+- Update `instruction_rewrite_metal` golden for folded constant reduce
+intrinsics.
+- Use the `Triple` overload of `createTargetMachineForTriple`
+(deprecated `StringRef` overload, llvm/llvm-project#205889).
+
+MODULAR_ORIG_COMMIT_REV_ID: d1efa03e7bb9727cb170a0457383cfd0212eceb6
+
+- [Serve] Reject unsatisfiable structured output grammars
+
+Use `LLMatcher.validate_grammar` to check if a structured output grammar
+is satisfiable, emitting an HTTP 400 error if not. Before,
+`LLMatcher.grammar_from_json_schema` was used on its own to check if the
+grammar was satisfiable, which only checked for a valid JSON, not
+satisfiability.
+
+Moves log_tool_call_conformance to openai routes to separate logging
+from validity checks.
+
+MODULAR_ORIG_COMMIT_REV_ID: 66bc6ba3bf3c150c499c95dab5a60b030d3c1dbd
+
+- [MAX] Fix UnifiedMTPGemma4 input count for structured output
+
+Fixes smoke failure after #89886.
+
+## Summary
+
+- Restores
+`structured_output=self.runtime.pipeline_config.needs_bitmask_constraints`
+in `UnifiedMTPGemma4BatchProcessor.prepare_initial_token_inputs`.
+- Without this flag, `UnifiedMTPGemma4Inputs.buffers` omits the
+structured-output bitmask triple even when the graph was compiled with
+constrained decoding, causing CUDA graph capture to fail with **29
+inputs vs 32 expected**.
+
+## Root cause
+
+The field was present on the pre-migration model
+`prepare_initial_token_inputs` but dropped when logic moved to the batch
+processor in the VLM slice. `batch_processor_cls` landed in #89886; this
+one-line ABI flag did not.
+
+MODULAR_ORIG_COMMIT_REV_ID: 81cd709f01d633062d30791b6161e364ed437611
+
+- [MAX] Restore reasoning_content support behind a config flag
+
+## What
+
+Adds an opt-in MAX Serve runtime config flag `emit_reasoning_content`
+(default `False`). When enabled, chat completion responses emit a
+reasoning
+model&#39;s chain-of-thought under `reasoning_content` instead of
+`reasoning`
+(the two are mutually exclusive — exactly one is populated; the other
+stays
+`None` and is dropped on the wire). When disabled (default), behavior is
+unchanged: reasoning is emitted only under `reasoning`.
+
+This restores the `reasoning_content` field removed in #88454, now
+gated, for
+clients (e.g. MiniMax) that require it.
+
+## Why
+
+MiniMax uses the `reasoning_content` field for thinking tokens. #88454
+removed
+it to align with vLLM&#39;s deprecation in favor of `reasoning`. Gating its
+re-emission behind a config lets either standard be selected per
+deployment
+without regressing the default.
+
+## Changes
+
+- `pipeline_runtime_config.py`: add `emit_reasoning_content: bool =
+False`.
+- `serve/schemas/openai.py`: re-add `reasoning_content` to
+`ChatCompletionResponseMessage` and `ChatCompletionStreamResponseDelta`.
+- `serve/router/openai_routes.py`: the chat generator selects the
+emitted
+  field (`reasoning` vs `reasoning_content`) at the streaming-delta and
+  final-message sites, wired from the config.
+- Tests: generator-level on/off coverage for streaming and
+non-streaming,
+plus a wire-level (`jsonable_encoder`) non-streaming serialization
+check.
+- Changelog entry.
+
+The request/input side (`reasoning_content` in
+`TextGenerationRequestMessage`
+for chat templating) was untouched by #88454 and is out of scope here.
+
+## Test plan
+
+- `//max/tests/tests/serve:test_openai_routes` — pass
+- `//max/tests/tests/pipelines/lib:test_pipeline_runtime_config` — pass
+- `./bazelw run //:format` / `//:lint` — clean
+- `./bazelw run //:install` — success
+
+MODULAR_ORIG_COMMIT_REV_ID: 6caf3fbf9c617c6f172ec3667191540f5762e5a1
+
+- [kernels] Move element_size into TensorStorage (#89966)
+
+MODULAR_ORIG_COMMIT_REV_ID: f671791989f9e640dc2b16f95921b1233a255482
+
+- [Kernels] Stop relying on implicit intra-package imports
+
+In various parts of the kernels libraries, modules and packages were
+relying on implicitly having access to their package&#39;s (and parent
+packages&#39;) decls without having to import them.
+
+MODULAR_ORIG_COMMIT_REV_ID: da2fd99b3f9c8db2433dc5325b406ae80c703714
+
+- [Kernels] Fix the GPU fuzzer poison oracle
+
+The `poison` oracle was a silent no-op. It set
+MODULAR_DEBUG_DEVICE_ALLOCATOR=poison, but the debug allocator now
+matches feature tokens exactly and only accepts `poison-all`,
+`uninitialized-poison`, and `out-of-bounds` — bare `poison` matched
+none, so no allocation was ever poisoned. It also never passed
+`--check`, so even a poisoned (NaN) output was never compared against
+the reference and could not be detected.
+
+Send `poison-all` and append `--check`. `poison-all` is the
+allocator-layer tier that fills every `enqueue_create_buffer` device
+buffer the fuzz targets use (the type-aware `uninitialized-poison` tier
+only covers graph-driver tensors, which the harness does not allocate),
+and `--check` makes the case compare its output so a surviving NaN from
+an unwritten/uninitialized element trips a numeric mismatch. Validated
+on B200: rms_norm 4/4 PASS under the corrected oracle.
+
+Also clean up the fuzz README: drop the rot-prone per-file table and the
+overly specific findings log, generalize the oracle docs, and point at
+`--help` for the live target list.
+
+MODULAR_ORIG_COMMIT_REV_ID: 6b9d3abea9b357ca6cabd3bc170ee78bea4658f4
+
+- [CI] Add JSON Schema draft 7 test suite to llm-fuzz
+
+Vendors the JSON Schema Test Suite draft 7 cases (plus its remotes/
+fixtures) into llm-fuzz and adds a json_schema_draft7 scenario that
+drives every schema four ways—tools_auto, tools_required, tools_named,
+and response_format—with an adversarial prompt that instructs the model
+to violate the schema.
+
+Schemas are sent faithfully with no keyword/format filtering or object
+wrapping; external $refs are inlined from the vendored remotes (local #
+pointers and cyclic refs are left in place), and the strict flag is
+deliberately never sent so we measure whether the server constrains
+output on its own.
+
+Each output is validated with the jsonschema Draft7Validator (with
+format promoted to an assertion), and since the server is expected to
+accept every draft 7 schema, any 4xx or non-conforming output is a FAIL,
+while truncation at max_tokens or a declined auto tool call is surfaced
+as INTERESTING rather than failed.
+
+The sweep runs all schema/mode combinations concurrently and closes with
+a post-attack health check to confirm the server survived.
+
+MODULAR_ORIG_COMMIT_REV_ID: 4b08b41729d4857e44e5c06448eeb545d1eab202
+
+- [MAX] Migrate VLM architectures to batch processor.
+
+- Adds per-architecture batch processors for graph and ModuleV3
+vision-language models, plus unified DFlash/MTP variants on top of Kimi
+K2.5 and Gemma4.
+- Moves prepare_initial_token_inputs, vision input stacking, decoder
+position-ID prep, and text-only empty_image_*() placeholders off models
+into processors (or shared helpers in pipelines/lib/*_
+- Wires batch_processor_cls on models and batching= on arch registries;
+vision encoder caches and model config are bound post-load_model
+(bind_model_state, bind_vision_cache, bind_vision_encoder, etc.).
+- Extracts shared VisionStacker and empty-buffer helpers to
+vision_batching.py; adds ModuleV3 language symbolic helpers to
+batch_processor.py.
+
+Arch | Processor | Base / pattern
+-- | -- | --
+gemma3multimodal | Gemma3MultiModalBatchProcessor |
+BatchProcessor + VisionStacker
+gemma3multimodal_modulev3 | Gemma3MultiModalModuleV3BatchProcessor |
+BatchProcessor + get_language_symbolic_inputs()
+gemma4 | Gemma4BatchProcessor | BatchProcessor + VisionEncoderCache bind
+idefics3 | Idefics3BatchProcessor | BatchProcessor + VisionStacker*_
+idefics3_modulev3 | Idefics3ModuleV3BatchProcessor |
+BatchProcessor + modulev3_idefics3_language_symbolic_inputs
+internvl | InternVLBatchProcessor | BatchProcessor + VisionStacker
+kimik2_5 | KimiK2_5BatchProcessor |
+DeepseekV3BatchProcessor + vision encoder cache
+pixtral | PixtralBatchProcessor | BatchProcessor
+pixtral_modulev3 | re-export PixtralBatchProcessor |
+pixtral graph processor
+qwen2_5vl | Qwen2_5VLBatchProcessor |
+BatchProcessor + ParallelArrayOps / 3D RoPE
+qwen3_5 | Qwen3_5BatchProcessor | Llama3BatchProcessor thin wrap*_
+qwen3vl_moe | Qwen3VLMoeBatchProcessor |
+BatchProcessor + deepstack placeholders
+unified_dflash_kimi_k25 | UnifiedDflashKimiK25BatchProcessor |
+KimiK2_5BatchProcessor + DFlash fields*_
+unified_mtp_gemma4 | UnifiedMTPGemma4BatchProcessor |
+BatchProcessor (MTP text path)
+
+MODULAR_ORIG_COMMIT_REV_ID: cf2531340e47de27ffc70d501ec98c7ee0b1cc8a
+
+- [Models] Add MTP (Multi-Token Prediction) support to MiniMax-M3
+
+Adds Multi-Token Prediction (MTP / NextN) support to MiniMax-M3,
+following the
+established DeepSeek-V3 unified-MTP pattern. This is graph support: the
+goal is
+to run the MTP layers end-to-end.
+
+What&#39;s included:
+
+- New `max_private/minimax_m3_mtp/` package:
+- `MiniMaxM3NextN` — the MTP draft module (`enorm`/`hnorm`/`eh_proj` +
+one
+reused M3 transformer block + shared head), single-layer dense KV cache.
+- `UnifiedMTPMiniMaxM3` — composes the target backbone,
+`RaggedTokenMerger`,
+`AcceptanceSampler`, and the draft into one graph (merge -&gt; target -&gt;
+    accept/reject -&gt; shift -&gt; K-step draft loop).
+- `UnifiedMTPMiniMaxM3Model` — unified `PipelineModel`:
+`target.*`/`draft.*`
+    weight split, nested `MultiKVCacheParams{target, draft}`, shared
+    embed/lm_head, graph build.
+- `convert_with_mtp_state_dict` weight adapter mapping the MTP layer to
+the
+    draft module.
+- `MiniMaxM3` backbone output tail generalized to honor `return_logits`
+(VARIABLE/ALL) and `return_hidden_states` via `extract_hs`. The default
+last-token path is unchanged, so the existing M3 pipeline is unaffected.
+- Unified architecture registered and selected under
+`--speculative-method mtp`.
+- Constrained decoding is plumbed through the structured-output bitmask
+path
+  (same mechanism as the DeepSeek unified MTP).
+
+Validation: on B200 the draft module and the unified graph both compile
+and
+execute (finite outputs) against a zero-initialized MTP checkpoint; the
+M3
+backbone CPU regression tests pass with the default path unchanged.
+
+Scope: the unified graph currently supports the dense target path; the
+sparse
+(block-indexer) target path is a follow-up. Token correctness /
+acceptance rate
+are out of scope for this change.
+MODULAR_ORIG_COMMIT_REV_ID: af385cbebe3088c9d2f85e5fc97cc12c58d37851
+
+- [Serve] Emit warnings for tool call conformance errors
+
+Emit warning logs rather than info logs for tool call outputs that
+violate the requested schema.
+
+MODULAR_ORIG_COMMIT_REV_ID: 7ca39e8cd95a163d7289809e7dff8f21e92d8339
+
+- [Kernels] Add a skill for authoring GPU kernel fuzz targets
+
+Document the workflow for adding a new GPU kernel fuzz target in the fuzz
+harness README, covering the per-target CaseSpec + run_one_case contract,
+the three argv modes (list-specs / single / fuzz), oracle and reference
+selection, and the build/registry wiring.
+
+MODULAR_ORIG_COMMIT_REV_ID: 576a590731c7ba02a30d3025596618ccf4781072
+
+- [Docs] Make docstring examples self-contained
+
+MODULAR_ORIG_COMMIT_REV_ID: b77cb69c0d431c0c9d1983de000e4ac7ae6b9ab5
+
+- [Kernels] Add remaining GPU kernel fuzz targets and oracle canaries
+
+Add the rest of the fuzz targets plus the positive-control canaries:
+
+- fuzz_softmax.mojo, fuzz_rms_norm.mojo, fuzz_layer_norm.mojo:
+  reduction / normalization targets (memory-safety + numerical
+  reference; softmax also fuzzes the value distribution and adds a
+  finiteness contract oracle).
+- fuzz_block_scaled_fp4.mojo: block-scaled FP4 SM100 matmul (small_bn),
+  reproducing a live scale-factor out-of-bounds read.
+- fuzz_moe_indices.mojo: moe_create_indices (uninitialized-read oracle).
+- fuzz_topk_sampling.mojo: fused_token_sampling_gpu (validity contract +
+  memory-safety on a fresh output buffer).
+- fuzz_ep_combine.mojo: EP MoE combine send_tokens_back write-offset
+  containment under memcheck/redzone.
+- fuzz_oob_canary.mojo / fuzz_numeric_canary.mojo: positive controls
+  that prove the memory-safety and numerical oracle pipelines catch what
+  the plain diff oracle misses.
+
+MODULAR_ORIG_COMMIT_REV_ID: c35f3332ab54420e37047f167da41238694197da
+
+- [Kernels] Add attention fuzz targets (MHA, MLA decode and prefill)
+
+Add fuzz targets for the attention kernels on top of the harness:
+
+- fuzz_mha_causal.mojo: MHA with CausalPaddingMask (memory-safety +
+  schedule oracles). Reproduces a decode-path hang at the degenerate
+  corner num_keys == 1 and valid_length == 0 (each alone passes).
+- fuzz_mha_nullmask.mojo: non-causal full attention (memory-safety +
+  numerical reference oracle).
+- fuzz_mla_decode.mojo: generic_flare_mla_decode_kv_cache_ragged, the
+  ragged paged-KV MLA decode op (ref/diff/schedule/memcheck across
+  128/64/16 head configs).
+- fuzz_fused_rope_rmsnorm.mojo: the fused MLA RoPE + KV-cache RMSNorm +
+  quantize-write prefill op, with a dual-output numerical reference
+  (dense roped query plus the paged K-cache writes).
+- repro_decode_hang.mojo: standalone minimal repro probe for the
+  decode-path hang.
+
+MODULAR_ORIG_COMMIT_REV_ID: c50fa4a69a2a16622bedcd8ef73ef2ecc5f07938
+
+- [mojo] inject conformance condition during trait conformance check for
+aliases
+
+A `comptime` member with a trailing `where` clause is now accepted as a
+witness for a conditional trait conformance when the conformance
+constraint implies the member&#39;s constraint.
+
+MODULAR_ORIG_COMMIT_REV_ID: 2248d8c5bea9d687912df6374530d3d53aa449f5
+
+- [Kernels] Make top-k+top-p sampler RNG offset batch-invariant
+
+The TopKTopPSamplingFromProbKernel keyed its Philox offset on
+block_idx.x (the physical batch slot) while the seed was already
+per-request (indexed by row_idx). The same request therefore drew a
+different uniform depending on where it landed in the batch, so a single
+request was not reproducible across batch compositions. Key the offset
+on row_idx (the request&#39;s logical row) instead; the per-row seed already
+decorrelates rows. When indices is null row_idx == bx, so unindexed
+batches are unchanged.
+
+The shared-seed top-k-only path (TopKSamplingFromProbKernel) is
+intentionally left as offset=bx: there the seed is a single scalar
+shared across rows, so bx is the per-row decorrelation and is correct.
+
+Adds a regression test that points every output slot at one logical row
+via indices=[0,...,0] with a single seed, so the only per-slot
+difference is block_idx.x, and asserts all slots sample the same token.
+Fails before the fix, passes after.
+
+MODULAR_ORIG_COMMIT_REV_ID: 05069316ffb1ada731e0123fe86fe39033b926d1
+
+- [Kernels] Add GPU kernel fuzzing harness with matmul target
+
+Add a boundary-aware fuzzer for Mojo GPU kernels under
+max/kernels/test/gpu/fuzz/. It searches the kernel input space (shapes,
+value distributions, launch configs) and judges each generated case with
+a per-kernel-class oracle, then shrinks failures to a minimal repro and
+records them in a replayable regression corpus.
+
+This first commit lands the reusable harness plus one example target:
+
+- _fuzz.mojo: reusable Mojo harness (boundary-aware int generator,
+  value-distribution fills incl. NaN/Inf injection, argv helpers).
+- fuzz.py: Python orchestrator (build, enumerate, run each case in an
+  isolated subprocess with a per-case timeout, classify, shrink, and
+  write/replay the regression corpus).
+- fuzz_matmul.mojo: example target for the tuned SM100 bf16 _matmul_gpu
+  (M is the runtime fuzz axis, N/K compile-time) with an fp32-accum
+  naive reference oracle.
+- test_fuzz_fills.mojo: CPU unit test for the harness fills (no GPU).
+- README.md documenting the layers, oracles, and how to add a target.
+
+MODULAR_ORIG_COMMIT_REV_ID: 472bcfc1ba846c5e8c8ad1ec1c457d4c61e6118e
+
+- [pipelines] allow support for detail param in video and image requests.
+
+MODULAR_ORIG_COMMIT_REV_ID: bcc3800825427b69de93dc2c821ef47c3279f3b4
+
+- [Kernels] Stop relying on implicit intra-package imports
+
+In various parts of the kernels libraries, modules and packages were
+relying on implicitly having access to their package&#39;s (and parent
+packages&#39;) decls without having to import them.
+
+In anticipation of the compiler restricting this behaviour in future
+work, this commit flushes out the changes necessary to build the
+libraries.
+
+MODULAR_ORIG_COMMIT_REV_ID: d09f442f13268c7af7abf790c72956a45ea3c616
+
+- [KVCache] Add kv_hash_algo and kv_hash_seed properties to KVCacheParams,
+NFC
+
+MODULAR_ORIG_COMMIT_REV_ID: a95191e9685741e565bb01df823febfab283eeea
+
+- [GPU] Add support for the Steam Deck&#39;s GPU
+Adds support to Mojo and MAX for the Steam Deck&#39;s RDNA2 Vega2 GPU.
+
+MODULAR_ORIG_COMMIT_REV_ID: 65ab749d58c52d141a843c38b561e972d122f552
+
+- [stdlib] Stop relying on implicit intra-package imports
+
+In various parts of the stdlib, modules and packages were relying on
+implicitly having access to their package&#39;s (and parent packages&#39;) decls
+without having to import them.
+
+In anticipation of the compiler restricting this behaviour in future
+work, this commit flushes out the changes necessary to build the stdlib.
+
+MODULAR_ORIG_COMMIT_REV_ID: 5678f784cd154eedd08d19192022259a5f24f114
+
+- [stdlib] Mark `String.__len__` as `@unavailable`
+
+MODULAR_ORIG_COMMIT_REV_ID: 31016fdd9ef7362d7f9c9859f6e64d20f65c9454
+
+- [bazel] Fix duplicate building
+
+This genrule is forcing a full Mojo build with a different config than
+the target. Use the `modular_genrule` rule which is intended to solve
+this problem
+
+MODULAR_ORIG_COMMIT_REV_ID: 97ede5d834d41eb5da8f05e101c63ead6c4c95c0
+
+- [MAX] Migrate _interpreter_ops elementwise callers to unified closure
+
+MODULAR_ORIG_COMMIT_REV_ID: 72ee11e53185c38d5c4c7cf4595993dcf2e427aa
+
+- [docs] DOCS-1464: SIMD.int update across docs
+
+- Update for SIMD.int introduction
+- Audits and fixes any suggestion that Int/UInt is not SIMD
+- Fixes minor grammatical issues found while auditing
+
+MODULAR_ORIG_COMMIT_REV_ID: f0ad2c92d2c3ae6c1996ff986628aa22c7ce1ab4
+
+- [neo-driver] Tie HAL Context handle origin back to self
+
+MODULAR_ORIG_COMMIT_REV_ID: d3e874bea516bbdeb8e1689b42b36c3ca5d764ff
+
+- [docs] Removes SVG assets
+
+SVG assets will be stored statically instead due to Docusaurus
+limitations
+
+MODULAR_ORIG_COMMIT_REV_ID: 3625c6a73f01581882c8d79eb071f77733a1e6d9
+
+- [Kernels] misc cleanup
+
+Annotate some more elementwise kernels seen in current models with trace
+descriptions so they don&#39;t show up as plain &#34;elementwise&#34;. Also cleanup
+some cases where elementwise no longer needs to branch based on is_cpu
+or not (there are more of these to simplify).
+
+MODULAR_ORIG_COMMIT_REV_ID: 9ea9a403fbdf5b60d2452fb66f376fd755e2b2ba
+
+- [DFlash] Remove disable overlap override for DFlash
+
+Overlap scheduling was masking another error that has since been fixed
+but the disable override was not removed.
+
+MODULAR_ORIG_COMMIT_REV_ID: aae9c700d4a3d8edb961daaf75d310930b5fc03b
+
+- [kernels] Remove `capturing` closures from `nn/pad.mojo`
+
+Migrate the legacy `capturing` closure parameter of the internal
+`_do_pad` helper to the unified closure form. The `pad_constant` and
+`pad_reflect` wrappers drop their `@parameter`/`@__copy_capture`
+decorators in favor of explicit capture lists (`{var constant_cast}` and
+`{}`).
+
+Padding behavior is unchanged and the public `pad_constant` /
+`pad_reflect` signatures are unaffected.
+
+MODULAR_ORIG_COMMIT_REV_ID: 508ddca2fc1865c6fdfd7f9fe740993e8264f9d7
+
+- [Release] Pin lockfiles to Mojo 1.0.0b3.dev2026062606, MAX 26.5.0.dev2026062606
+
+- [MAX] Migrate text LLM architectures to batch processor
+
+- Adds per-architecture batch processors for graph and ModuleV3 text
+LLMs, embedding encoders, and unified EAGLE/DFlash Llama3 spec-decode
+models.
+- Moves prepare_initial_token_inputs and preallocated batch buffers off
+models into processors (or shared bases in
+pipelines/lib/interfaces/batch_processor.py).
+- Wires batch_processor_cls on models and batching= on arch registries;
+stateful caches are bound post-load_model (bind_ssm_cache for Mamba,
+bind_conv_cache for LFM2, bind_parallelism_mode for Step-3.5).
+
+Tier | Count | Members
+-- | -- | --
+Custom processors | 1 | mamba
+Moderate override | 5 | lfm2, olmo3, mistral, qwen3, step3p5
+Thin wrapper | 12 | bert, gemma3, gemma3_modulev3, gpt_oss,
+gpt_oss_modulev3, llama3_modulev3, mpnet, mpnet_modulev3,
+qwen3_embedding, qwen3_embedding_modulev3, unified_eagle, unified_dflash
+
+- Overlap pipeline still fills draft_tokens, sampling buffers, and
+structured-output bitmask fields after prepare_initial_token_inputs.
+- Graph compile still uses model.graph_inputs() / nn_model.input_types()
+— processor get_symbolic_inputs unused on those paths except where
+models already delegate (e.g. olmo2_modulev3).
+- ModuleV3 EP runtime buffers stay on the model where applicable, not
+the processor.
+
+MODULAR_ORIG_COMMIT_REV_ID: c44ead2840e2924910ebacb939099c43b2d3deb0
+
+- [CI] Re-enable test_custom_dispatch_simulated_gpu
+
+This test was disabled due to nondeterministic failures observed only on
+the AMD MI355 pool (a ~44% fail rate; NVIDIA was unaffected). The
+simulated-GPU custom-dispatch path runs distributed `rms_norm` across
+two virtual devices on a single physical GPU and compares against a NumPy
+reference.
+
+The underlying nondeterminism has since been resolved by intervening
+changes to the experimental eager-realization and SPMD sharding paths.
+Verified stable on current main:
+
+- MI355: 70/70 runs passed, 0 failures
+- B200:  50/50 runs passed, 0 failures
+
+Removing the skip re-enables the test with no other changes required.
+
+MODULAR_ORIG_COMMIT_REV_ID: e3a68ac494078fb8f52027e6579e68e21cbeb7a3
+
+- [MAX] Migrate DeepSeek architectures to batch processor
+
+- Adds per-architecture batch processors for V2/V3 graph, V2/V3
+modulev3, NextN, Eagle3 (MLA + MHA), and unified MTP DeepSeekV3.
+- Moves prepare_initial_token_inputs and preallocated batch buffers off
+models into processors (or shared bases in
+pipelines/lib/interfaces/batch_processor.py).
+- Wires batch_processor_cls on models and batching= on arch registries;
+EP comm buffers are bound post-load_model via bind_ep_comm_initializer.
+- Merges main: adopts upstream UnifiedSpecDecodeInputs +
+_UnifiedSpecDecodeModelMixin; resolves spec-decode model conflicts by
+keeping batch-processor migration while dropping model-side
+prepare_initial_token_inputs / custom execute.
+
+Arch | Processor | Base
+-- | -- | --
+deepseekV2 | DeepseekV2BatchProcessor |
+SingleReplicaRaggedBatchProcessor
+deepseekV2_modulev3 | DeepseekV2ModuleV3BatchProcessor |
+ModuleV3SingleReplicaBatchProcessor
+deepseekV3_modulev3 | DeepseekV3ModuleV3BatchProcessor | V2 modulev3 (+
+EP symbolic types)
+deepseekV3 / V3_2 | DeepseekV3BatchProcessor | Llama3EpBatchProcessor
+deepseekV3_nextn | DeepseekV3NextNBatchProcessor | V3 (raw context
+lengths)
+eagle3_deepseekV3 | Eagle3*BatchProcessor | V3 + spec-decode wrap
+unified_mtp_deepseekV3 | UnifiedMTPDeepseekV3BatchProcessor | V3 thin
+wrap
+Single replica means data parallel degree (DP) = 1: the scheduler hands
+the batch processor one shard of work, not several.
+
+Overlap pipeline still fills draft_tokens, sampling buffers, and NextN
+hidden_states after prepare_initial_token_inputs.
+
+Follow-ups (not blocking)
+
+- V2 graph compile still uses model.graph_inputs() — processor
+get_symbolic_inputs unused on that path.
+- V3 graph compile still uses nn_model.input_types(), not the processor.
+- ModuleV3 EP runtime buffers stay on the model (_ep_model_inputs), not
+the processor.
+
+MODULAR_ORIG_COMMIT_REV_ID: 44fb4b1192577a4a712fbf0b05090081662f5760
+
+- [docs] Align argument convention naming.
+
+MODULAR_ORIG_COMMIT_REV_ID: b1fcae48a647e49fe6d1471a5bb064f29b1ba748
+
+- [MAX] Handle empty MSA indexer inputs
+Skip the MSA indexer kernel when there are no query tokens so empty
+per-rank
+inputs can safely pass through distributed execution.
+
+MODULAR_ORIG_COMMIT_REV_ID: 05e383da02b33690f4723d00f124f50af839c326
+
+- [MAX] Add Gemma-4 MoE NVFP4 fp8kv smoke recipe
+Adds an fp8 KV-cache smoke recipe for `nvidia/Gemma-4-26B-A4B-NVFP4` and
+wires it into the nightly matrix (single-B200). This covers fp8 KV on
+the NVFP4 MoE path.
+
+MODULAR_ORIG_COMMIT_REV_ID: 3bc1d411dcc8c7a9b528bbccecab430776b1e320
+
+- [stdlib] support stdlib_plugin_name attr on kgen.target
+
+MODULAR_ORIG_COMMIT_REV_ID: a871ab85ed84fcda64f7c2ec998ef0726f5100ea
+
+- [MAX][Models] Cache Gemma4 video vision-encoder outputs
+
+- Routes Gemma4 video through the shared `VisionEncoderCache` already
+used for images, keyed by a pixel-content + grid-dimension hash
+- A repeated clip — across chunks or requests — is a cache hit with no
+re-encode
+- Scatter indices are always rebuilt per chunk (they depend on
+`processed_length`, not re-encoding), so chunked-prefill correctness is
+unaffected
+
+MODULAR_ORIG_COMMIT_REV_ID: 270912bba98b832abb5213bc5aa72355bfe29278
+
+- [stdlib] cleanup: Remove `is_gpu()` conditional logic from
+`unroll_factor` default value
+
+This makes the 3rd `vectorize` overload consistent with the first two,
+which both have `unroll_factor: Int = 1` as the default.
+
+MODULAR_ORIG_COMMIT_REV_ID: 752e01936885c361fac57bca7bde864de61a6c86
+
+- [Kernels] Add grouped allgather support
+
+Adds grouped allgather support for contiguous device groups. A grouped
+allgather partitions participating devices into independent groups,
+gathers only within each group, and returns each device&#39;s group-local
+concatenation instead of concatenating tensors across the full device
+world.
+
+For example, with 8 GPUs and `group_size=4`, GPUs 0-3 gather only among
+themselves, while GPUs 4-7 do the same independently. This enables mixed
+data-parallel and tensor-parallel execution where allgather should stay
+inside each tensor-parallel group.
+
+The grouped kernels reuse separate signal-buffer barrier domains so
+subgroup barriers cannot interfere with full-world collectives that
+share
+the same `Signal` buffers.
+
+MODULAR_ORIG_COMMIT_REV_ID: d5bf0d6fe6e4649a9d3650a6069555ca2538c34b
+
+- [Serve] Improve multimodal preprocessor time-to-first-token
+
+## Type of change
+
+- Performance improvement
+- Bug fix (oversized media was fully downloaded/decoded before
+rejection)
+
+## Motivation
+
+Under high-volume multimodal traffic, time-to-first-token spiked badly
+even
+though most of the offending requests were ultimately *rejected* as too
+large.
+The image/video preprocessor did expensive, CPU-bound work directly on
+the
+server event loop and fully downloaded/decoded media before validating
+its
+size, so a single large payload serialized preprocessing for every
+concurrent
+request.
+
+Three root causes:
+
+1. Base64 `data:` decoding ran synchronously on the event loop. A
+multi-MB
+   payload blocked the loop for every other in-flight request.
+2. Size was validated only *after* the bytes were materialized:
+`http(s)`
+downloads read the whole body before checking length, and `data:` URIs
+were
+   fully base64-decoded before the size check.
+3. Videos had no per-item byte cap or count check at the router;
+oversized or
+   too-many videos were only caught deep in the tokenizer, after a full
+   download.
+
+## What changed
+
+- `resolve_image_from_url` now enforces a per-item byte cap *early*: an
+  `http(s)` download streams in bounded chunks and aborts as soon as the
+advertised `Content-Length` (or the running total) crosses the cap, and
+a
+  `data:` URI is rejected from its base64 length before it is decoded.
+- Large `data:` base64 decoding is offloaded to a worker thread, so it
+no
+longer blocks the event loop; small thumbnails still decode inline to
+skip
+  the thread-pool hop.
+- The OpenAI chat route enforces per-request video count and per-video
+byte
+  limits up front, mirroring the existing image limits.
+- The vision tokenizer now preprocesses request images on a worker
+thread
+  (matching the existing video offload) and reuses the API server&#39;s
+  decode-once result instead of decoding the same bytes a second time.
+- Added two server-level media-resolution settings (`max_bytes` /
+  `MAX_SERVE_MAX_BYTES` and `media_kind` / `MAX_SERVE_MEDIA_KIND`). The
+resolver derives its effective byte cap as the smaller of the per-model
+cap
+and the server cap (0 disables the server cap), and uses `media_kind`
+for the
+default size-limit error label. Both are logged at startup with the rest
+of
+  the media config.
+
+## Testing
+
+Added component-test reproducers (no model in the loop), all passing:
+
+- `test_image_resolution_perf.py`: the headline reproducer
+(`test_event_loop_not_blocked_during_decode`) dead-locks and fails if
+the
+decode runs on the event loop, and passes only when it is offloaded.
+Plus
+tests for decode-thread placement, reject-before-decode for `data:`
+URIs,
+`http(s)` early-abort via `Content-Length` and via the streamed total,
+the
+route-level video count/byte caps, and the new `Settings.max_bytes`
+ceiling /
+  `Settings.media_kind` default.
+- `test_vision_offload.py`: the image preprocessing decode-once contract
+(pre-decoded vs raw-bytes paths produce byte-identical output) and the
+video
+  cap wiring.
+
+Existing `test_file_uri`, `test_config`, `test_openai_routes`,
+`test_openai_request`, and the vision tokenizer/processor suites still
+pass.
+
+MODULAR_ORIG_COMMIT_REV_ID: 1432fbf23e6d671fb9fc8f00cf9f3defeb4a2f06
+
+- [stdlib] Add `String`/`StringSlice` default grapheme iteration
+
+MODULAR_ORIG_COMMIT_REV_ID: 985011f089c0f342e0c10edc9e28560f81db3c37
+
+- [MAX] Delete some dead code, NFC
+
+MODULAR_ORIG_COMMIT_REV_ID: f23041f5e7b4ed629e7f821d1c9af0aa30c544d0
+
+- [docs] DOCS-2130: Update design for cheatsheet page
+
+- Creates more effective page layout
+- Fixes boundary effects on sheets that don&#39;t work in previews
+- Groups cheatsheets into assets subfolders
+- Updates tooling (with boundary effects fixes)
+- All content refreshed to current tooling
+
+MODULAR_ORIG_COMMIT_REV_ID: e8c01c5c5a6f3b7908d3c9b0000336a8d9a0b52f
+
+- [Models][CI] Add full MiniMax-M3-MXFP8 to logit verification
+
+MODULAR_ORIG_COMMIT_REV_ID: 36bbcc957a243c40271bc2bffb87bc0642b5f85c
+
+- [CI] Switch golden nightly gating from exclusion list to inclusion list
+
+MODULAR_ORIG_COMMIT_REV_ID: 8a8e9b70d3da0899a3f6acf693693a9961a1af7d
+
+- [bazel] Remove stale SDK/integration-test visibility from minimax_m3
+fixture
+
+The //SDK/integration-test package no longer exists. Remove the dangling
+//SDK/integration-test:__subpackages__ visibility entry that a recently
+added minimax_m3_reasoning_split test fixture reintroduced, so the
+gazelle
+lint passes again.
+
+MODULAR_ORIG_COMMIT_REV_ID: da5d806d1f0421225242258e618afb57a52f3adb
+
+- [stdlib] Add `DeletableAllocation ` to `alloc` module.
+
+In order to move the rest of the codebase and kernels over to use the
+new expliclity-destroyed `Allocation` handle, we need to introduce a
+self-managed `Allocation` type which will `dealloc` on destruction.
+Notably, this is necessary as many places that use `alloc/free` (to be
+eventually replaced by `alloc/dealloc`) have several cases of implicit
+control flow through `raises` functions. Since the `Alloction` handle
+_must be destroyed_, we would need to add multiple `try/except` blocks
+everywhere to ensure the allocation is freed.
+This solution give us a `__del__` based `DeletableAllocation ` type
+which will ensure the data is still free (even in the `raises` path)
+without littering the code with `try/except` blocks.
+
+MODULAR_ORIG_COMMIT_REV_ID: c6ed47cd5905a1c3e245a14a30a4d80018c4e775
+
+- [CI] Smoke test&#39;s &#34;get_server_cmd&#34; should not mutate os.environ
+
+This PR makes the `get_server_cmd` pure. It now returns the wanted
+environment alongside the command.
+As we start to depend more on the smoke tests, this is starting to
+become a real issue rather than a just being weird.
+
+MODULAR_ORIG_COMMIT_REV_ID: 2fde5859e83eaff1349ef6889740f94fb7bd61a5
+
+- [driver] Restructure hal interfaces
+
+MODULAR_ORIG_COMMIT_REV_ID: c9dd443fd022f47715dab109b4624ca3f540ce5e
+
+- [SDLC] Hotfix for CI slowed down on CPU side from Interpreter Op Warming
+
+* CPU interpreter ops will also now pre-warm.
+
+MODULAR_ORIG_COMMIT_REV_ID: 2fd54ccbd13f947afb91749ee0bb0f92f291f11f
+
+- [Kernels] Add grouped reduce-scatter support
+
+Adds grouped reduce-scatter support for contiguous device groups. A
+grouped reduce-scatter partitions the participating devices into
+independent groups, runs a normal reduce-scatter within each group, and
+returns one shard per device from that device&#39;s group rather than
+reducing across the full device world.
+
+For example, with 8 GPUs and `group_size=4`, GPUs 0-3 reduce and scatter
+only among themselves, while GPUs 4-7 do the same independently. This
+enables mixed data-parallel and tensor-parallel execution where
+collectives should stay inside each tensor-parallel group.
+
+Updates the `Signal` buffer layout with a new domain dimension for
+barrier state.. The multi-device barrier implementation needs separate
+sets of signal-variable for collectives with different group sizes.
+Otherwise, running grouped and full collectives Interleavedly can leave
+the signal variables out of sync.
+
+MODULAR_ORIG_COMMIT_REV_ID: a909f4ef06812d424343665270bcd4a3f4c6b098
+
+- [MAX] Add reasoning_split request field for MiniMax M3
+
+Adds the `reasoning_split` chat-completion request field for MiniMax M3.
+
+- Defaults to `true` → keeps MAX&#39;s existing behavior (thinking in the
+dedicated `reasoning` field, answer-only `content`). Zero change for
+existing runs.
+- `false` → folds the thinking back into `content` wrapped in
+`&lt;think&gt;...&lt;/think&gt;`, matching the official MiniMax M3 endpoint, with no
+separate reasoning field returned.
+
+The change is a pure response-formatting operation in the OpenAI
+chat-completion output path (streaming + non-streaming). It is gated to
+MiniMax M3 (identified by its reasoning parser) and is a no-op for every
+other model. A prior placeholder validator that hard-rejected `false` is
+removed.
+
+MODULAR_ORIG_COMMIT_REV_ID: f2f375115df46c7173f2db31b0638d5b83d402f3
+
+- [stdlib] Adjusting memory settings
+
+max/kernels/test/gpu/basics/BUILD.bazel
+max/kernels/test/gpu/comm/BUILD.bazel
+max/kernels/test/gpu/compile/BUILD.bazel
+max/kernels/test/gpu/device_context/BUILD.bazel
+max/kernels/test/gpu/examples/BUILD.bazel
+max/kernels/test/gpu/kv_cache/BUILD.bazel
+max/kernels/test/gpu/layout/BUILD.bazel
+max/kernels/test/gpu/linalg/BUILD.bazel
+max/kernels/test/gpu/linalg/matmul_blackwell_iterative/BUILD.bazel
+max/kernels/test/gpu/memory/BUILD.bazel
+max/kernels/test/gpu/nn/BUILD.bazel
+max/kernels/test/gpu/quantization/BUILD.bazel
+max/kernels/test/gpu/state_space/BUILD.bazel
+
+MODULAR_ORIG_COMMIT_REV_ID: ad566af0a10a9edcbafb50753d20c7c6de609edc
+
+- [GC] Enable compute epilogue fusion for block scaled matmuls (MXFP8,
+NVFP4)
+
+[GC] Enable compute epilogue fusion for block scaled matmuls (MXFP8,
+NVFP4)
+
+MODULAR_ORIG_COMMIT_REV_ID: 060a33915435b35b24a5e81918509471a291d11a
+
+- [stdlib] Avoid `comptime for` relying on resolvability of current plugin
+
+MODULAR_ORIG_COMMIT_REV_ID: cba3005ebcdd593a9d2a0a3b63662de7b155a064
+
+- [MAX] Move serve optimization flags to SupportedArchitecture (#89882)
+
+MODULAR_ORIG_COMMIT_REV_ID: a08d46f98e7327c4ab2979806691d2b33d191e4d
+
+- [Kernels][AMD] use default blocking heuristic for float32
+
+Use the default blocking heuristic for float32 inputs instead of a fixed
+block size. This improves the kernel time for small shapes such as
+160x128x6144 from 500us-&gt;50us.
+
+MODULAR_ORIG_COMMIT_REV_ID: 23cfdca6c8549e4f1ed6333630fbed95f958f555
+
+- [Kernels] SM100 matmul: k_group descriptor hoist and mbarrier NANOSLEEP
+
+Combine two SM100 bf16 matmul changes plus the small-M tuning they were
+developed against.
+
+- MMA descriptor k_group hoist (mma.mojo, matmul_kernels.mojo): keep the
+MMA operand descriptor register-resident and advance it by a
+compile-time
+stride across the k_group loop instead of rebuilding it on every k-group
+acquire. Reduces static instruction count (~8%) on k_group_size&gt;1
+configs.
+
+- mbarrier wait suspends with NANOSLEEP instead of busy-spinning on the
+  pipeline mbarrier (pipeline.mojo, tile_pipeline.mojo, tmem.mojo).
+
+- Pipeline stages capped at 16 (config.mojo), epilogue wait_load() moved
+to
+  the final stage only (output_writer.mojo), and an M=32/N=1536 swapAB
+  tuning config (tuning_configs.mojo).
+
+Perf (B200, bf16, nsys steady-state):
+- The descriptor hoist and the NANOSLEEP change are wall-clock-neutral
+at
+  the shapes measured (M=256/N=4608, k_group=1: hoist -0.2%, NANOSLEEP
++0.2%, both within run-to-run noise). The hoist trims static
+instructions
+but is shadowed behind the MMA/TMA latency chain; NANOSLEEP is emitted
+but
+the wait is not a dynamic hot spin, so wall-clock is unchanged. These
+are
+  correctness/codegen-quality changes, not wall-clock wins on their own.
+- The 16-stage cap is a small win at M=8/N=4096 (5779 -&gt; 5660 ns,
+-2.0%).
+- No shapes regress.
+
+MODULAR_ORIG_COMMIT_REV_ID: 1e6539c0bce5bfb836bd793e65f20c9573e1f73d</div>
+</div>
+
+<a href="../project/modular_modular.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
