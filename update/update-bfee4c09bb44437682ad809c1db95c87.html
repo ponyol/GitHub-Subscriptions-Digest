@@ -1,0 +1,2861 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (21 commits) - kagent-dev/kagent - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (21 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/kagent-dev_kagent.html">kagent-dev/kagent</a> /
+    Updates in main (21 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/kagent-dev_kagent.html">kagent-dev/kagent</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-02 20:57 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/kagent-dev/kagent/commits/main" target="_blank">https://github.com/kagent-dev/kagent/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>The updates introduce comprehensive database upgrade/rollback compatibility tests and patch critical security vulnerabilities. Helm chart image reference generation has been fixed across multiple components, and agent runtime stability is improved with better Substrate compatibility and A2A client timeout configuration. Other notable changes include enhanced SSO session management, migration of AI model providers to SDKs, and various dependency and CI workflow updates to improve overall system reliability and developer experience.
+
+---
+
+**Russian translation:**
+
+Обновления включают комплексные тесты совместимости обновления/отката базы данных и устраняют критические уязвимости безопасности. Исправлена генерация ссылок на образы в Helm-чартах для нескольких компонентов, а стабильность выполнения агентов улучшена за счет лучшей совместимости с Substrate и настраиваемого таймаута клиента A2A. Также были улучшены управление сессиями SSO и миграция провайдеров ИИ-моделей на SDK, а также внесены различные обновления зависимостей и рабочих процессов CI для повышения общей надежности системы и удобства разработки.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Add database upgrade and rollback compatibility tests (#2084)
+
+## Description
+
+Closes: #1637
+
+Adds automated coverage that a Helm upgrade from a prior release to the
+current build is safe: migrations apply cleanly, existing data survives,
+the resulting schema matches a fresh install, and the migrations reverse
+cleanly. Also covers the rolling-deploy window where prior-release pods
+serve against an already-migrated schema, and — at each point in the
+upgrade/rollback cycle — drives a real agent invocation through the
+controller so kagent&#39;s own query paths are exercised, not just raw SQL.
+
+## Tests
+
+- **Upgrade round-trip** (`TestUpgrade`, gated by `RUN_UPGRADE_TESTS`):
+installs the prior release, seeds representative data, upgrades to the
+current build, then asserts the controller rolls out without crashing,
+migrations reach the target version cleanly, the seeded data survives,
+the upgraded schema is identical to a clean install, and reversing the
+migrations restores the prior schema with data intact. It then redeploys
+the previous release over the migrated schema to confirm the old binary
+boots and serves rather than crash-looping (ahead-schema tolerance).
+- **Rolling compatibility** (`TestRollingUpgradeCompatibility`, gated by
+`RUN_ROLLING_UPGRADE_TESTS`): runs the upgrade with two controller
+replicas and verifies a prior-release pod can still read and write while
+the new image rolls out. It runs regardless of whether migrations
+changed — the image swap alone can break a rolling deploy — and
+additionally exercises the old-code/new-schema window when the build
+adds migrations.
+- **Version-matched invocation**: at each state — post-upgrade,
+old-code-against-the-new-schema, and post-rollback — a representative
+invoke e2e slice (`TestE2EInvokeInlineAgent`) runs from the tree whose
+version matches the serving controller (the previous-release slices from
+a git worktree at that release&#39;s tag), so real deploy/invoke/read paths
+are exercised end to end. Self-skips when the harness (mock-LLM host /
+previous-release worktree) isn&#39;t set up, so a bare `go test` still runs
+the DB round-trip.
+
+## Targets
+
+Upgrade-from targets are chosen per branch, mirroring how releases ship
+(a CI matrix; a leg is skipped when it doesn&#39;t apply):
+
+- on `main` (building the next minor): the previous minor line&#39;s latest
+patch.
+- on a release branch (building a patch): the same line&#39;s last patch,
+and the previous minor&#39;s latest.
+
+The resolved upgrade-from version is printed before the build. Override
+locally with `UPGRADE_FROM_VERSION`.
+
+## Running locally
+
+Requires a kind cluster, then:
+
+```
+make create-kind-cluster
+make run-upgrade-tests
+```
+
+or
+
+```
+make create-kind-cluster
+make run-rolling-upgrade-tests
+```
+
+A run leaves the database migrated, so recreate the cluster between
+runs.
+
+## Notes
+
+- The previous install pins the bundled Postgres image to whatever the
+upgrade-from release&#39;s own install target shipped, so the baseline
+matches how that release actually runs rather than a hardcoded guess.
+- Query-level backward compatibility (a prior release&#39;s queries against
+the new schema) is covered separately by a static check in #2085.
+
+---------
+
+Signed-off-by: Jeremy Alvis &lt;jeremy.alvis@solo.io&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- fix(helm): omit empty repository segment in bundled image path (#2120)
+
+## What
+
+Fix the bundled-PostgreSQL image helper so an empty `image.repository`
+renders a valid reference (`registry/name:tag`) instead of
+`registry//name:tag`, which is an invalid image reference and sends the
+pod into `ImagePullBackOff`. I observed this on AKS with Helm Chart
+0.9.9.
+
+## Why
+
+`templates/_helpers.tpl` builds the image with a `printf` that always
+emits the same `registry/repository/name:tag` shape — it writes a `/`
+between every segment whether or not that segment is empty:
+
+```gotemplate
+{{- define &#34;kagent.postgresql.image&#34; -}}
+{{- $pg := .Values.database.postgres.bundled -}}
+{{- printf &#34;%s/%s/%s:%s&#34; $pg.image.registry $pg.image.repository $pg.image.name $pg.image.tag -}}
+{{- end -}}
+```
+
+`printf &#34;%s/%s/%s:%s&#34;` always inserts a `/` between segments, so an
+empty `repository` (a valid configuration for images that live at the
+root of a registry) leaves an empty path segment and renders a double
+slash:
+
+```
+docker.io//postgres:18.3-alpine   # invalid reference -&gt; ImagePullBackOff
+```
+
+The `kagent.postgresql.image` helper is unchanged across `v0.9.9`,
+`v0.9.10`, `v0.10.0-beta1`, and `main` (the `printf` line is identical
+at each), so the issue affects the current stable line and the next
+(`v0.10.x`) release line.
+
+## Fix
+
+Build the path as a list, drop empty segments with `compact`, then
+`join` with `/`. This needs no `if`/`else`: an empty `registry` and/or
+`repository` is simply left out, so leaving `repository` blank produces
+a valid reference (the supported way to pull an image from the root of a
+registry) instead of a broken one:
+
+```gotemplate
+{{- define &#34;kagent.postgresql.image&#34; -}}
+{{- $pg := .Values.database.postgres.bundled -}}
+{{- $parts := compact (list $pg.image.registry $pg.image.repository $pg.image.name) -}}
+{{- printf &#34;%s:%s&#34; (join &#34;/&#34; $parts) $pg.image.tag -}}
+{{- end -}}
+```
+
+Rendered results:
+
+| registry | repository | name | result |
+|---|---|---|---|
+| `docker.io` | `library` | `postgres` |
+`docker.io/library/postgres:tag` (unchanged) |
+| `docker.io` | `&#34;&#34;` | `postgres` | `docker.io/postgres:tag` (fixed) |
+| `&#34;&#34;` | `&#34;&#34;` | `postgres` | `postgres:tag` |
+
+## Tests
+
+Added one case to `helm/kagent/tests/postgresql_test.yaml` covering the
+empty-repository path (developed test-first). The existing `default
+pgvector image` and `custom image` tests already guard the non-empty
+path, so no regression test was
+duplicated.
+
+```yaml
+  - it: should omit empty repository segment in image
+    template: postgresql.yaml
+    documentIndex: 2
+    set:
+      database:
+        postgres:
+          bundled:
+            image:
+              registry: docker.io
+              repository: &#34;&#34;
+              name: postgres
+              tag: &#34;18.3-alpine&#34;
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: docker.io/postgres:18.3-alpine
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: &#34;//&#34;
+```
+
+The test fails without this change (`docker.io//postgres:18.3-alpine`)
+and passes with it — revert the `_helpers.tpl` hunk to reproduce.
+
+## How to verify
+
+```bash
+make helm-version                                   # generate Chart.yaml from template
+helm unittest helm/kagent                           # full suite green (incl. new case)
+helm lint helm/kagent
+
+# test-independent reproduction:
+helm template t helm/kagent \
+  --set database.postgres.bundled.image.repository=&#34;&#34; | grep image:
+# before: docker.io//postgres:18.3-alpine
+# after:  docker.io/postgres:18.3-alpine
+```
+
+## Scope
+
+Limited to the bundled-PostgreSQL helper (`kagent.postgresql.image`),
+where the `//` template bug is confirmed. The doc2vec/QueryDoc MCP image
+lives in a separate chart (`helm/tools/querydoc`) and is assembled
+controller-side from `IMAGE_REGISTRY` / `IMAGE_REPOSITORY` / `IMAGE_TAG`
+env vars, so it is intentionally **not** changed here. If it exhibits
+the same `//` symptom at deploy time, it should be addressed separately
+(likely in the controller join logic), not in this chart.
+
+A backport to the `v0.9.x` stable line may be worthwhile since the bug
+is present there — maintainers&#39; call.
+
+## Checklist
+
+- [x] Commit is DCO signed-off (`git commit -s`).
+- [x] `helm unittest helm/kagent` green; `helm lint helm/kagent` clean.
+- [x] Diff limited to `templates/_helpers.tpl` and
+`tests/postgresql_test.yaml`
+(generated `Chart.yaml`/`Chart.lock`/`charts/*.tgz`/`dist/` excluded).
+- [x] Test fails without the fix, passes with it.
+
+Signed-off-by: Mike Spinks &lt;mikespinks@gmail.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- fix(go-adk): openai embeddings generation (#2132)
+
+Close #2131 
+
+The main fix is to remove `HTTPClient` passed to embedding client so
+that it creates its own and attaches auth header properly (one line
+fix).
+
+However, since we&#39;re here already, I&#39;m also moving OpenAI, Azure, and
+Ollama providers to use their respective SDK like Bedrock and Gemini
+instead of doing direct HTTP calls to the endpoints. This ensures better
+long-term stability and maintainability. Also improves some test
+coverage + refactoring
+
+---------
+
+Signed-off-by: Jet Chiang &lt;pokyuen.jetchiang-ext@solo.io&gt;
+
+- fix(security): patch CRITICAL/HIGH CVEs in golang-adk-full and app images (#2133)
+
+## Summary
+
+Fixes CRITICAL and HIGH severity vulnerabilities detected by Trivy in
+the `Scan images` CI workflow.
+
+**golang-adk-full image:**
+- `shell-quote` **CVE-2026-9277** (CRITICAL) — Arbitrary code execution;
+pin to `1.8.4` alongside the existing `lodash-es` override in
+`go/Dockerfile.full`
+
+**app image:**
+- `PyJWT` **CVE-2026-48526** (HIGH) — Authentication bypass via forged
+tokens; bump constraint from `&gt;=2.12.0` → `&gt;=2.13.0` in `agentsts-core`,
+`agentsts-adk`, and workspace `constraint-dependencies`; lock resolves
+to `2.13.0`
+- `pyarrow` **CVE-2026-25087** (HIGH) — Denial of Service via
+Use-After-Free; add workspace constraint `&gt;=23.0.1`; lock resolves to
+`24.0.0`
+
+**Remaining / blocked:**
+- `starlette` CVE-2026-48818 + CVE-2026-54283 (HIGH) — Fix requires
+starlette `&gt;=1.3.1` (1.x), but `google-adk&gt;=1.28.1,&lt;2` pins
+`starlette&lt;1.0.0`. A follow-up PR upgrading `agentsts-adk` to
+`google-adk&gt;=2` is needed to fully close these.
+
+## Changes
+
+| File | Change |
+|------|--------|
+| `go/Dockerfile.full` | Add `shell-quote@1.8.4` to sandbox-runtime npm
+overrides |
+| `python/packages/agentsts-core/pyproject.toml` | `PyJWT&gt;=2.12.0` →
+`&gt;=2.13.0` |
+| `python/packages/agentsts-adk/pyproject.toml` | `PyJWT&gt;=2.12.0` →
+`&gt;=2.13.0` |
+| `python/pyproject.toml` | Add `pyjwt&gt;=2.13.0` and `pyarrow&gt;=23.0.1` to
+`constraint-dependencies` |
+| `python/uv.lock` | pyjwt `2.12.1`→`2.13.0`, pyarrow `21.0.0`→`24.0.0`,
+starlette `0.50.0`→`0.52.1` |
+
+## Test plan
+
+- [ ] `Scan images` CI passes for `golang-adk-full` (shell-quote CVE
+cleared)
+- [ ] `Scan images` CI passes for `app` (PyJWT + pyarrow CVEs cleared)
+- [ ] All existing unit/integration tests pass
+
+Signed-off-by: Jaison Paul &lt;paul.jaison@gmail.com&gt;
+
+- refactor: update byo sample base images to work with substrate (#2121)
+
+The existing `trixie-slim` image which uses glibc `2.41` runs into a
+segfault when running on substrate. This is due to gvisor unable to
+restore a process linked to glibc `2.41` but works against bookworm&#39;s
+glibc `2.36`. This PR updates the sample crew-ai, and langgraph BYO
+sample dockerfiles to use a base image confirmed to work with substrate
+as well as enables the `uv-managed` preference which statically linked
+libpython which is not corrupted on substrate restore.
+
+**Testing**
+- Deployed and tested all variations of the sample BYO agents as `Agent`
+and `SandboxAgent`.
+
+---------
+
+Signed-off-by: JM Huibonhoa &lt;jm.huibonhoa@solo.io&gt;
+
+- fix(helm): support omitting image.registry in querydoc chart (#2124)
+
+## What
+
+Make the querydoc (doc2vec) chart render a valid image reference when
+`image.registry` is left empty, so the registry can be omitted (e.g. to
+pull from Docker Hub or a mirror) without producing a leading-slash,
+unpullable reference.
+
+## Why
+
+The image is built inline in `templates/deployment.yaml`:
+
+```gotemplate
+image: &#34;{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}&#34;
+```
+
+The `/` between registry and repository is written unconditionally. If
+`image.registry` is set to `&#34;&#34;`, the result has a leading slash and is
+not a valid image reference, so the pod enters `ImagePullBackOff`:
+
+```
+/kagent-dev/doc2vec/mcp:1.1.10     # invalid reference
+```
+
+There is currently no way to omit the registry and let the container
+runtime resolve the repository against its default registry / a
+configured mirror.
+
+Omitting the registry is a configuration users legitimately need:
+
+- **Docker Hub.** A bare `org/image` reference resolves to Docker Hub,
+so users mirroring the image there want `kagent-dev/doc2vec/mcp:tag`,
+not `ghcr.io/...`.
+- **Air-gapped / mirrored environments.** Registry mirrors are
+configured at the container runtime, which rewrites the host — so chart
+values should carry only `repository:tag`.
+- **Registry rewriting.** Admission controllers (e.g. Kyverno) prepend
+an internal registry, so users leave `registry: &#34;&#34;`.
+- **Consistency.** Other charts let you omit the registry; querydoc
+silently breaks with `ImagePullBackOff`, which reads like a bug.
+
+&gt; Note: this is a different issue from the bundled-PostgreSQL
+`registry//name:tag`
+&gt; double-slash bug (#2120). That helper uses a 3-segment
+`registry/repository/name:tag`
+&gt; shape; querydoc uses a 2-segment `registry/repository:tag` shape with
+no separate
+&gt; image name, so the failure here is a leading slash from an empty
+registry, not a
+&gt; double slash from an empty repository. They are fixed independently.
+
+## Fix
+
+Introduce a `querydoc.image` helper (the chart currently has none) that
+builds the path from non-empty segments via `compact` + `join`, and call
+it from the deployment:
+
+```gotemplate
+{{- define &#34;querydoc.image&#34; -}}
+{{- $img := .Values.image -}}
+{{- $parts := compact (list $img.registry $img.repository) -}}
+{{- printf &#34;%s:%s&#34; (join &#34;/&#34; $parts) ($img.tag | default .Chart.AppVersion) -}}
+{{- end -}}
+```
+
+```gotemplate
+# templates/deployment.yaml
+image: &#34;{{ include &#34;querydoc.image&#34; . }}&#34;
+```
+
+Rendered results:
+
+| registry | repository | tag | result |
+|---|---|---|---|
+| `ghcr.io` | `kagent-dev/doc2vec/mcp` | `1.1.10` |
+`ghcr.io/kagent-dev/doc2vec/mcp:1.1.10` (unchanged) |
+| `ghcr.io` | `kagent-dev/doc2vec/mcp` | `v2.0.0` |
+`ghcr.io/kagent-dev/doc2vec/mcp:v2.0.0` (unchanged) |
+| `&#34;&#34;` | `kagent-dev/doc2vec/mcp` | `1.1.10` |
+`kagent-dev/doc2vec/mcp:1.1.10` (fixed) |
+
+## Tests
+
+Added one case to `helm/tools/querydoc/tests/deployment_test.yaml` for
+the empty-registry path (developed test-first). The existing &#34;should
+have correct container image&#34; and &#34;should use custom image tag when set&#34;
+tests already guard the default and custom-tag paths, so no regression
+test was duplicated.
+
+```yaml
+  - it: should omit empty registry segment in image
+    template: deployment.yaml
+    set:
+      image:
+        registry: &#34;&#34;
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: kagent-dev/doc2vec/mcp:1.1.10
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: &#34;^/&#34;
+```
+
+The test fails without this change (`/kagent-dev/doc2vec/mcp:1.1.10`)
+and passes with it — revert the `deployment.yaml`/`_helpers.tpl` hunks
+to reproduce.
+
+## How to verify
+
+```bash
+make helm-tools                                     # generate querydoc Chart.yaml
+helm unittest helm/tools/querydoc                   # full suite green (incl. new case)
+helm lint helm/tools/querydoc
+
+# test-independent reproduction:
+helm template t helm/tools/querydoc --set image.registry=&#34;&#34; | grep image:
+# before: /kagent-dev/doc2vec/mcp:1.1.10
+# after:  kagent-dev/doc2vec/mcp:1.1.10
+```
+
+## Scope
+
+Limited to the querydoc chart&#39;s image construction. Empty `repository`
+is not made valid here, because the repository carries the full image
+path and there is no separate image-name segment — omitting it leaves no
+image to pull. This PR only makes
+`image.registry` optional.
+
+## Checklist
+
+- [x] Commit is DCO signed-off (`git commit -s`).
+- [x] `helm unittest helm/tools/querydoc` green; `helm lint
+helm/tools/querydoc` clean.
+- [x] Diff limited to `templates/_helpers.tpl`,
+`templates/deployment.yaml`, and
+      `tests/deployment_test.yaml` (generated chart files excluded).
+- [x] Test fails without the fix, passes with it.
+
+Signed-off-by: Mike Spinks &lt;mikespinks@gmail.com&gt;
+
+- fix(helm): support omitting image.registry in grafana-mcp chart (#2125)
+
+## What
+
+Make the grafana-mcp chart render a valid image reference when
+`image.registry` is left empty, so the registry can be omitted (e.g. to
+pull from a mirror or let the runtime resolve the default registry)
+without producing a leading-slash, unpullable reference.
+
+## Why
+
+The image is built inline in `templates/deployment.yaml`:
+
+```gotemplate
+image: &#34;{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}&#34;
+```
+
+The `/` between registry and repository is written unconditionally. If
+`image.registry` is set to `&#34;&#34;`, the result has a leading slash and is
+not a valid image reference, so the pod enters `ImagePullBackOff`:
+
+```
+/grafana:latest     # invalid reference
+```
+
+There is currently no way to omit the registry and let the container
+runtime resolve the repository against its default registry / a
+configured mirror.
+
+Omitting the registry is a configuration users legitimately need:
+
+- **Air-gapped / mirrored environments.** Registry mirrors are
+configured at the container runtime, which rewrites the host — so chart
+values should carry only `repository:tag`.
+- **Registry rewriting.** Admission controllers (e.g. Kyverno) prepend
+an internal registry, so users leave `registry: &#34;&#34;`.
+- **Consistency.** Other charts let you omit the registry; grafana-mcp
+silently breaks with `ImagePullBackOff`, which reads like a bug.
+
+&gt; Note: the default `registry: mcp` is intentional and unchanged —
+`mcp/grafana` resolves to `docker.io/mcp/grafana` (Docker Hub&#39;s `mcp`
+namespace). This PR only makes an *empty* registry valid; the default
+path still renders `mcp/grafana:latest`.
+&gt; This is the same 2-segment `registry/repository:tag` leading-slash
+shape as the querydoc chart (#2124), and distinct from the
+bundled-PostgreSQL `registry//name:tag` double-slash bug (#2120), which
+uses a 3-segment shape. All fixed independently.
+
+## Fix
+
+Introduce a `grafana-mcp.image` helper (the chart currently has none)
+that builds the path from non-empty segments via `compact` + `join`, and
+call it from the deployment:
+
+```gotemplate
+{{- define &#34;grafana-mcp.image&#34; -}}
+{{- $img := .Values.image -}}
+{{- $parts := compact (list $img.registry $img.repository) -}}
+{{- printf &#34;%s:%s&#34; (join &#34;/&#34; $parts) $img.tag -}}
+{{- end -}}
+```
+
+```gotemplate
+# templates/deployment.yaml
+image: &#34;{{ include &#34;grafana-mcp.image&#34; . }}&#34;
+```
+
+Rendered results:
+
+| registry | repository | tag | result |
+|---|---|---|---|
+| `mcp` | `grafana` | `latest` | `mcp/grafana:latest` (unchanged) |
+| `&#34;&#34;` | `grafana` | `latest` | `grafana:latest` (fixed) |
+
+## Tests
+
+Added two cases to `helm/tools/grafana-mcp/tests/deployment_test.yaml`
+(developed test-first): a default-image regression guard (the suite had
+no image assertion), and the empty-registry path.
+
+```yaml
+  - it: should render the default container image
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: mcp/grafana:latest
+
+  - it: should omit empty registry segment in image
+    template: deployment.yaml
+    set:
+      image:
+        registry: &#34;&#34;
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: grafana:latest
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: &#34;^/&#34;
+```
+
+The empty-registry test fails without this change (`/grafana:latest`)
+and passes with it — revert the `deployment.yaml`/`_helpers.tpl` hunks
+to reproduce.
+
+## How to verify
+
+```bash
+make helm-tools                                       # generate grafana-mcp Chart.yaml
+helm unittest helm/tools/grafana-mcp                  # full suite green (incl. new cases)
+helm lint helm/tools/grafana-mcp
+
+# test-independent reproduction:
+helm template t helm/tools/grafana-mcp --set image.registry=&#34;&#34; | grep image:
+# before: /grafana:latest
+# after:  grafana:latest
+```
+
+## Scope
+
+Limited to the grafana-mcp chart&#39;s image construction. Empty
+`repository` is not made valid here — omitting it leaves no image to
+pull. This PR only makes `image.registry` optional.
+
+## Checklist
+
+- [x] Commit is DCO signed-off (`git commit -s`).
+- [x] `helm unittest helm/tools/grafana-mcp` green; `helm lint
+helm/tools/grafana-mcp` clean.
+- [x] Default image still renders `mcp/grafana:latest` (regression
+guard).
+- [x] Diff limited to `templates/_helpers.tpl`,
+`templates/deployment.yaml`, and `tests/deployment_test.yaml` (generated
+chart files excluded).
+- [x] Test fails without the fix, passes with it.
+
+Signed-off-by: Mike Spinks &lt;mikespinks@gmail.com&gt;
+
+- fix(go-adk): extract system prompt from genai.GenerateContentConfig in Ollama and Bedrock model providers (#2118)
+
+Closes #2114 
+
+Updated current unit tests, manually tested with Bedrock and Ollama
+models.
+
+---------
+
+Signed-off-by: Jet Chiang &lt;pokyuen.jetchiang-ext@solo.io&gt;
+
+- Trigger CI workflows on all release/** branches (#2117)
+
+## Description
+
+Switch the workflow branch filters from hardcoded release branch names
+to a `release/**` glob, so CI runs on every release branch instead of
+only the one that happened to be current when the filter was last
+edited.
+
+## Why
+
+The filters hardcoded `release/v0.7.x` (or were `main`-only).
+`release/v0.7.x` is long superseded, so PRs targeting current release
+branches — e.g. `release/v0.9.x` — triggered **no CI** (only
+branch-agnostic checks like DCO/labelers/snyk ran). A `release/**` glob
+matches every current and future release branch, so this won&#39;t go stale
+on the next release cut.
+
+## Changes
+
+`branches` filters updated to `[main, &#34;release/**&#34;]`:
+
+- `ci.yaml` — push + pull_request (was `[main, release/v0.7.x]`)
+- `ui-chromatic.yaml` — push + pull_request (was `[main,
+release/v0.7.x]`)
+- `migration-immutability.yaml` — pull_request (was `[main]`)
+- `sqlc-generate-check.yaml` — pull_request (was `[main]`)
+
+No job logic changed — only the trigger branch filters. The glob still
+matches `release/v0.7.x`, so nothing that ran before stops running.
+`migration-immutability` and `sqlc-generate-check` were `main`-only and
+now also run on release-branch PRs (those checks are relevant to release
+branches too).
+
+## Notes
+
+- For `pull_request`, GitHub evaluates the trigger from the PR head&#39;s
+workflow file, so this takes effect for PRs cut from `main` once merged,
+and for future release branches cut from `main`.
+- **Existing release branches carry their own stale copies of these
+filters** and won&#39;t inherit this change — it must be backported to each
+active release branch (e.g. `release/v0.9.x`) for their PRs to get CI.
+
+Signed-off-by: Jeremy Alvis &lt;jeremy.alvis@solo.io&gt;
+
+- feat(substrate): bump agent substrate to 0.0.7 (#2109)
+
+**Changes in this version (that affects Kagent):**
+
+- `ActorTemplate` spec became immutable -&gt; delete golden actor and
+delete / recreate template on spec drift for sandbox agents and agent
+harness reconciler
+- `workerPoolRef` removed from actor template -&gt; kagent uses worker
+selector and `SandboxClass` instead; helm `WorkerPool` gets the
+`kagent.dev/worker-pool: &lt;name&gt;` label automatically
+- `runsc` config decoupled from actor template -&gt; removed relevant
+flags, they&#39;re owned by `SandboxConfig` now
+- New `PAUSED` state and `PauseActor` RPC
+- `last_snapshot` proto field replaced by `lastest_snapshot_info`
+
+**Installation note:**
+
+You will likely need to wipe stale actor states in Valkey due to the
+last change above (see below). If you still run into issues with agents
+not getting ready, delete and reapply them. Existing session data are
+persisted in Kagent DB, so it will not be lost.
+
+```bash
+# When getting actors, you will likely run into this error
+kubectl ate get actors
+# Error: failed to list actors: rpc error: code = Internal desc = internal server error
+
+# Flush all Valkey primaries
+kubectl exec -n ate-system valkey-cluster-0 -- valkey-cli FLUSHALL
+```
+
+---------
+
+Signed-off-by: Jet Chiang &lt;pokyuen.jetchiang-ext@solo.io&gt;
+
+- Stop false stale-send guard after tool-call turns (#2115)
+
+## Description
+
+The chat send guard falsely blocked the next message with &#34;New messages
+loaded — please review before sending&#34; on essentially every turn after
+the first — sending twice was needed each time. It surfaced first on a
+tool-call turn, but the root cause affects every agent response.
+
+## Root cause
+
+A2A marks per-message `contextId`/`taskId` as optional — the `Task` is
+the canonical carrier, so persisted history messages routinely store
+them as empty strings. After a turn completes the UI keeps the
+locally-streamed message copies (it does not reload from the backend),
+and those carry the task&#39;s real `contextId`/`taskId`, so the send guard
+keys them as `[&#34;task&#34;, contextId, taskId, contentSignature]`. The
+backend-extracted copies, with empty ids, fall back to `[&#34;message&#34;,
+&lt;id&gt;]` instead — and for converted tool messages that id is even
+regenerated (`uuidv4`) on every extraction. So a persisted agent message
+never matches its locally-streamed counterpart, the guard counts the
+backend as ahead of the local view, and blocks the send. Every turn has
+an agent response, so every send after the first tripped it.
+
+## Fix
+
+Carry `contextId`/`taskId` on agent messages so the streamed and
+persisted copies key identically. Two layers:
+
+- **UI** (`ui/src/lib/messageHandlers.ts`): when flattening
+`task.history`, backfill `contextId`/`taskId` from the task for
+**every** extracted agent message (text and tool), treating `&#34;&#34;` as
+absent (`||`, not `??`). This is the complete fix on its own — it
+repairs already-persisted sessions and works regardless of which runtime
+produced them.
+- **Runtime** (source, defense-in-depth, helps new sessions): stamp
+`contextId`/`taskId` onto agent messages at emission time, in both
+producers — Python `kagent-adk` (`convert_event_to_a2a_message`) and the
+Go ADK executor, now the default declarative runtime
+(`go/adk/pkg/a2a/executor.go`, via a `newAgentStatusEvent` seam). A2A
+allows omission, and remote agents are out of our control, so the UI
+backfill stays regardless.
+
+Scope is limited to agent messages; user messages are keyed by
+`messageId` and already match.
+
+## Reproduction
+
+&lt;img width=&#34;402&#34; height=&#34;301&#34; alt=&#34;image (7)&#34;
+src=&#34;https://github.com/user-attachments/assets/136d194d-c195-4ba7-8319-9fc729a5a59d&#34;
+/&gt;
+
+1. Send a message that triggers a tool call.
+2. Send another message → blocked by the stale-send banner with no
+actual change.
+
+---------
+
+Signed-off-by: Jeremy Alvis &lt;jeremy.alvis@solo.io&gt;
+
+- Add check for schema-agnostic sql (#2067)
+
+## Description
+
+Adds a static check that migration SQL never hard-codes a schema, and
+flips that gate in the migrations guide from *Target* to enforced.
+Static-only — runs in the existing `go test` CI, no database required.
+
+## Changes
+
+`go/core/pkg/migrations/cross_track_test.go`:
+
+- **`TestSchemaAgnosticSQL`** — rejects `CREATE`/`DROP SCHEMA`,
+schema-qualified DDL (`CREATE TABLE foo.bar`), `SET search_path`, and
+`ALTER ... SET SCHEMA` in every migration file. The schema a migration
+lands in must come from the connection, not the file.
+- **`TestSchemaViolations`** — table-driven unit test with positive and
+negative cases. Detection is factored into a `schemaViolations` helper;
+comment stripping via `stripSQLComments`.
+
+---------
+
+Signed-off-by: Jeremy Alvis &lt;jeremy.alvis@solo.io&gt;
+
+- Allow configuration of A2A client timeout (#2113)
+
+With this change users can now set `controller.a2aClientTimeout` in
+their Helm values to override the timeout. Default behavior (empty/0)
+removes all timeout, preventing the 3-minute SSE cutoff.
+
+Closes #2112
+
+# Problem
+
+The a2a-go SDK applies a hardcoded 3-minute HTTP timeout to all A2A
+client requests. This causes context deadline exceeded errors when
+agents take longer than 3 minutes to complete, even during normal SSE
+streaming operations.
+
+# Proposed Solution
+
+- Add `KAGENT_A2A_CLIENT_TIMEOUT` environment variable (default: 0 = no
+timeout)
+- Create `a2aHTTPClient()` function to build HTTP clients respecting the
+configured timeout
+- Wire the timeout through Helm values (`controller.a2aClientTimeout`) →
+`ConfigMap` → env var
+- Replaces the SDK&#39;s 3-minute default with a configurable value suitable
+for long-running agents
+
+# Changes
+
+- `kagent.go`: Register `KagentA2AClientTimeout` env var
+- `a2a_registrar.go`: Implement `a2aHTTPClient()` and use it instead of
+`debugHTTPClient()`
+- `values.yaml`: Add `controller.a2aClientTimeout` Helm value
+- `controller-configmap.yaml`: Wire env var to the `ConfigMap`
+
+---------
+
+Signed-off-by: dvaz-external &lt;dvaz.external@epo.org&gt;
+
+- feat(sso) expired token session redirect (#2051)
+
+Improve SSO expired token redirect (#2045) 
+
+This pull request implements robust handling of SSO session expiry in
+the UI when deployed behind an OIDC proxy (such as oauth2-proxy). The
+main improvements are the introduction of a clear authentication status
+model, transparent re-authentication when the session expires, and
+safeguards against redirect loops. The changes ensure users are not
+unexpectedly logged out when their forwarded token expires, while
+avoiding infinite redirects in unsecured (no proxy) environments.
+Comprehensive unit tests and documentation updates are included.
+
+**Authentication state handling and re-authentication flow:**
+
+- Introduced an explicit `AuthStatus` model (`&#34;authenticated&#34;`,
+`&#34;expired&#34;`, `&#34;unsecured&#34;`) and updated `getCurrentUser` to return a
+structured `AuthResult` reflecting these states. This allows the UI to
+distinguish between a missing proxy, an expired token, and a valid
+session.
+[[1]](diffhunk://#diff-810f2f7cdb894e7c5a0daec17b6864a866d561bc4cf0c37b61873cae792c8504L14-R41)
+[[2]](diffhunk://#diff-a85c35b1f2858b3c4d567a9b413ab3efe379383afc6b3f9f7a713c6908607bf5R1-R122)
+- Updated `AuthProvider` in `AuthContext.tsx` to trigger a redirect to
+the OIDC re-auth endpoint (`/oauth2/start`) only when the session is
+`&#34;expired&#34;`, never in `&#34;unsecured&#34;` mode. Added a `sessionStorage`-based
+guard to prevent redirect loops if re-authentication fails to refresh
+the token. The guard is cleared on successful authentication.
+[[1]](diffhunk://#diff-6f392efee8540a2e02c4f02b3b4cb7e10aba056ca88b1bbc0cd3d5bfd478ba32L4-R15)
+[[2]](diffhunk://#diff-6f392efee8540a2e02c4f02b3b4cb7e10aba056ca88b1bbc0cd3d5bfd478ba32R25-R35)
+[[3]](diffhunk://#diff-6f392efee8540a2e02c4f02b3b4cb7e10aba056ca88b1bbc0cd3d5bfd478ba32R47-R73)
+
+**Testing and reliability:**
+
+- Added comprehensive unit tests for `getCurrentUser` to cover all
+authentication states, ensuring correct status assignment and token
+handling.
+- Added tests for `AuthProvider` to verify redirect and guard logic,
+including prevention of redirect loops and correct guard clearing on
+authentication.
+
+**Documentation and UI updates:**
+
+- Updated the architecture documentation and added a new design doc to
+explain the three authentication states, the re-authentication flow, and
+the rationale for the changes. The flowchart and rationale in
+`OIDC_PROXY_AUTH_ARCHITECTURE.md` were updated for clarity.
+[[1]](diffhunk://#diff-c05806e7bead589fd90ba06d6ed6d060af7c46653bcba4a22fbb80442a3e8936L132-R144)
+[[2]](diffhunk://#diff-a85c35b1f2858b3c4d567a9b413ab3efe379383afc6b3f9f7a713c6908607bf5R1-R122)
+- Minor UI alignment: adjusted the login page to match the new SSO
+redirect path and improved layout consistency.
+
+These changes collectively ensure a seamless and predictable
+authentication experience for users behind SSO, while maintaining safe
+behavior in unsecured deployments.
+
+---------
+
+Signed-off-by: Dmytro Rashko &lt;dmitriy.rashko@amdocs.com&gt;
+Co-authored-by: Peter Jausovec &lt;peterj@users.noreply.github.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- chore(deps): bump azure/setup-helm from 5.0.0 to 5.0.1 in the actions group (#2098)
+
+Bumps the actions group with 1 update:
+[azure/setup-helm](https://github.com/azure/setup-helm).
+
+Updates `azure/setup-helm` from 5.0.0 to 5.0.1
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/azure/setup-helm/releases&#34;&gt;azure/setup-helm&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;v5.0.1&lt;/h2&gt;
+&lt;h3&gt;Fixed&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/271&#34;&gt;#271&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/271&#34;&gt;Fix
+TypeScript 6.0 compatibility errors in run.ts&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/278&#34;&gt;#278&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/278&#34;&gt;fix: use
+chmod 755 instead of 777 for downloaded helm binary and folder&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Changed&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/286&#34;&gt;#286&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/286&#34;&gt;Bump
+actions/checkout from 6.0.3 to 7.0.0 in /.github/workflows in the
+actions group&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/285&#34;&gt;#285&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/285&#34;&gt;Bump the
+actions group with 2 updates&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/284&#34;&gt;#284&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/284&#34;&gt;Bump
+undici&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/283&#34;&gt;#283&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/283&#34;&gt;Bump the
+actions group with 5 updates&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/280&#34;&gt;#280&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/280&#34;&gt;Bump
+actions/checkout from 6.0.2 to 6.0.3 in /.github/workflows in the
+actions group&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/279&#34;&gt;#279&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/279&#34;&gt;Bump the
+actions group with 2 updates&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/277&#34;&gt;#277&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/277&#34;&gt;Bump
+vitest from 4.1.7 to 4.1.8 in the actions group&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/276&#34;&gt;#276&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/276&#34;&gt;chore:
+remove deprecated OliverMKing release workflow, pin to SHA&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/275&#34;&gt;#275&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/275&#34;&gt;Bump
+actions/stale from 10.2.0 to 10.3.0 in /.github/workflows in the actions
+group&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/274&#34;&gt;#274&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/274&#34;&gt;Bump the
+actions group with 3 updates&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/273&#34;&gt;#273&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/273&#34;&gt;Bump the
+actions group with 2 updates&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/269&#34;&gt;#269&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/269&#34;&gt;Bump the
+actions group across 1 directory with 7 updates&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/268&#34;&gt;#268&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/268&#34;&gt;Bump
+vite from 8.0.0 to 8.0.5&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/260&#34;&gt;#260&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/260&#34;&gt;Migrate
+to ESM with esbuild/vitest and upgrade to node24 (v5.0.0)&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Changelog&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/Azure/setup-helm/blob/main/CHANGELOG.md&#34;&gt;azure/setup-helm&#39;s
+changelog&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;[5.0.1] - 2026-06-23&lt;/h2&gt;
+&lt;h3&gt;Fixed&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/271&#34;&gt;#271&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/271&#34;&gt;Fix
+TypeScript 6.0 compatibility errors in run.ts&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/278&#34;&gt;#278&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/278&#34;&gt;fix: use
+chmod 755 instead of 777 for downloaded helm binary and folder&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Changed&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/286&#34;&gt;#286&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/286&#34;&gt;Bump
+actions/checkout from 6.0.3 to 7.0.0 in /.github/workflows in the
+actions group&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/285&#34;&gt;#285&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/285&#34;&gt;Bump the
+actions group with 2 updates&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/284&#34;&gt;#284&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/284&#34;&gt;Bump
+undici&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/283&#34;&gt;#283&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/283&#34;&gt;Bump the
+actions group with 5 updates&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/280&#34;&gt;#280&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/280&#34;&gt;Bump
+actions/checkout from 6.0.2 to 6.0.3 in /.github/workflows in the
+actions group&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/279&#34;&gt;#279&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/279&#34;&gt;Bump the
+actions group with 2 updates&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/277&#34;&gt;#277&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/277&#34;&gt;Bump
+vitest from 4.1.7 to 4.1.8 in the actions group&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/276&#34;&gt;#276&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/276&#34;&gt;chore:
+remove deprecated OliverMKing release workflow, pin to SHA&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/275&#34;&gt;#275&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/275&#34;&gt;Bump
+actions/stale from 10.2.0 to 10.3.0 in /.github/workflows in the actions
+group&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/274&#34;&gt;#274&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/274&#34;&gt;Bump the
+actions group with 3 updates&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/273&#34;&gt;#273&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/273&#34;&gt;Bump the
+actions group with 2 updates&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/269&#34;&gt;#269&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/269&#34;&gt;Bump the
+actions group across 1 directory with 7 updates&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/268&#34;&gt;#268&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/268&#34;&gt;Bump
+vite from 8.0.0 to 8.0.5&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/260&#34;&gt;#260&lt;/a&gt;
+&lt;a href=&#34;https://redirect.github.com/Azure/setup-helm/pull/260&#34;&gt;Migrate
+to ESM with esbuild/vitest and upgrade to node24 (v5.0.0)&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Azure/setup-helm/commit/9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310&#34;&gt;&lt;code&gt;9bc31f4&lt;/code&gt;&lt;/a&gt;
+build&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Azure/setup-helm/commit/95ecf4967d92f8074e91c548e394f8ac547da403&#34;&gt;&lt;code&gt;95ecf49&lt;/code&gt;&lt;/a&gt;
+Bump version to 5.0.1 and update CHANGELOG with recent changes (&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/287&#34;&gt;#287&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Azure/setup-helm/commit/4180b1c05c03707c071b0c4ffb32f7ccf49b71bd&#34;&gt;&lt;code&gt;4180b1c&lt;/code&gt;&lt;/a&gt;
+Bump the actions group with 2 updates (&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/285&#34;&gt;#285&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Azure/setup-helm/commit/6949b7ff3ed0c7f9b29dc9eafb275834aacc7802&#34;&gt;&lt;code&gt;6949b7f&lt;/code&gt;&lt;/a&gt;
+Bump undici (&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/284&#34;&gt;#284&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Azure/setup-helm/commit/51ce767c788f32a9d2a8b911f38e9033afd42959&#34;&gt;&lt;code&gt;51ce767&lt;/code&gt;&lt;/a&gt;
+Bump actions/checkout in /.github/workflows in the actions group (&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/286&#34;&gt;#286&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Azure/setup-helm/commit/d6da4f47af55af3a717c150920167917cdd944b3&#34;&gt;&lt;code&gt;d6da4f4&lt;/code&gt;&lt;/a&gt;
+Bump the actions group with 5 updates (&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/283&#34;&gt;#283&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Azure/setup-helm/commit/7e2bc108ba1a7390c1467373bceaa033d6bb74e8&#34;&gt;&lt;code&gt;7e2bc10&lt;/code&gt;&lt;/a&gt;
+Bump actions/checkout in /.github/workflows in the actions group (&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/280&#34;&gt;#280&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Azure/setup-helm/commit/64d6be9869229723b9bbc197a01e7d2e3c81895c&#34;&gt;&lt;code&gt;64d6be9&lt;/code&gt;&lt;/a&gt;
+Bump the actions group with 2 updates (&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/279&#34;&gt;#279&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Azure/setup-helm/commit/69214f9d74fea2fd41b0d5ca2f5222dd5ba34fd4&#34;&gt;&lt;code&gt;69214f9&lt;/code&gt;&lt;/a&gt;
+fix: use chmod 755 instead of 777 for downloaded helm binary and folder
+(&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/278&#34;&gt;#278&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Azure/setup-helm/commit/9dad99fe3c3d2198a1403a6aab02375f0f27dd09&#34;&gt;&lt;code&gt;9dad99f&lt;/code&gt;&lt;/a&gt;
+Bump vitest from 4.1.7 to 4.1.8 in the actions group (&lt;a
+href=&#34;https://redirect.github.com/azure/setup-helm/issues/277&#34;&gt;#277&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/azure/setup-helm/compare/v5.0.0...v5.0.1&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+
+[![Dependabot compatibility
+score](https://dependabot-badges.githubapp.com/badges/compatibility_score?dependency-name=azure/setup-helm&amp;package-manager=github_actions&amp;previous-version=5.0.0&amp;new-version=5.0.1)](https://docs.github.com/en/github/managing-security-vulnerabilities/about-dependabot-security-updates#about-compatibility-scores)
+
+Dependabot will resolve any conflicts with this PR as long as you don&#39;t
+alter it yourself. You can also trigger a rebase manually by commenting
+`@dependabot rebase`.
+
+[//]: # (dependabot-automerge-start)
+[//]: # (dependabot-automerge-end)
+
+---
+
+&lt;details&gt;
+&lt;summary&gt;Dependabot commands and options&lt;/summary&gt;
+&lt;br /&gt;
+
+You can trigger Dependabot actions by commenting on this PR:
+- `@dependabot rebase` will rebase this PR
+- `@dependabot recreate` will recreate this PR, overwriting any edits
+that have been made to it
+- `@dependabot show &lt;dependency name&gt; ignore conditions` will show all
+of the ignore conditions of the specified dependency
+- `@dependabot ignore &lt;dependency name&gt; major version` will close this
+group update PR and stop Dependabot creating any more for the specific
+dependency&#39;s major version (unless you unignore this specific
+dependency&#39;s major version or upgrade to it yourself)
+- `@dependabot ignore &lt;dependency name&gt; minor version` will close this
+group update PR and stop Dependabot creating any more for the specific
+dependency&#39;s minor version (unless you unignore this specific
+dependency&#39;s minor version or upgrade to it yourself)
+- `@dependabot ignore &lt;dependency name&gt;` will close this group update PR
+and stop Dependabot creating any more for the specific dependency
+(unless you unignore this specific dependency or upgrade to it yourself)
+- `@dependabot unignore &lt;dependency name&gt;` will remove all of the ignore
+conditions of the specified dependency
+- `@dependabot unignore &lt;dependency name&gt; &lt;ignore condition&gt;` will
+remove the ignore condition of the specified dependency and ignore
+conditions
+
+
+&lt;/details&gt;
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- chore(deps): update anthropic[vertex] requirement from &gt;=0.49.0 to &gt;=0.112.0 in /python (#2103)
+
+Updates the requirements on
+[anthropic[vertex]](https://github.com/anthropics/anthropic-sdk-python)
+to permit the latest version.
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/releases&#34;&gt;anthropic[vertex]&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;v0.112.0&lt;/h2&gt;
+&lt;h2&gt;0.112.0 (2026-06-24)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/compare/v0.111.0...v0.112.0&#34;&gt;v0.111.0...v0.112.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;client:&lt;/strong&gt; add support for system.message streaming
+events (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/2450d595731f9532080bb94eb8a43c0bd5189659&#34;&gt;2450d59&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Bug Fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;memory tool:&lt;/strong&gt; create parent directories with the
+correct permissions (&lt;a
+href=&#34;https://redirect.github.com/anthropics/anthropic-sdk-python/issues/135&#34;&gt;#135&lt;/a&gt;)
+(&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/f2fc2a9e0ad8507e4108e9a6b85d023416c2f14c&#34;&gt;f2fc2a9&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Chores&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for new refusal category (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/5ab533e58ee99bcd2e5071bab91d99caee66aa6a&#34;&gt;5ab533e&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for sending User Profile ID in
+request headers (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/83319bed74f4414d54e0f4237d70b945ed671008&#34;&gt;83319be&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Changelog&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/blob/main/CHANGELOG.md&#34;&gt;anthropic[vertex]&#39;s
+changelog&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;0.112.0 (2026-06-24)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/compare/v0.111.0...v0.112.0&#34;&gt;v0.111.0...v0.112.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;client:&lt;/strong&gt; add support for system.message streaming
+events (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/2450d595731f9532080bb94eb8a43c0bd5189659&#34;&gt;2450d59&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Bug Fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;memory tool:&lt;/strong&gt; create parent directories with the
+correct permissions (&lt;a
+href=&#34;https://redirect.github.com/anthropics/anthropic-sdk-python/issues/135&#34;&gt;#135&lt;/a&gt;)
+(&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/f2fc2a9e0ad8507e4108e9a6b85d023416c2f14c&#34;&gt;f2fc2a9&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Chores&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for new refusal category (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/5ab533e58ee99bcd2e5071bab91d99caee66aa6a&#34;&gt;5ab533e&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for sending User Profile ID in
+request headers (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/83319bed74f4414d54e0f4237d70b945ed671008&#34;&gt;83319be&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;0.111.0 (2026-06-18)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/compare/v0.110.0...v0.111.0&#34;&gt;v0.110.0...v0.111.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;helpers:&lt;/strong&gt; tag refusal-fallback middleware requests
+with fallback-refusal-middleware (&lt;a
+href=&#34;https://redirect.github.com/anthropics/anthropic-sdk-python/issues/96&#34;&gt;#96&lt;/a&gt;)
+(&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/2f8ac789506efc0719b06f1f646c9a98bb25ce7b&#34;&gt;2f8ac78&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;0.110.0 (2026-06-18)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/compare/v0.109.2...v0.110.0&#34;&gt;v0.109.2...v0.110.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for new code_execution_20260120
+tool (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/5e23212dc0883174c879b97ef8e7e33ead4e8da5&#34;&gt;5e23212&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Bug Fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;append x-stainless-helper across header merges instead of clobbering
+(&lt;a
+href=&#34;https://redirect.github.com/anthropics/anthropic-sdk-python/issues/105&#34;&gt;#105&lt;/a&gt;)
+(&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/922558e2ce52e18863dab27bcc04067068827364&#34;&gt;922558e&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;bedrock:&lt;/strong&gt; preserve stream event type (&lt;a
+href=&#34;https://redirect.github.com/anthropics/anthropic-sdk-python/issues/1682&#34;&gt;#1682&lt;/a&gt;)
+(&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/b27e3439699174dbc41e34e2d6ef5cb1e2930c18&#34;&gt;b27e343&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;helpers:&lt;/strong&gt; single source of truth for
+x-stainless-helper key + closed value vocabulary (&lt;a
+href=&#34;https://redirect.github.com/anthropics/anthropic-sdk-python/issues/95&#34;&gt;#95&lt;/a&gt;)
+(&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/e6f7a56bb624f4c946cb15ba7973fd6fe052e10f&#34;&gt;e6f7a56&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;0.109.2 (2026-06-15)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/compare/v0.109.1...v0.109.2&#34;&gt;v0.109.1...v0.109.2&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Chores&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; remove retired models from API and SDKs (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/d4bcfcc257bd0c97d5e75060bd19c97abddd9f49&#34;&gt;d4bcfcc&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;!-- raw HTML omitted --&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;... (truncated)&lt;/p&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/c986624e451a640040ac9bdfd87054372456af0b&#34;&gt;&lt;code&gt;c986624&lt;/code&gt;&lt;/a&gt;
+release: 0.112.0&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/e633dff66fb9f14e1711bc20d06ba2b894cdf000&#34;&gt;&lt;code&gt;e633dff&lt;/code&gt;&lt;/a&gt;
+chore(api): add support for new refusal category&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/a28468efa7b9188095ad8b542da2d2b050ed732a&#34;&gt;&lt;code&gt;a28468e&lt;/code&gt;&lt;/a&gt;
+chore(api): add support for sending User Profile ID in request
+headers&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/97d3d9b53a07e5e4e2b4107793f228a4898c61f6&#34;&gt;&lt;code&gt;97d3d9b&lt;/code&gt;&lt;/a&gt;
+fix(memory tool): create parent directories with the correct permissions
+(&lt;a
+href=&#34;https://redirect.github.com/anthropics/anthropic-sdk-python/issues/135&#34;&gt;#135&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/0868a68884fc73dc844f92cde5b172ee86f5aa3c&#34;&gt;&lt;code&gt;0868a68&lt;/code&gt;&lt;/a&gt;
+feat(client): add support for system.message streaming events&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/5d6fd8d3f46dfffdc7d1579674053c6efe9d6508&#34;&gt;&lt;code&gt;5d6fd8d&lt;/code&gt;&lt;/a&gt;
+release: 0.111.0&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/9fdf2efcf79c09a086169ea4710ec4b379565453&#34;&gt;&lt;code&gt;9fdf2ef&lt;/code&gt;&lt;/a&gt;
+feat(helpers): tag refusal-fallback middleware requests with
+fallback-refusal...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/af2b702140d8c53ba841b590b5022053c616c4d7&#34;&gt;&lt;code&gt;af2b702&lt;/code&gt;&lt;/a&gt;
+release: 0.110.0&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/a10dbaabdf6e0f9dda126c8014465c797f9ff008&#34;&gt;&lt;code&gt;a10dbaa&lt;/code&gt;&lt;/a&gt;
+feat(api): add support for new code_execution_20260120 tool&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/9d49b634b44bd70ae344d1e0574347eda2a8ef10&#34;&gt;&lt;code&gt;9d49b63&lt;/code&gt;&lt;/a&gt;
+fix(helpers): single source of truth for x-stainless-helper key + closed
+valu...&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/compare/v0.49.0...v0.112.0&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+
+Dependabot will resolve any conflicts with this PR as long as you don&#39;t
+alter it yourself. You can also trigger a rebase manually by commenting
+`@dependabot rebase`.
+
+[//]: # (dependabot-automerge-start)
+[//]: # (dependabot-automerge-end)
+
+---
+
+&lt;details&gt;
+&lt;summary&gt;Dependabot commands and options&lt;/summary&gt;
+&lt;br /&gt;
+
+You can trigger Dependabot actions by commenting on this PR:
+- `@dependabot rebase` will rebase this PR
+- `@dependabot recreate` will recreate this PR, overwriting any edits
+that have been made to it
+- `@dependabot show &lt;dependency name&gt; ignore conditions` will show all
+of the ignore conditions of the specified dependency
+- `@dependabot ignore this major version` will close this PR and stop
+Dependabot creating any more for this major version (unless you reopen
+the PR or upgrade to it yourself)
+- `@dependabot ignore this minor version` will close this PR and stop
+Dependabot creating any more for this minor version (unless you reopen
+the PR or upgrade to it yourself)
+- `@dependabot ignore this dependency` will close this PR and stop
+Dependabot creating any more for this dependency (unless you reopen the
+PR or upgrade to it yourself)
+
+
+&lt;/details&gt;
+
+---------
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Signed-off-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- chore(deps): bump the go-minor-patch group in /go with 3 updates (#2099)
+
+Bumps the go-minor-patch group in /go with 3 updates:
+[github.com/anthropics/anthropic-sdk-go](https://github.com/anthropics/anthropic-sdk-go),
+[google.golang.org/genai](https://github.com/googleapis/go-genai) and
+[github.com/ollama/ollama](https://github.com/ollama/ollama).
+
+Updates `github.com/anthropics/anthropic-sdk-go` from 1.51.0 to 1.52.0
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/releases&#34;&gt;github.com/anthropics/anthropic-sdk-go&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;v1.52.0&lt;/h2&gt;
+&lt;h2&gt;1.52.0 (2026-06-24)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/compare/v1.51.1...v1.52.0&#34;&gt;v1.51.1...v1.52.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;client:&lt;/strong&gt; add support for system.message streaming
+events (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/7bb296db56de13140605495642cf72889f829ed8&#34;&gt;7bb296d&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Chores&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for new refusal category (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/46f86259a94c1d43a21b3d44dd5eb40e9d4b3e13&#34;&gt;46f8625&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for sending User Profile ID in
+request headers (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/5cab486af669c06349d03bb66f0214557422561c&#34;&gt;5cab486&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;v1.51.1&lt;/h2&gt;
+&lt;h2&gt;1.51.1 (2026-06-18)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/compare/v1.51.0...v1.51.1&#34;&gt;v1.51.0...v1.51.1&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Bug Fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;helpers:&lt;/strong&gt; single source for x-stainless-helper,
+append semantics, and tag the fallback middleware (&lt;a
+href=&#34;https://redirect.github.com/anthropics/anthropic-sdk-go/issues/88&#34;&gt;#88&lt;/a&gt;)
+(&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/ebbdb7dea37b15cdd055c53806a51e06422847fe&#34;&gt;ebbdb7d&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Changelog&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/blob/main/CHANGELOG.md&#34;&gt;github.com/anthropics/anthropic-sdk-go&#39;s
+changelog&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;1.52.0 (2026-06-24)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/compare/v1.51.1...v1.52.0&#34;&gt;v1.51.1...v1.52.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;client:&lt;/strong&gt; add support for system.message streaming
+events (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/7bb296db56de13140605495642cf72889f829ed8&#34;&gt;7bb296d&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Chores&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for new refusal category (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/46f86259a94c1d43a21b3d44dd5eb40e9d4b3e13&#34;&gt;46f8625&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for sending User Profile ID in
+request headers (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/5cab486af669c06349d03bb66f0214557422561c&#34;&gt;5cab486&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;1.51.1 (2026-06-18)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/compare/v1.51.0...v1.51.1&#34;&gt;v1.51.0...v1.51.1&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Bug Fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;helpers:&lt;/strong&gt; single source for x-stainless-helper,
+append semantics, and tag the fallback middleware (&lt;a
+href=&#34;https://redirect.github.com/anthropics/anthropic-sdk-go/issues/88&#34;&gt;#88&lt;/a&gt;)
+(&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/ebbdb7dea37b15cdd055c53806a51e06422847fe&#34;&gt;ebbdb7d&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/2978fa577e78f2eaa4555ac62bfb9e401687a380&#34;&gt;&lt;code&gt;2978fa5&lt;/code&gt;&lt;/a&gt;
+release: 1.52.0&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/92687e70867fae2f0195f84cc9ef4df3b586e4e5&#34;&gt;&lt;code&gt;92687e7&lt;/code&gt;&lt;/a&gt;
+chore(api): add support for new refusal category&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/813e82f2eb9143e73868d62eda722d3e80aeaa02&#34;&gt;&lt;code&gt;813e82f&lt;/code&gt;&lt;/a&gt;
+chore(api): add support for sending User Profile ID in request
+headers&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/a36c6ff5d7804d592e2d0be9a526149817e6be09&#34;&gt;&lt;code&gt;a36c6ff&lt;/code&gt;&lt;/a&gt;
+feat(client): add support for system.message streaming events&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/d28739956e5ddd4788189284d8bf5f6222d52b08&#34;&gt;&lt;code&gt;d287399&lt;/code&gt;&lt;/a&gt;
+release: 1.51.1&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/aeca807111b0313928de0ab9e340da51c90e6750&#34;&gt;&lt;code&gt;aeca807&lt;/code&gt;&lt;/a&gt;
+fix(helpers): single source for x-stainless-helper, append semantics,
+and tag...&lt;/li&gt;
+&lt;li&gt;See full diff in &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/compare/v1.51.0...v1.52.0&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `google.golang.org/genai` from 1.61.0 to 1.62.0
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/googleapis/go-genai/releases&#34;&gt;google.golang.org/genai&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;v1.62.0&lt;/h2&gt;
+&lt;h2&gt;&lt;a
+href=&#34;https://github.com/googleapis/go-genai/compare/v1.61.0...v1.62.0&#34;&gt;1.62.0&lt;/a&gt;
+(2026-06-24)&lt;/h2&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Add ComputerUse.disabled_safety_policies (&lt;a
+href=&#34;https://github.com/googleapis/go-genai/commit/c89e5eb0e45b11805adf87d419016e219b8ef5a9&#34;&gt;c89e5eb&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Changelog&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/googleapis/go-genai/blob/main/CHANGELOG.md&#34;&gt;google.golang.org/genai&#39;s
+changelog&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;&lt;a
+href=&#34;https://github.com/googleapis/go-genai/compare/v1.61.0...v1.62.0&#34;&gt;1.62.0&lt;/a&gt;
+(2026-06-24)&lt;/h2&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Add ComputerUse.disabled_safety_policies (&lt;a
+href=&#34;https://github.com/googleapis/go-genai/commit/c89e5eb0e45b11805adf87d419016e219b8ef5a9&#34;&gt;c89e5eb&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/googleapis/go-genai/commit/5319d0b261cdf098a73d8968f6e43a095ca12700&#34;&gt;&lt;code&gt;5319d0b&lt;/code&gt;&lt;/a&gt;
+chore(main): release 1.62.0 (&lt;a
+href=&#34;https://redirect.github.com/googleapis/go-genai/issues/825&#34;&gt;#825&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/googleapis/go-genai/commit/535e44af9ec179c0da1052dfd6a3305d8c9169a8&#34;&gt;&lt;code&gt;535e44a&lt;/code&gt;&lt;/a&gt;
+chore: Disable ComputerUse.disabled_safety_policies in Gemini Enterprise
+API&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/googleapis/go-genai/commit/c89e5eb0e45b11805adf87d419016e219b8ef5a9&#34;&gt;&lt;code&gt;c89e5eb&lt;/code&gt;&lt;/a&gt;
+feat: Add ComputerUse.disabled_safety_policies&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/googleapis/go-genai/commit/ba3b2b49265b5754ababfaa0bdc97adeb1e811b9&#34;&gt;&lt;code&gt;ba3b2b4&lt;/code&gt;&lt;/a&gt;
+docs: fix typos across docstrings&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/googleapis/go-genai/commit/4fe211cbfa996366b0c4a82a8f2be59670de81a2&#34;&gt;&lt;code&gt;4fe211c&lt;/code&gt;&lt;/a&gt;
+chore: Upgrade stalebot action to use v10 (due to Node20
+deprecation)&lt;/li&gt;
+&lt;li&gt;See full diff in &lt;a
+href=&#34;https://github.com/googleapis/go-genai/compare/v1.61.0...v1.62.0&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `github.com/ollama/ollama` from 0.30.10 to 0.30.11
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/ollama/ollama/releases&#34;&gt;github.com/ollama/ollama&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;v0.30.11&lt;/h2&gt;
+&lt;h2&gt;What&#39;s Changed&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;launch: add thinking capability detection to opencode by &lt;a
+href=&#34;https://github.com/hoyyeva&#34;&gt;&lt;code&gt;@​hoyyeva&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/15434&#34;&gt;ollama/ollama#15434&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;launch: auto-install Claude Code by &lt;a
+href=&#34;https://github.com/hoyyeva&#34;&gt;&lt;code&gt;@​hoyyeva&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16802&#34;&gt;ollama/ollama#16802&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;launch: auto-install opencode when missing by &lt;a
+href=&#34;https://github.com/hoyyeva&#34;&gt;&lt;code&gt;@​hoyyeva&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16806&#34;&gt;ollama/ollama#16806&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;discover: fix inverted iGPU/dGPU Vulkan classification on Windows
+hybrid graphics by &lt;a
+href=&#34;https://github.com/Sahil170595&#34;&gt;&lt;code&gt;@​Sahil170595&lt;/code&gt;&lt;/a&gt; in
+&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16669&#34;&gt;ollama/ollama#16669&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;mlxrunner: unify and tune speculative decoding by &lt;a
+href=&#34;https://github.com/jessegross&#34;&gt;&lt;code&gt;@​jessegross&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16791&#34;&gt;ollama/ollama#16791&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;launch/codex: detect model drift when Codex App UI switches by &lt;a
+href=&#34;https://github.com/BruceMacD&#34;&gt;&lt;code&gt;@​BruceMacD&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16864&#34;&gt;ollama/ollama#16864&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;llama: add sm_86 architecture to cuda_v13_windows preset by &lt;a
+href=&#34;https://github.com/anishesg&#34;&gt;&lt;code&gt;@​anishesg&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16834&#34;&gt;ollama/ollama#16834&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;llm: size mmproj offload by projector memory by &lt;a
+href=&#34;https://github.com/dhiltgen&#34;&gt;&lt;code&gt;@​dhiltgen&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16866&#34;&gt;ollama/ollama#16866&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;docs: document max think level by &lt;a
+href=&#34;https://github.com/ParthSareen&#34;&gt;&lt;code&gt;@​ParthSareen&lt;/code&gt;&lt;/a&gt; in
+&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16877&#34;&gt;ollama/ollama#16877&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;llm: preserve generation headroom for shifted prompts by &lt;a
+href=&#34;https://github.com/ParthSareen&#34;&gt;&lt;code&gt;@​ParthSareen&lt;/code&gt;&lt;/a&gt; in
+&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16856&#34;&gt;ollama/ollama#16856&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;llama: default qwen2.5vl window attention metadata by &lt;a
+href=&#34;https://github.com/dhiltgen&#34;&gt;&lt;code&gt;@​dhiltgen&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16868&#34;&gt;ollama/ollama#16868&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;llm: use host Vulkan loader on Windows by &lt;a
+href=&#34;https://github.com/dhiltgen&#34;&gt;&lt;code&gt;@​dhiltgen&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16869&#34;&gt;ollama/ollama#16869&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;mlx: update and fix CUDA JIT packaging by &lt;a
+href=&#34;https://github.com/dhiltgen&#34;&gt;&lt;code&gt;@​dhiltgen&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16871&#34;&gt;ollama/ollama#16871&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;llm: fix ollama ps double-counting mmap&#39;d weights on partial offload
+by &lt;a href=&#34;https://github.com/discobot&#34;&gt;&lt;code&gt;@​discobot&lt;/code&gt;&lt;/a&gt; in
+&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16709&#34;&gt;ollama/ollama#16709&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;docs: redesign docs landing and integrations overview by &lt;a
+href=&#34;https://github.com/hoyyeva&#34;&gt;&lt;code&gt;@​hoyyeva&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16807&#34;&gt;ollama/ollama#16807&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;server: align generate with native chat templates by &lt;a
+href=&#34;https://github.com/dhiltgen&#34;&gt;&lt;code&gt;@​dhiltgen&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16878&#34;&gt;ollama/ollama#16878&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;jetson: add CC 87 for CUDA v13 by &lt;a
+href=&#34;https://github.com/dhiltgen&#34;&gt;&lt;code&gt;@​dhiltgen&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16628&#34;&gt;ollama/ollama#16628&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;llama.cpp version update by &lt;a
+href=&#34;https://github.com/dhiltgen&#34;&gt;&lt;code&gt;@​dhiltgen&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16548&#34;&gt;ollama/ollama#16548&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;New Contributors&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Sahil170595&#34;&gt;&lt;code&gt;@​Sahil170595&lt;/code&gt;&lt;/a&gt;
+made their first contribution in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16669&#34;&gt;ollama/ollama#16669&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://github.com/anishesg&#34;&gt;&lt;code&gt;@​anishesg&lt;/code&gt;&lt;/a&gt;
+made their first contribution in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16834&#34;&gt;ollama/ollama#16834&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://github.com/discobot&#34;&gt;&lt;code&gt;@​discobot&lt;/code&gt;&lt;/a&gt;
+made their first contribution in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16709&#34;&gt;ollama/ollama#16709&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;Full Changelog&lt;/strong&gt;: &lt;a
+href=&#34;https://github.com/ollama/ollama/compare/v0.30.10...v0.30.11-rc0&#34;&gt;https://github.com/ollama/ollama/compare/v0.30.10...v0.30.11-rc0&lt;/a&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/ollama/ollama/commit/d26a58557d83aa8892bdfa79b3550f5ee969cd1c&#34;&gt;&lt;code&gt;d26a585&lt;/code&gt;&lt;/a&gt;
+MLX: wire up scheduler selected context size for ps (&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/issues/16918&#34;&gt;#16918&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/ollama/ollama/commit/2e474c98f91a3995001abfa80c41f7e11ad5f4a3&#34;&gt;&lt;code&gt;2e474c9&lt;/code&gt;&lt;/a&gt;
+parser/renderer: add Ornith 9B renderer/parser support (&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/issues/16920&#34;&gt;#16920&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/ollama/ollama/commit/2cb2c5381fe2e666e8b5788e664bdbaab47f37e6&#34;&gt;&lt;code&gt;2cb2c53&lt;/code&gt;&lt;/a&gt;
+launch: update hermes install urls to official (&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/issues/16913&#34;&gt;#16913&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/ollama/ollama/commit/2a6b50421adc2be411f2fb71f20b2a06450d52db&#34;&gt;&lt;code&gt;2a6b504&lt;/code&gt;&lt;/a&gt;
+fix capability grid dark mode style (&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/issues/16907&#34;&gt;#16907&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/ollama/ollama/commit/f22ec2ec49dba452122fed36573de1f2784868de&#34;&gt;&lt;code&gt;f22ec2e&lt;/code&gt;&lt;/a&gt;
+CUDA: require driver 550 or newer for v12 (&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/issues/16895&#34;&gt;#16895&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/ollama/ollama/commit/d9075caf1ae19447716325d1094f50edea4b036d&#34;&gt;&lt;code&gt;d9075ca&lt;/code&gt;&lt;/a&gt;
+docs: redesign coding integration docs (&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/issues/16808&#34;&gt;#16808&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/ollama/ollama/commit/e11eeb3ba01e9a59f74e767ce7d61a825daf86cd&#34;&gt;&lt;code&gt;e11eeb3&lt;/code&gt;&lt;/a&gt;
+llama.cpp version update (&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/issues/16548&#34;&gt;#16548&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/ollama/ollama/commit/0a408b2225e499411f4c64b34cc32623b5fdd4f6&#34;&gt;&lt;code&gt;0a408b2&lt;/code&gt;&lt;/a&gt;
+jetson: add CC 87 for CUDA v13 (&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/issues/16628&#34;&gt;#16628&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/ollama/ollama/commit/16739dee607e645392e6f4b21674dc951686d0f2&#34;&gt;&lt;code&gt;16739de&lt;/code&gt;&lt;/a&gt;
+server: align generate with native chat templates (&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/issues/16878&#34;&gt;#16878&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/ollama/ollama/commit/d48d790baf33f30cc078da8cc63b3045e18e300e&#34;&gt;&lt;code&gt;d48d790&lt;/code&gt;&lt;/a&gt;
+docs: redesign docs landing and integrations overview (&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/issues/16807&#34;&gt;#16807&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/ollama/ollama/compare/v0.30.10...v0.30.11&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+
+Dependabot will resolve any conflicts with this PR as long as you don&#39;t
+alter it yourself. You can also trigger a rebase manually by commenting
+`@dependabot rebase`.
+
+[//]: # (dependabot-automerge-start)
+[//]: # (dependabot-automerge-end)
+
+---
+
+&lt;details&gt;
+&lt;summary&gt;Dependabot commands and options&lt;/summary&gt;
+&lt;br /&gt;
+
+You can trigger Dependabot actions by commenting on this PR:
+- `@dependabot rebase` will rebase this PR
+- `@dependabot recreate` will recreate this PR, overwriting any edits
+that have been made to it
+- `@dependabot show &lt;dependency name&gt; ignore conditions` will show all
+of the ignore conditions of the specified dependency
+- `@dependabot ignore &lt;dependency name&gt; major version` will close this
+group update PR and stop Dependabot creating any more for the specific
+dependency&#39;s major version (unless you unignore this specific
+dependency&#39;s major version or upgrade to it yourself)
+- `@dependabot ignore &lt;dependency name&gt; minor version` will close this
+group update PR and stop Dependabot creating any more for the specific
+dependency&#39;s minor version (unless you unignore this specific
+dependency&#39;s minor version or upgrade to it yourself)
+- `@dependabot ignore &lt;dependency name&gt;` will close this group update PR
+and stop Dependabot creating any more for the specific dependency
+(unless you unignore this specific dependency or upgrade to it yourself)
+- `@dependabot unignore &lt;dependency name&gt;` will remove all of the ignore
+conditions of the specified dependency
+- `@dependabot unignore &lt;dependency name&gt; &lt;ignore condition&gt;` will
+remove the ignore condition of the specified dependency and ignore
+conditions
+
+
+&lt;/details&gt;
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- chore(deps): bump the python-minor-patch group in /python with 9 updates (#2101)
+
+Bumps the python-minor-patch group in /python with 9 updates:
+
+| Package | From | To |
+| --- | --- | --- |
+| [ruff](https://github.com/astral-sh/ruff) | `0.15.18` | `0.15.20` |
+| [anyio](https://github.com/agronholm/anyio) | `4.14.0` | `4.14.1` |
+| [typer](https://github.com/fastapi/typer) | `0.26.7` | `0.26.8` |
+| [openai](https://github.com/openai/openai-python) | `2.43.0` |
+`2.44.0` |
+| [mcp](https://github.com/modelcontextprotocol/python-sdk) | `1.28.0` |
+`1.28.1` |
+| [fastapi](https://github.com/fastapi/fastapi) | `0.138.0` | `0.138.1`
+|
+| [boto3](https://github.com/boto/boto3) | `1.43.34` | `1.43.36` |
+| [openai-agents](https://github.com/openai/openai-agents-python) |
+`0.17.6` | `0.17.7` |
+| [langchain-openai](https://github.com/langchain-ai/langchain) |
+`1.3.2` | `1.3.3` |
+
+Updates `ruff` from 0.15.18 to 0.15.20
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/astral-sh/ruff/releases&#34;&gt;ruff&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;0.15.20&lt;/h2&gt;
+&lt;h2&gt;Release Notes&lt;/h2&gt;
+&lt;p&gt;Released on 2026-06-25.&lt;/p&gt;
+&lt;h3&gt;Preview features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Allow human-readable names in rule selectors (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/25887&#34;&gt;#25887&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Emit a warning instead of an error for unknown rule selectors (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26113&#34;&gt;#26113&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Match &lt;code&gt;noqa&lt;/code&gt; shebang handling in &lt;code&gt;ruff:ignore&lt;/code&gt;
+comments (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26286&#34;&gt;#26286&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;[&lt;code&gt;ruff&lt;/code&gt;] Remove &lt;code&gt;pytest-fixture-autouse&lt;/code&gt;
+(&lt;code&gt;RUF076&lt;/code&gt;) (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26240&#34;&gt;#26240&lt;/a&gt;,
+&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26371&#34;&gt;#26371&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Documentation&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Add versioning sections to custom crate READMEs (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26317&#34;&gt;#26317&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Update &lt;code&gt;ruff_python_parser&lt;/code&gt; README for crates.io (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26315&#34;&gt;#26315&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;[&lt;code&gt;perflint&lt;/code&gt;] Clarify that &lt;code&gt;PERF402&lt;/code&gt; applies to
+any iterable (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26242&#34;&gt;#26242&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Contributors&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/dhruvmanila&#34;&gt;&lt;code&gt;@​dhruvmanila&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/MichaReiser&#34;&gt;&lt;code&gt;@​MichaReiser&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://github.com/ntBre&#34;&gt;&lt;code&gt;@​ntBre&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/trilamsr&#34;&gt;&lt;code&gt;@​trilamsr&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Install ruff 0.15.20&lt;/h2&gt;
+&lt;h3&gt;Install prebuilt binaries via shell script&lt;/h3&gt;
+&lt;pre lang=&#34;sh&#34;&gt;&lt;code&gt;curl --proto &#39;=https&#39; --tlsv1.2 -LsSf
+https://releases.astral.sh/github/ruff/releases/download/0.15.20/ruff-installer.sh
+| sh
+&lt;/code&gt;&lt;/pre&gt;
+&lt;h3&gt;Install prebuilt binaries via powershell script&lt;/h3&gt;
+&lt;pre lang=&#34;sh&#34;&gt;&lt;code&gt;powershell -ExecutionPolicy Bypass -c &amp;quot;irm
+https://releases.astral.sh/github/ruff/releases/download/0.15.20/ruff-installer.ps1
+| iex&amp;quot;
+&lt;/code&gt;&lt;/pre&gt;
+&lt;h2&gt;Download ruff 0.15.20&lt;/h2&gt;
+&lt;table&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th&gt;File&lt;/th&gt;
+&lt;th&gt;Platform&lt;/th&gt;
+&lt;th&gt;Checksum&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://releases.astral.sh/github/ruff/releases/download/0.15.20/ruff-aarch64-apple-darwin.tar.gz&#34;&gt;ruff-aarch64-apple-darwin.tar.gz&lt;/a&gt;&lt;/td&gt;
+&lt;td&gt;Apple Silicon macOS&lt;/td&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://releases.astral.sh/github/ruff/releases/download/0.15.20/ruff-aarch64-apple-darwin.tar.gz.sha256&#34;&gt;checksum&lt;/a&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://releases.astral.sh/github/ruff/releases/download/0.15.20/ruff-x86_64-apple-darwin.tar.gz&#34;&gt;ruff-x86_64-apple-darwin.tar.gz&lt;/a&gt;&lt;/td&gt;
+&lt;td&gt;Intel macOS&lt;/td&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://releases.astral.sh/github/ruff/releases/download/0.15.20/ruff-x86_64-apple-darwin.tar.gz.sha256&#34;&gt;checksum&lt;/a&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://releases.astral.sh/github/ruff/releases/download/0.15.20/ruff-aarch64-pc-windows-msvc.zip&#34;&gt;ruff-aarch64-pc-windows-msvc.zip&lt;/a&gt;&lt;/td&gt;
+&lt;td&gt;ARM64 Windows&lt;/td&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://releases.astral.sh/github/ruff/releases/download/0.15.20/ruff-aarch64-pc-windows-msvc.zip.sha256&#34;&gt;checksum&lt;/a&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://releases.astral.sh/github/ruff/releases/download/0.15.20/ruff-i686-pc-windows-msvc.zip&#34;&gt;ruff-i686-pc-windows-msvc.zip&lt;/a&gt;&lt;/td&gt;
+&lt;td&gt;x86 Windows&lt;/td&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://releases.astral.sh/github/ruff/releases/download/0.15.20/ruff-i686-pc-windows-msvc.zip.sha256&#34;&gt;checksum&lt;/a&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://releases.astral.sh/github/ruff/releases/download/0.15.20/ruff-x86_64-pc-windows-msvc.zip&#34;&gt;ruff-x86_64-pc-windows-msvc.zip&lt;/a&gt;&lt;/td&gt;
+&lt;td&gt;x64 Windows&lt;/td&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://releases.astral.sh/github/ruff/releases/download/0.15.20/ruff-x86_64-pc-windows-msvc.zip.sha256&#34;&gt;checksum&lt;/a&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://releases.astral.sh/github/ruff/releases/download/0.15.20/ruff-aarch64-unknown-linux-gnu.tar.gz&#34;&gt;ruff-aarch64-unknown-linux-gnu.tar.gz&lt;/a&gt;&lt;/td&gt;
+&lt;td&gt;ARM64 Linux&lt;/td&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://releases.astral.sh/github/ruff/releases/download/0.15.20/ruff-aarch64-unknown-linux-gnu.tar.gz.sha256&#34;&gt;checksum&lt;/a&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://releases.astral.sh/github/ruff/releases/download/0.15.20/ruff-i686-unknown-linux-gnu.tar.gz&#34;&gt;ruff-i686-unknown-linux-gnu.tar.gz&lt;/a&gt;&lt;/td&gt;
+&lt;td&gt;x86 Linux&lt;/td&gt;
+&lt;td&gt;&lt;a
+href=&#34;https://releases.astral.sh/github/ruff/releases/download/0.15.20/ruff-i686-unknown-linux-gnu.tar.gz.sha256&#34;&gt;checksum&lt;/a&gt;&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;!-- raw HTML omitted --&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;... (truncated)&lt;/p&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Changelog&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/astral-sh/ruff/blob/main/CHANGELOG.md&#34;&gt;ruff&#39;s
+changelog&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;0.15.20&lt;/h2&gt;
+&lt;p&gt;Released on 2026-06-25.&lt;/p&gt;
+&lt;h3&gt;Preview features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Allow human-readable names in rule selectors (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/25887&#34;&gt;#25887&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Emit a warning instead of an error for unknown rule selectors (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26113&#34;&gt;#26113&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Match &lt;code&gt;noqa&lt;/code&gt; shebang handling in &lt;code&gt;ruff:ignore&lt;/code&gt;
+comments (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26286&#34;&gt;#26286&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;[&lt;code&gt;ruff&lt;/code&gt;] Remove &lt;code&gt;pytest-fixture-autouse&lt;/code&gt;
+(&lt;code&gt;RUF076&lt;/code&gt;) (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26240&#34;&gt;#26240&lt;/a&gt;,
+&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26371&#34;&gt;#26371&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Documentation&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Add versioning sections to custom crate READMEs (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26317&#34;&gt;#26317&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Update &lt;code&gt;ruff_python_parser&lt;/code&gt; README for crates.io (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26315&#34;&gt;#26315&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;[&lt;code&gt;perflint&lt;/code&gt;] Clarify that &lt;code&gt;PERF402&lt;/code&gt; applies to
+any iterable (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26242&#34;&gt;#26242&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Contributors&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/dhruvmanila&#34;&gt;&lt;code&gt;@​dhruvmanila&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/MichaReiser&#34;&gt;&lt;code&gt;@​MichaReiser&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://github.com/ntBre&#34;&gt;&lt;code&gt;@​ntBre&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/trilamsr&#34;&gt;&lt;code&gt;@​trilamsr&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;0.15.19&lt;/h2&gt;
+&lt;p&gt;Released on 2026-06-23.&lt;/p&gt;
+&lt;h3&gt;Preview features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Support human-readable names when hovering suppression comments and
+in code actions (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26114&#34;&gt;#26114&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Bug fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Fall back to default settings when editor-only settings are invalid
+(&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26244&#34;&gt;#26244&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Fix panic when inserting text at a notebook cell boundary (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26111&#34;&gt;#26111&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Rule changes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;[&lt;code&gt;pylint&lt;/code&gt;] Update fix suggestions for
+&lt;code&gt;__floor__&lt;/code&gt;, &lt;code&gt;__trunc__&lt;/code&gt;,
+&lt;code&gt;__length_hint__&lt;/code&gt;, and &lt;code&gt;__matmul__&lt;/code&gt; variants
+(&lt;code&gt;PLC2801&lt;/code&gt;) (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26239&#34;&gt;#26239&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Performance&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Avoid allocating when parsing single string literals (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26200&#34;&gt;#26200&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Avoid reallocating singleton call arguments (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26223&#34;&gt;#26223&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Lazily create source files for lint diagnostics (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26226&#34;&gt;#26226&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Optimize formatter text width and indentation (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26236&#34;&gt;#26236&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Reserve capacity for builtin bindings (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26229&#34;&gt;#26229&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Skip repeated-key checks for singleton dictionaries (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26228&#34;&gt;#26228&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Use ArrayVec for qualified name segments (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/pull/26224&#34;&gt;#26224&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;!-- raw HTML omitted --&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;... (truncated)&lt;/p&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/f82a36b6baf8c0547a17bbde6c0d927ccd45d938&#34;&gt;&lt;code&gt;f82a36b&lt;/code&gt;&lt;/a&gt;
+Bump 0.15.20 (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/issues/26376&#34;&gt;#26376&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/af329438b55d5aa8ca28725f17abbae63b5c815d&#34;&gt;&lt;code&gt;af32943&lt;/code&gt;&lt;/a&gt;
+Improve the summarise-ecosystem-results skill (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/issues/26378&#34;&gt;#26378&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/485ebab5de692aad34720898cd80245b6092ba86&#34;&gt;&lt;code&gt;485ebab&lt;/code&gt;&lt;/a&gt;
+Remove &lt;code&gt;RUF076&lt;/code&gt; name from schema (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/issues/26371&#34;&gt;#26371&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/ef81835ce3da615346584dc446de0fe26bfc154b&#34;&gt;&lt;code&gt;ef81835&lt;/code&gt;&lt;/a&gt;
+[ty] Implement rust-analyzer&#39;s &amp;quot;Click for full compiler
+diagnostic&amp;quot; feature (...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/572b31e2377a701a7365f069f6ef87002962cb2b&#34;&gt;&lt;code&gt;572b31e&lt;/code&gt;&lt;/a&gt;
+[&lt;code&gt;ruff&lt;/code&gt;] Remove &lt;code&gt;pytest-fixture-autouse&lt;/code&gt;
+(&lt;code&gt;RUF076&lt;/code&gt;) (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/issues/26240&#34;&gt;#26240&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/f703f219d7fddd1a4abba9fa81e34773c185a4b9&#34;&gt;&lt;code&gt;f703f21&lt;/code&gt;&lt;/a&gt;
+Allow human-readable names in rule selectors (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/issues/25887&#34;&gt;#25887&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/0d726b28ee35413926145ffef4ac1143cae9ea1e&#34;&gt;&lt;code&gt;0d726b2&lt;/code&gt;&lt;/a&gt;
+[ty] Reuse equality semantics for membership compatibility (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/issues/25955&#34;&gt;#25955&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/dbe6e9848c3f78fdaf543cfc000939ebc73b5f00&#34;&gt;&lt;code&gt;dbe6e98&lt;/code&gt;&lt;/a&gt;
+[ty] Infer definite equality comparison results (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/issues/26337&#34;&gt;#26337&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/e700ea357a2196d76b58eb89b2031ddb5ca896e0&#34;&gt;&lt;code&gt;e700ea3&lt;/code&gt;&lt;/a&gt;
+[ty] Prove TypedDict structural patterns exhaustive (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/issues/26285&#34;&gt;#26285&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/astral-sh/ruff/commit/6a0d2ec93959d966430b8c39d4de5c3e8a88e911&#34;&gt;&lt;code&gt;6a0d2ec&lt;/code&gt;&lt;/a&gt;
+[ty] Widen inferred class-valued instance attributes (&lt;a
+href=&#34;https://redirect.github.com/astral-sh/ruff/issues/26338&#34;&gt;#26338&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/astral-sh/ruff/compare/0.15.18...0.15.20&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `anyio` from 4.14.0 to 4.14.1
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/agronholm/anyio/releases&#34;&gt;anyio&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;4.14.1&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Fixed teardown of higher-scoped async fixtures failing on asyncio
+with &lt;code&gt;RuntimeError: Attempted to exit cancel scope in a different
+task than it was entered in&lt;/code&gt; when an async test raise an outcome
+exception (e.g., &lt;code&gt;pytest.skip()&lt;/code&gt;,
+&lt;code&gt;pytest.xfail()&lt;/code&gt;, or &lt;code&gt;pytest.fail()&lt;/code&gt;) (&lt;a
+href=&#34;https://redirect.github.com/agronholm/anyio/issues/1179&#34;&gt;#1179&lt;/a&gt;;
+PR by &lt;a
+href=&#34;https://github.com/EmmanuelNiyonshuti&#34;&gt;&lt;code&gt;@​EmmanuelNiyonshuti&lt;/code&gt;&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Fixed &lt;code&gt;CapacityLimiter.total_tokens&lt;/code&gt; rejecting a value of
+&lt;code&gt;0&lt;/code&gt; when the limiter was instantiated outside of an event
+loop, contradicting the documented behavior of allowing 0 total tokens
+(&lt;a
+href=&#34;https://redirect.github.com/agronholm/anyio/pull/1183&#34;&gt;#1183&lt;/a&gt;;
+PR by &lt;a
+href=&#34;https://github.com/nyxst4ck&#34;&gt;&lt;code&gt;@​nyxst4ck&lt;/code&gt;&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/agronholm/anyio/commit/149b9e907618fadf6840a4d3cebad533b0c7d033&#34;&gt;&lt;code&gt;149b9e9&lt;/code&gt;&lt;/a&gt;
+Bumped up the version&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/agronholm/anyio/commit/377518cd1160314f2fdf74f356ae9e848c94a065&#34;&gt;&lt;code&gt;377518c&lt;/code&gt;&lt;/a&gt;
+Bump actions/checkout from 6 to 7 in the github-actions group (&lt;a
+href=&#34;https://redirect.github.com/agronholm/anyio/issues/1186&#34;&gt;#1186&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/agronholm/anyio/commit/b42a2f5e8e9910d0c57b970f9a747427a9da26f0&#34;&gt;&lt;code&gt;b42a2f5&lt;/code&gt;&lt;/a&gt;
+[pre-commit.ci] pre-commit autoupdate (&lt;a
+href=&#34;https://redirect.github.com/agronholm/anyio/issues/1185&#34;&gt;#1185&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/agronholm/anyio/commit/3ceb6ffbfa89be715f444550883356fbfbc13154&#34;&gt;&lt;code&gt;3ceb6ff&lt;/code&gt;&lt;/a&gt;
+Allow 0 tokens in a CapacityLimiter instantiated outside an event loop
+(&lt;a
+href=&#34;https://redirect.github.com/agronholm/anyio/issues/1183&#34;&gt;#1183&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/agronholm/anyio/commit/e10d1db74f7a59cb283a1e4b3b22227da11c6f07&#34;&gt;&lt;code&gt;e10d1db&lt;/code&gt;&lt;/a&gt;
+Add missing await to open_file() in file I/O concurrency example (&lt;a
+href=&#34;https://redirect.github.com/agronholm/anyio/issues/1182&#34;&gt;#1182&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/agronholm/anyio/commit/1dbc3b62256e5877bcf610aca98ba6e450d14c20&#34;&gt;&lt;code&gt;1dbc3b6&lt;/code&gt;&lt;/a&gt;
+OutcomeException should not discard test runner_task (&lt;a
+href=&#34;https://redirect.github.com/agronholm/anyio/issues/1180&#34;&gt;#1180&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;See full diff in &lt;a
+href=&#34;https://github.com/agronholm/anyio/compare/4.14.0...4.14.1&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `typer` from 0.26.7 to 0.26.8
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/fastapi/typer/releases&#34;&gt;typer&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;0.26.8&lt;/h2&gt;
+&lt;h3&gt;Fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;🐛 Make second column of Rich help output reflect the type
+consistently, even when using &lt;code&gt;metavar&lt;/code&gt;. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1410&#34;&gt;#1410&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/svlandeg&#34;&gt;&lt;code&gt;@​svlandeg&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;🐛 Fix formatting in &lt;code&gt;NoSuchOption.format_message()&lt;/code&gt;. PR
+&lt;a href=&#34;https://redirect.github.com/fastapi/typer/pull/1843&#34;&gt;#1843&lt;/a&gt;
+by &lt;a
+href=&#34;https://github.com/foomunleong&#34;&gt;&lt;code&gt;@​foomunleong&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Docs&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;📝 Update docs badges: remove Publish badge, it doesn&#39;t give extra
+information. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1850&#34;&gt;#1850&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;📝 Fix formatting for help link to support GitHub-specific overview
+edge-case. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1826&#34;&gt;#1826&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/phalberg&#34;&gt;&lt;code&gt;@​phalberg&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Internal&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;👷 Simplify pull request workflow triggers. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1858&#34;&gt;#1858&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;👷 Update issue-manager to 0.7.1. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1857&#34;&gt;#1857&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;⬆️ Update issue-manager to 0.7.0. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1856&#34;&gt;#1856&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;🔒️ Update zizmor workflow security checks. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1854&#34;&gt;#1854&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;⬆️ Group Dependabot updates. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1853&#34;&gt;#1853&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;⬆️ Update Dependabot ecosystem coverage. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1851&#34;&gt;#1851&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;👷 Fix alls-green test dependency. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1848&#34;&gt;#1848&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;⬆ Bump cryptography from 46.0.7 to 48.0.1. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1841&#34;&gt;#1841&lt;/a&gt; by
+&lt;a
+href=&#34;https://github.com/apps/dependabot&#34;&gt;&lt;code&gt;@​dependabot[bot]&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;⬆ Bump pyjwt from 2.12.0 to 2.13.0. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1839&#34;&gt;#1839&lt;/a&gt; by
+&lt;a
+href=&#34;https://github.com/apps/dependabot&#34;&gt;&lt;code&gt;@​dependabot[bot]&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;⬆ Bump the github-actions group across 1 directory with 3 updates.
+PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1828&#34;&gt;#1828&lt;/a&gt; by
+&lt;a
+href=&#34;https://github.com/apps/dependabot&#34;&gt;&lt;code&gt;@​dependabot[bot]&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;⬆ Bump the python-packages group with 3 updates. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1829&#34;&gt;#1829&lt;/a&gt; by
+&lt;a
+href=&#34;https://github.com/apps/dependabot&#34;&gt;&lt;code&gt;@​dependabot[bot]&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Changelog&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/fastapi/typer/blob/master/docs/release-notes.md&#34;&gt;typer&#39;s
+changelog&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;0.26.8 (2026-06-25)&lt;/h2&gt;
+&lt;h3&gt;Fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;🐛 Make second column of Rich help output reflect the type
+consistently, even when using &lt;code&gt;metavar&lt;/code&gt;. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1410&#34;&gt;#1410&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/svlandeg&#34;&gt;&lt;code&gt;@​svlandeg&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;🐛 Fix formatting in &lt;code&gt;NoSuchOption.format_message()&lt;/code&gt;. PR
+&lt;a href=&#34;https://redirect.github.com/fastapi/typer/pull/1843&#34;&gt;#1843&lt;/a&gt;
+by &lt;a
+href=&#34;https://github.com/foomunleong&#34;&gt;&lt;code&gt;@​foomunleong&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Docs&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;📝 Update docs badges: remove Publish badge, it doesn&#39;t give extra
+information. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1850&#34;&gt;#1850&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;📝 Fix formatting for help link to support GitHub-specific overview
+edge-case. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1826&#34;&gt;#1826&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/phalberg&#34;&gt;&lt;code&gt;@​phalberg&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Internal&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;👷 Simplify pull request workflow triggers. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1858&#34;&gt;#1858&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;👷 Update issue-manager to 0.7.1. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1857&#34;&gt;#1857&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;⬆️ Update issue-manager to 0.7.0. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1856&#34;&gt;#1856&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;🔒️ Update zizmor workflow security checks. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1854&#34;&gt;#1854&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;⬆️ Group Dependabot updates. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1853&#34;&gt;#1853&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;⬆️ Update Dependabot ecosystem coverage. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1851&#34;&gt;#1851&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;👷 Fix alls-green test dependency. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1848&#34;&gt;#1848&lt;/a&gt; by
+&lt;a href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;⬆ Bump cryptography from 46.0.7 to 48.0.1. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1841&#34;&gt;#1841&lt;/a&gt; by
+&lt;a
+href=&#34;https://github.com/apps/dependabot&#34;&gt;&lt;code&gt;@​dependabot[bot]&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;⬆ Bump pyjwt from 2.12.0 to 2.13.0. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1839&#34;&gt;#1839&lt;/a&gt; by
+&lt;a
+href=&#34;https://github.com/apps/dependabot&#34;&gt;&lt;code&gt;@​dependabot[bot]&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;⬆ Bump the github-actions group across 1 directory with 3 updates.
+PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1828&#34;&gt;#1828&lt;/a&gt; by
+&lt;a
+href=&#34;https://github.com/apps/dependabot&#34;&gt;&lt;code&gt;@​dependabot[bot]&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;⬆ Bump the python-packages group with 3 updates. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/pull/1829&#34;&gt;#1829&lt;/a&gt; by
+&lt;a
+href=&#34;https://github.com/apps/dependabot&#34;&gt;&lt;code&gt;@​dependabot[bot]&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/typer/commit/b210c0e2376d99344f79f11fab3ad34cf890cc20&#34;&gt;&lt;code&gt;b210c0e&lt;/code&gt;&lt;/a&gt;
+🔖 Release version 0.26.8 (&lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/issues/1859&#34;&gt;#1859&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/typer/commit/51ae1006b9b90f8586b8a881030584ecd4ffd83a&#34;&gt;&lt;code&gt;51ae100&lt;/code&gt;&lt;/a&gt;
+📝 Update release notes&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/typer/commit/0c15b1b239a2066ef1acd62143cd7d6f2fabde5d&#34;&gt;&lt;code&gt;0c15b1b&lt;/code&gt;&lt;/a&gt;
+🐛 Make second column of Rich help output reflect the type consistently,
+even ...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/typer/commit/b7cb8c7a5879cafb5a787db9f6d960c0654e0123&#34;&gt;&lt;code&gt;b7cb8c7&lt;/code&gt;&lt;/a&gt;
+📝 Update release notes&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/typer/commit/5285cd4b2d2b00cca710445dfe72bb812fe1a643&#34;&gt;&lt;code&gt;5285cd4&lt;/code&gt;&lt;/a&gt;
+👷 Simplify pull request workflow triggers (&lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/issues/1858&#34;&gt;#1858&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/typer/commit/b27385b746ab17b1f2ced14cb26b2eaeb4affa65&#34;&gt;&lt;code&gt;b27385b&lt;/code&gt;&lt;/a&gt;
+📝 Update release notes&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/typer/commit/e64958fa66176bb4cd6d893f81e745a8664426b4&#34;&gt;&lt;code&gt;e64958f&lt;/code&gt;&lt;/a&gt;
+👷 Update issue-manager to 0.7.1 (&lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/issues/1857&#34;&gt;#1857&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/typer/commit/1b02fb3b57230df404c4c4e5754b9d1affc4bb8d&#34;&gt;&lt;code&gt;1b02fb3&lt;/code&gt;&lt;/a&gt;
+📝 Update release notes&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/typer/commit/e64632c24315ea0fa23ace6c388e6cce2494fe06&#34;&gt;&lt;code&gt;e64632c&lt;/code&gt;&lt;/a&gt;
+⬆️ Update issue-manager to 0.7.0 (&lt;a
+href=&#34;https://redirect.github.com/fastapi/typer/issues/1856&#34;&gt;#1856&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/typer/commit/289b6a637204d511c6a941261da1fea2f5659076&#34;&gt;&lt;code&gt;289b6a6&lt;/code&gt;&lt;/a&gt;
+📝 Update release notes&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/fastapi/typer/compare/0.26.7...0.26.8&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `openai` from 2.43.0 to 2.44.0
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/openai/openai-python/releases&#34;&gt;openai&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;v2.44.0&lt;/h2&gt;
+&lt;h2&gt;2.44.0 (2026-06-24)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/openai/openai-python/compare/v2.43.0...v2.44.0&#34;&gt;v2.43.0...v2.44.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Bug Fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;auth:&lt;/strong&gt; prioritize first auth header (&lt;a
+href=&#34;https://github.com/openai/openai-python/commit/797e3362e222ae14e587a4543b76a54d8992d66c&#34;&gt;797e336&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Changelog&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/openai/openai-python/blob/main/CHANGELOG.md&#34;&gt;openai&#39;s
+changelog&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;2.44.0 (2026-06-24)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/openai/openai-python/compare/v2.43.0...v2.44.0&#34;&gt;v2.43.0...v2.44.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Bug Fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;auth:&lt;/strong&gt; prioritize first auth header (&lt;a
+href=&#34;https://github.com/openai/openai-python/commit/797e3362e222ae14e587a4543b76a54d8992d66c&#34;&gt;797e336&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/openai/openai-python/commit/6d9262d5c666a1e4d47f63178db907ba3087ac5d&#34;&gt;&lt;code&gt;6d9262d&lt;/code&gt;&lt;/a&gt;
+release: 2.44.0&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/openai/openai-python/commit/d35627525e192b7a65b556d8a79d22079ccabdf6&#34;&gt;&lt;code&gt;d356275&lt;/code&gt;&lt;/a&gt;
+[codex] Add AWS Bedrock provider authentication (&lt;a
+href=&#34;https://redirect.github.com/openai/openai-python/issues/3398&#34;&gt;#3398&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/openai/openai-python/commit/f47f9a270861ca6a6096e8ea15ef8f3e1fb089b0&#34;&gt;&lt;code&gt;f47f9a2&lt;/code&gt;&lt;/a&gt;
+fix(auth): prioritize first auth header&lt;/li&gt;
+&lt;li&gt;See full diff in &lt;a
+href=&#34;https://github.com/openai/openai-python/compare/v2.43.0...v2.44.0&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `mcp` from 1.28.0 to 1.28.1
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/modelcontextprotocol/python-sdk/commit/777b8d06710c140e3606b0d4598e2aa48546c266&#34;&gt;&lt;code&gt;777b8d0&lt;/code&gt;&lt;/a&gt;
+[v1.x] Support TransportSecuritySettings in the WebSocket server
+transport (#...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/modelcontextprotocol/python-sdk/commit/47204674fb26185c2cf45f065831f27b8e5d5c65&#34;&gt;&lt;code&gt;4720467&lt;/code&gt;&lt;/a&gt;
+[v1.x] Set Development Status classifier to Production/Stable (&lt;a
+href=&#34;https://redirect.github.com/modelcontextprotocol/python-sdk/issues/2976&#34;&gt;#2976&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/modelcontextprotocol/python-sdk/commit/6df3d734265eb49bf758a5e5eb420937337184e9&#34;&gt;&lt;code&gt;6df3d73&lt;/code&gt;&lt;/a&gt;
+[v1.x] Buffer per-request StreamableHTTP streams; store priming event
+before ...&lt;/li&gt;
+&lt;li&gt;See full diff in &lt;a
+href=&#34;https://github.com/modelcontextprotocol/python-sdk/compare/v1.28.0...v1.28.1&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `fastapi` from 0.138.0 to 0.138.1
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/fastapi/fastapi/releases&#34;&gt;fastapi&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;0.138.1&lt;/h2&gt;
+&lt;h3&gt;Refactors&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;♻️ Refactor Library Skills, make info easier to find for agents. PR
+&lt;a
+href=&#34;https://redirect.github.com/fastapi/fastapi/pull/15841&#34;&gt;#15841&lt;/a&gt;
+by &lt;a
+href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Internal&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;👷 Simplify pull request workflow triggers. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/fastapi/pull/15836&#34;&gt;#15836&lt;/a&gt;
+by &lt;a
+href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;👷 Update issue-manager to 0.7.1. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/fastapi/pull/15833&#34;&gt;#15833&lt;/a&gt;
+by &lt;a
+href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;⬆️ Update issue-manager to 0.7.0. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/fastapi/pull/15831&#34;&gt;#15831&lt;/a&gt;
+by &lt;a
+href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;🔧 Update sponsors: Add TestMu again. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/fastapi/pull/15830&#34;&gt;#15830&lt;/a&gt;
+by &lt;a
+href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;🔒️ Update zizmor workflow security checks. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/fastapi/pull/15820&#34;&gt;#15820&lt;/a&gt;
+by &lt;a
+href=&#34;https://github.com/tiangolo&#34;&gt;&lt;code&gt;@​tiangolo&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;⬆ Bump pydantic-settings from 2.14.1 to 2.14.2. PR &lt;a
+href=&#34;https://redirect.github.com/fastapi/fastapi/pull/15799&#34;&gt;#15799&lt;/a&gt;
+by &lt;a
+href=&#34;https://github.com/apps/dependabot&#34;&gt;&lt;code&gt;@​dependabot[bot]&lt;/code&gt;&lt;/a&gt;.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/fastapi/commit/b90c49aefad4958abdfbcacf9c2f816940a8f0e2&#34;&gt;&lt;code&gt;b90c49a&lt;/code&gt;&lt;/a&gt;
+🔖 Release version 0.138.1 (&lt;a
+href=&#34;https://redirect.github.com/fastapi/fastapi/issues/15842&#34;&gt;#15842&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/fastapi/commit/1f2f3df4852bf7cb29be1187806d95a0fdc7ea40&#34;&gt;&lt;code&gt;1f2f3df&lt;/code&gt;&lt;/a&gt;
+📝 Update release notes&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/fastapi/commit/0af003a85da454dcf6b6783e0ad3f0dd687e944f&#34;&gt;&lt;code&gt;0af003a&lt;/code&gt;&lt;/a&gt;
+♻️ Refactor Library Skills, make info easier to find for agents (&lt;a
+href=&#34;https://redirect.github.com/fastapi/fastapi/issues/15841&#34;&gt;#15841&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/fastapi/commit/d5494c1f01796350fa082cf8a82b124e95162e9d&#34;&gt;&lt;code&gt;d5494c1&lt;/code&gt;&lt;/a&gt;
+📝 Update release notes&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/fastapi/commit/82c527e714f16bf9e07202aff0fb91cada329844&#34;&gt;&lt;code&gt;82c527e&lt;/code&gt;&lt;/a&gt;
+👷 Simplify pull request workflow triggers (&lt;a
+href=&#34;https://redirect.github.com/fastapi/fastapi/issues/15836&#34;&gt;#15836&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/fastapi/commit/3f28dbe6d84cdac19bdb2b41e1664981e37359ab&#34;&gt;&lt;code&gt;3f28dbe&lt;/code&gt;&lt;/a&gt;
+📝 Update release notes&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/fastapi/commit/f6ea6b1f12e6d1a45c630a8fdf5d4c7c0959dad9&#34;&gt;&lt;code&gt;f6ea6b1&lt;/code&gt;&lt;/a&gt;
+👷 Update issue-manager to 0.7.1 (&lt;a
+href=&#34;https://redirect.github.com/fastapi/fastapi/issues/15833&#34;&gt;#15833&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/fastapi/commit/219ac634ab82b6321492ef97fb223b618ce13948&#34;&gt;&lt;code&gt;219ac63&lt;/code&gt;&lt;/a&gt;
+📝 Update release notes&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/fastapi/commit/fcc8e1f99431a0b381eaef03e07446e6975422b7&#34;&gt;&lt;code&gt;fcc8e1f&lt;/code&gt;&lt;/a&gt;
+⬆️ Update issue-manager to 0.7.0 (&lt;a
+href=&#34;https://redirect.github.com/fastapi/fastapi/issues/15831&#34;&gt;#15831&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/fastapi/fastapi/commit/457f4c705c0287e49d7aa4ddec292db6185d16e3&#34;&gt;&lt;code&gt;457f4c7&lt;/code&gt;&lt;/a&gt;
+📝 Update release notes&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/fastapi/fastapi/compare/0.138.0...0.138.1&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `boto3` from 1.43.34 to 1.43.36
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/boto/boto3/commit/1d26f21494e4f0d47b6817859e0cfdfec326e611&#34;&gt;&lt;code&gt;1d26f21&lt;/code&gt;&lt;/a&gt;
+Merge branch &#39;release-1.43.36&#39;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/boto/boto3/commit/111333b8fa157f4bd0b3306cbdd7edfa8feb6671&#34;&gt;&lt;code&gt;111333b&lt;/code&gt;&lt;/a&gt;
+Bumping version to 1.43.36&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/boto/boto3/commit/9d1fa236992643881bcdc77522f7932e02a445be&#34;&gt;&lt;code&gt;9d1fa23&lt;/code&gt;&lt;/a&gt;
+Add changelog entries from botocore&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/boto/boto3/commit/6d7f3c2434d930e5bffd689ec55cf1ffed6c7ce4&#34;&gt;&lt;code&gt;6d7f3c2&lt;/code&gt;&lt;/a&gt;
+Update security docs to use newer versions of openssl and python (&lt;a
+href=&#34;https://redirect.github.com/boto/boto3/issues/4796&#34;&gt;#4796&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/boto/boto3/commit/c5b26cac2783f1c22cc018749b6bcfb9c9c29a3b&#34;&gt;&lt;code&gt;c5b26ca&lt;/code&gt;&lt;/a&gt;
+Merge branch &#39;release-1.43.35&#39;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/boto/boto3/commit/c3750ac9cf9590ca8cd9339ed45849dfce3aebae&#34;&gt;&lt;code&gt;c3750ac&lt;/code&gt;&lt;/a&gt;
+Merge branch &#39;release-1.43.35&#39; into develop&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/boto/boto3/commit/46e77cd24d470f8266a1023a0a2a95abcc08664b&#34;&gt;&lt;code&gt;46e77cd&lt;/code&gt;&lt;/a&gt;
+Bumping version to 1.43.35&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/boto/boto3/commit/9919edee9ac657535ae6681c52309c1d2ac3cf6a&#34;&gt;&lt;code&gt;9919ede&lt;/code&gt;&lt;/a&gt;
+Add changelog entries from botocore&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/boto/boto3/commit/0065dbe753454542f21d89234f9da589894c41f7&#34;&gt;&lt;code&gt;0065dbe&lt;/code&gt;&lt;/a&gt;
+Merge branch &#39;release-1.43.34&#39; into develop&lt;/li&gt;
+&lt;li&gt;See full diff in &lt;a
+href=&#34;https://github.com/boto/boto3/compare/1.43.34...1.43.36&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `openai-agents` from 0.17.6 to 0.17.7
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/openai/openai-agents-python/releases&#34;&gt;openai-agents&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;v0.17.7&lt;/h2&gt;
+&lt;h2&gt;What&#39;s Changed&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;feat: expose configurable websocket max_size limit by &lt;a
+href=&#34;https://github.com/anneheartrecord&#34;&gt;&lt;code&gt;@​anneheartrecord&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3645&#34;&gt;openai/openai-agents-python#3645&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;feat: add buffered Chat Completions tool-call streaming by &lt;a
+href=&#34;https://github.com/incoffeemonster&#34;&gt;&lt;code&gt;@​incoffeemonster&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3506&#34;&gt;openai/openai-agents-python#3506&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: reduce sandbox sink buffering and spool timeouts by &lt;a
+href=&#34;https://github.com/2830500285&#34;&gt;&lt;code&gt;@​2830500285&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3642&#34;&gt;openai/openai-agents-python#3642&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/issues/3346&#34;&gt;#3346&lt;/a&gt;
+clean up branch-only messages when deleting branches by &lt;a
+href=&#34;https://github.com/Aphroq&#34;&gt;&lt;code&gt;@​Aphroq&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3347&#34;&gt;openai/openai-agents-python#3347&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/issues/3348&#34;&gt;#3348&lt;/a&gt;
+make AdvancedSQLiteSession add_items atomic by &lt;a
+href=&#34;https://github.com/Aphroq&#34;&gt;&lt;code&gt;@​Aphroq&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3349&#34;&gt;openai/openai-agents-python#3349&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: cancel sibling guardrail tasks when one raises by &lt;a
+href=&#34;https://github.com/adityasingh2400&#34;&gt;&lt;code&gt;@​adityasingh2400&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3239&#34;&gt;openai/openai-agents-python#3239&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: skip needs_approval_checker when status resolved in
+_collect_runs_by_approval by &lt;a
+href=&#34;https://github.com/adityasingh2400&#34;&gt;&lt;code&gt;@​adityasingh2400&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3259&#34;&gt;openai/openai-agents-python#3259&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: validate ls special permission bits by position by &lt;a
+href=&#34;https://github.com/a1vazovsky&#34;&gt;&lt;code&gt;@​a1vazovsky&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3420&#34;&gt;openai/openai-agents-python#3420&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: gate remote-mount edit guidance by mode by &lt;a
+href=&#34;https://github.com/a1vazovsky&#34;&gt;&lt;code&gt;@​a1vazovsky&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3423&#34;&gt;openai/openai-agents-python#3423&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: remove dependency on types-requests by &lt;a
+href=&#34;https://github.com/rouge8&#34;&gt;&lt;code&gt;@​rouge8&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3509&#34;&gt;openai/openai-agents-python#3509&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: empty list/tuple tool output dropped via all([]) == True by &lt;a
+href=&#34;https://github.com/vidigoat&#34;&gt;&lt;code&gt;@​vidigoat&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3554&#34;&gt;openai/openai-agents-python#3554&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: wake PTY output collection on process exit (E2B) by &lt;a
+href=&#34;https://github.com/rohitrastogi&#34;&gt;&lt;code&gt;@​rohitrastogi&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3610&#34;&gt;openai/openai-agents-python#3610&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: avoid stale object-id dedupe in server conversation tracker by
+&lt;a href=&#34;https://github.com/chutch&#34;&gt;&lt;code&gt;@​chutch&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3621&#34;&gt;openai/openai-agents-python#3621&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: report effective Blaxel timeouts by &lt;a
+href=&#34;https://github.com/he-yufeng&#34;&gt;&lt;code&gt;@​he-yufeng&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3643&#34;&gt;openai/openai-agents-python#3643&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: prevent ambiguous Realtime multi-agent tool dispatch by &lt;a
+href=&#34;https://github.com/mavrickdeveloper&#34;&gt;&lt;code&gt;@​mavrickdeveloper&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3441&#34;&gt;openai/openai-agents-python#3441&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: add hint to duplicated MCP server tool name error message by &lt;a
+href=&#34;https://github.com/wustwyh&#34;&gt;&lt;code&gt;@​wustwyh&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3678&#34;&gt;openai/openai-agents-python#3678&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: recursively extract HTTP errors from nested ExceptionGroups by
+&lt;a href=&#34;https://github.com/mshsheikh&#34;&gt;&lt;code&gt;@​mshsheikh&lt;/code&gt;&lt;/a&gt; in
+&lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3556&#34;&gt;openai/openai-agents-python#3556&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Documentation &amp;amp; Other Changes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;docs: &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/issues/3461&#34;&gt;#3461&lt;/a&gt;
+changes for tool_not_found_behavior option by &lt;a
+href=&#34;https://github.com/seratch&#34;&gt;&lt;code&gt;@​seratch&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3462&#34;&gt;openai/openai-agents-python#3462&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;docs: changes for &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/issues/3487&#34;&gt;#3487&lt;/a&gt;
+feature addition by &lt;a
+href=&#34;https://github.com/seratch&#34;&gt;&lt;code&gt;@​seratch&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3488&#34;&gt;openai/openai-agents-python#3488&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;docs: fix OpenAI capitalization in auto-generated ref titles by &lt;a
+href=&#34;https://github.com/atimothee&#34;&gt;&lt;code&gt;@​atimothee&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3646&#34;&gt;openai/openai-agents-python#3646&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;docs: add SDK maintainer references and review guidance by &lt;a
+href=&#34;https://github.com/seratch&#34;&gt;&lt;code&gt;@​seratch&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3676&#34;&gt;openai/openai-agents-python#3676&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;Release 0.17.7 by &lt;a
+href=&#34;https://github.com/github-actions&#34;&gt;&lt;code&gt;@​github-actions&lt;/code&gt;&lt;/a&gt;[bot]
+in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3682&#34;&gt;openai/openai-agents-python#3682&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;New Contributors&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;https://github.com/rouge8&#34;&gt;&lt;code&gt;@​rouge8&lt;/code&gt;&lt;/a&gt; made
+their first contribution in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3509&#34;&gt;openai/openai-agents-python#3509&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://github.com/vidigoat&#34;&gt;&lt;code&gt;@​vidigoat&lt;/code&gt;&lt;/a&gt;
+made their first contribution in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3554&#34;&gt;openai/openai-agents-python#3554&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/rohitrastogi&#34;&gt;&lt;code&gt;@​rohitrastogi&lt;/code&gt;&lt;/a&gt;
+made their first contribution in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3610&#34;&gt;openai/openai-agents-python#3610&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://github.com/chutch&#34;&gt;&lt;code&gt;@​chutch&lt;/code&gt;&lt;/a&gt; made
+their first contribution in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3621&#34;&gt;openai/openai-agents-python#3621&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://github.com/he-yufeng&#34;&gt;&lt;code&gt;@​he-yufeng&lt;/code&gt;&lt;/a&gt;
+made their first contribution in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3643&#34;&gt;openai/openai-agents-python#3643&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anneheartrecord&#34;&gt;&lt;code&gt;@​anneheartrecord&lt;/code&gt;&lt;/a&gt;
+made their first contribution in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3645&#34;&gt;openai/openai-agents-python#3645&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/2830500285&#34;&gt;&lt;code&gt;@​2830500285&lt;/code&gt;&lt;/a&gt; made
+their first contribution in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3642&#34;&gt;openai/openai-agents-python#3642&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://github.com/atimothee&#34;&gt;&lt;code&gt;@​atimothee&lt;/code&gt;&lt;/a&gt;
+made their first contribution in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3646&#34;&gt;openai/openai-agents-python#3646&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/incoffeemonster&#34;&gt;&lt;code&gt;@​incoffeemonster&lt;/code&gt;&lt;/a&gt;
+made their first contribution in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3506&#34;&gt;openai/openai-agents-python#3506&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://github.com/wustwyh&#34;&gt;&lt;code&gt;@​wustwyh&lt;/code&gt;&lt;/a&gt; made
+their first contribution in &lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/pull/3678&#34;&gt;openai/openai-agents-python#3678&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;Full Changelog&lt;/strong&gt;: &lt;a
+href=&#34;https://github.com/openai/openai-agents-python/compare/v0.17.6...v0.17.7&#34;&gt;https://github.com/openai/openai-agents-python/compare/v0.17.6...v0.17.7&lt;/a&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/openai/openai-agents-python/commit/8a0e34caaa65b64f5bdf5cf407ac467404c8a106&#34;&gt;&lt;code&gt;8a0e34c&lt;/code&gt;&lt;/a&gt;
+Release 0.17.7 (&lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/issues/3682&#34;&gt;#3682&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/openai/openai-agents-python/commit/30ff4a5239512f8c587b4cd65199e1b3fcf2f6d0&#34;&gt;&lt;code&gt;30ff4a5&lt;/code&gt;&lt;/a&gt;
+fix: recursively extract HTTP errors from nested ExceptionGroups (&lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/issues/3556&#34;&gt;#3556&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/openai/openai-agents-python/commit/16d16ec2be255177af199361757bc8aedc936dd2&#34;&gt;&lt;code&gt;16d16ec&lt;/code&gt;&lt;/a&gt;
+chore: update maintainer-review skill to have two phases&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/openai/openai-agents-python/commit/f706d651240aa8e83a536f03d4317d2ff358eefe&#34;&gt;&lt;code&gt;f706d65&lt;/code&gt;&lt;/a&gt;
+chore: adjust examples-auto-run skill&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/openai/openai-agents-python/commit/2df8adcae7de0802d859e9ac0c6d4755747f17de&#34;&gt;&lt;code&gt;2df8adc&lt;/code&gt;&lt;/a&gt;
+fix: add hint to duplicated MCP server tool name error message (&lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/issues/3678&#34;&gt;#3678&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/openai/openai-agents-python/commit/7192bc968a136a183ae08a5c8d02aee79add41b7&#34;&gt;&lt;code&gt;7192bc9&lt;/code&gt;&lt;/a&gt;
+docs: add SDK maintainer references and review guidance (&lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/issues/3676&#34;&gt;#3676&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/openai/openai-agents-python/commit/a9b7b7ef4a9eb7df50e2d9b837114f899f07b36f&#34;&gt;&lt;code&gt;a9b7b7e&lt;/code&gt;&lt;/a&gt;
+fix(realtime): prevent ambiguous multi-agent tool dispatch (&lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/issues/3441&#34;&gt;#3441&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/openai/openai-agents-python/commit/28d2a6c8382992b80421c9179997492e5fc39ce0&#34;&gt;&lt;code&gt;28d2a6c&lt;/code&gt;&lt;/a&gt;
+feat: add buffered Chat Completions tool-call streaming (&lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/issues/3506&#34;&gt;#3506&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/openai/openai-agents-python/commit/3f6324c2d2e7cc94d6a44d3e4846d714ed3b83f3&#34;&gt;&lt;code&gt;3f6324c&lt;/code&gt;&lt;/a&gt;
+docs: fix OpenAI capitalization in auto-generated ref titles (&lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/issues/3646&#34;&gt;#3646&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/openai/openai-agents-python/commit/f115dd60159c37f0ca5ed08e6777ff105059e8c2&#34;&gt;&lt;code&gt;f115dd6&lt;/code&gt;&lt;/a&gt;
+fix: reduce sandbox sink buffering and spool timeouts (&lt;a
+href=&#34;https://redirect.github.com/openai/openai-agents-python/issues/3642&#34;&gt;#3642&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/openai/openai-agents-python/compare/v0.17.6...v0.17.7&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `langchain-openai` from 1.3.2 to 1.3.3
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/langchain-ai/langchain/releases&#34;&gt;langchain-openai&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;langchain-openai==1.3.3&lt;/h2&gt;
+&lt;p&gt;Changes since langchain-openai==1.3.2&lt;/p&gt;
+&lt;p&gt;release(openai): 1.3.3 (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38375&#34;&gt;#38375&lt;/a&gt;)
+fix(openai): drop response item ids when &lt;code&gt;store&lt;/code&gt; is false (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38372&#34;&gt;#38372&lt;/a&gt;)
+fix(langchain,openai): only set &lt;code&gt;strict=True&lt;/code&gt; on tools for
+OpenAI-compatible models in &lt;code&gt;ProviderStrategy&lt;/code&gt; (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38370&#34;&gt;#38370&lt;/a&gt;)
+test(openai): clarify expected strict schema error (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38338&#34;&gt;#38338&lt;/a&gt;)
+fix(openai): drop &lt;code&gt;stop&lt;/code&gt; from Responses API payload (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38336&#34;&gt;#38336&lt;/a&gt;)
+chore: bump langsmith from 0.8.5 to 0.8.18 in /libs/partners/openai (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38293&#34;&gt;#38293&lt;/a&gt;)
+chore: bump vcrpy from 8.1.1 to 8.2.1 in /libs/partners/openai (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38294&#34;&gt;#38294&lt;/a&gt;)
+chore(model-profiles): refresh model profile data (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38274&#34;&gt;#38274&lt;/a&gt;)
+test(openai): vcr embedding raw equivalence tests (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38199&#34;&gt;#38199&lt;/a&gt;)&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langchain/commit/4a837567c894363a729bae39a1b2bbe68cb89c41&#34;&gt;&lt;code&gt;4a83756&lt;/code&gt;&lt;/a&gt;
+release(openai): 1.3.3 (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38375&#34;&gt;#38375&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langchain/commit/792c1a743e4471990e96e818957b3299517e7255&#34;&gt;&lt;code&gt;792c1a7&lt;/code&gt;&lt;/a&gt;
+fix(openai): drop response item ids when &lt;code&gt;store&lt;/code&gt; is false (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38372&#34;&gt;#38372&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langchain/commit/9f7e46fd7052960a402a059b2f78ec6248f78527&#34;&gt;&lt;code&gt;9f7e46f&lt;/code&gt;&lt;/a&gt;
+release(anthropic): 1.4.7 (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38373&#34;&gt;#38373&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langchain/commit/9ef324c9abb534b4839bd2a42f4fb36b1ec3f3c3&#34;&gt;&lt;code&gt;9ef324c&lt;/code&gt;&lt;/a&gt;
+fix(langchain,openai): only set &lt;code&gt;strict=True&lt;/code&gt; on tools for
+OpenAI-compatible ...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langchain/commit/05b5af17dca9a554b40e216554f5020ff05eb378&#34;&gt;&lt;code&gt;05b5af1&lt;/code&gt;&lt;/a&gt;
+chore(infra): update workflow key name (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38367&#34;&gt;#38367&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langchain/commit/8e8177487003026f25198068a137270fe369f2d4&#34;&gt;&lt;code&gt;8e81774&lt;/code&gt;&lt;/a&gt;
+test(groq): xfail flaky tool choice test (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38365&#34;&gt;#38365&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langchain/commit/946fbbbead849fc948e50ef726242c47013a43b7&#34;&gt;&lt;code&gt;946fbbb&lt;/code&gt;&lt;/a&gt;
+fix(groq): replace deprecated Groq llama models (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38363&#34;&gt;#38363&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langchain/commit/d11b1fc86369b970a8e6144fdcc4f5923f6e03cd&#34;&gt;&lt;code&gt;d11b1fc&lt;/code&gt;&lt;/a&gt;
+chore(model-profiles): refresh model profile data (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38341&#34;&gt;#38341&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langchain/commit/9d14a5e06d98355e5c0eccd0736b961fbe419f87&#34;&gt;&lt;code&gt;9d14a5e&lt;/code&gt;&lt;/a&gt;
+feat(groq): add &lt;code&gt;performance&lt;/code&gt; service tier (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38339&#34;&gt;#38339&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langchain/commit/cc6b125f02209b6ed816c58401b6c53f44a55c35&#34;&gt;&lt;code&gt;cc6b125&lt;/code&gt;&lt;/a&gt;
+test(openai): clarify expected strict schema error (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langchain/issues/38338&#34;&gt;#38338&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/langchain-ai/langchain/compare/langchain-openai==1.3.2...langchain-openai==1.3.3&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+
+Dependabot will resolve any conflicts with this PR as long as you don&#39;t
+alter it yourself. You can also trigger a rebase manually by commenting
+`@dependabot rebase`.
+
+[//]: # (dependabot-automerge-start)
+[//]: # (dependabot-automerge-end)
+
+---
+
+&lt;details&gt;
+&lt;summary&gt;Dependabot commands and options&lt;/summary&gt;
+&lt;br /&gt;
+
+You can trigger Dependabot actions by commenting on this PR:
+- `@dependabot rebase` will rebase this PR
+- `@dependabot recreate` will recreate this PR, overwriting any edits
+that have been made to it
+- `@dependabot show &lt;dependency name&gt; ignore conditions` will show all
+of the ignore conditions of the specified dependency
+- `@dependabot ignore &lt;dependency name&gt; major version` will close this
+group update PR and stop Dependabot creating any more for the specific
+dependency&#39;s major version (unless you unignore this specific
+dependency&#39;s major version or upgrade to it yourself)
+- `@dependabot ignore &lt;dependency name&gt; minor version` will close this
+group update PR and stop Dependabot creating any more for the specific
+dependency&#39;s minor version (unless you unignore this specific
+dependency&#39;s minor version or upgrade to it yourself)
+- `@dependabot ignore &lt;dependency name&gt;` will close this group update PR
+and stop Dependabot creating any more for the specific dependency
+(unless you unignore this specific dependency or upgrade to it yourself)
+- `@dependabot unignore &lt;dependency name&gt;` will remove all of the ignore
+conditions of the specified dependency
+- `@dependabot unignore &lt;dependency name&gt; &lt;ignore condition&gt;` will
+remove the ignore condition of the specified dependency and ignore
+conditions
+
+
+&lt;/details&gt;
+
+---------
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Signed-off-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- feat: substrate support for BYO and python runtimes for SandboxAgent CR (#2043)
+
+- Implements substrate support for BYO typed agents and the python
+runtime for declarative agents.
+- Fixes an existing issue where on config changes the previous golden
+snapshot was still being served. We now correctly serve the newest
+golden snapshot with the updated config.
+- Fixes an issue where golden snapshot building could use stale config.
+Substrate caches config values based on the `KAGENT_CONFIG_JSON` secret
+key ref name which is static. This can result in stale config being
+fetched. The secret key ref name now contains the config hash as a
+suffix so different configs now have a unique cache key.
+
+**Testing**
+- Tested locally in a kind cluster. Below is an example conversation
+with a declarative sandbox agent using the python runtime where I switch
+between model providers to test config rollout.
+&lt;img width=&#34;1028&#34; height=&#34;700&#34; alt=&#34;Screenshot 2026-06-22 at 4 27 29 PM&#34;
+src=&#34;https://github.com/user-attachments/assets/40b0c0f7-aff1-4752-b878-b9037f94c3a3&#34;
+/&gt;
+
+---------
+
+Signed-off-by: JM Huibonhoa &lt;jm.huibonhoa@solo.io&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- feat: enable sharing of chat sessions (#1935)
+
+Design choices are documented in #1933. Will address/respond to comments
+either here or there if needed and keep the implementation in sync as we
+go.
+
+For testing locally, I first installed locally and started a few session
+as the default user `admin@kagent.dev`, I then reinstalled with trusted
+proxy enabled whereby I could test as my real user.
+
+Closes #1933
+
+---------
+
+Signed-off-by: Brian Fox &lt;878612+onematchfox@users.noreply.github.com&gt;
+Signed-off-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+Co-authored-by: Peter Jausovec &lt;peterj@users.noreply.github.com&gt;
+Co-authored-by: Jet Chiang &lt;pokyuen.jetchiang-ext@solo.io&gt;
+
+- docs: replace outdated AutoGen reference in SECURITY.md (#2110)
+
+AutoGen is no longer used. kagent now runs on Google ADK.
+
+- Updated the base image dependency example in the &#34;When NOT to send a
+report&#34; section
+
+Signed-off-by: mesutoezdil &lt;mesudozdil@gmail.com&gt;</div>
+</div>
+
+<a href="../project/kagent-dev_kagent.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

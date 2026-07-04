@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (29 commits) - gastownhall/beads - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (29 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/gastownhall_beads.html">gastownhall/beads</a> /
+    Updates in main (29 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/gastownhall_beads.html">gastownhall/beads</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-04 06:28 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/gastownhall/beads/commits/main" target="_blank">https://github.com/gastownhall/beads/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление представляет надежный механизм лизинга (claim-TTL, heartbeat, reclaim) для предотвращения перманентного зависания задач, позволяя претензиям истекать и быть восстановленными. Для управления конкурентным доступом в Dolt был реализован новый механизм `row_lock`. Кроме того, значительно повышена стабильность системы благодаря автоматическому повтору критических операций при конфликтах сериализации и устранены многочисленные проблемы с миграцией базы данных, что обеспечивает более плавные обновления. В число прочих улучшений входит &#34;умный&#34; шлюз для безопасной удаленной миграции схемы, а также расширение функциональности команд `bd show` и `bd export`.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- feat(lease): land the leasing stack + schema v54 (claim-TTL, heartbeat, reclaim) (#4537)
+
+* fix(dolt): retry mutate+commit methods on serialization conflict (1213/1205)
+
+ClaimIssue, ClaimReadyIssue, UpdateIssue and CloseIssue each hand-rolled
+their own tx (BeginTx + DOLT_ADD/DOLT_COMMIT + Commit) outside
+withRetryTx, so a concurrent writer that lost Dolt&#39;s optimistic
+commit-time merge surfaced MySQL 1213/1205 as a hard failure instead of
+retrying. Dolt has no real row locking — FOR UPDATE / SKIP LOCKED are
+parse-only no-ops (https://www.dolthub.com/blog/2023-10-23-hold-my-beer/)
+— so retry is the only safety net under N concurrent workers. These four
+are the work-queue hot paths: `bd ready --claim`, claim, update, close.
+
+Move each body into a withRetryTx closure (which owns BeginTx and the
+final Commit and retries serialization failures with backoff), preserving
+the single-tx CAS/mutation + DOLT_COMMIT atomicity exactly. On retry,
+ClaimReadyIssue re-scans the ready front from a fresh snapshot and claims
+the next available issue.
+
+Tested: TestEmbeddedReadyClaimConcurrent, TestEmbeddedReadyConcurrent,
+TestEmbeddedCloseConcurrent, TestEmbeddedUpdateConcurrent and the
+non-concurrent embedded Update/Close/Ready tests pass; build + vet clean.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* test(dolt): add concurrent work-queue drain test (Gas Station claim invariant)
+
+N workers concurrently dequeue one shared ready-front via ClaimReadyIssue
+until empty; asserts every issue claimed exactly once, none stranded, no
+double-claims, and no serialization error ever surfaces (withRetryTx absorbs
+the 1213/1205 from the claim-CAS cell collision). This is the regression guard
+for the multi-agent claim queue that #4491 makes safe.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(lease): claim-TTL + heartbeat + reclaim for dead-worker recovery
+
+Gas Station v1.1 (wy-5r9j). A claim was previously permanent: a worker that
+died mid-task stranded its issue in_progress forever. This adds a lease so a
+claim can expire and be recovered.
+
+Schema (migration 0054): add lease_expires_at, heartbeat_at (DATETIME) and
+row_lock (BIGINT) to issues (and wisps, for uniform issueops routing), plus
+idx_issues_lease for the reaper scan. assignee doubles as the lease owner.
+
+Lifecycle (shared issueops, so both server-mode DoltStore and EmbeddedDoltStore
+get it):
+  - Claim stamps lease_expires_at = now + TTL (default 5m, WithLeaseTTL to
+    override), heartbeat_at = now, and a fresh row_lock.
+  - bd heartbeat &lt;id&gt; — owner-only; pushes the lease forward and rewrites
+    row_lock. Fails (ErrNotClaimable/ErrAlreadyClaimed) once the lease is gone.
+  - bd reclaim --older-than &lt;dur&gt; — reverts in_progress issues whose lease
+    expired more than &lt;dur&gt; ago back to ready (clears assignee/started_at,
+    records a lease_reclaimed event). Default grace 2×TTL.
+
+The row_lock trick: Dolt has no row locking and merges concurrent commits
+cell-by-cell, so a heartbeat (writes heartbeat_at) racing a reclaim (writes
+status) would silently cell-merge into a zombie — an open/unassigned issue that
+still carries the worker&#39;s fresh heartbeat. Every mutating path (claim, close,
+update, heartbeat, reclaim) now rewrites the shared row_lock cell, forcing the
+loser to a 1213/1205 serialization conflict that withRetryTx replays. All lease
+paths are withRetryTx/withConn wrapped.
+
+Tests (real Dolt): TestRowLockForcesConflictOnDisjointCellWrites proves the bug
+without row_lock (silent merge to zombie) and correctness with it (conflict);
+TestConcurrentHeartbeatReclaimClose is the integration race (live workers
+heartbeat+close vs a continuous reaper vs dead workers) asserting exactly-once,
+no lost close, no zombie; plus claim/heartbeat/reclaim unit coverage on both
+backends.
+
+Note: lease columns are second-granular DATETIME (Dolt rounds), so sub-second
+TTLs are meaningless — production TTL is minutes. Heartbeat writes a Dolt
+commit, so cadence must stay ≪ claim cadence to avoid history bloat.
+
+Fixes the test coupling in TestMigration0053PromotesRigWisps, which assumed the
+rig-wisp repair was always LatestVersion().
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* ci+docs: allowlist lease stress tests; scope the row_lock invariant comment
+
+- Add TestConcurrentWorkQueueDrain and TestConcurrentHeartbeatReclaimClose
+  to the check-testing-short.sh allowlist; both are real-Dolt runtime/stress
+  skips and were failing ci-pr-policy.
+- freshRowLock doc said &#34;EVERY mutating path&#34; rewrites row_lock, which
+  overstates it. Scope it to status/ownership/lease-mutating paths (the set
+  the reclaim/heartbeat races care about) and document the invariant + why
+  orthogonal-cell writers (is_blocked, compaction, deps, rename, reopen) are
+  intentionally exempt, so a future writer does not silently reintroduce the
+  zombie-merge bug.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(show): surface lease_expires_at/heartbeat_at in bd show (--json + text) (wy-9cdw)
+
+Migration 0054 added lease_expires_at/heartbeat_at (and internal row_lock) to
+the issues/wisps tables for the claim/heartbeat/reclaim leasing feature, but
+bd show could not observe lease state — you had to drop to raw SQL.
+
+- types.Issue: add LeaseExpiresAt/HeartbeatAt (*time.Time, omitempty), matching
+  the StartedAt nullable-timestamp convention. row_lock stays unexported.
+- sqlbuild.IssueSelectColumns: append lease_expires_at, heartbeat_at to the
+  canonical hydration list (flows to every stack via the shared constant).
+- issueops.ScanIssueFrom: scan + map the two nullable columns (before the
+  trailing extra dests, keeping positional parity across all scan sites).
+- bd show text view: emit a muted &#39;Lease: expires &lt;rel&gt; (heartbeat &lt;rel&gt; ago)&#39;
+  line only for in_progress issues holding an active lease; add formatTimeUntil
+  as the forward-looking mirror of formatTimeAgo.
+- types_test: assert lease keys appear when set, are omitted when nil, and that
+  row_lock is never surfaced.
+
+* fix(lease): settle v54 review blockers
+
+Address #4537 review blockers before landing v54: keep heartbeat off wisps in both backends, keep direct status/assignee updates from leaving stale leases, guard the down migration, and emit reclaim JSON as snake_case.
+
+Agent-Signature: codex-gpt-5.5-high on behalf of matt wilkie
+
+* fix(lease): cover lease fields in tests and hooks
+
+Agent-Signature: codex-gpt-5.5-high on behalf of matt wilkie
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+Co-authored-by: matt wilkie &lt;maphew@gmail.com&gt;
+
+- chore(release): refresh MCP lock for v1.1.0
+
+Agent-Signature: codex-gpt-5.5-high on behalf of matt wilkie
+
+- chore: release v1.1.0
+
+Agent-Signature: codex-gpt-5.5-high on behalf of matt wilkie
+
+- docs(changelog): add [1.1.0] release notes (#4570)
+
+Consolidates rc.1 + rc.2 and adds the post-rc.2 migration-recovery fixes
+(#4555/#4558 v53 wisp-dependency drift + aux-snapshot recovery; #4566/#4567
+dirty-working-set commit deadlock). Authored ahead of the version bump per
+RELEASING.md; the release molecule handles the bump, docs snapshot, and tag.
+
+Agent-Signature: claude-opus-4-8-high on behalf of matt wilkie
+
+- fix(embedded): let working-set reconcile commands open past dirty-table migration guard (#4567)
+
+In embedded mode every store open runs init schema -&gt; MigrateUp, which
+refuses when pending migrations alter tables with uncommitted working-set
+changes. The documented recovery - commit the working set - is itself a bd
+command (bd dolt commit / bd vc commit) whose open hits the same refusal:
+the guard deadlocks against the only command that can satisfy it, leaving
+no in-tool recovery short of raw dolt or destroying the store (#4566).
+
+- schema: the pre-flight dirty-table guard returns a typed DirtyTablesError
+  whose message names the recovery path; it still fires before any
+  migration statement runs. The mid-pass ignored-source guard deliberately
+  stays a plain fatal error (commented).
+- embeddeddolt: replace the lenientGate bool with an open-intent enum
+  (strict / read-only command / working-set reconcile). Both non-strict
+  intents skip the migration with intent-specific warnings on either the
+  #4259 remote-migrate gate refusal or the new DirtyTablesError, so reads
+  are not bricked by dirty tables and reconcile commands can commit the
+  working set at the current schema.
+- cmd/bd: dolt commit and vc commit are classified as working-set
+  reconcile commands and open via the new OpenForWorkingSetReconcile
+  (dolt.Config.LenientOpen, embedded-only; server mode unchanged).
+
+After the commit clears the working set, a normal bd migrate applies
+cleanly. bd migrate / bd bootstrap still hit the guard strictly.
+
+Tests: schema unit test asserts the typed error; embeddeddolt end-to-end
+test (BEADS_TEST_EMBEDDED_DOLT=1) reproduces the deadlock and the recovery,
+pinned at schema v51 so future migrations cannot shift it onto the
+failed-0053 recovery path.
+
+Fixes gastownhall/beads#4566
+
+Agent-Signature: claude-fable-5-high on behalf of matt wilkie
+
+Claude-Session: https://claude.ai/code/session_01FWVnjn3Bq4PSG1akpFpKnY
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- docs: fix broken docs/EXTENDING.md xref to docs/CONFIG.md (#4526)
+
+The configuration reference pointed compact_* tuning at docs/EXTENDING.md,
+which has never existed in the repo, so the link broke immediately.
+Compaction settings are actually documented in docs/CONFIG.md. Redirect
+the reference there, matching the existing CONFIG.md link style, across
+the live doc, all three versioned snapshots, and regenerate
+website/static/llms-full.txt so no broken xref to docs/EXTENDING.md
+remains anywhere in the repo.
+
+Fixes mybd-q71.
+
+Agent-Signature: claude-opus-4-8-high on behalf of matt wilkie
+
+- fix(schema): repair v53 wisp dependency drift (#4558)
+
+* fix(schema): repair v53 wisp dependency drift
+
+Add a v53 pre-migration repair for mixed-vintage wisp_dependencies tables that have the id column but lack split target columns, and allow recovery from the known failed-v53 dirty-table state.
+
+Agent-Signature: codex-gpt-5.5-high on behalf of matt wilkie
+
+* test(schema): harden v53 repair coverage
+
+Cover the v53 recovery gate&#39;s repaired-shape and wrong-version rejects, and add a Dolt-backed collision fixture proving the split-target backfill prefers wisp matches before issue matches. Reuse the shared schema column helper for issues rig column repair.
+
+Agent-Signature: codex-gpt-5.5-high on behalf of matt wilkie
+
+* fix(schema): recover v53 traps that dirtied aux snapshot tables
+
+The failed-v53 recovery gate only self-healed when every dirty table was
+in its allowed set. A DB starting at v49 runs 0050-0053 in one uncommitted
+batch (MigrateUp commits once at the end), so 0051&#39;s DROP DEFAULT on
+issue_snapshots/compaction_snapshots leaves them dirty when 0053 fails.
+Those tables were outside the allowed set, so a legacy-default DB stayed
+permanently trapped. Their dirty state is an idempotent schema-only
+DROP DEFAULT, safe to include in the recovery commit.
+
+Fixes the residual hard-trap variant found in review of #4555.
+
+Agent-Signature: claude-opus-4-8-high on behalf of matt wilkie
+
+- Merge pull request #4528 from maphew/feat/zzg-prime-divergence-reminder
+
+feat(prime): remind when AGENTS.md and CLAUDE.md diverge
+
+- fix(prime): satisfy divergence reminder CI blockers
+
+Rename the prime divergence test helper so the embedded/CGO cmd/bd test package no longer collides with the existing writeFile helper, and reword the reminder code to avoid the misspell-rejected hardlink spelling.
+
+Agent-Signature: codex-gpt-5.5-medium on behalf of matt wilkie
+
+- Merge pull request #4525 from maphew/fix/closeissue-errnotfound
+
+fix(storage): wrap storage.ErrNotFound in CloseIssue for sentinel parity
+
+- fix(storage): wrap storage.ErrNotFound in CloseIssue for sentinel parity
+
+CloseIssueInTx returned a bare fmt.Errorf(&#34;issue not found: %s&#34;), so
+errors.Is(err, storage.ErrNotFound) was false — unlike GetIssue,
+UpdateIssue, and DeleteIssue, which all wrap the sentinel. Callers that
+branch on storage.ErrNotFound (and the in-progress storage conformance
+suite, gastownhall/beads#4414) could not detect a missing issue on close.
+
+Wrap the sentinel and add a regression test asserting the not-found path
+satisfies errors.Is(err, storage.ErrNotFound).
+
+Fixes mybd-fv7r.
+
+Agent-Signature: claude-opus-4-8-high on behalf of matt wilkie
+
+- fix(export): auto-export JSONL in SQL-server mode via working-set state hash (#4557)
+
+Auto-export was skipped entirely when bd runs as a client of a dolt
+sql-server (dolt_mode &#34;server&#34; / shared-server), despite export.auto=true.
+In topologies without a Dolt remote, .beads/issues.jsonl is the only
+git-durable state, so a `git push` without a manual `bd export` silently
+published stale issue state.
+
+Two fixes, because removing the skip alone is not enough:
+
+- Remove the server-mode skip in maybeAutoExport: server-mode clients
+  rely on the JSONL export exactly like embedded users do.
+- Add storage.StateHasher (DOLT_HASHOF_DB) and prefer it over
+  GetCurrentCommit for change detection. Server mode runs with dolt
+  auto-commit off, so writes stay in the working set and HEAD does not
+  advance — HEAD-based detection would export once and then go
+  permanently quiet. DOLT_HASHOF_DB covers the working set; stores
+  without it (and older servers) fall back to HEAD-based detection.
+
+The newer proxied-server mode (UOW provider, no global store) still skips
+all post-run maintenance and needs a UOW-based export as a follow-up.
+
+Verified end-to-end against a scratch dolt sql-server: create and close
+both refresh issues.jsonl immediately, with the state hash advancing
+while HEAD stays fixed.
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- feat(gate): turn the smart remote-migrate gate on by default (#4516) (#4551)
+
+rc.2 shipped the state-aware gate opt-in behind BD_SMART_GATE, but nothing
+surfaced that the variable existed, so every clone still hit the blunt
+always-block wall. SmartGateEnabled() now defaults to true when unset
+(unparseable values keep the default); BD_SMART_GATE=0 opts out and
+restores the unconditional #4515 block. Routing is unchanged and every
+fallback path still degrades to the blunt block, so the default is never
+less safe than before.
+
+Blunt-gate tests pin BD_SMART_GATE=0 explicitly; new tests cover the
+default-on contract, and the behind-schema-remote init test now covers
+both the default (auto-migrate as safe first-mover) and opt-out
+(designated-migrator guidance) paths end-to-end on a real embedded
+database. Upgrade guide and CHANGELOG updated.
+
+Closes #4516.
+
+Agent-Signature: claude-fable-5-high on behalf of matt wilkie
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+Claude-Session: https://claude.ai/code/session_0167xsjJDukVKE7BE1i4W2wE
+
+- test(prime): stop prime tests reading the ambient workspace database (#4552)
+
+TestOutputContextFunction and five sibling prime tests call
+outputPrimeContext without stubbing the package-global store, so
+formatMemoriesForPrime lazily opens whatever beads database an
+ancestor-directory walk finds from the test process CWD and injects that
+workspace&#39;s live persistent-memory text into the output under test. Any
+memory containing a rejected phrase fails the assertions - in the wild, a
+memory whose body mentioned &#34;git pull&#34; broke the stealth and local-only
+subtests. It only reproduces with CGO_ENABLED=1 (the embedded Dolt store
+must be openable) in a checkout nested under a real beads workspace; CI
+checkouts have no ancestor database, which is why CI never sees it.
+
+Add stubPrimeStoreUnavailable(), following the existing
+stubPrimeHasGitRemote restore-func idiom (ensureStoreActiveForPrime is
+already a stubbable var, used by the store-timeout test), and apply it in
+the six tests that render prime output. No production code changes.
+
+Agent-Signature: claude-fable-5-high on behalf of matt wilkie
+
+Claude-Session: https://claude.ai/code/session_0167xsjJDukVKE7BE1i4W2wE
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- docs(cli): regenerate CLI reference for bd remember bare-key reads (#4545)
+
+Main has been red since 9ee97c264 (remember read-paving) landed without
+a docs regen: docs/CLI_REFERENCE.md and the website remember page
+drifted from live --help, failing the strict CLI-docs freshness probe
+in Build Artifacts / PR Policy / doc-flags jobs on every push to main.
+
+Regenerated with scripts/generate-cli-docs.sh (pinned CGO_ENABLED=0
+build). Diff is exactly the new bare-key recall paragraph and example.
+
+Agent-Signature: claude-fable-5-high on behalf of matt wilkie
+
+Claude-Session: https://claude.ai/code/session_0167xsjJDukVKE7BE1i4W2wE
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- chore(release): prep v1.1.0-rc.2 (#4540)
+
+Second release candidate for 1.1.0. rc.1 is superseded: two
+upgrade-breaking migration regressions were reported against it (#4502
+v53 fails on pre-rig issues tables; #4534 one orphaned child_counters
+row bricks every create) and both fixes plus the remote-migrate gate
+hardening (#4515/#4516), the schema-newer fail-fast (#4531), the
+prerelease-correct install header (#4530), and the validated upgrade
+recipe (#4514) landed after the rc.1 tag.
+
+CHANGELOG gains the dated 1.1.0-rc.2 section, info.go the whats-new
+entry, update-versions.sh 1.1.0-rc.2 bumped the version files, and the
+beads-mcp lockfile is resynced (1.1.0rc2). check-versions.sh passes.
+
+Agent-Signature: claude-fable-5-high on behalf of matt wilkie
+
+Claude-Session: https://claude.ai/code/session_0167xsjJDukVKE7BE1i4W2wE
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- fix(schema): repair migration-state drift that breaks v53 upgrades (#4502, #4534) (#4538)
+
+* fix(schema): repair migration-state drift that breaks v53 upgrades (#4502, #4534)
+
+Two field reports against v1.1.0-rc.1 show real databases reaching the v53
+migration with state the migration lineage assumes cannot exist:
+
+- #4502: the rig/agent columns (hook_bead, role_bead, agent_state,
+  last_activity, role_type, rig) were only ever added to the squashed
+  bootstrap 0001_create_issues, so a database bootstrapped before they
+  existed sits at schema v52 without them. Migration 0053 copies exactly
+  those columns from wisps into issues and failed with Unknown column
+  even with zero rig wisps to repair. 0053 now ensures each of the six
+  exists on issues before the copy (databases in the wild may have some
+  but not all).
+
+- #4534: migration 0039 dropped fk_counter_parent and clone-local
+  migration 0002 re-added it under FOREIGN_KEY_CHECKS=0, so a
+  child_counters row orphaned during the FK-less window survives the
+  constraint&#39;s return, and Dolt constraint validation then rejects
+  subsequent inserts on an otherwise healthy database. New clone-local
+  migration 0011 moves live-wisp counters to wisp_child_counters and
+  deletes rows dangling from issues - the rows ON DELETE CASCADE would
+  have removed had the FK been in force. Already-bitten databases heal
+  on the next command with the new binary.
+
+Verified end-to-end with real binaries: a stock rc.1 bd fails on a
+v52-shaped embedded database with &#39;Unknown column agent_state in
+issues&#39;; the patched bd migrates it, restores the columns, promotes rig
+wisps, and records v53. On a database with a planted orphaned counter
+row, the patched bd applies ignored 0011 on open, removes the orphan,
+and preserves live counters.
+
+Docs ride along because they close the same exposure: the upgrade guide
+recipes now start with a JSONL export before migrating, and the README
+gains an upgrading pointer (it previously never mentioned upgrades).
+
+Fix shapes suggested by the reporters&#39; field repair notes: gojun077
+(#4502) validated the guarded ALTERs manually, eitsupi (#4534) isolated
+the orphaned-row root cause and confirmed deletion as the cure.
+
+Agent-Signature: claude-fable-5-high on behalf of matt wilkie
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+Claude-Session: https://claude.ai/code/session_0167xsjJDukVKE7BE1i4W2wE
+
+* fixup: move 0053 drift repair from SQL into the migration runner
+
+The migration hygiene gate (check C) rightly freezes shipped migration
+files: editing one forks fresh clones from upgraded clones via the
+recorded content hash. But a migration that FAILS on drifted databases
+cannot be fixed forward with a new file either - the failing version
+aborts the pass before any later version runs. Repair the drift in Go
+immediately before applying v53 instead (precedent:
+ensureContentHashColumn), leaving 0053&#39;s content untouched.
+
+Re-validated end-to-end: stock rc.1 still fails on the v52-shaped
+embedded database; the reworked binary opens it, restores all six
+columns, records v53, data intact.
+
+Agent-Signature: claude-fable-5-high on behalf of matt wilkie
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+Claude-Session: https://claude.ai/code/session_0167xsjJDukVKE7BE1i4W2wE
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- fix(scripts): document CGO override + stderr-warn in CLI docgen guard (#4532)
+
+Why: regenerating CLI docs on a machine with a C compiler links CGO by
+default, so `bd federation --help` emits the full federation subcommand tree.
+The committed docs are built by CI with CGO_ENABLED=0, which stubs federation
+(&#34;built without CGO support&#34;), so a naive regen produces ~hundreds of lines of
+spurious federation churn (federation.md, CLI_REFERENCE.md, llms-full.txt)
+unrelated to the actual change. The existing guard force-rebuilds a pure-go
+binary but offered no escape hatch and announced the swap on stdout.
+
+What:
+- Route the CGO-mismatch notice to stderr (keeps --check/CI stdout clean and
+  makes it a proper warning).
+- Add a documented BD_DOCS_ALLOW_CGO=1 override hook so an intentional
+  full-federation regen can trust the supplied binary as-is; default stays
+  safe (rebuild pinned CGO_ENABLED=0 -tags gms_pure_go).
+- Make the message name the pure-go recipe and reference the stub marker
+  (&#34;Federation commands require CGO&#34;, cmd/bd/federation_nocgo.go).
+- Document the override in the script&#39;s --help text.
+
+generate-llms-full.sh builds no bd binary, so it needs no change.
+
+Agent-Signature: claude-opus-4-8-high on behalf of matt wilkie
+
+- fix(storage): fail fast on writable opens of a schema-newer DB (#4531)
+
+* fix(storage): fail fast on writable opens of a schema-newer DB
+
+Why: a stale bd that opened a forward-drifted database (DB schema newer
+than the binary) only failed fast on read-only opens. Writable opens ran
+MigrateUp, which no-ops when the DB is already past the binary&#39;s latest
+migration (atLatest uses &gt;=), so the open succeeded and a later query
+died with a cryptic unknown-column error (e.g. &#34;column depends_on_id
+could not be found&#34;) instead of a clear &#34;upgrade bd&#34; message. This is the
+stale-binary incident behind #4135/#4137.
+
+PR #4152 added the SchemaSkewError forward-drift guard but wired
+CheckForwardDrift only into the read-only store paths. This extends the
+same guard to both writable open paths:
+
+- server mode (internal/storage/dolt New): run CheckForwardDrift on
+  read-only AND writable opens before initSchema.
+- embedded mode (internal/storage/embeddeddolt initSchema): run
+  CheckForwardDrift after the USE switch, before the remote-migrate gate
+  and MigrateUp.
+
+checkSchemaSkew now reads the version via CurrentVersion, which treats a
+missing schema_migrations table as version 0, so the guard is safe to run
+before initSchema creates the table on a fresh database. CheckForwardDrift
+now accepts a DBConn so the embedded path can pass its pinned *sql.Conn.
+
+Agent-Signature: claude-opus-4-8-high on behalf of matt wilkie
+
+* test(schema): exercise forward drift guard with pinned conn
+
+Agent-Signature: codex-gpt-5.5-high on behalf of matt wilkie
+
+- fix(release): branch install header for prerelease vs stable (#4530)
+
+Why: prerelease (RC) GitHub releases shipped the single static stable
+install header, so three of four documented methods (brew, install.sh,
+install.ps1) silently install the latest STABLE release instead of the
+RC. Only the manual asset download actually fetched the prerelease.
+
+What: gate release.header on goreleaser&#39;s `{{ if .Prerelease }}`. The
+prerelease branch emits RC-appropriate instructions (manual asset
+download + `go install ...@v{{ .Version }}`) and notes that stable
+channels keep serving the latest stable release. The else (stable)
+branch keeps the existing header content verbatim.
+
+Agent-Signature: claude-opus-4-8-high on behalf of matt wilkie
+
+- build(goreleaser): remove orphaned homebrew brews block (#4527)
+
+The brews: block pointed at the gastownhall/homebrew-beads tap with
+skip_upload: true, so goreleaser never published from it. It was left
+behind as dead config.
+
+Why: #4478 (merged 2026-06-23) retired the legacy homebrew-beads tap as a
+release channel and removed the release-workflow job that publishes
+Formula/bd.rb. With no publish target remaining, this brews: block is
+orphaned configuration and is safe to delete.
+
+Agent-Signature: claude-opus-4-8-high on behalf of matt wilkie
+
+- feat(storage): backend-agnostic conformance test suite (#4414)
+
+* feat(storage): add backend-agnostic conformance test suite
+
+40 behavioral contract tests any Storage/DoltStorage implementation
+can run via conformance.RunAll(t, factory).
+
+Covers: CRUD (12), search/filter (6), dependencies (3),
+ready/blocked (5), labels (3), comments (2), config (2),
+metadata slots (1), statistics (1), iterators (2), transactions (1).
+
+Usage:
+  func TestConformance(t *testing.T) {
+      conformance.RunAll(t, func(t *testing.T) storage.DoltStorage {
+          return newTestStore(t)
+      })
+  }
+
+Co-Authored-By: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+* test(storage): wire conformance suite into Dolt backends + fix suite to run green
+
+Wire conformance.RunAll into the real Dolt backends so the storage contract is
+enforced against an implementation rather than only asserted, and fix the
+issues that surfaced the first time the suite ran against a backend (the PR&#39;s
+&#34;wire into existing Dolt backend tests&#34; box was still unchecked).
+
+- internal/storage/embeddeddolt/conformance_test.go: run the suite against the
+  embedded backend. Gated by BEADS_TEST_EMBEDDED_DOLT=1 like its siblings, so
+  it executes in the existing test-embedded-storage CI job and self-skips in
+  the main fast test job.
+- internal/storage/dolt/conformance_test.go: run the suite against server-mode
+  Dolt via setupTestStore (branch-isolated, self-skips with no test server).
+  Enforcing this every-PR needs a CI job that runs with a live dolt-sql-server;
+  tracked as a follow-up.
+
+Suite corrections (it had never been run against a backend):
+- Factory contract now documents that the store must be initialized
+  (issue_prefix set), and the embedded factory sets it. The storage layer
+  validates issue_prefix and does not default it; bd&#39;s CLI layer does.
+- withDefaults() fills the Status/IssueType the storage layer requires and does
+  not default, so terse test literals stay valid.
+- Not-found checks use errors.Is(err, storage.ErrNotFound) instead of strict
+  equality, since backends wrap the sentinel with context.
+- CreateDuplicate asserts the data-integrity invariant (exactly one row for the
+  ID after a duplicate create) instead of expecting an error; beads&#39; storage
+  layer intentionally upserts on duplicate ID. The test deliberately does not
+  bless last-writer-wins overwrite.
+
+Backend parity fix the suite caught:
+- issueops/delete.go: DeleteIssue now wraps storage.ErrNotFound, matching
+  GetIssue/UpdateIssue. CloseIssue has the same latent gap (untested here);
+  tracked as a follow-up.
+
+Co-Authored-By: Mark Atwood &lt;34491708+MarkAtwood@users.noreply.github.com&gt;
+Agent-Signature: claude-opus-4-8-high on behalf of matt wilkie
+
+* test(storage): drop dead unused-import anchors in conformance suite
+
+Remove `var _ = fmt.Sprintf` / `var _ = time.Now` and the now-unused fmt
+import. time is still used (time.Date in testUpdatePreservesCreatedAt), so only
+fmt drops. No behavioral change.
+
+Flagged by kevglynn&#39;s over-engineering pass on the sister flat-file PR #4415;
+absorbing it here since this PR owns conformance.go.
+
+Co-Authored-By: kevglynn &lt;12972584+kevglynn@users.noreply.github.com&gt;
+Agent-Signature: claude-opus-4-8-high on behalf of matt wilkie
+
+* ci: run embedded conformance suite in its own job
+
+Wiring the conformance suite into test-embedded-storage (4e6aaad) pushed that
+job past its 10m -test.timeout (panic: test timed out after 10m0s); the
+embedded Dolt backend opens a fresh DB per test, so the ~38-scenario
+conformance.RunAll added several minutes of wall-clock.
+
+Split TestConformance into a dedicated test-embedded-conformance job instead of
+bumping the timeout, so both jobs stay well inside their envelopes and run in
+parallel. The job reuses the already-built embeddeddolt-test artifact (no extra
+build); test-embedded-storage now -test.skip&#39;s TestConformance, the new job
+-test.run&#39;s only it. Mirrors the dedicated-conformance-job shape planned for the
+server backend (mybd-665b). Registered in ci-gate (required, skipped_ok under
+full_embedded).
+
+Agent-Signature: claude-opus-4-8-high on behalf of matt wilkie
+
+* ci: enforce conformance suite against server-mode Dolt
+
+internal/storage/dolt/conformance_test.go runs conformance.RunAll against
+server-mode Dolt but self-skips everywhere in CI today (no docker image cached
+-&gt; isDoltImageCached() false). Add a dedicated test-server-storage job so the
+storage contract is enforced against a real server backend on every storage PR,
+not just the embedded backend.
+
+build-embedded now also compiles /tmp/dolt-conformance-test (no -race; the Dolt
+server runs out-of-process in a container). The new job downloads that binary,
+installs+configures the dolt CLI, pulls dolthub/dolt-sql-server:2.1.0 (presence
+flips isDoltImageCached() true so TestMain starts the shared server), and runs
+-test.run &#39;^TestConformance$&#39; without -short / BEADS_TEST_SKIP=dolt. Server
+setup mirrors regression.yml; job shape mirrors the test-embedded-conformance
+twin. Registered in ci-gate (required + skipped_ok under full_embedded).
+
+Completes the embedded+server halves of the storage conformance contract
+(mybd-9rro criterion 3 / mybd-665b).
+
+Agent-Signature: claude-opus-4-8-high on behalf of matt wilkie
+
+* fix(storage/dolt): stop IterIssues deadlocking under MaxOpenConns=1
+
+The streaming doltIssueIter held a dedicated *sql.Conn for the row cursor and
+hydrated each row&#39;s labels on a SECOND pool connection (iterFetchLabels via
+s.db). That assumes the pool can grant a second connection. Server-mode Dolt
+pins each store to MaxOpenConns=1 (branch isolation is session-level:
+DOLT_CHECKOUT applies to the connection), so the label query blocks forever
+waiting for the cursor&#39;s connection -&gt; deadlock whenever IterIssues returns
+&gt;=1 row. The server-conformance CI job surfaced it: TestConformance/IterIssues
+hung to the 15m timeout. Embedded didn&#39;t, because it sets MaxOpenConns=2 and
+its IterIssues is slice-then-walk.
+
+Per-row hydration over a held cursor is fundamentally incompatible with a
+single connection, so do what SearchIssues already does: read the issue rows
+and batch-hydrate labels (WHERE issue_id IN (...) via
+GetLabelsForIssuesFromTableInTx) inside one read transaction on one connection,
+then wrap the result in storage.NewSliceIter. Same query/filter/ORDER BY/LIMIT;
+labels now follow the SearchIssues convention (nil when an issue has none).
+Removes the dedicated-conn doltIssueIter and iterFetchLabels.
+
+Fixes mybd-2pcb. Unblocks the server-conformance job (mybd-665b).
+
+Agent-Signature: claude-opus-4-8-high on behalf of matt wilkie
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+Co-authored-by: matt wilkie &lt;maphew@gmail.com&gt;
+Co-authored-by: kevglynn &lt;12972584+kevglynn@users.noreply.github.com&gt;
+
+- feat(remember): pave the read desire path — bare existing key recalls instead of writing
+
+&#39;bd remember &lt;x&gt;&#39; takes CONTENT, but &#39;remember X&#39; reads as a getter in
+English, so agents repeatedly type &#39;bd remember some-key&#39; meaning a read
+(AGENT-ERGONOMICS.md desire path; bit again 2026-07-01 creating junk
+memories whose content was their own key). Builds on the unmerged
+overwrite guard (33fbdb9c4) and goes further: when no --key is given and
+the arg round-trips slugify unchanged (a bare slug — real prose never
+does):
+
+  - key EXISTS  -&gt; recall it (stdout = content like &#39;bd recall&#39;, stderr
+                   hint, JSON {action: recalled}); no write occurs
+  - no such key -&gt; refuse with pointers to &#39;bd memories&#39; and --key,
+                   instead of silently storing the token as its own
+                   content
+
+--key states explicit write intent and bypasses both branches. Prose
+content behavior is unchanged. Updates remember&#39;s help text and the
+TestEmbeddedMemory guard subtests to the new semantics.
+
+- fix(remember): refuse to clobber a memory when content is its own key
+
+`bd remember &lt;x&gt;` is a WRITE whose positional arg is the CONTENT, not a
+key. A common slip is treating it like a getter -- `bd remember
+some-existing-key` -- which slugifies the bare key back to itself and
+SILENTLY OVERWRITES that memory&#39;s content with the literal key.
+
+Guard: when no explicit --key was given, the content round-trips through
+slugify unchanged (already a bare slug -- the tell-tale of a mistyped
+read), and a memory with that key already exists, refuse and point the
+user at `bd recall`. Existing keys are themselves slugify outputs, so
+this precisely catches &#34;content names an existing memory&#34; with ~zero
+false positives on real prose insights. Passing --key explicitly
+bypasses the guard (deliberate intent).
+
+Adds guard/bypass/new-slug subtests to TestEmbeddedMemory.
+
+- feat(gate): state-aware smart remote-migrate gate (#4516)
+
+## Why
+
+Agents are the highest-volume bd users, and the remote-backed migration gate from #4515 made the #4259 upgrade path safe but blunt: every write stayed blocked until a human chose migrate or adopt. This lands the opt-in state-aware smart gate from #4516 so safe first-mover cases can proceed automatically while destructive or ambiguous cases still stop for operator choice.
+
+## What Changed
+
+- Added `BD_SMART_GATE` routing for remote-backed pending schema migrations.
+- Compared local migration content hashes with the cached remote-tracking ref to distinguish auto-migrate, adopt, fork-skew, and conservative fallback cases.
+- Reused the migration content-hash reader in the doctor migration-skew check.
+- Kept default smart-off behavior compatible with the existing #4515 gate.
+- Fixed review findings in-place: smart auto-migrate now requires exact local/remote schema-version parity, and server mode passes its configured remote into the smart-gate read instead of always assuming `origin`.
+- Increased the embedded storage CI timeout from 10m to 20m to match current package runtime and existing embedded command shard timeout.
+
+## Validation
+
+- GitHub PR checks are green on head `bf9c193c387b1b955cd7d7df61bab8e4b5802171`.
+- Local targeted validation included schema smart-gate tests, migration-skew doctor tests, JSON gate output tests, and the real-Dolt smart-gate target where available.
+
+Refs #4524, #4516, #4259.
+
+Agent-Signature: codex-gpt-5.5-high on behalf of matt wilkie
+
+- docs: consolidate Homebrew tap-migration snippet across install/upgrade docs
+
+Why: PR #4478 introduced the old-tap -&gt; Homebrew-core migration commands and they ended up duplicated verbatim in three docs (`docs/INSTALLING.md`, website installation, website upgrading), creating drift risk where wording could diverge across copies.
+
+What:
+- Make website upgrading.md the canonical home for the tap-migration snippet.
+- Replace the duplicate block in website installation.md with a link to the canonical upgrading section.
+- Keep docs/INSTALLING.md inline for GitHub rendering, with a drift-guard comment pointing maintainers at the canonical copy.
+- Note the deliberate parallel-doc relationship between docs/INSTALLING.md and the website install page.
+
+Refs #4478
+
+Agent-Signature: codex-gpt-5.5-high on behalf of matt wilkie
+
+- feat(prime): remind when AGENTS.md and CLAUDE.md diverge
+
+Why: When both AGENTS.md and CLAUDE.md exist as independent regular files
+carrying the bd integration marker, edits to one silently miss the other,
+letting the two agent-instruction surfaces drift apart over time.
+
+What: bd prime now appends a single one-line reminder, but only when ALL
+hold: both files exist, both are regular files (not symlinks), they are not
+hardlinked to the same inode, and each contains the BEGIN BEADS INTEGRATION
+marker. In every other case (the common case) it emits nothing and does only
+a couple of cheap Lstat calls, keeping the feature zero-cost by default.
+
+Agent-Signature: claude-opus-4-8-high on behalf of matt wilkie
+
+- fix(gate): make the remote-migrate gate agent-safe, not a footgun (#4515)
+
+Agents are the highest-volume bd users, and the #4259 remote-migrate gate
+handed them a loaded gun: the JSON error&#39;s top-level `hint` was the literal
+runnable command `BD_ALLOW_REMOTE_MIGRATE=1 bd migrate`. An agent optimizing to
+unblock a write would just run it — harmless on a single clone, but on a shared
+remote a second clone migrating independently forks the schema unrecoverably,
+the exact hazard the gate exists to prevent.
+
+This de-fangs the agent-facing surfaces without changing the gate&#39;s decision:
+
+- JSON error (handleRemoteMigrateGateJSON): the `hint` is now a non-runnable
+  directive (AgentDirective) telling the agent this is a coordination decision
+  to surface to the operator. The runnable migrate command moves into a
+  structured `remote_migrate_gate.options[migrate]`, gated on its &#34;single
+  designated migrator&#34; precondition and annotated with its risk, alongside the
+  `adopt` path. Adds severity/human_decision_required/observed/expected/docs,
+  matching the AgentDiagnostic contract (&#34;Go observes and reports, the agent
+  decides and acts&#34;). Backward-compatible: error + current/latest/pending kept.
+
+- Embedded lenient read-only warning (fires during `bd prime` and every read,
+  i.e. before an agent ever attempts a write): reframed from &#34;To resolve … runs:
+  &lt;command&gt;&#34; to a conditional coordination decision with both options, so the
+  agent is steered correctly at session start.
+
+Tests: cmd/bd asserts hint != escape command and that the migrate command lives
+only under the conditional `migrate` option; a schema-package test locks the
+same contract at the source. Pre-existing dolt-CLI migration test failures in
+this environment are unrelated (they fail identically on pristine main).
+
+Follow-up (separate, reviewed): a &#34;smart gate&#34; that fetches remote schema state
+and auto-adopts/auto-migrates the safe cases (deterministic migrations,
+content-hash match) so the common agent path just works — only stopping on a
+genuine fork. Tracked separately.
+
+Agent-Signature: claude-opus-4-8-high on behalf of matt wilkie
+
+Claude-Session: https://claude.ai/code/session_01HYKaYDJhaWzxaiXnw46q7E
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- docs(upgrade): add validated recipe for remote-backed / multi-clone upgrades (#4514)
+
+* docs(upgrade): add validated recipe for remote-backed / multi-clone upgrades
+
+Replacing the bd binary is not enough to upgrade a database that syncs to a
+Dolt remote: bd refuses silent in-place migration (BD_ALLOW_REMOTE_MIGRATE
+gate, #4259), and the 0050 dependencies-PK reshape can leave independently
+-migrated clones permanently un-mergeable. The procedure existed only as prose
+spread across the CHANGELOG, the gate error, and RECOVERY.md, with no single
+numbered recipe in the user-facing upgrade guide.
+
+Validated by running the recipe end-to-end on a live embedded database
+(mybd, v49 -&gt; v53): migrate + push succeeded and data was intact. Two things
+the prose got wrong and this corrects:
+
+- The gate blocks `bd dolt push`/`bd dolt pull` too, not just `bd migrate`, so
+  all syncing must happen with the *old* binary before upgrading; other clones
+  adopt the migrated DB with `bd bootstrap`, not `bd dolt pull`.
+- `bd doctor` (which carries the migration-content-skew check) is server-mode
+  only; embedded users verify with `bd version` / `bd ready`.
+
+Changes:
+- website/docs/getting-started/upgrading.md: new &#34;Remote-backed databases and
+  multiple clones&#34; section with single-clone and multi-clone recipes, keyed on
+  behavior (remote + pending migration) not on the rc, so it stays correct when
+  1.1-rc is promoted to 1.1.0 and for every later migration.
+- CHANGELOG.md: tighten the 1.1.0-rc.1 multi-clone upgrade note into a numbered
+  recipe linking to the guide.
+- docs/INSTALLING.md: point &#34;After Upgrading&#34; at the recipe and note prereleases
+  ship only as GitHub prereleases (not on stable brew/npm/PyPI).
+
+Agent-Signature: claude-opus-4-8-high on behalf of matt wilkie
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+Claude-Session: https://claude.ai/code/session_01HYKaYDJhaWzxaiXnw46q7E
+
+* docs(recovery): fix prevention flow — other clones bootstrap, not pull
+
+Review finding on #4514: docs/RECOVERY.md&#39;s prevention section still told
+non-migrator clones to upgrade the binary then `bd dolt pull`, which contradicts
+the validated recipe — once the new binary sees pending migrations on a
+remote-backed clone, `bd dolt pull` is refused too, so the clone must adopt with
+`bd bootstrap`. The changelog links into this playbook, so the stale bullets
+could route users back into the unsafe path. Updated to the
+&#34;one machine migrates, every other clone bootstraps&#34; flow.
+
+Agent-Signature: claude-opus-4-8-high on behalf of matt wilkie
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+Claude-Session: https://claude.ai/code/session_01HYKaYDJhaWzxaiXnw46q7E
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;</div>
+</div>
+
+<a href="../project/gastownhall_beads.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

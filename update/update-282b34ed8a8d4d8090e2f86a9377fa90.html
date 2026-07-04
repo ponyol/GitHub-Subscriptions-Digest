@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (4 commits) - FluidInference/FluidAudio - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (4 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a> /
+    Updates in main (4 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-04 03:43 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/FluidInference/FluidAudio/commits/main" target="_blank">https://github.com/FluidInference/FluidAudio/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>**Summary:**
+This update significantly enhances project robustness and performance across several areas. Benchmark runs now fail loudly and retry when annotation data is missing, preventing misleading results, while model downloads validate artifacts before caching to prevent corruption. A critical ASR cold-start issue on iPadOS was resolved by replacing a CoreML preprocessor with a native Swift implementation, improving cross-platform reliability. Furthermore, Sortformer models received fixes for BNNS crashes, gained runtime control over precision and compute units, and now support cooperative cancellation for better responsiveness.
+
+**Summary in Russian:**
+Это обновление значительно повышает надежность и производительность проекта в нескольких областях. Теперь бенчмарки прерываются с явной ошибкой и повторяются при отсутствии данных аннотаций, предотвращая вводящие в заблуждение результаты, а загрузка моделей проверяет артефакты перед кешированием для предотвращения повреждений. Критическая проблема холодного старта ASR на iPadOS была решена путем замены препроцессора CoreML на нативную реализацию Swift, что повысило кросс-платформенную надежность. Кроме того, модели Sortformer получили исправления для сбоев BNNS, приобрели возможность управления точностью и вычислительными блоками во время выполнения, а также теперь поддерживают кооперативную отмену для повышения отзывчивости.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix(benchmark): fail loudly on missing AMI annotations instead of scoring placeholder ground truth (#754)
+
+Closes #752
+
+## Root cause of the 80.8% DER report
+
+The 80.8% DER / 80.9% JER on PR #744&#39;s CI run was **not a diarizer
+regression**. From that run&#39;s logs:
+
+```
+[ERROR] [FluidAudio.Dataset]  Failed to download AMI annotations      ← Edinburgh server flake (×2)
+[WARN]  [FluidAudio.AMIParser] 📋 Using simplified placeholder ground truth (causes poor DER performance)
+[INFO]  DER: 80.8%   JER: 80.9%   Speakers: 4 detected / 4 truth
+```
+
+The pipeline itself was healthy (4/4 speakers, normal stage timings,
+normal speaker mapping). The AMI annotation download from
+`groups.inf.ed.ac.uk` transiently failed, `AMIParser` silently
+substituted a synthetic placeholder reference (8 evenly-sliced
+round-robin segments), and the benchmark scored real diarization output
+against fake ground truth — then posted the result as if genuine.
+
+Supporting evidence it was a one-off harness artifact:
+- The offline VBx job on the **same PR** scored 10.4% (its annotation
+download, minutes earlier, succeeded)
+- PR #728&#39;s benchmark re-ran 21 minutes later: 15.1%
+- PR #744&#39;s only diarizer-touching diff was a formatting-only change to
+`KMeansClustering.swift`
+- Every subsequent run on main-based branches is back at exactly 15.1%
+
+## Changes
+
+- **AMIParser**: remove the placeholder ground-truth fallbacks.
+Search-based loaders now throw `AMIParserError.annotationsNotFound` (or
+propagate parse errors) instead of returning
+`generateSimplifiedGroundTruth` output — benchmarks can no longer
+silently score against fake data. `generateSimplifiedGroundTruth` is
+deleted; the loaders become synchronous throwing functions.
+- **DiarizationBenchmark**: `exit(1)` when no meeting produced a result,
+so CI goes red instead of exiting 0 with empty metrics.
+- **DatasetDownloader**: retry the annotation zip download (3 attempts
+with backoff).
+- **Workflows** (`diarizer-benchmark`, `offline-pipeline`,
+`sortformer-benchmark`): cache `Datasets/ami_public_1.6.2` so the flaky
+Edinburgh server is only hit on cache miss; only post the PR benchmark
+comment when metric extraction succeeded (previously `if: always()`,
+which would post garbage numbers on failure).
+- **Tests**: new `AMIParserTests` cases covering the throwing behavior
+via injectable search roots.
+
+## Verification
+
+- **Without annotations**: benchmark logs
+`annotationsNotFound(subdirectory: &#34;segments&#34;)`, writes no results file,
+exits **1**
+- **With annotations**: DER **15.1%** / JER 24.8% on ES2004a — exactly
+the healthy CI baseline
+
+## Also: Documentation/Benchmarks.md re-run (second commit)
+
+All diarization tables re-measured 2026-07-03 on an Apple M5 Pro against
+the official AMI-SDM 16-meeting split:
+
+- **Offline**: 10.6% avg DER with `--threshold 0.7`, bit-identical
+across consecutive runs, reproducing the existing table exactly.
+Documented that #616 changed the effective CLI default clustering
+threshold from 0.7 to 0.6 (community-1 preset), which undercounts
+speakers on 4 meetings (e.g. EN2002a 2/4 → 41.9% DER) and yields 15.5%
+avg on this split — the documented command now pins `--threshold 0.7`.
+- **Streaming**: all four configs re-run on the official 16-meeting
+split (previous tables used an easier 7-meeting subset): 10s/0s 38.2%,
+5s/0s 39.0%, 3s/1s 53.3%, 5s/2s 55.9% avg DER. No-overlap configs beat
+overlap configs; &#34;best configuration&#34; label moved to 10s/0s.
+- Noted a latent issue (not fixed here): running many overlapping-chunk
+meetings in one process crashes with `E5RT: Failed to allocate memory
+IOSurface object` (SIGABRT in MLE5Engine) — the overlap tables were
+measured one meeting per process.
+
+- fix(asr/nemotron): native-Swift mel front-end to fix iPadOS cold-start zero output (#739) (#744)
+
+## Summary
+
+Fixes #739 — `StreamingNemotronAsrManager` produces **zero output on
+iPadOS cold start** (empty transcript, works on macOS).
+
+**Root cause** (verified, and it differs from the issue&#39;s stated
+theory): the `ios17.slice_by_index: zero shape error` / &#34;Skipped adding
+default_function to entry point: main&#34; warning comes from the **CoreML
+`preprocessor` model&#39;s flexible `RangeDim` audio input**, not the
+encoder. CoreML builds the ANE `default_function` against the range&#39;s
+1-sample lower bound → mel extraction slices to zero frames → the
+preprocessor&#39;s ANE `main` entry point is never built. (Confirmed by
+loading each model on `CPU_AND_NE`: only the preprocessor warns; the
+encoder graph is clean. The issue&#39;s proposed encoder `cache_len`
+re-trace was a misdiagnosis — `cache_len` only feeds boolean masks, not
+a data-dependent slice.)
+
+**Fix:** remove the CoreML preprocessor from both Nemotron streaming
+managers and compute log-mel **natively in Swift**
+(`NemotronMelExtractor`). No model re-conversion / HF re-upload needed.
+
+## Changes
+- **`NemotronMelExtractor`** — wraps the shared `AudioMelSpectrogram`,
+reproducing NeMo&#39;s `AudioToMelSpectrogramPreprocessor` exactly
+(`n_fft=512`, `win=400`, `hop=160`, 128 mels, symmetric Hann,
+`preemph=0.97`, `normalize: NA` → raw log-mel, no per-feature
+normalization — the one difference from `UnifiedMelExtractor`).
+- **English** (`StreamingNemotronAsrManager` + `+Pipeline`): swap
+`preprocessor` MLModel for the extractor.
+- **Multilingual** (`StreamingNemotronMultilingualAsrManager` +
+`+Pipeline`/`+Buffers`/`+Shared`): same swap, with **two** extractor
+instances (on-actor + concurrent triple-stage prefetch) so the
+extractor&#39;s non-thread-safe FFT buffers are never shared across the
+prefetch boundary; `preprocessor` dropped from
+`SharedNemotronMultilingualModels`.
+- **Fail loudly:** load-time encoder probe throws
+`ASRError.encoderInstantiationFailed` if the encoder returns all-zero
+output (instead of silently emitting empty transcripts).
+
+## Verification
+- **Python parity:** CoreML preprocessor == NeMo PyTorch raw log-mel
+(max |Δ| ≈ 9e-3); per-bin means ≈ −15 confirm it is *not* per-feature
+normalized.
+- **English LibriSpeech test-clean (full, 2620 files):** WER 560ms
+**2.71%** · 1120ms **2.58%** · 2240ms **2.64%**.
+- **Multilingual FLEURS (7 langs, full splits):** AVG WER/CER **8.62 /
+8.33 / 8.30%** at 560/1120/2240ms; meets-or-beats NVIDIA&#39;s published
+`[56,0]` numbers on all published languages.
+- `swift build` passes; new unit tests for the extractor
+(shape/determinism/not-normalized) and the new error case. (Note: `swift
+test` needs full Xcode for XCTest — runs in CI; built/validated locally
++ via CLI benchmarks.)
+
+## Docs
+- New **Nemotron Speech Streaming 0.6B (English)** section in
+`Documentation/Benchmarks.md` (LibriSpeech test-clean WER/RTFx per chunk
+tier).
+- Refreshed `Documentation/ASR/NemotronMultilingual.md` to current tiers
+(560/1120/2240; dropped obsolete 320ms) with freshly measured numbers.
+
+## Not covered
+- On-device iPad cold-start `ANEProgramProcessRequestDirect status=0x12`
+confirmation requires a physical iPad — not verifiable from a Mac. The
+mel-parity root-cause case (removing the RangeDim preprocessor) is
+solid; the probe guarantees the failure can no longer be silent.
+
+- fix(sortformer): BNNS-fixed v3 models, precision/compute-unit control + cancellation (#726) (#728)
+
+## Summary
+Fixes the Sortformer BNNS graph-compile crash from #726 and hardens the
+config + device-compat path.
+
+The root-level Sortformer CoreML models had `chunk_pre_encoder_embs_out`
+as **both a graph input and output** in the head submodel, which the
+macOS 26 / newer BNNS compiler rejects:
+```
+BNNS Graph Compile: Function main has tensor chunk_pre_encoder_embs_out as both an input and output.
+```
+Root cause was a conversion-toolchain artifact (torch 2.9.x folded the
+identity that kept input/output distinct). The models were rebuilt clean
+(torch 2.7 + coremltools 9.0), verified no-alias + ANE-loadable +
+numerically matched to the PyTorch reference (100% speaker-argmax
+parity), and uploaded to
+`FluidInference/diar-streaming-sortformer-coreml/v3/`.
+
+## Changes
+- **Point downloads at the fixed models**: default `v3/fp16` set.
+- **Runtime precision selection** (addresses reporter feedback —
+`modelsSubdirectory` was a `let`): `ModelNames.Sortformer.ModelPrecision
+{ .fp16, .palettized }` + mutable `SortformerConfig.precision` (default
+`.fp16`); `bundle(for:)` honors it. Flip to the 6-bit, ~2.5× smaller set
+without editing source — `var c = .highContextV2_1; c.precision =
+.palettized` — or `sortformer --palettized`.
+- **A14 compute-unit auto-fallback** (addresses reporter feedback —
+large fp16 high-context hangs for minutes on `.all`):
+`SortformerModels.recommendedComputeUnits(for:)` routes the large fp16
+high-context variants to `.cpuOnly` on &lt;8 GB devices, while the ~330 MB
+palettized high-context head (loads fine on ANE) keeps `.all`. Threaded
+through `load`/`loadFromHuggingFace`/`initialize` (all default to auto,
+still overridable). Also fixes `load()` ignoring its compute-unit
+argument.
+- **Offline compute-unit control** (addresses reporter feedback — local
+loads were stuck on `.all`): `OfflineSortformerModels.load` /
+`OfflineSortformerDiarizer.initialize(modelPath:)` no longer hardcode
+`.all`; they take a `computeUnits` parameter (mirrors the streaming-path
+fix), so older devices can pick `.cpuOnly` for local offline models too.
+- **Cooperative cancellation** (addresses reporter feedback — progress +
+cancellation in the processing loop): `SortformerDiarizer` now calls
+`try Task.checkCancellation()` in both the streaming
+(`makeStreamingChunkLocked`) and offline (`processCompleteInternal`)
+chunk loops, before each inference. Run `processComplete` inside a Swift
+`Task` and `cancel()` it to stop early with `CancellationError` — no
+async refactor required. Progress reporting via the existing
+`progressCallback` is documented on the public API.
+- **`efficientV2_1` variant**: chunk_len=25, ~2 s output latency, ~4×
+the RTFx of the default streaming config at near-identical per-inference
+cost.
+- **Config-mismatch guard**: `SortformerDiarizer` validates the diarizer
+`SortformerConfig` against the model&#39;s embedded metadata
+(`chunk_len`/contexts/`fifo_len`/`spkcache_len`) on init and logs a
+clear error on mismatch. `spkcacheUpdatePeriod` is excluded since the
+host clamps it.
+- **CLI ergonomics**: `sortformer --config fast|efficient|low|high
+[--palettized] [--compute-units cpu|cpuAndGPU|ane|all]` (compute-units
+threaded through streaming + offline, local + HF); `sortformer-benchmark
+--collar`/`--onset`/`--offset`.
+
+## Benchmarks
+**RAM (`highContextV2_1`):** fp16 ~2.4 GB → palettized ~330 MB
+(reporter-confirmed).
+
+**Offline throughput vs Argmax** (M5 Pro, ComputeUnit.ALL, 30.72 s
+windows, median of 120). Argmax&#39;s Sortformer is an offline batch model
+(no streaming state); exported ours as a single fused offline graph and
+benchmarked head-to-head against their 3-model chain:
+
+| | model-exec (mel → preds) | end-to-end (incl. mel) |
+|---|--------------------------|------------------------|
+| Argmax (3 calls) | 14.57 ms · 2108× | 16.41 ms · 1872× |
+| **FluidAudio (fused)** | **10.65 ms · 2884×** | **12.49 ms · 2459×** |
+
+FluidAudio is **1.3–1.4× faster offline** — one fused GPU graph vs their
+ANE→GPU split. The &#34;&gt;10× faster&#34; sometimes cited for Argmax compares
+their offline model against our `highContextV2_1` *streaming* config
+(slowest/largest variant) — apples-to-oranges. For low-latency streaming
+throughput use `.efficientV2_1` (~215× RTFx); Argmax ships no streaming
+Sortformer. Repro script: mobius#73 `offline_argmax_bench.py`. Full
+writeup: `Documentation/Diarization/Sortformer.md#benchmarks`.
+
+## Validation
+- All CI green (build/test macOS + iOS, swift-format, Sortformer
+benchmark).
+- Numerical parity vs NeMo PyTorch reference = 100% speaker-argmax
+agreement across all variants.
+- Full AMI-SDM DER (forced-alignment GT, collar 0.25): highContext
+~26.5%, default streaming ~29.0%. 6-bit palettization = +0.9 pp avg
+(streaming; larger on high-context — why fp16 stays default).
+- Reporter (#726) confirmed the BNNS fix + palettized RAM win on-device;
+the compute-unit and cancellation additions close their remaining
+follow-up requests.
+
+- Validate downloaded model artifacts before caching (#740) (#741)
+
+Closes #740.
+
+## Problem
+
+`AsrModels.download(...)` / `DiarizerModels.downloadIfNeeded()` write
+HuggingFace artifacts straight into the cache. When the network path is
+unhealthy (captive portal, corporate proxy, mirror 5xx/redirects), the
+HTTP body can be an **HTML error page** or a **truncated** file rather
+than the real artifact. It gets written under the expected filename, so
+the presence-based `modelsExist(at:version:)` check reports the model as
+installed. The failure only surfaces later at load/compile time as an
+opaque CoreML error, far from the root cause.
+
+## Change
+
+All model downloads route through `DownloadUtils`. Each file is fetched
+to a temp path and validated **before** it is moved into the cache, so a
+bad fetch never poisons the cache dir. Validation is wired into both
+download paths — `downloadRepo` (via `downloadFileWithRetry`) and
+`downloadSubdirectory`:
+
+- Reject `Content-Type: text/html` responses (proxy / captive-portal
+pages).
+- Reject empty bodies.
+- Sniff leading bytes for `&lt;!DOCTYPE html` / `&lt;html` / `&lt;?xml` markup
+(error pages served with `200` under the model&#39;s filename).
+- Exact size match against the size HuggingFace reports for the object,
+to catch truncation.
+
+Failures throw a distinct
+`HuggingFaceDownloadError.invalidArtifact(path:reason:)` so callers can
+present &#34;download corrupt — retry&#34; instead of a downstream load crash.
+The error is classified **retryable**, so a transient bad fetch is
+retried with the existing bounded backoff rather than failing the whole
+repo download on the first blip.
+
+### Size check is safe for LFS
+
+Verified against the HF tree API that the `size` field is the **resolved
+LFS object size**, not the 130-byte pointer (e.g.
+`Encoder.mlmodelc/weights/weight.bin` reports `445187200`, matching
+`lfs.size`). So the exact-match truncation check won&#39;t false-positive on
+large weights. Legitimately-empty files (API `size == 0`) are still
+created directly and bypass validation.
+
+## Tests
+
+Adds `DownloadArtifactValidationTests` (13 cases): HTML/XML/doctype
+detection, binary/JSON pass-through, content-type rejection, empty /
+truncated / oversized bodies, unknown-size skip, and the error
+description.</div>
+</div>
+
+<a href="../project/FluidInference_FluidAudio.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,2632 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in litellm_internal_staging (100 commits) - BerriAI/litellm - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in litellm_internal_staging (100 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/BerriAI_litellm.html">BerriAI/litellm</a> /
+    Updates in litellm_internal_staging (100 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/BerriAI_litellm.html">BerriAI/litellm</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-04 01:56 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/BerriAI/litellm/commits/litellm_internal_staging" target="_blank">https://github.com/BerriAI/litellm/commits/litellm_internal_staging</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление значительно улучшает управление токен-обменом Management Control Plane (MCP) и On-Behalf-Of (OBO) за счет автоматического обнаружения конечных точек, улучшения кэширования и усиления безопасности с помощью запросов RFC 9728 и корректной обработки ошибок. Основные исправления безопасности включают маскировку конфиденциальных учетных данных в сообщениях об ошибках запасных вариантов и обеспечение детальной авторизации на уровне администратора для управления ключами, командами и пользователями. Кроме того, релиз содержит улучшения пользовательского интерфейса, новые функции защиты (guardrails), такие как опции fail-open, и расширенную интеграцию для поставщиков ИИ, включая Tencent TokenHub, Google Distributed Cloud Gemini и модели Bedrock.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- feat(mcp): discover the OBO token endpoint via RFC 9728 -&gt; RFC 8414 (no IdP guessing) (#31762)
+
+* feat(mcp): discover the OBO token endpoint via RFC 9728 to RFC 8414 (no IdP guessing)
+
+An oauth2_token_exchange server can now have its token endpoint discovered the
+same way the oauth2 (authorization_code) flow already does, instead of always
+requiring token_exchange_endpoint/token_url to be configured by hand. The
+existing _descovery_metadata chain (RFC 9728 protected-resource metadata -&gt;
+RFC 8414 authorization-server metadata -&gt; token_endpoint, SSRF-guarded via
+async_safe_get) is reused; both the config-load and DB-build paths gate on a new
+_obo_needs_endpoint_discovery so discovery runs only when no endpoint is
+configured, and an explicitly configured endpoint still wins and skips the
+round-trip. The discovered token endpoint lands on token_url, which
+_token_exchange_spec already reads, so no resolver change is needed.
+_resolve_oauth2_flow returns None for any non-oauth2 auth_type, so a discovered
+token_url on an OBO server is never mis-inferred as the M2M client_credentials
+flow.
+
+Discovery for OBO is authoritative only: the resolution order is explicitly
+configured endpoint, then RFC 9728 -&gt; RFC 8414 advertisement, then fail closed
+(412, on the parent commit). The gateway never guesses the IdP. _descovery_metadata
+grows an allow_origin_fallback flag, kept True for the browser oauth2 flow (a
+human sees the redirect) but set False for token_exchange so the last-resort
+guess that treats the resource server&#39;s own origin as its authorization server
+is skipped; a subject token is never exchanged against an inferred endpoint.
+
+* fix(mcp): surface a failed OBO exchange at connect instead of an empty tool list
+
+A token_exchange server whose exchange fails with a subject present used to open the MCP
+session anyway and mask the failure as an empty tools/list. Single-server routes now run
+the exchange preemptively at the transport edge, where a rejected subject raises the RFC
+9728 challenge and a gateway fault its public status; the multi-server aggregate keeps
+absorbing per-server auth failures. The exchanger caches the preflight result, so the
+session&#39;s list/call reuses it with no extra IdP round-trip. Discovery now also debug-logs
+the authorization server&#39;s advertised issuer, grant types, and client auth methods
+
+* fix(mcp): persist the discovered OBO token endpoint to the DB row
+
+A DB-backed oauth2_token_exchange server with no configured endpoint had its token_url
+resolved via RFC 9728 -&gt; RFC 8414 only on the in-memory object returned from
+build_mcp_server_from_table; the row kept token_url=None, so every rebuild re-ran discovery
+and a transient upstream outage during a rebuild left the server with no endpoint until the
+next successful discovery. Write the discovered token_url back onto the row so the guard sees
+it on the next build. Best-effort and scoped to DB servers: config servers already persist
+in-memory, and the write-back never fires from a user connect (only from add/update/reload,
+all admin or system driven). Adds DB-path coverage for discovery firing when unset, skipping
+when the credentials endpoint is configured, the write-back, and its negative guards
+
+- revert: undo teamless all-team-models denial from #32022 and #29746 (#32032)
+
+* Revert &#34;fix(auth): deny model access for teamless keys with all-team-models (#32022)&#34;
+
+This reverts commit dfbbda4f199ff4cbe49c6f5924c856661953681b.
+
+* revert: undo teamless all-team-models denial from PR #29746
+
+Reverts the team_id guard in _resolve_key_models_for_auth_check and
+get_key_models so teamless keys with all-team-models resolve to []
+(unrestricted = all proxy models) rather than being denied.
+
+Adds hardened regression tests across listing (get_key_models), inference
+(_enforce_key_and_fallback_model_access, can_key_call_model,
+can_key_call_resolved_model), and batch (_enforce_batch_file_model_access)
+paths that enforce teamless all-team-models == all-proxy-models and will
+fail if anyone re-introduces a team_id guard
+
+Co-Authored-By: Devin AI &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+
+* chore: retrigger checks
+
+---------
+
+Co-authored-by: Devin AI &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+Co-authored-by: mateo &lt;mateo@berri.ai&gt;
+Co-authored-by: mateo-berri &lt;277851410+mateo-berri@users.noreply.github.com&gt;
+
+- fix(router): mask provider credentials embedded in fallback error messages (#32083)
+
+The Router&#39;s async fallback orchestrator appended fallback structures
+(fallback_model_group, fallbacks, context_window_fallbacks,
+content_policy_fallbacks) and the inner fallback exception onto
+original_exception.message before re-raising. That message is forwarded
+verbatim by the proxy as ProxyException.message. When fallbacks are
+configured as inline deployment dicts, the raw provider api_key /
+aws_secret_access_key inside those dicts reached any authenticated
+caller in the response body.
+
+Route the fallback structures through a new mask_sensitive_structure
+helper (reuses the existing SensitiveDataMasker), and wrap the inner
+fallback exception string in the existing redact_string. Topology names
+still render for debugging under the existing expose_router_debug_in_errors
+opt-in; only credential values inside inline-dict fallbacks are masked.
+The router&#39;s own verbose_router_logger calls that embedded the same
+structures are updated alongside, so log output stays consistent with the
+exception message.
+
+Verified end-to-end against a real proxy hitting OpenAI: before, the
+client response body contained the raw fallback api_key; after, with the
+flag on, the api_key value is masked to a 4-char prefix while topology
+names are still visible for the operator
+
+- chore(ui): remove debug console.log statements from dashboard (#32087)
+
+* chore(ui): remove debug console.log statements from dashboard
+
+Delete 463 leftover console.log/console.debug calls across 87 files in the
+Admin dashboard. These logged form payloads, API responses, and render
+traces into every user&#39;s browser console.
+
+The ESLint policy already encodes the intent (no-console allows only warn
+and error), so those are kept, along with the console.log = function(){}
+suppression reassignments and the console.log calls that live inside
+string/template literals rendered as example code snippets.
+
+Removal used an AST codemod so only standalone console.log/console.debug
+expression statements were dropped; non-statement uses (no-op chart
+onValueChange props, a placeholder onClick, and a sequence-expression in
+TopKeyView) were handled by hand. Ratchets the no-console lint metric from
+484 to 15.
+
+* chore(ui): drop empty blocks left after console.log removal
+
+Greptile flagged three empty control-flow blocks (an if and an else in
+chat_completion.tsx, an else in networking.tsx) left behind when their
+only content was a deleted console.log. Removes those plus one more empty
+if in chat_completion.tsx&#39;s catch that the review missed.
+
+* test(ui): drop provider_info_helpers test asserting debug log
+
+The getProviderModels debug console.log calls were removed in this PR, so
+the test asserting they fire no longer applies. Remove that test and its
+now-unused console.log spy; the remaining 57 tests still cover the
+function&#39;s actual return-value behavior.
+
+- fix(anthropic): bill streaming 1h prompt-cache writes at the 1h rate (#32073)
+
+* fix(anthropic): preserve 1h cache-creation TTL breakdown across streaming usage chunks
+
+Anthropic emits the cache-creation TTL breakdown (ephemeral 5m/1h split) only on
+the message_start SSE event; the later message_delta carries the flat
+cache_creation_input_tokens count but drops the nested cache_creation object.
+ChunkProcessor aggregates prompt_tokens_details last-wins, so message_delta&#39;s
+details (with cache_creation_token_details=None) clobbered the breakdown captured
+from message_start. Cost calc then fell into the flat-rate branch of
+calculate_cache_writing_cost and billed 1-hour cache writes at the 5-minute rate,
+undercounting the cache-creation cost component by ~37.5% on streaming requests.
+
+Track cache_creation_token_details with the same non-null-wins semantics already
+used for the flat cache counts and stitch it back onto the final
+prompt_tokens_details when the last chunk lacks it. Non-streaming was unaffected
+because its usage is parsed once from the full response body.
+
+* refactor(streaming): extract cache-creation breakdown helpers to stay within strict complexity budget
+
+* test(streaming): cover final-chunk cache-creation breakdown path
+
+---------
+
+Co-authored-by: Richard Warburton &lt;Richard.Warburton@theaccessgroup.com&gt;
+
+- feat(mcp): make token_exchange (OBO) production-ready - discovery threading + audit hardening + RFC 9728 challenge (#31622)
+
+* feat(mcp): thread the caller token into tools/list discovery for token_exchange
+
+A token_exchange (OBO) server&#39;s tools could not be discovered through the aggregator: the list path
+never threaded the caller&#39;s token, so every tools/list hit the no-subject branch. v1 masked this with
+its client_credentials fallback (discovery used a service token); v2 dropped that fallback, so listing
+had no credential and the OBO server&#39;s tools never appeared - and an MCP client lists before it calls.
+
+Thread the inbound subject_token into the list path the same way the call path does, gated on
+auth_type oauth2_token_exchange so the caller&#39;s bearer never leaks into other modes:
+_get_tools_from_server takes an oauth2_headers param, extracts the token via _extract_bearer_token, and
+passes it to _create_mcp_client; server.py forwards oauth2_headers at the list call site.
+authorization_code (resolves off identity plus stored token), the static/config modes, and the
+background registry refresh are unaffected, and the list path&#39;s existing graceful degradation
+(catch -&gt; empty list) is preserved.
+
+* fix(mcp): harden token_exchange OBO from the audit (strip, TTL/expires_in, subject_token_type)
+
+- _should_strip_caller_authorization returns True for oauth2_token_exchange, so the inbound subject
+  token is never forwarded upstream raw - only the IdP-exchanged token is (matches authorization_code).
+- _parse_expires_in accepts a JSON float / numeric-string expires_in, and _ttl_seconds caps the cache
+  TTL at the token&#39;s real remaining lifetime so a short-lived exchanged token is never served stale.
+- to_server_spec normalizes a falsy subject_token_type to the default URN, parity with v1.
+
+The subject/key disambiguation (never exchange the LiteLLM key; Authorization: Bearer &lt;litellm-key&gt;
+support for /mcp) is intentionally a separate cross-cutting PR off staging, not part of this OBO work.
+
+* fix(mcp): stop caller header bypassing OBO exchange; thread subject into prompts/resources
+
+The per-server x-mcp-* override guard in _create_mcp_client only kept the v2 spec
+for authorization_code, so a caller-supplied header silently disabled the RFC 8693
+exchange on a token_exchange server and forwarded the raw bearer upstream. Extend
+the guard to token_exchange so the exchange always runs and the caller cannot
+substitute an arbitrary upstream credential.
+
+prompts/list+get, resources/list+read, and resource-templates/list never threaded
+the OBO subject token, so those operations failed closed (401 / empty) on a
+token_exchange server. Thread the caller&#39;s bearer as the subject for those paths
+too, gated on the token_exchange mode via a shared _obo_subject_token helper.
+
+* fix(mcp): keep the OBO/authz_code resolver credential authoritative; centralize OpenAPI strip
+
+A guardrail (e.g. MCPJWTSigner), static_headers, or any other injected Authorization could
+shadow the resolver-owned credential for token_exchange / authorization_code servers, so the
+upstream would receive e.g. the signer&#39;s JWT instead of the exchanged token and reject it. In
+_create_mcp_client the resolver-owned credential now wins: a conflicting header is dropped and
+the minted/stored token reaches upstream. No behavior change for none/passthrough/static modes,
+where an injected Authorization still wins as before.
+
+The OpenAPI/local _request_extra_headers forwarder gated its Authorization strip on
+has_client_credentials only, so an OpenAPI-backed token_exchange server with
+extra_headers:[Authorization] forwarded the raw subject token upstream and never exchanged. It
+now uses the centralized _should_strip_caller_authorization so it matches the managed paths.
+
+* feat(mcp): RFC 9728 challenge for token_exchange (OBO) unauthorized
+
+OBO previously returned an opaque 401 (Bearer error=&#34;invalid_request&#34;) with no discovery
+info, and any IdP exchange failure collapsed to a retryable 503. Now an OBO server behaves like
+a standards-compliant OAuth resource server:
+
+- A missing/rejected subject token returns the RFC 9728 / RFC 6750 challenge: 401 +
+  WWW-Authenticate: Bearer resource_metadata=&#34;...&#34;, error=&#34;invalid_token&#34;, so a spec-compliant
+  MCP client can discover the IdP, SSO, and retry with a fresh subject token.
+- The protected-resource metadata for a token_exchange server advertises the JWT-auth issuer(s)
+  (JWT_ISSUER / litellm_jwtauth.issuers) as authorization_servers -- the IdP that issues and
+  validates the subject -- instead of the gateway.
+- An IdP 4xx (subject rejected) is now a non-retryable 401 (the challenge) instead of a 503, so a
+  caller with a dead token re-authenticates rather than looping; 5xx/transport stays retryable 503.
+
+* fix(mcp): emit the OBO RFC 9728 challenge preemptively so a no-subject client can discover the IdP
+
+A token_exchange server&#39;s tools are not discoverable without a subject token (list is lenient -&gt;
+empty), and a tool-call-time 401 is wrapped into a JSON-RPC error so the WWW-Authenticate header is
+lost. So a cold-start client never saw the challenge and could not start discovery. Add a
+token_exchange branch to the preemptive-401: a no-subject connect to an OBO server now returns
+401 + WWW-Authenticate: Bearer resource_metadata=..., error=&#34;invalid_token&#34; at the transport level,
+so a spec-compliant client discovers the IdP (the PRM advertises the JWT-auth issuer), SSOs, and
+retries with a subject token. Verified live on the per-server endpoint; the with-subject connect
+still proceeds (no challenge).
+
+(Also formats two lines from earlier commits in this stack.)
+
+* refactor(mcp): inject root_path into the OBO/OAuth challenge edge
+
+The adapter&#39;s raise_user_oauth_challenge and raise_token_exchange_challenge
+reached into os.getenv(&#34;SERVER_ROOT_PATH&#34;) via get_server_root_path(), a
+hidden ambient read in a module that is meant to be a pure edge. That coupling
+made the preemptive-challenge test order-dependent under xdist: a sibling test
+sets SERVER_ROOT_PATH at import without cleanup, leaking the prefix into the
+challenge URL and failing the exact-match assertion.
+
+Resolve the root path at the imperative-shell call sites and pass it in
+keyword-only, so both challenge builders become pure functions of their inputs.
+Extract the shared resource_metadata path construction into a single
+oauth_protected_resource_path helper, collapsing the duplicated prefix/name
+logic the two functions carried.
+
+Also reduce _create_mcp_client below the strict complexity ceiling by extracting
+the v2 credential resolution into _resolve_v2_auth, and extract the OBO
+protected-resource-metadata branch into _obo_protected_resource_response (which
+shipped without coverage) so discovery can be unit-tested directly.
+
+Tests are now hermetic: the adapter tests pass root_path as a real input rather
+than monkeypatching the environment, the stale-session preemptive test asserts
+structural invariants instead of the exact prefixed URL, and five new tests
+cover the OBO PRM issuer branch end to end.
+
+* feat(mcp): OBO cache-key tenant isolation, reactive 401 retry, v1-parity logs
+
+From a pass over the OBO behavior contract. Three changes to the
+token_exchange arm, none of which alters any other auth mode.
+
+The exchanged-token cache key now folds in the caller&#39;s tenant alongside
+the subject token and exchange config, so two tenants presenting the same
+opaque token can never share a cache entry; cross-tenant isolation is
+structural rather than incidental to subject-token uniqueness. tenant_id is
+threaded from the resolver&#39;s Subject; it is keyword-only with an empty
+default so the no-tenant case and the existing call sites are unchanged.
+
+The tool-call path gains one reactive retry. When an upstream rejects the
+injected token with a 401/403, the gateway invalidates the cached exchange,
+re-mints once through the IdP by rebuilding the client, and retries the call
+exactly once before surfacing the upstream error, so a token revoked or
+rotated upstream mid-TTL self-heals without an infinite loop. It is gated
+strictly to oauth2_token_exchange; passthrough, authorization_code,
+client_credentials, api_key, and none keep their single-call behavior.
+MCPClient.call_tool gains a raise_on_error flag (mirroring list_tools) so
+the path can tell an upstream 401 apart from an ordinary tool error and
+avoid re-running a non-idempotent tool on a non-auth failure.
+
+The exchanger also emits the v1-parity log lines it had dropped (attempt
+with server, endpoint and audience; success; cache hit), while never
+logging the form, subject token, secret, or minted token.
+
+* fix(mcp): fail closed with 412 when a token_exchange server has no endpoint
+
+A true token_exchange (OBO) server must use only an explicitly configured
+token endpoint; it must never guess an IdP or silently fall back to a weaker
+source. Previously an OBO server with client credentials but no
+token_exchange_endpoint/token_url deferred to v1, which no-op&#39;d and let the
+request connect to the upstream with no credential (an upstream 401 rather
+than a clear gateway error).
+
+Now such a server is owned by the v2 arm: _token_exchange_spec builds the spec
+even when the endpoint is absent, and the exchanger fails closed with a
+precondition_required error that maps to HTTP 412 before any upstream or IdP
+call, with the caller&#39;s subject token never sent anywhere. A missing
+client_id/secret still maps to misconfigured (500); a present-but-rejected
+subject still maps to 401; an unreachable IdP still maps to 503. The no-subject
+case keeps its existing 401 RFC 9728 challenge.
+
+* feat(mcp): log a refused non-Bearer token_type in the OBO exchange
+
+* fix(mcp): surface OBO/authorization_code list-time 401 as a challenge instead of masking it
+
+* feat(mcp): classify RFC 6749 gateway-fault token-exchange errors as 500, not a caller 401
+
+* test(mcp): absorb fixture uses 500 now that 401/403 are challenge-class at list time
+
+* style(mcp): PEP 604 union in the OBO retry signature to keep the UP007 budget flat
+
+- feat(mcp): migrate the token_exchange (OBO) arm to the v2 resolver (#31526)
+
+* feat(mcp): v2-native RFC 8693 token exchanger for the token_exchange mode
+
+Adds the pure Rfc8693TokenExchanger plus its composition root: the OBO exchange POSTs the
+RFC 8693 grant through an injected HTTP edge and returns the upstream-bound token as a typed
+Result, caching and single-flighting per (subject_token, server) so a repeated caller token
+skips the IdP round-trip. The audience is carried on TokenExchangeConfig and sent only when the
+operator set one, matching the spec default behavior. Errors are values: a missing endpoint or
+client credential is misconfigured, an IdP that returns no usable token is upstream_unavailable.
+
+* feat(mcp): migrate the token_exchange arm to the v2 resolve_credentials
+
+Routes RFC 8693 OBO servers through the v2 resolver: the resolver arm reads the caller&#39;s
+inbound token and swaps it via the injected TokenExchanger, to_server_spec maps a complete
+oauth2_token_exchange server (endpoint plus client credentials) to TokenExchangeConfig, and the
+egress wires the LazyTokenExchanger in. A token_exchange server with no caller token fails closed
+with a plain 401 rather than v1&#39;s fall-through to client_credentials, so the call site now scopes
+the per-server browser-OAuth challenge to authorization_code and lets other modes raise their own.
+
+* fix(mcp): bind the token-exchange cache key to the exchange config
+
+The exchanged-token cache was keyed only by (subject_token, server_id), so rotating a server&#39;s
+audience, scope, endpoint, client_id, or secret kept serving a token minted for the old config
+until TTL. The key now hashes the caller token together with the config that minted it, so a config
+change forces a fresh exchange. Everything is hashed, so no secret is held in the key.
+
+* refactor(mcp): build the token exchanger eagerly, dropping the lazy wrapper
+
+The token exchanger reads no runtime global at build time (its httpx client is acquired per call),
+unlike the per-user store, so it does not need lazy first-use construction. Building it once at
+egress construction removes the first-use init path entirely and keeps the process-lifetime cache.
+
+* fix(mcp): map non-object token-exchange JSON to a miss instead of a 500
+
+The post adapter annotated the parsed body as a dict without checking it, so a valid-but-non-object
+JSON response (list/string/number) was returned as-is and crashed the field parsing with an
+AttributeError. It now validates the shape at the boundary and returns None for a non-object body,
+so a malformed IdP response surfaces as a typed upstream_unavailable rather than a server error.
+
+* fix(mcp): fail closed on a non-Bearer token_type in the OBO exchange
+
+* feat(mcp): honor token_endpoint_auth_method (client_secret_basic) in the v2 OBO exchange
+
+* feat(mcp): reject a non-access issued_token_type in the OBO exchange
+
+* fix: include token endpoint auth method in exchange cache key
+
+---------
+
+Co-authored-by: Cursor Agent &lt;cursoragent@cursor.com&gt;
+
+- Merge pull request #32072 from BerriAI/litellm_budget_fallbacks_ui
+
+feat(ui): add budget fallbacks configuration to key create/edit forms
+
+- Merge pull request #32026 from BerriAI/litellm_headroom_unreachable_fallback
+
+feat(guardrails): add unreachable_fallback fail-open option to headroom guardrail
+
+- Merge pull request #32082 from BerriAI/litellm_/eloquent-swanson-d634ca
+
+chore(ui): add no-console lint ratchet and strip console from prod builds
+
+- fix: prevent duplicate budget alert emails on concurrent threshold crossings (#32011)
+
+* fix: prevent duplicate budget alert emails on concurrent threshold crossings
+
+Budget alert emails were sent more than once for a single threshold crossing. The email dedup guard read the &#34;already sent&#34; marker, awaited the send, then wrote the marker, so concurrent requests crossing the same threshold within the send window all saw no marker and each sent. This affected the multi-threshold path (default_key_max_budget_alert_emails), the legacy single-threshold path (EMAIL_BUDGET_ALERT_MAX_SPEND_ALERT_PERCENTAGE), and the soft budget path, all in EmailBaseCallback.budget_alerts
+
+All three branches now claim the send slot atomically before sending via async_increment_cache, which is atomic per event loop for the in-memory cache and across workers via Redis INCR; only the caller that observes a count of 1 sends. On send failure the marker is released with async_delete_cache so a transient failure does not suppress the alert for the full 24h TTL
+
+* fix: harden budget alert claim release and skip-path event allocation
+
+Addresses review feedback on the claim-before-send change. The claim release in each send-failure handler now logs the send error first and releases the claim best-effort through a shared helper, so a transient cache error during async_delete_cache cannot propagate out of the fire-and-forget budget_alerts task, drop the send-failure log, and leave the claim stuck for the full 24h TTL. In the multi-threshold branch the increment claim now runs before the WebhookEvent is built, so skipped concurrent crossings no longer construct and discard the event, matching the single-threshold and soft budget branches
+
+- chore(ui): preserve console.warn in prod builds to match lint allow-list
+
+The lint rule allows console.warn (allow: [warn, error]) but removeConsole
+only excluded error, so approved console.warn calls were silently dropped
+from production bundles. Add warn to the exclude list so the prod strip
+and the lint allow-list agree; only console.log/debug/info are stripped
+now, warn and error both survive (verified: warn 85 to 85, error 906 to
+906, log 675 to 14).
+
+- chore(ui): sync no-console budget to 484 after staging merge
+
+Merging litellm_internal_staging dropped 2 console.log calls (the
+currentUser logs removed in #32079), so the no-console budget max and
+metric move from 486 to 484 to match the current count.
+
+- Merge remote-tracking branch &#39;origin/litellm_internal_staging&#39; into litellm_/eloquent-swanson-d634ca
+
+- chore(ui): add no-console lint ratchet and strip console from prod builds
+
+Introduce a gradual ratchet to remove raw console.* calls from the
+dashboard, mirroring the existing no-explicit-any budget.
+
+The no-console eslint rule is set to warn with allow: [warn, error] so
+the 486 console.log/debug/info calls are tracked without force-deleting
+the legitimate console.error/warn error reporting in catch blocks. The
+count is grandfathered via eslint-budgets.json (max 486, target 0) and
+eslint-metrics.json, so any newly added console.log fails the budget
+check and follow-up PRs grind the max down toward zero.
+
+Independently, next.config strips console output from production builds
+via SWC removeConsole (exclude: [error]), gated on NODE_ENV=production so
+dev keeps full console output. This gives an immediate prod-hygiene net
+regardless of how long the source cleanup takes. Verified against a real
+production build: app-code console.log dropped from 675 to 14 in the
+bundle (remainder is node_modules, which the transform leaves alone),
+console.warn app calls stripped, console.error preserved 906 to 906.
+
+- Merge pull request #32079 from BerriAI/litellm_/dreamy-lovelace-4a90c8
+
+test(ui): quiet vitest CI logs by silencing passing-test console output
+
+- style: format key_edit_view.tsx with prettier
+
+Co-Authored-By: Devin AI &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+
+- Merge remote-tracking branch &#39;origin/litellm_internal_staging&#39; into litellm_/dreamy-lovelace-4a90c8
+
+# Conflicts:
+#	ui/litellm-dashboard/vitest.config.ts
+
+- test(ui): quiet vitest CI logs by silencing passing-test console output
+
+The ui_unit_tests CircleCI job logged ~45k lines for a single run, most of
+it React act() warnings, antd deprecation notices and component stack traces
+emitted as console output by passing tests, which buried real failures.
+
+Set silent: &#34;passed-only&#34; (Vitest 3.2+) gated on process.env.CI so console
+output from passing tests is suppressed while a failing test still prints its
+logs and full stack trace. Also drop two stray console.log calls in
+UsagePageView that dumped the whole currentUser object on every render in
+production, not just tests.
+
+Verified by running the suite the way CI does
+(CI=true npm run test -- --run --pool forks --poolOptions.forks.maxForks=6):
+45,075 lines before, 981 after, all 4075 tests still passing. A throwaway
+failing test confirms its console.log and assertion diff remain visible.
+
+- fix: allow clearing budget_fallbacks in edit view when key had existing fallbacks
+
+Co-Authored-By: Devin AI &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+
+- chore: clarify the linear ticket instruction in pr template (#32076)
+
+* chore: clarify the linear ticket instruction in pr template
+
+* fix: make it more concise
+
+* Update CLAUDE.md
+
+lol
+
+* chore: tell claude not to search for it if it doesn&#39;t have it
+
+---------
+
+Co-authored-by: ryan-crabbe-berri &lt;ryan@berri.ai&gt;
+
+- Merge pull request #32078 from BerriAI/litellm_/distracted-banach-e3481f
+
+fix(ci): stop ui_unit_tests vitest onTaskUpdate RPC timeout flake
+
+- fix(anthropic): keep context_management working when drop_params is enabled (#32020)
+
+* fix(anthropic): keep context_management working when drop_params is enabled
+
+drop_params (proxy-wide or per-request) silently disabled the in-gateway
+context_management polyfill on the /v1/messages -&gt; chat completions adapter
+path, even though context_management is a LiteLLM-supported param (native on
+Anthropic, polyfilled elsewhere). Gate the polyfill on an explicit
+additional_drop_params: [&#34;context_management&#34;] opt-out instead, which also
+makes that escape hatch actually work on the adapter path.
+
+* test(anthropic): cover sync adapter polyfill gate for global drop_params and additional_drop_params
+
+- Merge remote-tracking branch &#39;origin/litellm_internal_staging&#39; into litellm_/distracted-banach-e3481f
+
+- fix(ci): stop ui_unit_tests vitest onTaskUpdate RPC timeout flake
+
+The ui_unit_tests job runs vitest with maxForks=8 on an 8-vCPU xlarge
+container, leaving no headroom for the main vitest process that services
+worker RPCs. Under full CPU saturation the coordinator misses the
+onTaskUpdate ack, vitest raises &#34;Timeout calling onTaskUpdate&#34; as an
+unhandled error, and the job exits 1 even though every test passes.
+
+Lower maxForks to 6 so the coordinator, jsdom, and OS keep two cores, and
+raise teardownTimeout to 60s for extra slack on heavy runs.
+
+- feat(mcp): add all-proxy-mcpservers sentinel to grant teams every MCP server (#32012)
+
+* feat(mcp): add all-proxy-mcpservers sentinel to grant every MCP server
+
+Teams can now be scoped to the all-proxy-mcpservers sentinel so they gain
+access to every MCP server on the proxy without listing each id. The
+sentinel expands to the live registry at request time, so a server added
+later is picked up with no change to the team&#39;s stored permission. The team
+ceiling that validates a key&#39;s MCP scope expands the sentinel too, so a key
+can be scoped to any server (including one registered after the team) and
+still pass subset validation
+
+Expose the option in the team create and edit forms via a new exclusive
+&#34;All Proxy MCP Servers&#34; choice in MCPServerSelector, mirroring the existing
+&#34;No MCP Servers&#34; sentinel
+
+* Update litellm/proxy/management_helpers/object_permission_utils.py
+
+Co-authored-by: greptile-apps[bot] &lt;165735046+greptile-apps[bot]@users.noreply.github.com&gt;
+
+* fix(mcp): honor all-proxy-mcpservers only on the team path, never per-key
+
+The sentinel was expanded inside the shared expand_permission_list, which
+also feeds the key, org, end_user and agent resolvers. A key whose stored
+object_permission ever held all-proxy-mcpservers (a stale write, a
+configured default, or a bug) would silently resolve to every MCP server at
+runtime, and a teamless key had nothing to cap it, so all servers got
+injected. Only write-time validation stripping the value stood between that
+value and a full grant
+
+Move the expansion out of expand_permission_list and into
+_get_allowed_mcp_servers_for_team so the sentinel is honored only where it is
+settable (a team). Anywhere else it now passes through as an inert literal
+that matches no registered server and is denied downstream. Reserved-id
+protection already blocks a real server from taking that id
+
+* fix(mcp): require proxy admin to grant a team the all-proxy MCP sentinel
+
+Granting a team every MCP server on the proxy is a proxy-wide authorization
+decision, but team create/update let any caller who can manage a team set
+object_permission.mcp_servers, with no ceiling check. Org admins reach
+/team/update by default (org_admin_allowed_routes) and _verify_team_access
+also admits team admins, so a non-proxy-admin could set all-proxy-mcpservers
+and self-grant their team access to every MCP server on the proxy, including
+servers never assigned to that team
+
+Gate the grant in new_team and update_team: a non-proxy-admin cannot add the
+all-proxy-mcpservers sentinel. The check is scoped to newly adding it, so a
+team a proxy admin already scoped to all-proxy can still be edited by a team
+admin without being forced to strip the sentinel. The UI only offers the
+&#34;All Proxy MCP Servers&#34; option to proxy admins in the team create and edit
+forms
+
+* fix(ui): render friendly all-proxy MCP label for non-admins editing an all-proxy team
+
+A team scoped to the all-proxy-mcpservers sentinel could be opened in the team
+edit form by a team admin or org admin (canEditTeam admits them), but the
+&#34;All Proxy MCP Servers&#34; option in MCPServerSelector was rendered only behind the
+proxy-admin-gated allowAllProxyMcpServers flag. For a non-proxy-admin the stored
+sentinel was hydrated into the selected value with no matching Select.Option, so
+antd showed the raw all-proxy-mcpservers literal as a chip, and adding another
+server could persist a mixed [all-proxy-mcpservers, &lt;id&gt;] value.
+
+Render the option whenever the sentinel is present in the value, not only when
+the caller may grant it, and drive the real-option disabling off presence too so
+the selection stays exclusive. A non-proxy-admin now sees the friendly label
+read-only and cannot build a mixed state; only a proxy admin can newly add it,
+which the backend already enforces.
+
+Adds regression tests: the selector shows the friendly option (not the raw
+literal) when the sentinel is stored but the grant flag is off, plus exclusive
+emit and disabled-real-options coverage, and MCPServerPermissions renders the
+green &#34;All&#34; state instead of the raw sentinel string.
+
+* fix(ui): drop redundant &#34;All servers&#34; hint from the all-proxy MCP chip
+
+antd renders a Select option&#39;s children inside the selected tag, so the
+all-proxy option showed both &#34;All Proxy MCP Servers&#34; and the green &#34;All servers&#34;
+type-hint in the chip, which say the same thing. Collapse the option to a single
+green &#34;All Proxy MCP Servers&#34; label so the dropdown row and the chip read cleanly
+without the duplication.
+
+* fix(ui): color the all-proxy MCP label blue to match server chips
+
+Use the same blue (#1890ff) as regular MCP server entries for the
+&#34;All Proxy MCP Servers&#34; option/chip instead of green.
+
+* fix(ui): make the all-proxy MCP permissions display blue, not green
+
+Match the blue used by the selector chip and regular server entries so the
+&#34;All Proxy MCP Servers&#34; badge and row in MCPServerPermissions are consistent
+across the team/key/org detail views. The red &#34;Blocked&#34; state for
+no-mcp-servers is unchanged.
+
+---------
+
+Co-authored-by: greptile-apps[bot] &lt;165735046+greptile-apps[bot]@users.noreply.github.com&gt;
+
+- fix: prevent stale budget fallback entries after form reset and guard empty payload in edit view
+
+Address Greptile P1 (stale state after reset): use key prop to force
+BudgetFallbacksEditor remount when parent resets budgetFallbacks to {},
+matching the existing routerSettingsKey pattern.
+
+Address Greptile P2 (inconsistent empty payload): guard budget_fallbacks
+in edit view to only include when non-empty, matching create form behavior.
+
+Co-Authored-By: Devin AI &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+
+- feat(ui): add budget fallbacks configuration to key create/edit forms
+
+Co-Authored-By: Devin AI &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+
+- fix: restore schema.d.ts from base branch
+
+Co-Authored-By: Devin AI &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+
+- fix(guardrails): address review comments on headroom fail_open
+
+- Prevent fail-open from registering user-supplied hashes as valid for
+  CCR retrieval; _call_compress now returns (messages, compressed_ok)
+  so apply_guardrail skips hash extraction and tool injection when
+  compression did not succeed
+- Remove Optional wrapper from HeadroomGuardrailConfigModel.unreachable_fallback
+  to match BaseLitellmParams typing
+- Add fail_open tests for non-JSON response, missing messages key, and
+  empty message list paths
+- Add regression test verifying fail_open does not authorize attacker-planted
+  hashes
+- Regenerate dashboard API types
+
+Co-Authored-By: Devin AI &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+
+- feat(ui): re-add chat UI, allow simple UI for MCP OBO auth (#31893)
+
+- feat(proxy): add key-level budget_fallbacks to reroute requests when a per-model budget is exceeded (#31783)
+
+- fix(e2e): define SpendTagsResponse/TagSpend so spend suite collects
+
+fix(e2e): define SpendTagsResponse/TagSpend so spend suite collects
+
+- fix(mcp): persist DCR client_id from on-create MCP OAuth Authorize &amp; Fetch (#31920)
+
+* fix(mcp): persist DCR client_id so interactive OAuth token refresh works
+
+Interactive authorization_code MCP servers register an OAuth client via Dynamic
+Client Registration (RFC 7591) during the authorize flow, but the minted
+client_id and the discovered token_url were returned to the caller and never
+written to the server row. The autonomous refresh_token grant reads client_id,
+client_secret and token_url off the server, so an expired access token could not
+be refreshed; the user was bounced back to re-authorize and tools/list returned
+zero tools
+
+Persist the DCR client_id (plus client_secret and token_endpoint_auth_method when
+the registration returns them) and the discovered token_url onto the server row,
+reusing the encrypt_credentials write that client_credentials and token exchange
+already use, then refresh the in-memory registry so the value is live at refresh
+time. Both the v1 refresher and the v2 AuthorizationCodeRefresher read those same
+fields, so egress needs no change
+
+* fix: reuse persisted MCP DCR clients
+
+* fix(ui): persist DCR client_id from on-create MCP OAuth &#34;Authorize &amp; Fetch&#34;
+
+The interactive &#34;Authorize &amp; Fetch&#34; flow on the create form registers an OAuth
+client (RFC 7591) against a temporary server that has no DB row, then creates the
+real server afterward. useMcpOAuthFlow captured the DCR client_id and client_secret
+but passed only the token to onTokenReceived, so the create request dropped the
+client identity and the created server could not refresh its access token; its row
+had credentials={} and the refresh_token grant 401d at the upstream token endpoint
+
+Forward the registered client to onTokenReceived and write client_id (and
+client_secret when present) into the create form credentials, so the create request
+carries them and the backend persists them through its existing encrypt_credentials
+path. token_url is omitted because it is re-discovered on load (RFC 9728 then 8414);
+token_endpoint_auth_method is unused because this flow only ever registers as
+client_secret_post or none, never client_secret_basic
+
+* fix(ui): prevent stale MCP OAuth credentials
+
+* fix(ui): reset MCP OAuth authorization state
+
+---------
+
+Co-authored-by: Cursor Agent &lt;cursoragent@cursor.com&gt;
+
+- fix: catch litellm.Timeout in HeadroomGuardrail to support fail_open on timeouts
+
+async_handler.post catches httpx.TimeoutException and re-raises it as
+litellm.Timeout (a subclass of openai.APITimeoutError). The except
+blocks in _call_compress and _call_retrieve only listed httpx exception
+types, so litellm.Timeout propagated uncaught and bypassed the
+unreachable_fallback=fail_open path.
+
+Add litellm.Timeout to both except clauses and add regression tests for
+the fail_closed and fail_open timeout paths.
+
+- fix(azure_sentinel): resolve audit stream from AZURE_SENTINEL_AUDIT_STREAM_NAME (#32010)
+
+When AzureSentinelLogger is resolved from the string callback name
+&#34;azure_sentinel&#34;, it is constructed with no arguments, so audit_stream_name is
+always None and resolved_audit_stream_name fell back to the standard
+resolved_stream_name. Audit logs then ingested into the access-log DCR stream
+whose schema is built from StandardLoggingPayload, so Azure Monitor Logs
+Ingestion silently dropped the audit-specific columns and audit rows arrived
+effectively empty.
+
+Add an AZURE_SENTINEL_AUDIT_STREAM_NAME env var fallback in __init__, mirroring
+the AZURE_SENTINEL_STREAM_NAME idiom already used for the standard stream, so
+audit logs can target a separate DCR stream without a custom callbacks file.
+
+- fix(mcp): persist DCR client_id so interactive OAuth token refresh works (#31912)
+
+* fix(mcp): persist DCR client_id so interactive OAuth token refresh works
+
+Interactive authorization_code MCP servers register an OAuth client via Dynamic
+Client Registration (RFC 7591) during the authorize flow, but the minted
+client_id and the discovered token_url were returned to the caller and never
+written to the server row. The autonomous refresh_token grant reads client_id,
+client_secret and token_url off the server, so an expired access token could not
+be refreshed; the user was bounced back to re-authorize and tools/list returned
+zero tools
+
+Persist the DCR client_id (plus client_secret and token_endpoint_auth_method when
+the registration returns them) and the discovered token_url onto the server row,
+reusing the encrypt_credentials write that client_credentials and token exchange
+already use, then refresh the in-memory registry so the value is live at refresh
+time. Both the v1 refresher and the v2 AuthorizationCodeRefresher read those same
+fields, so egress needs no change
+
+* fix: reuse persisted MCP DCR clients
+
+* fix: reuse persisted MCP DCR clients
+
+---------
+
+Co-authored-by: Cursor Agent &lt;cursoragent@cursor.com&gt;
+
+- feat(ui): add token endpoint auth method selector to MCP OAuth forms (#31739)
+
+PR #31635 added a per-server token_endpoint_auth_method (client_secret_basic
+or client_secret_post) for upstream OAuth token endpoints, but it could only be
+set by editing the stored credentials JSON. This surfaces it in the dashboard as
+an optional selector directly under the Token URL field, in both the create form
+(OAuthFormFields, M2M and interactive flows) and the edit form. The field binds
+to credentials.token_endpoint_auth_method, which the backend already reads; the
+value is sent only when chosen, so leaving it blank keeps the existing setting
+and preserves the client_secret_post default.
+
+- feat(tinyfish): make search provider permissive, attribute errors (#31997)
+
+* feat(tinyfish): make search provider permissive, attribute errors
+
+Reshapes the TinyFish search provider so LiteLLM mirrors the TinyFish
+Search API surface instead of maintaining a parallel cherry-pick.
+
+Request side:
+- Drop misleading request TypedDict
+- Stop sending max_results on wire (TinyFish ignores it); clamp to [1,10]
+  client-side via self-threaded state
+- Guard non-numeric max_results from bare ValueError
+- Auto-JSON-encode dict params; lowercase bool serialization for ux-labs
+
+Response side:
+- Drop both Pydantic response models; parse directly into SearchResponse
+  so per-result extras flow through via extra=&#34;allow&#34;
+- Default missing title/url/snippet to &#34;&#34; instead of failing the call
+- Read top-level parameter_warnings and re-fire as verbose_logger.warning
+  (pre-wired for upcoming TinyFish-side rollout; no-op today)
+
+Error handling:
+- Attributed _wrap_error helper at 3 call sites in transform_search_response
+  (&#34;TinyFish Search: &lt;msg&gt;. See https://docs.tinyfish.ai/search-api for
+  details.&#34;)
+- Dispatch non-2xx responses through _wrap_error (fixes pre-existing bug
+  where 4xx/5xx silently returned empty SearchResponse)
+- Wrap json.JSONDecodeError on 200 bodies
+- Wrap pydantic.ValidationError for envelope-shape mismatches
+
+Bug fix worth flagging: 4xx/5xx responses now raise an attributed
+BaseLLMException instead of silently returning SearchResponse(results=[]).
+
+Follow-up to #30634.
+
+* fix(tinyfish): apply ruff format; guard OverflowError in max_results clamp
+
+- Run ruff format on the touched files (CI lint job rejected the prior
+  commit&#39;s formatting).
+- Add OverflowError to the except clause in the max_results clamp so
+  callers passing math.inf (or other non-finite floats) get the same
+  warn-and-ignore behavior as other malformed values. Greptile spotted
+  this in the first-pass review.
+- Add test_max_results_infinity_float_warns_and_skips covering the
+  inf case.
+
+* fix(tinyfish): apply --line-length 88 ruff format to match CI
+
+CI uses &#39;ruff format --check --line-length 88&#39;; my prior format pass
+used the default line length, leaving several lines unwrapped. No
+behavior change — purely whitespace.
+
+* fix(tinyfish): reduce transform_search_response complexity; sort imports
+
+CI&#39;s ruff strict-rule budget rejected the prior commit with:
+- C901: transform_search_response complexity 16 &gt; 10 (cap exceeded by 1)
+- I001: import sort violation (cap exceeded by 1)
+
+Extract two module-level helpers from transform_search_response to drop
+its cyclomatic complexity:
+- _default_missing_result_fields: in-place title/url/snippet defaulting
+- _emit_parameter_warnings: defensive parameter_warnings reader
+
+Auto-fix the import sort via ruff --fix.
+
+No behavior change; the 59 existing tests still pass.
+
+* test(tinyfish): cover defensive branches in _default_missing_result_fields
+
+Codecov flagged 97.61% patch coverage (2 lines missing). The uncovered
+lines were the non-dict raw_json and non-dict per-result item early-exits
+in _default_missing_result_fields. Add two unit tests on the helper
+directly to bring patch coverage to 100%.
+
+* chore(tinyfish): apply ruff format to fix lint after staging merge
+
+---------
+
+Co-authored-by: Chenlu Ji &lt;jichenlulu@gmail.com&gt;
+
+- bump: litellm-proxy-extras 0.4.74 -&gt; 0.4.75, litellm-enterprise 0.1.45 -&gt; 0.1.46 (#32029)
+
+Both directories diverged from main; bump PATCH and relock.
+
+- fix(azure_ai): preserve content, tables, and keyValuePairs in doc-intelligence /v1/ocr (#32018)
+
+* fix(azure_ai): preserve content, tables, and keyValuePairs in doc-intelligence /v1/ocr
+
+Azure Document Intelligence analyzeResult.content, .tables, and
+.keyValuePairs were dropped when normalizing to the Mistral OCR schema.
+They are now passed through verbatim as top-level response fields, and
+the duplicated sync/async response parsing is consolidated into one
+pydantic-validated helper.
+
+Also adds the Azure DI features query param (list[str] or
+comma-separated string, e.g. features=keyValuePairs) which Azure
+requires for keyValuePairs extraction.
+
+* test(azure_ai): replace fastapi jsonable_encoder with model_dump in ocr unit tests
+
+- fix(guardrails): catch httpx.HTTPStatusError in headroom compress call
+
+litellm&#39;s async httpx client already calls raise_for_status() internally, so a
+non-2xx /v1/compress response surfaced as an uncaught httpx.HTTPStatusError
+instead of going through the guardrail&#39;s status_code check. Caught live by
+running the guardrail against a mock headroom endpoint that returns 500:
+unreachable_fallback=fail_open silently failed to forward the request until
+this fix.
+
+- fix(proxy): admin-gate `permissions` on _process_single_key_update (LIT-4137) (#32002)
+
+The bulk-update entrypoints `/key/bulk_update` and `/team/key/bulk_update`
+route through `_process_single_key_update`, not through
+`_validate_update_key_data`, so the `permissions` gate LIT-4092 wired
+into the single-key path never fires on bulk. Currently safe by
+construction: `BulkUpdateKeyRequestItem` doesn&#39;t declare `permissions`
+(Pydantic silently drops it), and `KeyUpdateFields` uses
+`model_config = ConfigDict(extra=&#34;forbid&#34;)` (Pydantic 422s at parse
+time). Neither structural barrier is enforced by tests on the field
+itself; a future widening of either allowlist to include `permissions`
+would reopen the class silently.
+
+This wires `_check_permissions_caller_permission` into
+`_process_single_key_update` right after `_validate_max_budget`, before
+`prepare_key_update_data`. Zero behavior change today for any caller
+routing through the current bulk request models; a defense-in-depth
+gate for the class.
+
+Tests:
+
+- test_process_single_key_update_non_admin_permissions_rejected
+- test_process_single_key_update_non_admin_permissions_explicit_empty_rejected
+
+Both mutation-killed against removing the gate. Full mapped test file
+(341 tests) green.
+
+- fix(proxy): admin-gate `allowed_routes` presence on /key/update and /key/regenerate (LIT-4139) (#31987)
+
+`_check_allowed_routes_caller_permission` previously keyed its
+admin-only rule on truthiness. The refactor adds an `allowed_routes_was_provided`
+keyword param that raw-body call sites populate from
+`&#34;allowed_routes&#34; in data.model_fields_set`, so a caller that omits
+the field (default flows through) is distinct from one that sends
+any explicit value.
+
+Four raw-body call sites now pass `allowed_routes_was_provided=...`:
+`_common_key_generation_helper`, `generate_service_account_key_fn`,
+`_validate_update_key_data`, and `regenerate_key_fn`.
+
+Two derived-value call sites keep the pre-fix shape: the
+post-`handle_key_type` recheck at `_common_key_generation_helper`
+and the mirror in `regenerate_key_fn`. Both pass values produced by
+`handle_key_type` (not by the request body), so `allowed_routes_was_provided` stays
+False and the `allow_safe_presets=True` carve-out continues to accept
+the `llm_api_routes` / `info_routes` presets.
+
+In `regenerate_key_fn` the gate runs before the `premium_user`
+license check, matching the LIT-4092 ordering.
+`test_non_admin_regenerate_key_allowed_routes_rejected_before_enterprise_gate`
+pins the ordering; it fails on a swap of the two gates.
+
+Tests in `tests/test_litellm/proxy/management_endpoints/test_key_management_endpoints.py`
+under `TestAllowedRoutesCallerPermission`:
+
+- test_non_admin_generate_key_explicit_empty_allowed_routes_rejected
+- test_non_admin_update_key_explicit_empty_allowed_routes_rejected
+- test_non_admin_update_key_explicit_null_allowed_routes_rejected
+- test_non_admin_regenerate_key_explicit_empty_allowed_routes_rejected
+- test_non_admin_regenerate_key_allowed_routes_rejected_before_enterprise_gate
+- test_helper_accepts_derived_safe_preset_for_non_admin
+- test_helper_rejects_derived_unsafe_preset_for_non_admin
+- test_helper_rejects_when_provided_and_none_without_typeerror
+
+The four attack-vector tests fail on the pre-fix HEAD and pass on this
+commit. Three helper-level tests pin the derived-value branch and the
+load-bearing None guard; each is mutation-killed against a targeted
+change to the frozenset or the guard. Full mapped test file (347 tests)
+green.
+
+- fix(proxy): admin-gate `permissions` on /user/new and /user/update (LIT-4138) (#31998)
+
+`NewUserRequest` and `UpdateUserRequest` inherit `permissions` from
+`GenerateRequestBase`. `/user/new` passes the field into
+`generate_key_helper_fn` which persists it on the auto-created key,
+so an org admin who lands on `/user/new` (the route allowlist accepts
+org_admin callers when the request body names an org where they hold
+that membership) can mint a key with proxy-wide capabilities such as
+`get_spend_routes`.
+
+This wires the existing `_check_permissions_caller_permission` helper
+into `new_user` and `_update_single_user_helper`. The helper&#39;s presence
+check keys on `data.model_fields_set`, so an omitted field flows
+through untouched and an explicit `{}` / `null` from a non-admin is
+rejected 403 the same as any other value.
+
+`_update_single_user_helper` is shared by `/user/update` and
+`/user/bulk_update`, so both paths inherit the gate.
+
+Tests in
+`tests/test_litellm/proxy/management_endpoints/test_internal_user_endpoints.py`:
+
+- test_new_user_non_admin_permissions_non_empty_rejected
+- test_new_user_non_admin_permissions_explicit_empty_rejected
+- test_new_user_non_admin_omits_permissions_succeeds (control)
+- test_new_user_admin_can_set_permissions (control)
+- test_update_single_user_non_admin_permissions_rejected
+- test_update_single_user_non_admin_permissions_explicit_empty_rejected
+
+The four attack-vector tests fail on the pre-fix HEAD and pass on this
+commit. Full mapped test file (79 tests) green.
+
+- feat(guardrails): add unreachable_fallback fail-open option to headroom guardrail
+
+Reuses the existing unreachable_fallback flag (already implemented by
+generic_guardrail_api, akto, vigil_guard, repelloai) so headroom compression
+failures can forward the request uncompressed instead of blocking it with a
+502.
+
+- fix(auth): deny model access for teamless keys with all-team-models (#32022)
+
+_enforce_key_and_fallback_model_access and can_key_call_resolved_model
+both unconditionally skipped key-level model checks whenever
+all-team-models was present, without verifying the key actually belongs
+to a team. PR #29746 fixed the listing path (get_key_models) but these
+two call-path checks were left untouched, letting teamless keys call
+any model via /chat/completions while seeing an empty model list.
+
+Add team_id is not None guard to both bypass conditions so teamless
+keys fall through to can_key_call_model, which already correctly
+rejects unresolvable all-team-models sentinels
+
+Co-authored-by: mateo &lt;mateo@berri.ai&gt;
+Co-authored-by: Devin AI &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+
+- fix(a2a): populate response usage in a2a chat transformation (#31980)
+
+* fix(a2a): populate response usage in a2a chat transformation
+
+* test(a2a): rename to avoid module basename collision with fastcrw&#39;s test_transformation.py
+
+- feat: litellm oss staging (#31935)
+
+* fix(prometheus): bound per-request budget metric emission with a timeout (#31632)
+
+* fix(prometheus): bound per-request budget metric emission with a timeout
+
+Wrap the per-request budget-metric gather in asyncio.wait_for so a slow Redis or DB lookup cannot consume the whole LoggingWorker watchdog and get the success-logging event cancelled. On timeout the emission is skipped in isolation; budget gauges are still refreshed by the periodic cron. The timeout is configurable via PROMETHEUS_BUDGET_METRICS_PER_REQUEST_TIMEOUT and defaults to 5.0 seconds, falling back to the default on an invalid value instead of raising
+
+* fix(prometheus): reject non-finite and non-positive budget-metrics timeout env
+
+float() accepts 0, negatives, nan and inf, which bypass the fallback: a value &lt;= 0 makes asyncio.wait_for time out immediately and skip every per-request emission, and inf reintroduces the unbounded wait the timeout was meant to bound. Validate the parsed value is finite and greater than zero before using it, otherwise fall back to the default
+
+* fix: report the blocked LLM response&#39;s real token usage (#31217)
+
+When a guardrail blocks a post-call response, the synthetic violation response
+reported hard-coded zero usage, discarding the token usage the upstream call
+had already consumed.
+
+Fix the root cause rather than re-counting tokens:
+- Add an optional `original_response` field to ModifyResponseException.
+- The unified guardrail&#39;s post-call success hook attaches the blocked LLM
+  response to the exception.
+- The /v1/messages and OpenAI-format (/v1/chat/completions, /v1/completions)
+  block handlers report `original_response.usage` directly. Pre-call blocks
+  never invoked the LLM, so usage is zero.
+
+Mock-based tests cover the helper (returns original usage / zero), the success
+hook attaching original_response, and the endpoint reporting it end-to-end.
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(guardrails): buffer + cleanly terminate streamed responses on block (#31389)
+
+Streaming moderation improvements for the unified guardrail post-call
+streaming iterator hook:
+
+- streaming_buffer_until_moderated: withhold all chunks until end-of-stream
+  moderation passes, then release the original response (clean) or only the
+  block message (blocked) -- the original content is never delivered on a
+  block. Snapshot chunks with a shallow list() copy (end-of-stream builds a
+  separate assembled response; chunks aren&#39;t mutated in place).
+- Clean Anthropic SSE on block: synthesize a well-formed termination sequence
+  instead of a bare data: {&#34;error&#34;: ...} blob that truncates the stream.
+  Provider-specific synthesis lives in AnthropicMessagesHandler via
+  build_block_sse_chunks (format-agnostic routing stays in the hook).
+- Mid-stream blocks continue the in-progress message (close open content
+  block, append block message, terminate) rather than emitting a second
+  message_start, which clients reject. Standalone envelope only when no chunks
+  were sent (buffered path).
+- ModifyResponseException imported under TYPE_CHECKING + locally at runtime to
+  avoid a module-level cyclic import.
+
+Adds regression tests for buffering (content withheld on block) and mid-stream
+continuation (single message_start).
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix: report real usage on streaming blocks, disable buffered mode for content-rewriting guardrails
+
+- _standalone_block_chunks and _block_continuation_chunks now read real
+  token usage from ModifyResponseException.original_response instead of
+  hardcoding zero, matching the non-streaming _blocked_response_usage path.
+  Shared helper moved to guardrail_translation/utils.py.
+- streaming_buffer_until_moderated is now forced off when the guardrail has
+  mask_response_content=True, since buffered replay releases the withheld
+  original chunks verbatim -- unsafe for a guardrail that rewrites content
+  (e.g. PII masking).
+- Fix inverted streaming-flag precedence comment.
+
+* style: ruff format after greploop fixes
+
+* fix: handle Anthropic streaming guardrail blocks
+
+* fix(responses): check terminal event type for streaming guardrail end-of-stream detection
+
+_check_streaming_has_ended assumed responses_so_far held ModelResponse
+objects with .choices, but for the Responses API the accumulated chunks
+are raw SSE event dicts, causing an AttributeError on every call
+
+* fix: preserve Anthropic blocked stream usage
+
+---------
+
+Co-authored-by: FERNANDO IZAR &lt;fizar@me.com&gt;
+Co-authored-by: Joseph Barker &lt;156112794+seph-barker@users.noreply.github.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+Co-authored-by: Cursor Agent &lt;cursoragent@cursor.com&gt;
+
+- fix(a2a): record agent cost_per_query and input tokens on native send path (#31979)
+
+* fix(a2a): record agent cost_per_query and input tokens on native send path
+
+* test(a2a): add __init__.py to avoid test_utils.py module collision
+
+- fix(ui): include cache token columns in usage export (#32015)
+
+- perf(lint): skip and cache base gate passes, parallelize make lint, skip redundant prisma generate (#32000)
+
+* perf(lint): skip and cache base gate passes, parallelize make lint, skip redundant prisma generate
+
+make pre-commit paid for a full second basedpyright pass over a merge-base
+worktree on every run even when no rule was over its ceiling, re-generated an
+unchanged Prisma client, and ran seven independent checks sequentially. The
+basedpyright and ruff strict gates now skip the base pass when head is within
+every limit (the same early-out type_discipline_gate already had), the
+basedpyright base counts are cached under the git common dir keyed by
+merge-base commit, pyrightconfig.json, and uv.lock, prisma generate only runs
+when the schema or prisma version changed, and make lint fans its checks out
+through a parallel sub-make after a single setup phase
+
+* fix(lint): keep the base-cache scratch file out of the prune glob
+
+The tmp+rename scratch in store_counts was named basedpyright-base-&lt;hash&gt;.json.tmp,
+which the stale-entry prune glob (basedpyright-base-*) also matches, so a concurrent
+lint run from another worktree sharing the same git common dir could unlink it between
+write_text and replace and crash the gate with FileNotFoundError. The scratch is now
+dot-prefixed so the glob can never see it, pid-suffixed so concurrent writers of the
+same entry never share a scratch, and the prune glob is restricted to committed
+*.json entries
+
+- chore(e2e): untrack gateway config and document e2e test location (#31914)
+
+* chore(e2e): untrack gateway config and document e2e test location
+
+Stop tracking tests/e2e/gateway/litellm-config.yml so the local proxy config stays on the machine
+
+Add a note to CLAUDE.md that new e2e tests belong in tests/e2e/ and must follow that directory&#39;s conventions
+
+* chore(e2e): add self-contained docker compose stack for local runs
+
+Ship a docker-compose.yml that starts the proxy with a throwaway Postgres and Redis and inlines the proxy config with example models, so contributors can bring up a local gateway with nothing but a .env. Update CONTRIBUTING.md to match the inline-config flow
+
+* chore(e2e): drop the second gemini deployment; one key is enough locally
+
+* docs(e2e): make pre-commit steps ordered and require flagging internally found issues
+
+- feat(ui): shadcn migration foundation: Tailwind v4, shadcn init, antd cascade fix (#31995)
+
+* feat(ui): shadcn migration foundation: Tailwind v4, shadcn init, antd cascade fix
+
+Upgrade the dashboard from Tailwind v3 to v4 with CSS-first config: the
+official upgrade codemod renamed utilities across 151 files, and
+tailwind.config.js (plus the dead tailwind.config.ts) is replaced by
+@theme tokens, @source globs, and @plugin directives in globals.css. The
+Tremor safelist becomes @source inline patterns and the legacy tremor
+theme tokens carry over verbatim. ui_colors.json was build-time only and
+fed the dying Tremor palette, so its brand values are inlined and the
+file removed; runtime theming replaces that path next.
+
+shadcn is initialized with a hand-authored components.json (rsc,
+cssVariables, baseColor gray) pointing utils at the existing
+lib/cva.config.ts, which now exports cn (cva beta cx + twMerge) instead
+of adding class-variance-authority as a second variant library. The two
+ad-hoc cn helpers fold into it. Button lands as the canary primitive,
+adapted to cva beta and React 18 forwardRef, with tests covering the
+variant, twMerge, asChild, and ref seams. --radius is 0.5rem so the
+shadcn radius scale reproduces Tailwind defaults and legacy rounded-*
+classes render unchanged.
+
+antd v5 emits unlayered CSS-in-JS that would beat every layered v4
+utility, so AntdGlobalProvider now wraps the app in StyleProvider layer
+and ConfigProvider cssVar, and globals.css declares
+@layer theme, base, antd, components, utilities. antd wins over
+preflight but yields to utilities, which is what lets migrated shadcn
+pages coexist with legacy antd pages. Preflight stays global with the
+three v3 behaviors pinned (default border color, button cursor,
+placeholder color).
+
+* fix(ui): restore tremor opacity tints removed by tailwind v4
+
+Tailwind v4 removed the *-opacity-* utilities, but the precompiled
+@tremor/react dist still composes them with shade-500 palette classes
+(bg-opacity-10 over bg-&lt;color&gt;-500 etc.), so Badge, BadgeDelta, Callout,
+light Icon and Button, BarList, and ProgressBar lost their tints and
+rendered solid 500-shade fills. Adversarial review caught it; the
+original smoke pages only exercised antd Tags.
+
+tremor-v3-compat.css restores exactly the pairs tremor emits: for each
+of the 22 safelisted colors, bg-opacity-{10,20,40}, hover/group-hover
+bg-opacity-{20,30}, and ring-opacity-{20,40} against the -500 shade,
+via color-mix into the utilities layer. Tremor&#39;s colorPalette maps both
+background and iconRing to 500, so the -500 pairing covers every
+composition in the dist; dark: variants are inert until dark mode ships.
+The shim dies with @tremor/react at the end of the migration.
+
+The upgrade codemod also missed two hand-rolled modal scrims using
+bg-black bg-opacity-{30,50} (solid black under v4); now bg-black/30 and
+bg-black/50. Removed the docker/build_admin_ui.sh copy of
+enterprise_colors.json into the deleted ui_colors.json; that build-time
+rebrand path is retired and its runtime replacement lands with the
+theming phase.
+
+* fix(ui): pair ring-opacity-40 with shade 300 in tremor compat shim
+
+Tremor&#39;s colorPalette maps ring to shade 300, and the only consumer of
+ring-opacity-40 (Icon variant outlined) composes it with that shade,
+so the shade-500 rows were dead and outlined icon rings would render
+at full opacity. Latent today (no dashboard usage of the outlined
+variant); caught by adversarial review. ring-opacity-20 stays at 500
+(iconRing), matching Badge and BadgeDelta.
+
+- fix(bedrock): map guardrailConfig to InvokeModel guardrail headers (#31985)
+
+* fix(bedrock): map guardrailConfig to InvokeModel guardrail headers
+
+The InvokeModel API takes the guardrail identifier, version and trace as
+X-Amzn-Bedrock-* request headers, unlike Converse which takes them in the
+request body. The invoke transformer never set these headers, so
+guardrailConfig was silently dropped (or leaked into the request body)
+and Bedrock guardrails never ran on invoke-route models. Pop
+guardrailConfig in AmazonInvokeConfig.validate_environment, validate it,
+and set the headers before SigV4 signing; explicitly passed headers keep
+winning over guardrailConfig so existing workarounds are unaffected
+
+* fix(bedrock): reject guardrailConfig missing guardrailIdentifier
+
+A guardrailConfig without guardrailIdentifier (e.g. an empty dict) would
+validate, produce no guardrail headers, and let the request proceed with
+guardrails silently not applied; that silent skip is the exact failure
+mode this fix exists to remove, so fail fast with a 400 instead
+
+- feat(tencent): add Tencent TokenHub as a provider (#31903)
+
+* feat(tencent): add Tencent TokenHub as a provider
+
+Tencent TokenHub is OpenAI- and Anthropic-compatible. This registers it as a
+new provider: TencentChatConfig routes /v1/chat/completions and gates the
+thinking/reasoning_effort params behind supports_reasoning, and
+TencentAnthropicMessagesConfig routes the Anthropic-compatible Messages API.
+Adds cost tracking, the deepseek-v4-pro/flash model entries, and provider
+endpoint support metadata.
+
+* test(tencent): add unit tests for Tencent TokenHub provider
+
+Covers TencentChatConfig (chat completions) and TencentAnthropicMessagesConfig
+(messages API) across transformation, param mapping, URL building, and header
+validation, plus get_optional_params routing. Tests mock supports_reasoning to
+stay independent of remote model cost data.
+
+* fix(tencent): correct max_output_tokens and reuse parent messages env validation
+
+Raise max_output_tokens/max_tokens for tencent/deepseek-v4-pro and tencent/deepseek-v4-flash from 8192 to 384000, matching Tencent TokenHub&#39;s published DeepSeek-V4 output limit; the 8192 value mirrored the native DeepSeek default and would have rejected valid larger requests before they reached Tencent
+
+Delegate validate_anthropic_messages_environment to the parent via super() so the Tencent messages endpoint keeps content-type and anthropic-beta header injection instead of dropping them, keeping only the TENCENT_API_KEY resolution overridden
+
+Add regression tests covering beta-header injection, the cost-calculator delegation, provider-info secret resolution, and validate_environment key handling
+
+* fix(tencent): normalize messages URL when TENCENT_API_BASE has chat completions suffix
+
+* fix(tencent): register tencent in models_by_provider
+
+The provider was added to the LlmProviders enum and cost map but not to the
+models_by_provider lookup, so test_models_by_provider (which asserts every
+litellm_provider present in the cost map is registered) failed once the tencent
+models were loaded. Add the tencent_models set, populate it from the cost map,
+and expose it under the tencent key, mirroring deepseek.
+
+* fix(tencent): import generic_cost_per_token from its canonical module
+
+Import generic_cost_per_token from litellm.litellm_core_utils.llm_cost_calc.utils
+instead of the top-level litellm.cost_calculator dispatcher, which imports the
+tencent cost module at load time. Removing the back-reference avoids the circular
+import and matches how deepseek and the other providers source the helper.
+
+---------
+
+Co-authored-by: Felipe Rodrigues Gare Carnielli &lt;felipe.gare@hotmail.com&gt;
+Co-authored-by: Cursor Agent &lt;cursoragent@cursor.com&gt;
+
+- fix(mcp): surface tools/list 401 auth failures as a challenge on single-server routes (#31921)
+
+A 401 while listing tools (a missing or expired per-user OAuth token, or an
+upstream 401 for any auth_type) was swallowed to an empty tool list, so a
+single-server client got a 200 with no tools and no WWW-Authenticate challenge
+instead of a 401 it could re-authenticate against. Only oauth pass-through and
+delegate-to-upstream oauth2 servers surfaced it; every other auth_type, and the
+missing-token case for all of them, masked it.
+
+The surface-vs-absorb decision now keys on the route, not the auth_type. An
+upstream 401 in _fetch_tools_with_timeout becomes an MCPUpstreamAuthError
+regardless of auth_type, and the per-user OAuth challenge raised during client
+creation (a bare HTTPException 401 carrying a WWW-Authenticate header) is
+converted to the same type in _get_tools_from_server. The challenge is scoped
+to 401: a 403 (authenticated but forbidden, e.g. insufficient scope) is not a
+re-auth signal and degrades to an empty list like any other non-auth error, and
+the stdio-allowlist 403 (no challenge header) stays absorbed. The existing
+routing then does the right thing: single-server routes turn the error into a
+401 + WWW-Authenticate, while the multi-server aggregator absorbs it to an empty
+list so one unauthenticated server does not fail the whole listing.
+
+On the UI tools page, an OBO (per-user authorization_code) server now shows the
+Authorize gate when the list call returns 401, not only when no credential row
+exists. The backend already refreshes a still-refreshable token on the list
+call, so a 401 means there is no valid token and none could be minted (expired
+with no usable refresh token), which is exactly when the user must reauthorize.
+
+- test(e2e): add vertex_ai passthrough spend-log coverage (#31781)
+
+* test(e2e): add vertex_ai passthrough spend-log coverage
+
+Port the de-flake of the SDK-based vertex spend test (#31689) into the
+tests/e2e/llm_translation harness. The vertexai SDK intermittently ignored the
+proxy api_endpoint override and billed Vertex directly, so the request never
+reached LiteLLM and no spend was logged; driving native generateContent over the
+shared transport always reaches the proxy, which the harness already guarantees.
+
+The vertex deployment is added at runtime through /model/new with
+use_in_pass_through rather than declared in the gateway config, and deleted on
+teardown. That registers the deployment&#39;s service account for the /vertex_ai
+route, so the passthrough call sends only its litellm virtual key in
+x-litellm-api-key and no upstream bearer, and the proxy mints the Vertex token
+itself. The credential is the one the proxy already holds, read from the same
+VERTEXAI_CREDENTIALS/VERTEXAI_PROJECT env; the test never mints a token.
+
+Asserts both that the forward succeeds and that a costed SpendLogs row lands
+(vertex_ai provider, a gemini model, spend &gt; 0, call_type pass_through_endpoint),
+correlated by the x-litellm-call-id header.
+
+* Update tests/e2e/llm_translation/test_vertex_passthrough_e2e.py
+
+Co-authored-by: greptile-apps[bot] &lt;165735046+greptile-apps[bot]@users.noreply.github.com&gt;
+
+* Update tests/e2e/llm_translation/test_vertex_passthrough_e2e.py
+
+Co-authored-by: greptile-apps[bot] &lt;165735046+greptile-apps[bot]@users.noreply.github.com&gt;
+
+---------
+
+Co-authored-by: greptile-apps[bot] &lt;165735046+greptile-apps[bot]@users.noreply.github.com&gt;
+
+- fix(bedrock): honor ttl for tool_config cache injection points (#31929)
+
+* fix(bedrock): honor ttl for tool_config cache injection points
+
+Pass cache_control_injection_points control.ttl through to Bedrock
+toolConfig cachePoint blocks, matching message/system cache behavior.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* refactor(bedrock): drive Claude 4.5+ ttl support from pricing JSON, not regex
+
+is_claude_4_5_on_bedrock hardcoded a model-name pattern list that needed a
+manual update for every new Claude release (it already silently missed
+Sonnet 5 and Fable 5). Replace it with a lookup against
+cache_creation_input_token_cost_above_1hr in model_prices_and_context_window.json,
+which AWS docs confirm tracks the same 1h-TTL-capable model set.
+
+Also fixes two bedrock Claude 3.5 Sonnet entries that incorrectly carried
+that pricing field (their own regional variants didn&#39;t have it), which
+would have made the JSON-driven check wrongly grant them 1h TTL support.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* fix(tests): use real Claude Sonnet 4.5 release id in ttl cache-point tests
+
+test_add_cache_point_tool_block_passes_ttl_for_claude_4_5 and
+test_bedrock_tools_pt_passes_ttl_for_claude_4_5 used a fabricated model id
+(...-20250514-v1:0) that never shipped. This passed under the old regex-based
+is_claude_4_5_on_bedrock, which matched on substring alone, but fails now
+that it looks up cache_creation_input_token_cost_above_1hr in
+litellm.model_cost, since the fake id has no pricing entry.
+
+Also force the bundled local cost map in both tests so ttl eligibility reads
+this branch&#39;s pricing data instead of the network-fetched main copy, which
+lacks the fix until merge.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* fix(bedrock): restore cache and tool config compatibility
+
+* fix(bedrock): preserve Sonnet 5 parallel tool config
+
+* fix(bedrock): decouple parallel tool support from cache ttl
+
+* refactor(bedrock): drive parallel tool use config from JSON, not hardcoded patterns
+
+Replace the hardcoded _CLAUDE_BEDROCK_PARALLEL_TOOL_USE_PATTERNS tuple and
+bedrock_converse_supports_strict_tool_schemas (dead code) with a
+supports_parallel_tool_use_config key in model_prices_and_context_window.json,
+matching how is_claude_4_5_on_bedrock already reads
+cache_creation_input_token_cost_above_1hr from the pricing JSON.
+
+New models pick up parallel tool use support automatically when their
+pricing entry ships with the key set, with no code change required
+
+Co-Authored-By: Devin AI &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+
+* fix(tests): use real model id in parallel-tool-use-without-ttl-pricing test
+
+anthropic.claude-opus-4-7-unlisted-v1:0 has no entry in
+model_prices_and_context_window.json, so
+bedrock_converse_supports_parallel_tool_use_config returned False and the
+test died with KeyError on additionalModelRequestFields. Use
+jp.anthropic.claude-opus-4-7, a real entry that carries
+supports_parallel_tool_use_config without 1h-TTL cache pricing, which is
+exactly the decoupling this test exists to cover
+
+* test(utils): allow supports_parallel_tool_use_config in pricing schema
+
+The misc unit test job validates model_prices_and_context_window.json
+against the INTENDED_SCHEMA allowlist in test_utils.py, which rejects
+unknown keys. Add the supports_parallel_tool_use_config key this PR
+introduced so test_aaamodel_prices_and_context_window_json_is_valid
+passes again
+
+* fix(bedrock): preserve ttl for regional claude models
+
+* fix(bedrock): fall back to base model entry when regional pricing lacks capability fields
+
+Regional model_cost entries like jp.anthropic.claude-opus-4-7 that omit
+cache_creation_input_token_cost_above_1hr shadowed the base entry that has it,
+so is_claude_4_5_on_bedrock returned False and requested cache ttl values were
+dropped for those deployments. Both capability lookups now consult the full
+model id and the region-stripped base entry, matching the coverage of the old
+name-pattern list. Also restores ToolBlock keyword construction for the
+tool_config cachePoint; PEP 589 TypedDict keyword instantiation works on every
+supported Python version
+
+---------
+
+Co-authored-by: Shivam Rawat &lt;shivamrawat@Shivams-MacBook-Pro.local&gt;
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+Co-authored-by: mateo &lt;mateo@berri.ai&gt;
+Co-authored-by: Devin AI &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+Co-authored-by: mateo-berri &lt;277851410+mateo-berri@users.noreply.github.com&gt;
+
+- Merge pull request #31928 from BerriAI/litellm_s3_v2_content_md5
+
+- fix(release): make Create Release reliable for stable maintenance cuts (#31986)
+
+* fix(release): create tag before release and set make_latest post-publish
+
+The Create Release workflow failed for every stable maintenance release
+while pre-releases succeeded. Two independent bugs were behind that.
+
+createRelease was minting the tag from target_commitish, and that path
+returns &#34;Resource not accessible by integration&#34; (403) to the Actions
+token, or 404 to a user token, for certain commits (cli/cli#9773). The
+stable-line tips tripped it; the dev/rc commits happened not to. Create
+the tag up front with git.createRef and drop target_commitish so the
+release attaches to the existing tag instead of minting one. A 422 from
+createRef (tag already exists) is tolerated so re-runs are idempotent.
+
+make_latest is silently ignored during the draft-to-published
+transition (cli/cli#8201), so a backport that published would seize the
+repo &#34;latest&#34; badge from a newer line. Publish first, then set
+make_latest in a separate call, and only for non-prereleases.
+
+Each operation here is already runtime-proven: git.createRef under the
+workflow token by prior release-branch jobs, the no-target createRelease
+and non-prerelease publish and separate make_latest PATCH by a manual
+1.89.5 cut.
+
+* fix(release): pin tag_name on publish so the draft binding can&#39;t reset
+
+Pre-creating the tag means the draft is edited while a tag ref already exists, and a draft PATCH that omits tag_name can reset it to the untagged placeholder. Send tag_name explicitly on both updateRelease calls so publish always attaches to the intended tag.
+
+* fix(release): fail loudly when the tag exists at a different commit
+
+The createRef 422 swallow kept re-runs idempotent but also masked a tag that already exists at the wrong SHA, which would publish the release against the wrong commit silently. On 422, compare the existing tag ref to the intended commit and error on a mismatch, keeping idempotency only for a genuine same-SHA re-run.
+
+- feat(mcp): bound outbound tool-call concurrency per MCP server (#31641)
+
+Add an optional per-server max_concurrent_requests that caps how many
+tool calls LiteLLM sends to one MCP server at once, so batch-processing
+backends are not overwhelmed by unbounded parallel dispatch. Excess calls
+queue on a per-server asyncio.Semaphore instead of being rejected. Unset
+or non-positive means unlimited, preserving existing behavior.
+
+Resolves LIT-2749
+
+- fix(proxy): restore admin key/team callback_vars.turn_off_message_logging override (LIT-3587) (#31905)
+
+The security fix in 34e9be1ba7 removed turn_off_message_logging from
+_supported_callback_params to stop callers bypassing global redaction via
+the request body. That also killed the documented admin-only per-key or
+per-team override because both flows resolve through the same allowlist
+in initialize_standard_callback_dynamic_params.
+
+Put turn_off_message_logging back in _supported_callback_params so an
+admin-configured metadata.logging[].callback_vars.turn_off_message_logging
+survives into StandardCallbackDynamicParams and can override the global
+setting for that key or team, as documented at
+docs/proxy/team_logging#disableenable-message-redaction.
+
+Consolidate the metadata traversal so the extractor and the proxy strip
+walk the same set of client-controllable slots. iter_client_callback_metadata_dicts
+in litellm_core_utils/initialize_dynamic_callback_params.py is the single
+source of truth for metadata, litellm_metadata, and litellm_params.metadata;
+_strip_client_message_redaction_opt_out imports it so a future addition
+to one side automatically reaches the other. The extractor iterates the
+helper in reversed order so litellm_params.metadata keeps overriding
+metadata, matching the pre-refactor merge precedence.
+
+Client bypass stays blocked. Restoring the field re-enrolls it in the
+auth layer&#39;s _BANNED_REQUEST_BODY_PARAMS (derived from
+_supported_callback_params via _build_banned_observability_params), so
+client submissions at the top level, inside metadata, or inside a
+JSON-string litellm_metadata all 401 at ingress. is_request_body_safe
+also now descends into litellm_params.metadata for the same 401 defense
+against the nested-body attack vector, matching how the metadata and
+litellm_metadata slots are handled. _strip_client_message_redaction_opt_out
+runs after the litellm_metadata JSON parse and before the admin callback_vars
+unpack, so admin values survive while any leftover client-supplied
+opt-out is dropped when global redaction is on and the key or team
+lacks allow_client_message_redaction_opt_out.
+
+Flip the two dynamic-param e2e tests added by the security fix to
+reflect the restored override behavior, keeping the invariant that
+proxy client bypass is stopped by the auth layer 401 above.
+
+Co-authored-by: yucheng &lt;yucheng@yuchengs-MBP.attlocal.net&gt;
+Co-authored-by: Cursor Agent &lt;cursoragent@cursor.com&gt;
+
+- fix: merge metadata.tags into litellm_metadata on /v1/responses route (#31793)
+
+For LITELLM_METADATA_ROUTES (responses, /v1/messages, batches, etc.),
+the proxy stores admin metadata under data[&#34;litellm_metadata&#34;] while
+user-supplied metadata lives in data[&#34;metadata&#34;]. Tags placed in
+metadata.tags by the caller were never merged into litellm_metadata.tags,
+causing SpendLogs.request_tags to be empty on these routes
+
+Closes #31584
+
+Co-authored-by: devin-ai-integration[bot] &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+
+- refactor(ui): drive cache settings form from a typed frontend schema (#31939)
+
+* refactor(ui): drive cache settings form from a typed frontend schema
+
+The Cache Settings form was dynamically generated from field metadata
+shipped by the backend, and read its values back out of the DOM with
+document.querySelector. That loses type safety and makes client-side
+validation awkward, which is a poor fit for a form whose shape only
+changes when a developer edits code.
+
+Move the field definitions (name, label, type, default, help text, which
+redis type they apply to, section, and validation rules) into a typed
+frontend module and render them through antd Form with controlled state.
+The GET /cache/settings endpoint is still used to populate current values,
+and the save/test payload shape sent to POST /cache/settings and
+/cache/settings/test is unchanged. Per-field validation now lives on each
+field&#39;s antd rules, so an inline error can surface before and on submit;
+this is where the upcoming Redis URL validation will slot in.
+
+The backend&#39;s fields output in GET /cache/settings is no longer consumed
+by the UI, but is left in place since removing it is a separate backend
+change.
+
+* refactor(ui): validate list-field JSON inline so bad input blocks save
+
+sentinel_nodes and redis_startup_nodes had no validation rule, so
+malformed JSON passed validateFields, was caught while building the save
+payload, and the field was silently omitted; the user&#39;s cluster/sentinel
+config was discarded with no feedback. Add a jsonListRule (same shape as
+portRule) to both list fields so an invalid value surfaces inline and
+blocks save.
+
+* fix(ui): show valid-JSON examples for cache list fields and clarify the error
+
+The Startup Nodes and Sentinel Nodes help text showed Python-style
+single-quoted examples (e.g. [{&#39;host&#39;: &#39;127.0.0.1&#39;, &#39;port&#39;: &#39;7001&#39;}]),
+which the JSON validator correctly rejects, so pasting the example we
+display failed. Switch both examples to valid JSON with double quotes and
+change the parse-error message to &#34;Must be a valid JSON array (use double
+quotes)&#34; so the hint points at the fix. Also add a regression test
+asserting a numeric field (Database Index) is included in the save payload.
+
+* fix(ui): validate numeric cache fields as text so bad input blocks save
+
+Numeric fields (Database Index, TTL, Max Connections, Similarity
+Threshold) rendered as antd InputNumber, which silently coerces
+non-numeric input to empty. Because the fields are optional, an invalid
+entry like a full connection URL pasted into Database Index passed
+validation and was silently dropped from the save payload.
+
+Render numeric fields as text inputs with a validation rule (non-negative
+integer for Database Index and Max Connections, number for TTL and
+Similarity Threshold), mirroring how Port already works, so invalid input
+is preserved, flagged inline, and blocks submit instead of vanishing. The
+save payload still coerces these to real numbers. Adds a regression test
+for a non-numeric value entered into a numeric field.
+
+- fix(mcp): gate OAuth authorize/token/register/discovery on auth_type=oauth2 (#31736)
+
+* fix(mcp): gate OAuth authorize/token/register/discovery on auth_type=oauth2
+
+A non-oauth2 MCP server (notably auth_type=none, access-group gated) has no
+client_id and no authorization URL, yet the gateway OAuth endpoints did not
+check auth_type. authorize() raised &#34;client_id is required&#34; before the
+auth_type was ever examined, and the .well-known discovery builders always
+advertised authorization_servers / authorization_endpoint / token_endpoint /
+registration_endpoint, so spec-compliant MCP clients were pointed at an OAuth
+flow that can never succeed.
+
+Add an auth_type != oauth2 guard to the authorize, token, register,
+protected-resource and authorization-server paths (covering the internal UI
+OAuth endpoints too). The discovery guard sits after the OAuth pass-through
+branch so genuine pass-through servers keep proxying their upstream metadata.
+oauth2 servers are unaffected.
+
+* fix(mcp): accurate non-oauth2 message; 404 unknown discovery names to close enumeration oracle
+
+Address review feedback on the auth_type gate.
+
+The 400 message no longer claims access is governed by access groups, which is
+only true for auth_type=none; it now states that the gateway runs the OAuth
+client_id/authorize/token/register flow only for oauth2 servers and that the
+server is reached using its configured auth_type, which is accurate for every
+non-oauth2 type (api_key, oauth2_token_exchange, etc.).
+
+The discovery gate previously 404&#39;d a named non-oauth2 server but still returned
+200 metadata for an unknown name, which both serves a broken document for a typo
+and lets an unauthenticated caller enumerate non-OAuth server names by comparing
+404 vs 200. A named discovery request now returns 200 only when it resolves to an
+oauth2 server; unknown (or hidden) and non-oauth2 names return the same 404. Root
+discovery and pass-through servers are unaffected.
+
+* Apply suggestions from code review
+
+Co-authored-by: greptile-apps[bot] &lt;165735046+greptile-apps[bot]@users.noreply.github.com&gt;
+
+---------
+
+Co-authored-by: greptile-apps[bot] &lt;165735046+greptile-apps[bot]@users.noreply.github.com&gt;
+
+- fix(mcp): tighten role-based visibility on /v1/mcp/server/submissions (#31932)
+
+Route non-full-admin callers through _sanitize_mcp_server_list_for_non_admin,
+matching the pattern the fetch and list handlers adopted. Replace the two
+regression tests that pinned the old partial-blank behavior with a
+sanitize/full-admin pair mirroring the fetch/list coverage.
+
+Resolves LIT-3929
+
+- feat(proxy): track cost for unmanaged Vertex AI batch jobs (#31442)
+
+* feat(proxy): track cost for unmanaged Vertex AI batch jobs
+
+CheckBatchCost previously skipped Vertex batches created via the raw GCS
+input_file_id path, since their unified_object_id is a raw provider job id
+that fails the base64 managed-id check. Behind the opt-in general_settings
+flag track_unmanaged_vertex_batch_cost, the poller now derives the model
+from the gs:// input_file_id, maps it to a configured vertex_ai deployment,
+polls the batch, computes cost, and marks batch_processed=True.
+
+* Update tracking for failed&#34;, &#34;expired&#34;, &#34;cancelled&#34;
+
+* fix(proxy): apply ruff format to proxy_server.py
+
+* address greptile review feedback (greploop iteration 1)
+
+Filter unmanaged Vertex batch deployments by vertex_ai provider so a
+shared model group name can&#39;t route to a wrong-provider deployment.
+Move gs:// URI parsing into VertexAIBatchTransformation. Add test
+coverage for the failed/expired/cancelled terminal-status DB update.
+
+* fix: route unmanaged vertex batches to matching deployment
+
+---------
+
+Co-authored-by: Cursor Agent &lt;cursoragent@cursor.com&gt;
+
+- fix(mcp): roll up MCP tool spend to user counters and usage UI (#31576)
+
+* fix(mcp): roll up MCP tool spend to user counters and usage UI
+
+Direct REST MCP tool calls now fire success logging so spend_logs and
+user/team rollups include configured mcp_server_cost_info charges.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* fix(mcp): gate key-info enrichment to requests missing user_id; fix import order
+
+- Only call _enrich_failure_metadata_with_key_info when user_api_key_user_id is
+  absent, avoiding a cache/DB lookup on every normal LLM request.
+- Move LiteLLMProxyRequestSetup import to correct alphabetical position (I001).
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* fix(mcp): scope MCP spend aggregate by api_key to prevent cross-tenant disclosure
+
+Add api_key = ANY($2) to the MCP session aggregate query so it is
+bounded by the same ownership already applied to the main page query.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* Fix spend logs for call and list mcp tools
+
+* Add tags in mcp logging
+
+* Fix ruff
+
+* fix(lint): replace List/Dict with list/dict in new annotations (UP006)
+
+Replace the 8 new UP006 violations introduced by the mcp-tags changes:
+- Optional[List[str]] → Optional[list[str]] for request_tags params
+- List[str] return type → list[str] in _get_parent_request_tags
+- Dict[str, Dict[...]] → dict[str, dict[...]] for mcp_spend_map annotation
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* fix(lint): keep call_tool_rest_api within complexity budget and narrow MCP spend enrichment except to PrismaError
+
+* fix(mcp): keep final streaming chunk when draining inner stream fails
+
+* fix: handle MCP logging edge cases
+
+* fix: propagate MCP logging cancellation
+
+---------
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+Co-authored-by: mateo-berri &lt;277851410+mateo-berri@users.noreply.github.com&gt;
+
+- fix(logging): resolve model_map_value for proxy custom pricing (#31940)
+
+* fix(logging): resolve model_map_value for proxy custom pricing
+
+Use deployment model for standard logging cost-map lookup when the router overrides response.model to a group alias, and flush stdout when printing the payload.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* fix(logging): add comment and test for deployment fallback in standard logging payload
+
+Address review: explain why the metadata[&#34;deployment&#34;] fallback is unconditional,
+and add a test covering the get_standard_logging_object_payload code path.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* fix(test): update model_map_key assertion for provider-prefixed keys
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* fix(logging): scope base_model to model param only under custom_pricing
+
+Passing model=base_model unconditionally caused _get_provider_for_cost_calc
+to infer and prepend a provider prefix on all non-custom-pricing calls,
+changing model_map_key for existing deployments. Scope it to custom_pricing=True
+where the fix is actually needed.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+---------
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+Co-authored-by: Mateo Wang &lt;277851410+mateo-berri@users.noreply.github.com&gt;
+
+- test(e2e): add live batches suite across providers and routing scenarios (#30958)
+
+* tests: add e2e tests for spend, budgets and llms
+
+* style: make chained comparison of status_code clearer
+
+Co-authored-by: greptile-apps[bot] &lt;165735046+greptile-apps[bot]@users.noreply.github.com&gt;
+
+* remove e2e_tests folder
+
+* test: add spend tracking tests
+
+* fix: p0 issues, added types and shared functions for each test suite
+
+* style: carry clearer status_code comparison into renamed e2e dir
+
+* refactor: migrate to gateway client
+
+* fix: add new tests, split gateway
+
+* test(e2e): add live batches suite across providers and routing scenarios
+
+* test(batches): cover real cost tracking on completed batch retrieve
+
+* test(e2e): assert managed vs raw file and batch id shapes per routing scenario
+
+* test(e2e): assert full response shape of each batches and files endpoint
+
+* test(e2e): only accept transitional statuses for a freshly created batch
+
+* test(prompt-factory): make test_convert_url deterministic with a data URL
+
+picsum.photos is down (HTTP 522), so test_convert_url failed on every
+run. Swap the live external image for an inline data: URL and assert the
+round-trip through convert_url_to_base64 genuinely.
+
+A data URL is already inline base64 image data, so convert_url_to_base64
+now short-circuits it instead of attempting an impossible HTTP fetch;
+add a regression for that branch in the mapped image_handling test
+
+* fix: pass through async image data urls
+
+* fix(image-handling): short-circuit data URLs in async path too
+
+Bugbot flagged that convert_url_to_base64 returns data: base64 URLs
+unchanged but async_convert_url_to_base64 still tried to fetch them,
+so async OCR flows (Bedrock, Azure) would reject inline images the sync
+path accepts. Add the same guard to the async function and a regression
+test that asserts the async path returns the data URL without touching
+the HTTP client
+
+* Fix: openai batches lifecycle
+
+* Fix: add e2e azure openai tests
+
+* Fix e2e for vertex ai
+
+* Add all models for testing
+
+* test(managed-files): assert idempotent upsert in store_unified_file_id
+
+store_unified_file_id switched from create to upsert to avoid
+UniqueViolationError when re-storing the same unified_file_id (e.g.
+batch output files stored before metadata is available). Update the
+unit test to assert the upsert call and its create payload instead of
+the removed create call.
+
+* test(batches): reconcile vertex_ai native batch-id comment with fallback guard
+
+* fix(test-config): keep rust-ocr models in model_list by moving files_settings after it
+
+* fix(test-config): move batch models after OCR block to keep merge with internal_staging clean
+
+* fix(batches): use &#39;24hrs&#39; completion window and allow managed-files listing with provider filter
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* style: ruff format transformation.py and endpoints.py
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* fix(e2e/batches): set Azure raw_model to gpt-4.1-mini-batch to match deployed model
+
+Co-Authored-By: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+* fix(vertex-ai/batches): correct completion_window to 24h per Literal type definition
+
+* test(vertex-ai/batches): align completion_window assertion to 24h
+
+* fix: update managed file metadata on upsert
+
+---------
+
+Co-authored-by: mubashir1osmani &lt;mubashir.osmani777@gmail.com&gt;
+Co-authored-by: Mateo Wang &lt;277851410+mateo-berri@users.noreply.github.com&gt;
+Co-authored-by: greptile-apps[bot] &lt;165735046+greptile-apps[bot]@users.noreply.github.com&gt;
+Co-authored-by: Cursor Agent &lt;cursoragent@cursor.com&gt;
+Co-authored-by: Claude Sonnet 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix(mcp): byom visibility, preview UX, and admin settings gating (#31809)
+
+* fix(ui): show info message when MCP tool preview returns 403
+
+Internal users submitting MCP servers hit an admin-only preview endpoint; replace the red connection error with a clear review notice while leaving other failures unchanged.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* fix(mcp): let BYOM submitters see their approved servers
+
+Approved user-submitted MCP servers defaulted to no access groups and allow_all_keys=false, so submitters could not see them after admin approval. Grant creator visibility for active submissions in get_allowed_mcp_servers.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* Improve dialogue box
+
+* fix(security): restrict MCP semantic filter settings to proxy admins
+
+Add an explicit PROXY_ADMIN check on PATCH /update/mcp_semantic_filter_settings
+and hide Semantic Filter and Network Settings tabs from non-admin users in
+the MCP Servers UI.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* fix(lint): use list[str] instead of List[str] to satisfy UP006 budget
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* perf(mcp): cache BYOM submitter server lookup with 60s TTL
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* style: fix ruff format and prettier formatting
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* fix: preserve approved BYOM server visibility
+
+* fix(mcp): keep no-mcp-servers opt-out absolute and gate BYOM union by key scope
+
+The autofix in 94fd2bf made the no-mcp-servers sentinel return the caller&#39;s
+submitted BYOM servers, which weakened an explicit key-level opt-out into a
+soft preference. Restore the absolute opt-out and additionally skip the BYOM
+union for keys with an explicit object_permission.mcp_servers list and for
+toolset-scoped requests, mirroring how allow_all_keys servers are handled.
+Add unit tests for the sentinel, explicit scoping, toolset scope, the cache
+invalidation helper, the cache-miss DB path, and the db.py query helper.
+
+---------
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+Co-authored-by: Claude &lt;noreply@anthropic.com&gt;
+
+- feat(prometheus): expose MCP tool metadata in Prometheus metrics (#31899)
+
+Co-authored-by: Yassin Kortam &lt;yassin@berri.ai&gt;
+
+- fix(bedrock): drop strict/additionalProperties from toolSpec for Claude Sonnet 4 (#31943)
+
+* fix(bedrock): drop strict/additionalProperties from toolSpec for Claude Sonnet 4
+
+Claude Sonnet 4 on Bedrock Converse rejects toolSpec.strict and
+additionalProperties the same way Opus 4.7/4.8 do. Add
+bedrock_converse_supports_strict_tools: false to all Sonnet 4 regional
+variants so those fields are suppressed before the request is sent.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* test(bedrock): assert additionalProperties dropped for strict-unsupported models
+
+Rename the regression test to reflect Opus 4.7/4.8 and Sonnet 4 coverage,
+and assert both strict and additionalProperties are stripped from toolSpec.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* test(fireworks): skip embeddings live test when provider account is suspended
+
+---------
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+Co-authored-by: Claude &lt;noreply@anthropic.com&gt;
+
+- feat(vertex_ai): pass full imageConfig dict for Gemini image generation (#31811)
+
+* feat(vertex_ai): pass full imageConfig dict for Gemini image generation
+
+Support all ImageConfig fields (aspectRatio, imageSize, personGeneration,
+imageOutputOptions) when calling Vertex AI Gemini image generation endpoints.
+Previously only aspectRatio and imageSize were extracted; other fields were
+silently dropped.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* style: ruff format vertex_gemini_transformation
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+* fix(vertex_ai): warn on non-dict imageConfig instead of silently dropping
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+---------
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- test(bedrock): switch image gen live test off EOL Titan to Nova Canvas (#31937)
+
+Co-authored-by: mateo &lt;mateo@berri.ai&gt;
+Co-authored-by: Devin AI &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+
+- refactor(ui): colocate users page into route-level _components (#31897)
+
+Moves the user-management component tree (view_users plus BulkEditUsers, edit_user, DefaultUserSettings, user_edit_view, and the view_users table/columns/info-view) out of the shared src/components dump into the users route segment under _components, now that the app router owns the route. The page imports from a trimmed ./_components barrel
+
+UserInfo moves into networking.tsx beside UserListResponse, its real owner: networking defines the user API response shapes that embed it, and previously reached up into a view folder (components/view_users/types) to import the type. Defining it in networking removes that backwards data-layer-to-view dependency and drains the view_users/ folder entirely. CreateUserButton and onboarding_link stay in components/ since the create-key flow also consumes them
+
+Relative imports in the moved files are rewritten to @/components/* absolute paths, and the eight pre-existing eslint-suppressions entries are re-keyed to the new paths so the move stays behavior and lint neutral
+
+Verified: the moved suites pass with the same 75 assertions as before the move, tsc and eslint are clean, and next build compiles the /users route
+
+- chore(ui): remove unused dep, delete dead file, and unblock knip (#31933)
+
+Knip flagged remark-gfm as unused and date-fns as imported-but-undeclared, so drop remark-gfm (which prunes its transitive markdown subtree from the lockfile) and declare date-fns, which keyExpiryUtils.ts imports but only received transitively. Also delete the dead memory/components/index.tsx barrel, since nothing imports it once the page pulls MemoryView from its module directly
+
+Knip itself could not run: its Playwright plugin imports every config referenced by a --config flag in package.json scripts, and migration.serverRootPath.config.ts threw at import time when SERVER_ROOT_PATH was unset. Move that guard into a config-specific globalSetup so importing the config is side-effect-free; the check still fires loudly before any test runs when the prefix is missing
+
+- fix(bedrock): trigger Nova Sonic generation on response.create so realtime sessions stop hanging (#31924)
+
+* fix(bedrock): trigger Nova Sonic generation on response.create so realtime sessions stop hanging (LIT-2239)
+
+* fix(bedrock): reopen audio content at client sample rate after trigger block
+
+* test(bedrock): cover realtime handler disconnect flush and stream-end guard
+
+* fix(bedrock): always close realtime input stream even if close flush fails
+
+* fix(lint): use contextlib.suppress in bedrock realtime cleanup to satisfy BLE001 budget
+
+* fix(bedrock): suppress bedrock close send errors per-message so promptEnd/sessionEnd still flush
+
+---------
+
+Co-authored-by: Cursor Agent &lt;cursoragent@cursor.com&gt;
+
+- fix(bedrock/converse): drop toolSpec.strict for Opus 4.7/4.8 (#31582) (#31923)
+
+* fix(bedrock/converse): drop toolSpec.strict for Opus 4.7/4.8
+
+Bedrock Converse routes Claude Opus 4.7/4.8 through an Anthropic-compatible
+validator that maps toolSpec to the native tool shape and rejects the extra
+`strict` key with `tools.N.custom.strict: Extra inputs are not permitted`,
+even though Anthropic&#39;s native API accepts `strict` as a top-level tool field
+for the same models. Sonnet 4.5/4.6 and Opus &lt;=4.6 accept `toolSpec.strict`
+unchanged.
+
+The existing gate `get_bedrock_base_model(model).startswith(&#34;anthropic&#34;)`
+(introduced in #29814 to forward `strict` for Claude on Bedrock Converse) is
+too broad and regressed Opus 4.7/4.8 callers — see #31582.
+
+Replace the inline check with a small `bedrock_converse_supports_strict_tools`
+helper that excludes the Opus 4.7/4.8 family from strict forwarding. All
+other Anthropic models on Bedrock keep the existing behavior.
+
+Closes #31582.
+
+* fix(bedrock/converse): move strict-tools regression to a clean test file
+
+The original regression test was added to
+test_litellm_core_utils_prompt_templates_factory.py, which has
+pre-existing ruff-format violations throughout (multi-line asserts that
+fit on one line). The lint workflow runs `ruff format --check` on
+changed files only, so touching that file surfaces those pre-existing
+violations and fails CI for unrelated reasons.
+
+Move the #31582 regression coverage into a new dedicated test file so
+the format check stays green. Also collapses the helper&#39;s `not any(...)`
+onto a single line to satisfy ruff format.
+
+Covers: #31582
+
+* refactor(bedrock/converse): drive strict-tools gate from model cost map
+
+Replace the hardcoded Opus 4.7/4.8 pattern list with a
+bedrock_converse_supports_strict_tools flag on the affected entries in
+model_prices_and_context_window.json, resolved via get_model_info with a
+local cost map fallback, so future models with the same restriction only
+need a JSON update
+
+* chore: revert unrelated credential_migration.py reformat
+
+---------
+
+Co-authored-by: ly-wang19 &lt;ly-wang19@users.noreply.github.com&gt;
+
+- chore(lint): remove dead E501 config, fix stale blame-ignore SHAs, note 120 line width (#31927)
+
+* chore(lint): remove dead E501 config, fix stale blame-ignore SHAs, note 120 width in CLAUDE.md
+
+E501 sat in both lint.ignore and lint.extend-select in ruff.toml; ignore wins,
+so no line length was linted at all (verified: a 130-char line passes ruff
+check while T201 fires). Remove it from both lists so the config tells the
+truth: the formatter&#39;s wrap width is the only line-length control, matching
+how the repo has actually behaved since E501 was ignored in Oct 2024
+
+.git-blame-ignore-revs listed the pre-squash PR-head SHAs for the two ruff
+reformat commits (#31317, #31518), which never landed on the branch, so git
+blame ignored nothing. Replace them with the squash-merge SHAs that are
+actually in history
+
+Also document in CLAUDE.md that the line length is 120 (ruff.toml), not 88,
+so agents stop wrapping to the old Black width
+
+* fix: make CLAUDE.md more concise
+
+* fix: make the guideline more clear
+
+- fix: allow S3 Content-MD5 on FIPS hosts
+
+- fix(s3_v2): pass usedforsecurity=False to hashlib.md5 for FIPS envs
+
+Co-Authored-By: Devin AI &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+
+- fix(proxy): tighten role gating on /get/config/callbacks response (#31745)
+
+The handler returned decrypted callback environment values and alerting
+routing values verbatim to callers who were not full PROXY_ADMIN. Gate
+those on full-admin role, matching the posture used on the sibling
+config-inspection endpoints. Non-sensitive routing fields (host / base
+URL / port style values) stay visible so the UI can still label which
+integration is wired up. Full PROXY_ADMIN sees everything unchanged so
+the edit form round-trips on save.
+
+Resolves LIT-4115.
+
+- feat(s3_v2): send Content-MD5 on PUT and optional server-side encryption
+
+Co-Authored-By: Devin AI &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+
+- fix(model_prices): apply claude-sonnet-5 introductory pricing through 2026-08-31 (#31917)
+
+* fix(model_prices): apply claude-sonnet-5 introductory pricing through 2026-08-31
+
+Anthropic launched Sonnet 5 with introductory pricing of $2/$10 per million
+input/output tokens through August 31, 2026 (sticker price $3/$15 applies
+from September 1, 2026). Bedrock, Vertex AI, and Azure Foundry mirror the
+introductory rate. LiteLLM was charging the sticker price on all ten
+claude-sonnet-5 entries, over-billing by 50% during the introductory period.
+
+Update input, output, cache write (5m and 1h), and cache read costs on the
+base entries to the introductory rate, and keep the 10% cross-region premium
+on the us/eu/au/jp Bedrock inference profiles on top of it. Also add an
+anthropic-sonnet-5 entry to the dev proxy config.
+
+* test: document exact sticker prices to restore on 2026-09-01
+
+- feat(gdc): implement Google Distributed Cloud (GDC) Gemini provider (#31895)
+
+* feat(gdc): add Google Distributed Cloud Gemini provider support
+Introduce support for the Google Distributed Cloud (GDC) Gemini provider by adding &#34;gdc&#34; to the list of chat providers and enabling the gdc/ model prefix. The implementation defines a new GDCGeminiConfig class which handles authentication via Google Distributed Cloud service account credentials, manages token generation, formats GDC Gemini request URLs, and transforms request structures accordingly
+The PreProcessNonDefaultParams class is also updated to exclude vertex parameters from filtering when the custom LLM provider is GDC, allowing vertex parameters to be passed properly during GDC initialization
+
+* fix: resolve issues identified in PR #30702
+
+* fix(gdc): harden credentials, fix vertex param filtering, add tests
+
+The supports_vertex_params branch regressed vertex_ai and vertex_ai_beta: the `if custom_llm_provider in [...]: pass` was a no-op, so those providers fell through to the config lookup, found no supports_vertex_params, and had their vertex_ params stripped. The check is now a single _provider_supports_vertex_params helper that keeps vertex_ params for the vertex family and for any config that opts in, and only swallows the expected ValueError from an unknown provider string instead of a blanket except
+
+GDC project and location now resolve from the deployment&#39;s litellm_params and the litellm.vertex_project / litellm.vertex_location globals before falling back to request optional_params, matching how vertex_ai resolves them, so a proxy caller can no longer route a request to a project the deployment did not expose
+
+A request api_key is no longer treated as a filesystem path, so a caller can&#39;t make the host open a local service-account file; api_key must be a literal service-account JSON string or a bearer token
+
+The opt-in token cache is hardened: the lock and cache dict are created in __init__ instead of via a racy hasattr lazy-init, the token is read inside the lock, and the audience is stripped of a trailing slash once so the cached and non-cached paths agree
+
+Also declares gdc_api_base, switches the lazy-import entry to the relative path every other entry uses, adds the missing trailing comma in the provider config map, and drops the api_base fallback that only ran when api_key was None
+
+Adds unit tests covering the vertex-param filter, deployment-over-request precedence, the api_key file-path rejection, URL construction branches, environment validation, token caching, and the gdc completion dispatch; transformation.py is fully covered
+
+* fix(gdc): prefer GDC-specific config, honor vertex_ai aliases, harden URL and bool parsing
+
+* fix(gdc): mint the GDCH token audience from the host, not the full base
+
+When api_base embedded /v1/projects/... and the deployment set project/location, get_complete_url rebuilt the request URL from the host while validate_environment still derived the token audience from the full original api_base, so the bearer token could target a different audience than the URL actually called. The audience is now the scheme://host of api_base in every case, matching the host get_complete_url builds against
+
+* fix(gdc): restrict JSON api_key to GDCH service accounts
+
+Only accept a credential whose type is gdch_service_account before
+calling google.auth.load_credentials_from_dict, so a caller-supplied
+external_account/identity_pool/pluggable credential carrying arbitrary
+token or credential_source endpoints is rejected before any token
+refresh runs. GDC only ever uses GDCH service accounts, and non-GDCH
+credentials could not have completed auth anyway (with_gdch_audience is
+GDCH-only), so this narrows the credential-refresh surface without
+changing valid GDC behavior.
+
+* fix(gdc): validate project and location as plain identifiers
+
+vertex_project and vertex_location can come from request params and were
+interpolated as raw path text into the GDC request URL and the
+x-goog-user-project header. A caller-supplied value containing / ? # or
+.. could reshape the path and make the proxy send its GDC-authorized
+request to a different endpoint under the configured host. Validate both
+against a strict identifier pattern before building the URL or header and
+raise an auth error otherwise; GCP project ids and locations are plain
+identifiers so valid deployments are unaffected.
+
+* fix(gdc): bind x-goog-user-project quota header to the deployment
+
+The quota project header was resolved with request-level vertex_project
+taking effect, so with a preformed deployment api_base a caller could set
+vertex_project to a different project and have it sent under the proxy&#39;s
+GDC credential, misattributing quota or billing. Resolve the header
+project the same way the URL is resolved: a preformed api_base without a
+deployment override binds to the project embedded in the URL, otherwise
+deployment and global config win over request params. This keeps the URL
+and the quota header consistent.
+
+* fix(gdc): always rebind x-goog-user-project, stripping caller-forwarded values
+
+The quota project header was only set when absent, so with client header
+forwarding an authenticated caller could send their own
+x-goog-user-project (any casing) and have it ride on the proxy&#39;s GDC
+credential, bypassing the deployment-derived binding. Strip every casing
+of the header and always set it from _effective_project before the
+request is signed.
+
+* fix(gdc): make a preformed api_base authoritative for project routing
+
+get_litellm_params copies caller-supplied vertex_project and vertex_location into litellm_params via OPTIONAL_KWARGS_KEYS, so litellm_params cannot be treated as a deployment-only source. The previous _deployment_overrides_path inference let an authenticated caller flip a pinned preformed api_base such as /v1/projects/pinned/... to /v1/projects/attacker/..., driving requests to a caller-chosen project with the proxy&#39;s configured GDC credentials and quota header
+
+A preformed /v1/projects/ api_base is now authoritative; get_complete_url returns it unchanged and _effective_project binds the x-goog-user-project quota header to the project embedded in that URL, so a caller can no longer redirect a pinned deployment or move the quota header off it. The two tests that asserted the override behavior are now regression tests that fail if the rewrite is reintroduced
+
+* fix(gdc): make a preformed api_base self-sufficient in get_complete_url
+
+get_complete_url resolved and required a params-derived vertex_project before returning a preformed /v1/projects/ api_base, so a deployment that pins its project in the api_base path was forced to also pass vertex_project or hit &#39;project is required&#39;. validate_environment already extracts the project from a preformed URL and needs no such param, so the two paths disagreed
+
+The preformed-URL early return now runs before project/location resolution, matching validate_environment: a preformed api_base is returned as-is with no redundant param, and non-preformed bases still require vertex_project and vertex_location as before. Adds a regression test that a preformed base with no project/location params returns the URL unchanged
+
+---------
+
+Co-authored-by: Paige O&#39;Connor &lt;lostpaige@google.com&gt;
+Co-authored-by: Tim Laubach &lt;tlaubach@google.com&gt;
+
+- feat(github_copilot): route /v1/messages to Copilot native Anthropic endpoint (#31802)
+
+* feat(github_copilot): route /v1/messages to Copilot native Anthropic endpoint
+
+Add a GitHub Copilot Anthropic Messages transformation that routes supported Claude models through the native /v1/messages endpoint. This covers request URL construction, default headers, and supported model metadata.
+
+* fix(github_copilot): address PR review feedback
+
+Tighten the Anthropic Messages environment validation and web search interception behavior after review feedback. Avoid treating non-web-search requests as web-search-only paths.
+
+* style(github_copilot): apply black formatting
+
+Apply Black formatting to the GitHub Copilot Anthropic Messages tests.
+
+* test(github_copilot): cover ProviderConfigManager dispatch for Anthropic Messages
+
+Add coverage for ProviderConfigManager dispatch when GitHub Copilot models use the Anthropic Messages API, including non-Anthropic models returning no config.
+
+* fix(github_copilot): apply messages-proxy intent header to /v1/messages
+
+Set the messages-proxy interaction header for GitHub Copilot Anthropic Messages requests so /v1/messages uses the expected Copilot intent.
+
+* fix(github_copilot): use modern generic annotations
+
+Replace legacy typing generics in the GitHub Copilot Anthropic Messages transformation so the strict Ruff budget gate stays within its ceiling.
+
+* refactor(github_copilot): decouple web-search short-circuit and harden /v1/messages URL
+
+Address review feedback on the Copilot native Anthropic messages path.
+
+Replace the hardcoded LlmProviders.GITHUB_COPILOT check in the web-search
+interception handler with a handles_web_search_natively() method on
+BaseAnthropicMessagesConfig (default True), overridden to False in
+GithubCopilotAnthropicMessagesConfig. Provider-specific behavior now lives in
+llms/ and the handler stays provider-agnostic, so a future provider in the same
+situation needs no carve-out here.
+
+In get_complete_url, reuse the already-resolved api_base returned by
+validate_anthropic_messages_environment instead of reading the authenticator a
+second time, removing redundant I/O and the mid-request inconsistency window.
+The caller-supplied base is still discarded in validate, which is the security
+boundary. Normalize a trailing slash on the base in both methods so a
+tenant-specific host never yields a double-slash //v1/messages URL.
+
+* fix(github_copilot): forward anthropic-beta headers on /v1/messages
+
+The Copilot config inherited should_filter_anthropic_beta_headers()==True
+from BaseAnthropicMessagesConfig, so update_headers_with_filtered_beta
+stripped every anthropic-beta value after validate_anthropic_messages_environment
+injected them (github_copilot has no mapping in
+anthropic_beta_headers_config.json). That silently disabled header-gated
+features like context_management and structured outputs on the native
+passthrough. Override the hook to False, matching OpenAILikeAnthropicMessagesConfig.
+
+* test(github_copilot): remove dead branch in beta-header regression test
+
+The anthropic-beta filtering test guarded the fix with an if branch on
+should_filter_anthropic_beta_headers(), which is always False, so the branch was
+unreachable. Replace it with a direct assertion that running the provider-scoped
+filter for github_copilot strips every beta value, proving why the override is
+load-bearing and catching a regression that flips it back on.
+
+---------
+
+Co-authored-by: ririnto &lt;ririnto@kakao.com&gt;
+Co-authored-by: Cursor Agent &lt;cursoragent@cursor.com&gt;
+
+- fix(proxy): admin-gate `permissions` on /key/update and /key/regenerate (LIT-4092) (#31810)
+
+The `_check_permissions_caller_permission` helper introduced in
+#31469 was only wired into `_common_key_generation_helper`. This
+change wires it into `_validate_update_key_data` and `regenerate_key_fn`
+so the three write paths share the admin gate, and refactors the
+helper to accept the full request model so it can key on
+`&#34;permissions&#34; in data.model_fields_set` rather than truthiness. The
+presence check keeps the model-level omit default flowing through
+unchanged while treating any explicit value (including `{}` / `null`)
+as an admin-only write.
+
+In `regenerate_key_fn` the gate is placed before the `premium_user`
+license check so the rejection is consistent across premium and
+non-premium deployments. That ordering is pinned by
+`test_regenerate_key_non_admin_permissions_rejected_before_enterprise_gate`
+
+Tests in tests/test_litellm/proxy/management_endpoints/test_key_management_endpoints.py:
+
+- test_update_key_non_admin_permissions_non_empty_rejected
+- test_update_key_non_admin_permissions_explicit_empty_rejected
+- test_update_key_non_admin_permissions_explicit_null_rejected
+- test_update_key_non_admin_omits_permissions_succeeds (control)
+- test_update_key_admin_can_set_permissions (control)
+- test_regenerate_key_non_admin_permissions_rejected
+- test_regenerate_key_non_admin_permissions_explicit_empty_rejected
+- test_permissions_explicit_empty_rejected_for_non_admin_on_generate
+- test_regenerate_key_non_admin_permissions_rejected_before_enterprise_gate
+
+Mutation-killed against gate removal on either wire, against reverting
+the helper to a truthiness check, and against reordering the gate past
+the enterprise-license check
+
+- fix(proxy): authorize /health/test_connection against loaded deployment&#39;s team_id (VERIA-441) (#31767)
+
+* fix(proxy): authorize /health/test_connection against loaded deployment&#39;s team_id (VERIA-441)
+
+POST /health/test_connection looked up a deployment by request-supplied model_info.id, dumped its
+litellm_params (including api_key) into the outbound probe, merged request params over it, and then
+authorized the call against the caller-supplied model_info.team_id. A team admin could pass another
+team&#39;s deployment id together with their own team_id and an attacker-controlled api_base, sending
+the victim team&#39;s provider key to that URL.
+
+Capture the loaded deployment&#39;s model_info alongside its litellm_params in both the id-lookup and
+the model_name fallback paths, and pass that captured value to can_user_make_model_call. When no
+deployment is loaded (caller is probing fresh, request-supplied credentials), keep using the
+request body&#39;s model_info; no foreign deployment is in scope and the existing role check still
+requires admin or team-admin.
+
+Add two regression tests that wrap (not mock) ModelManagementAuthChecks.can_user_make_model_call,
+one per resolution path, asserting HTTP 403 and that the auth check was reached with the loaded
+deployment&#39;s team_id. Both fail on the pre-fix code.
+
+* test(health): add positive-path regression through real auth (VERIA-441)
+
+The two deny tests already exercise the real (wrapped) ModelManagementAuthChecks.
+Add a matching positive-path test so a mutation that swaps the auth team_id for
+a deny-all value on the legit path also fails: loaded deployment owned by team-X,
+caller admin of team-X -&gt; asserts HTTP 200 and that the auth check ran with the
+LOADED deployment&#39;s team_id.
+
+* refactor(test): rename health endpoint tests for clarity (VERIA-441)
+
+Rename test functions and variables from attacker/victim/owner framing to
+neutral team-a/team-b terminology. Update docstrings to remove exploit-specific
+language. Tests remain functionally identical, covering deny paths (cross-team
+deployments) and the positive path (same-team deployments).
+
+- chore: make CLAUDE.md rules more concise (#31892)
+
+- feat(bedrock_mantle): add xai.grok-4.3 to model cost map for SigV4 auth (#31916)
+
+Register bedrock_mantle/xai.grok-4.3 with /v1/responses in
+supported_endpoints so the data-driven gate routes it through
+BedrockMantleResponsesAPIConfig (which inherits SigV4 signing via
+BedrockMantleAuthMixin). Without this entry the model falls through to
+None and forces bearer-token-only auth.
+
+Pricing sourced from AWS Bedrock pricing page.
+
+Closes #31196
+
+Co-authored-by: unknown &lt;&gt;
+Co-authored-by: Devin AI &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;
+
+- fix(scripts): resolve worktree root before relative_to in type_check_gate (#31906)
+
+On macOS, tempfile.mkdtemp returns a path under /var/folders, a symlink
+to /private/var. The base pass in type_check_gate.py resolved each
+diagnostic path (yielding /private/var/...) but not the worktree root,
+so relative_to raised ValueError for every diagnostic, base counts came
+back empty, and the vacuous-run guard failed every local
+make lint-basedpyright run. type_discipline_gate.py already resolves
+root the same way; ruff_strict_gate.py counts rule codes without
+touching worktree paths, so it is unaffected. CI runs Linux where the
+temp dir is not a symlink, which is why this only bit local macOS runs
+
+- Merge pull request #31904 from BerriAI/litellm_/competent-mestorf-165751
+
+revert: &#34;chore: remove _experimental/out&#34; (#31546)
+
+- Revert &#34;chore: remove _experimental/out (#31546)&#34;
+
+This reverts commit 72bcb748b97179657a4c252230f6b249757d7e66.
+
+- feat(ui): disclaim that the Update API Key modal only rotates api_key (#31805)
+
+* feat(ui): disclaim that the Update API Key modal only rotates api_key
+
+An adversarial review of the credential-rotation work noted the modal always
+writes litellm_params.api_key, so models that authenticate with an Azure AD
+token, AWS credentials, or a Vertex service-account JSON are not rotated by it.
+Adds a warning Alert to the modal so users are not misled into thinking those
+secrets were rotated; broadening the modal to those providers is a follow-up
+
+* Update ui/litellm-dashboard/src/components/update_model_credentials_modal.tsx
+
+Co-authored-by: greptile-apps[bot] &lt;165735046+greptile-apps[bot]@users.noreply.github.com&gt;
+
+* style(ui): prettier-format the credential modal
+
+---------
+
+Co-authored-by: greptile-apps[bot] &lt;165735046+greptile-apps[bot]@users.noreply.github.com&gt;
+
+- refactor(lint): collapse type/lint budgets to a single per-rule limit (#31883)
+
+* chore(lint): raise basedpyright per-rule slack to 50% of baseline
+
+The per-rule ceilings in basedpyright-code-budget.json sat at roughly 10% slack over baseline, which several in-flight PRs are already bumping into. Raise the slack on every rule to at least 50% of its baseline so there is ample headroom for a long while, while never lowering any rule that already had more generous slack (e.g. reportReturnType stays at 100).
+
+Co-authored-by: Mateo Wang &lt;mateo-berri@users.noreply.github.com&gt;
+
+* refactor(lint): collapse type/lint budgets to a single per-rule limit
+
+The three non-frontend budget files (ruff-strict, type-discipline, basedpyright-code) tracked a per-rule baseline and slack whose sum was the ceiling. Nothing consumed the split beyond that sum, so this replaces both keys with a single limit equal to the old baseline + slack; the original baselines live in git history if anyone needs them.
+
+The gate scripts and the ratchet guard now read limit directly. lint-budget-update no longer re-captures raw counts; it ratchets each rule&#39;s limit down by the number of violations this branch cleared since its branch point (the merge-base), so the granted headroom shrinks by exactly what was fixed and a limit never rises. The ratchet guard reads either schema so it still compares correctly across the migration boundary.
+
+Co-authored-by: Mateo Wang &lt;mateo-berri@users.noreply.github.com&gt;
+
+* chore(lint): surface staged-vs-working parity for pre-commit and budget-update
+
+make pre-commit selects which checks to run from the staged index but runs the linters over the working tree, so unstaged edits to tracked files and untracked files skew a green/red away from what a commit of only the staged changes would produce. There is no safe in-place way to lint the index, so the script now warns when unstaged or untracked changes are present, and CLAUDE.md documents that you must stage everything first for both make pre-commit and make lint-budget-update to predict CI correctly.
+
+Co-authored-by: Mateo Wang &lt;mateo-berri@users.noreply.github.com&gt;
+
+* docs(lint): list type-discipline budget in lint-budget-update instruction
+
+---------
+
+Co-authored-by: Cursor Agent &lt;cursoragent@cursor.com&gt;
+Co-authored-by: Mateo Wang &lt;mateo-berri@users.noreply.github.com&gt;
+
+- fix(proxy): hydrate MCP server registry from DB on startup when store_model_in_db is false (#31775)
+
+MCP servers created through the UI are persisted to the database independent of
+store_model_in_db, but the in-memory registry that GET /v1/mcp/server reads was
+hydrated from the database only through add_deployment, which runs solely when
+store_model_in_db is True. On a DB-backed single-instance proxy with
+store_model_in_db unset the registry started empty after a restart, so the MCP
+Servers page showed nothing until an add or edit triggered a reload.
+
+Hydrate the registry from the database on startup regardless of store_model_in_db
+via a new ProxyConfig.init_mcp_servers_from_db, honoring supported_db_objects.
+
+- feat(mcp): add mcp_tool_search virtual tools for large tool catalogs (#31777)
+
+* feat(mcp): add tool search virtual tools for large catalogs
+
+When mcp_tool_search_enabled is set on a key&#39;s object_permission,
+tools/list returns only mcp_tool_search and mcp_tool_call instead of
+the full catalog. The LLM searches by keyword then calls discovered
+tools by name, avoiding context bloat with 100+ tool deployments.
+
+* fix(mcp): persist mcp_tool_search_enabled and route tool_call by name
+
+The mcp_tool_search_enabled flag existed on the Pydantic models but the
+Prisma schema lacked the column, so keys generated with the flag never
+persisted it and tools/list kept returning the full catalog. Add the
+column across all three schema.prisma copies plus a migration.
+
+handle_mcp_tool_call passed server_name=&#34;&#34; into call_tool, which built a
+malformed prefixed name (&#34;-&lt;tool&gt;&#34;) and failed to resolve the server.
+Resolve the caller&#39;s allowed servers and dispatch through execute_mcp_tool
+instead, matching how the normal /tools/call path routes.
+
+* fix(mcp): filter list_tools to virtual tools on the protocol path
+
+The REST surface (/mcp-rest/tools/list) returned only the two virtual
+tools when mcp_tool_search_enabled was set, but the MCP protocol handler
+(handle_list_tools, used by real MCP clients over streamable-http/SSE)
+still returned the full catalog. Apply the same early return there so an
+actual MCP client sees mcp_tool_search and mcp_tool_call instead of every
+tool. call_tool was already intercepted on this path.
+
+* fix(mcp): enforce IP + server filtering on virtual tool search/call
+
+Review flagged that the virtual mcp_tool_search/mcp_tool_call path skipped
+access controls the normal MCP flow applies. mcp_tool_call resolved allowed
+servers from key permissions only, never applying IP filtering, so a caller
+on a public IP could invoke a tool on a server marked
+available_on_public_internet: false. mcp_tool_search listed the raw catalog
+via global_mcp_server_manager.list_tools, exposing tool names/schemas that
+/tools/list would hide and ignoring per-key/per-server tool filters.
+
+Route both virtual handlers through the same filtered paths used by the
+normal MCP flow: search now calls _list_mcp_tools and call resolves servers
+via _get_allowed_mcp_servers, both threaded with the request client IP so
+filter_server_ids_by_ip applies. execute_mcp_tool then enforces the server
+allowlist and per-key tool permissions. Thread client_ip through
+_list_mcp_tools/_get_tools_from_mcp_servers and pass it from the REST and
+SSE call sites.
+
+* fix(ci): ruff format server.py and sync dashboard API types
+
+ruff format normalizes the list_tools client_ip changes in server.py, and
+schema.d.ts gains the mcp_tool_search_enabled object-permission field so the
+generated dashboard types match the proxy OpenAPI spec.
+
+* style(mcp): drop quoted annotations and sort imports
+
+Clears UP037 on the virtual tool handler signatures (redundant with
+from __future__ import annotations) and I001 on the list_tools import block.
+
+* refactor(mcp): extract virtual-tool dispatch and host progress capture
+
+Pulls the mcp_tool_search/mcp_tool_call interception and the host
+progress-callback setup out of mcp_server_tool_call into helpers, keeping
+that handler under the strict cyclomatic-complexity ceiling after the
+client_ip threading. No behavior change.
+
+* test(mcp): cover SSE virtual-tool dispatch and host progress helpers
+
+Adds unit tests for _dispatch_virtual_mcp_tool (non-virtual passthrough,
+flag-disabled rejection, search/call routing with client_ip),
+_capture_host_progress_callback, and the protocol list_tools virtual
+early-return, covering the new server.py paths.
+
+* fix(mcp): forward per-request auth headers through virtual tool handlers
+
+The virtual mcp_tool_search/mcp_tool_call path intercepted the request
+before the normal header extraction ran, so client-supplied per-request
+auth (Authorization for upstream pass-through, x-mcp-auth-&lt;alias&gt;) was
+dropped and execute_mcp_tool/_list_mcp_tools received None. Thread
+mcp_auth_header, mcp_server_auth_headers, oauth2_headers, and raw_headers
+from both the REST and SSE call sites through the handlers so upstream MCP
+servers that require pass-through auth can be listed and called.
+
+* fix(mcp): preserve requested server scope in virtual tool calls
+
+A scoped MCP session (/mcp/&lt;server&gt;/ or header-scoped) carries an
+mcp_servers scope that the normal call path passes into routing so the
+session can only reach that server. The virtual-tool branch dropped it and
+resolved with mcp_servers=None, letting a scoped session call mcp_tool_call
+for any server the key can access. Thread the context mcp_servers scope
+through _dispatch_virtual_mcp_tool into both handlers so search and call
+resolve against the same scoped server set.
+
+* fix(mcp): convert virtual tool errors to isError on the protocol path
+
+The virtual-tool dispatch ran before the protocol handler&#39;s HTTPException
+and guardrail handling, so a rejected virtual call (e.g. an out-of-scope
+403 from execute_mcp_tool) raised out of mcp_server_tool_call and broke the
+MCP JSON-RPC stream instead of returning an isError CallToolResult. Move
+the dispatch inside the same try that wraps call_mcp_tool so virtual-tool
+errors get the same isError conversion as normal tool calls.
+
+* fix(mcp): spend-log virtual tool calls on the REST path
+
+The REST virtual-tool branch returned before common_processing_pre_call_logic,
+so execute_mcp_tool ran without a litellm_logging_obj and virtual mcp_tool_call
+invocations were not spend-logged or guardrail-checked like normal calls. Run
+the same pre-call pipeline in the call branch and thread the resulting
+litellm_logging_obj through handle_mcp_tool_call into execute_mcp_tool.
+
+* fix(mcp): reject virtual tool call when key has no accessible servers
+
+handle_mcp_tool_call passed an empty allowed_mcp_servers list into
+execute_mcp_tool; an unprefixed local tool name then fell through to the
+local registry, which has no server permission check, so a key with only
+mcp_tool_search_enabled and no server grants could run operator-configured
+local tools by name. Reject with 403 before dispatch when no servers are
+accessible, matching call_mcp_tool.
+
+* docs(mcp): document virtual tool_search module and parity rule in AGENTS.md
+
+* style(mcp): apply ruff format at repo line-length (120)
+
+* fix(mcp): add mcp_tool_search_enabled to ObjectPermissionDict and customer test fixture
+
+* chore: trigger CI
+
+* fix(mcp): mirror pre-call pipeline, guard imports, coerce top_k, honor include_disabled_tools
+
+- SSE mcp_tool_call now runs common_processing_pre_call_logic so it spend-logs and runs guardrails like the REST path (P1)
+- coerce_top_k avoids ValueError on non-integer top_k from clients (both REST and SSE)
+- guard mcp.types import in tool_search behind runtime/TYPE_CHECKING per package convention
+- admin list with include_disabled_tools returns the real catalog even when mcp_tool_search_enabled is set
+
+- fix(prometheus): expose project_alias in custom metadata labels (LIT-3741) (#31784)
+
+Include top-level scalar fields from standard_logging_metadata in the
+combined metadata dict used by custom_prometheus_metadata_labels. Previously
+only nested sub-dicts (requester_metadata, user_api_key_auth_metadata,
+spend_logs_metadata) were spread into combined_metadata, so fields like
+user_api_key_project_alias were inaccessible and always resolved to None.
+
+Co-authored-by: unknown &lt;&gt;
+Co-authored-by: Devin AI &lt;158243242+devin-ai-integration[bot]@users.noreply.github.com&gt;</div>
+</div>
+
+<a href="../project/BerriAI_litellm.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

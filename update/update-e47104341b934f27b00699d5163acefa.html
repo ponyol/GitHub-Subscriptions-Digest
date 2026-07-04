@@ -1,0 +1,1725 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in master (51 commits) - milvus-io/milvus - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in master (51 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/milvus-io_milvus.html">milvus-io/milvus</a> /
+    Updates in master (51 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/milvus-io_milvus.html">milvus-io/milvus</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-04 05:44 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/milvus-io/milvus/commits/master" target="_blank">https://github.com/milvus-io/milvus/commits/master</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This update focuses on enhancing Milvus&#39;s core capabilities, addressing both performance and stability. It delivers critical bug fixes related to data consistency, memory management, and concurrency, while introducing significant new features such as raw string literals, bitwise operators in filter expressions, support for struct arrays, and a function chain API for search rerank. Performance optimizations for parsing, segment loading, and I/O are also included, alongside strengthened test coverage and external integrations.
+
+---
+
+Это обновление направлено на улучшение основных возможностей Milvus, касающихся как производительности, так и стабильности. Оно содержит критические исправления ошибок, связанных с согласованностью данных, управлением памятью и параллелизмом, а также внедряет важные новые функции, такие как необработанные строковые литералы, побитовые операторы в выражениях фильтров, поддержку массивов структур и API цепочки функций для переранжирования поиска. Также включены оптимизации производительности для парсинга, загрузки сегментов и операций ввода-вывода, наряду с усиленным тестовым покрытием и внешними интеграциями.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix: keep dual writes for growing-source flush (#50999)
+
+issue: #50911
+
+Signed-off-by: luzhang &lt;luzhang@zilliz.com&gt;
+Co-authored-by: luzhang &lt;luzhang@zilliz.com&gt;
+
+- test: add raw-string LIKE escape-model coverage (#50843)
+
+## Summary
+
+This PR now contains **only supplementary test coverage** for the `LIKE`
+escape
+model — no production code.
+
+The production fix it originally carried (`scanLikePattern` in
+`internal/parser/planparserv2/pattern_match.go`, aligning the Go
+optimizer with
+the C++ canonical matcher in `RegexQuery.cpp`) **already landed in
+master via
+#50845**, which was stacked on this PR. After rebasing onto master that
+production commit is dropped as already-upstream, so the diff here
+reduces to
+tests only.
+
+`git diff master` touches exactly three files, all tests:
+
+| file | layer |
+|---|---|
+| `internal/parser/planparserv2/plan_parser_v2_test.go` | Go optimizer
+(parser-level) |
+| `internal/core/src/common/RegexQueryUtilTest.cpp` | C++ executor /
+canonical matcher |
+| `tests/python_client/.../test_milvus_client_scalar_filtering.py` |
+Python e2e |
+
+## What the tests add
+
+Now that raw string literals `r&#34;...&#34;` exist (#50845), the escape tests
+read with
+a **single** backslash instead of the doubled/quadrupled backslashes the
+normal
+string-literal layer forced — exercising the raw-string path end to end.
+
+**Go — `TestExpr_RawString_LikeEscapeModel`** drives the optimizer
+end-to-end
+through `r&#34;...&#34;` LIKE patterns and asserts the lowered op + literal
+operand:
+- escaped wildcard → literal byte (`r&#34;a\%bc&#34;` → `Equal &#34;a%bc&#34;`);
+- a literal `%` coexisting with an **unescaped** `%` boundary
+(`r&#34;abc\%def%&#34;` → `PrefixMatch &#34;abc%def&#34;`, `r&#34;%abc\%def%&#34;` → `InnerMatch
+&#34;abc%def&#34;`);
+- `\\` collapsing to one literal `\`;
+- a dangling trailing backslash — un-expressible as a raw string (parse
+error),
+  and `OpType_Match` fallback via a normal string.
+
+**C++ — `RegexQueryUtilTest.cpp`** keeps the canonical-matcher escape
+tests
+(literal `%`/`_` matched verbatim, multi-char decoys, long-span
+positives). Raw
+strings are a Go-parser-only feature, so the C++ executor tests use
+plan-level
+inputs.
+
+**Python e2e** — the escaped-wildcard `LIKE` expressions and
+`test_like_escaped_wildcard_is_literal` now use `r&#34;...&#34;` (one
+backslash); the
+eval oracle gains a raw-`LIKE` branch that re-quotes the verbatim raw
+content via
+`repr()` so it stays in lock-step with the server. A raw-string
+dangling-backslash case (rejected at lex time) is added; the
+matcher-level
+dangling case stays a normal string since a raw string cannot end in an
+odd
+number of backslashes.
+
+## Verification
+
+```
+go test -tags dynamic,test -gcflags=&#34;all=-N -l&#34; -count=1 ./internal/parser/planparserv2/
+```
+planparserv2 package passes; `gofmt` clean; Python `ruff check` / `ruff
+format`
+clean; the oracle&#39;s raw-`LIKE` branch verified to reproduce the
+documented
+expected result sets.
+
+issue: #43864
+
+---------
+
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Signed-off-by: xiaofanluan &lt;xiaofan.luan@zilliz.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- feat: impl StructArray -- support partial update for struct (#51010)
+
+issue: https://github.com/milvus-io/milvus/issues/49995
+ref: https://github.com/milvus-io/milvus/issues/42148
+design doc: docs/design-docs/design_docs/20260306-struct.md
+
+Missing parts of sub-fields in struct is not supported in this PR.
+
+Signed-off-by: SpadeA &lt;tangchenjie1210@gmail.com&gt;
+
+- test: Clean up Helm test values (#51007)
+
+## Summary
+
+- remove redundant Milvus runtime overrides from tests/_helm values
+- delete stale standalone-one-pod values files from tests/_helm/values
+- merge duplicate dataCoord.compaction keys in woodpecker nightly values
+- add e2e-amd distributed woodpecker service boundary values preset
+
+Fixes #51006
+
+## Test Plan
+
+- [x] strict duplicate-key YAML check for tests/_helm/values and
+embedded user.yaml blocks
+- [x] verified targetVecIndexVersion and standalone-one-pod no longer
+exist under tests/_helm/values
+- [x] git diff --check
+
+Signed-off-by: Yanliang Qiao &lt;yanliang.qiao@zilliz.com&gt;
+
+- fix: cap recovered growing manifest rows (#50952)
+
+## Summary
+
+issue: #50910
+issue: #50945
+
+Growing StorageV3 recovery could load all rows from the manifest even
+when `SegmentLoadInfo.num_of_rows` represented an earlier checkpoint.
+That allowed the growing text-match index to advance beyond the
+checkpoint row count; the next WAL replay insert then reserved the
+checkpoint offset and Tantivy rejected the lower doc id.
+
+This PR:
+- Caps recovered column-group rows to the segment checkpoint row count
+before raw fields, PKs, and text indexes are populated.
+- Adds `Growing.LoadStorageV3ManifestCapsRowsAtCheckpoint`, which writes
+a 6-row StorageV3 manifest, loads it with a 4-row checkpoint, then
+inserts the next row at offset 4.
+
+## Verification
+
+- `clang-format-12` on changed C++ files
+- `git diff --check`
+- Fresh C++ configure in `/tmp/milvus-50910-build` was blocked before
+compilation because generated `internal/core/src/pb` sources were
+missing: `No SOURCES given to target: milvus_pb`
+
+---------
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- fix: Avoid blocking compactor executor slot queries (#50789)
+
+## Summary
+
+Fixes #50788
+
+The DataNode compactor executor used the same mutex for task state, slot
+accounting, channel enqueueing, completion callbacks, and filesystem
+metric publication. When the task queue was full, `Enqueue` could block
+while holding the mutex, which also blocked `Slots()` and made DataNode
+`QuerySlot` time out.
+
+This PR keeps the executor mutex scoped to in-memory state updates only:
+
+- release the mutex before sending to `taskCh`
+- update terminal task state and release slot usage before completion
+callbacks
+- publish filesystem metrics outside the executor lock
+- add regression tests for full task queues and completion callbacks
+querying slots
+
+## Test Plan
+
+- `go test -v -count=1 -tags dynamic,test -gcflags=&#34;all=-N -l&#34;
+-ldflags=&#34;-r ${TEST_MILVUS_WORK_DIR}/cmake_build/lib -r
+${TEST_MILVUS_WORK_DIR}/internal/core/output/lib&#34;
+./internal/datanode/compactor -run &#34;TestCompactionExecutor&#34; -timeout
+300s`
+- `gofumpt -l internal/datanode/compactor/executor.go
+internal/datanode/compactor/executor_test.go`
+- `git diff --check`
+
+Signed-off-by: sijie-ni-0214 &lt;sijie.ni@zilliz.com&gt;
+
+- fix: keep streaming segment delta until distribution catches up (#50794)
+
+## Summary
+
+Fixes #50793
+
+QueryCoord segment task delta filtering checked only sealed segment
+distribution. Streaming/growing segments are tracked from the channel
+leader view, so a streaming reduce task could be treated as reflected
+immediately after the RPC returned even if the growing segment was still
+present in distribution.
+
+This PR makes segment distribution matching scope-aware:
+
+- `DataScope_Streaming` checks channel leader view `GrowingSegments`
+- sealed segment scopes keep using `SegmentDistManager`
+- segment delta records persist channel name and data scope
+- adds regression coverage for streaming reduce deltas staying active
+until the growing distribution disappears
+
+## Test Plan
+
+- `gofumpt -l internal/querycoordv2/task/action.go
+internal/querycoordv2/task/scheduler.go
+internal/querycoordv2/task/task_test.go`
+- `git diff --check HEAD~1..HEAD`
+
+Signed-off-by: sijie-ni-0214 &lt;sijie.ni@zilliz.com&gt;
+
+- enhance: reduce duplicate querycoord collection info lookups (#50801)
+
+## Summary
+
+Coalesce in-flight QueryCoord collection info recovery by collection ID
+so concurrent tasks for the same collection share the same
+`DescribeCollection` request.
+
+This reduces repeated metadata recovery work during bursty
+same-collection task submission while still avoiding a long-lived
+collection info cache after the shared request completes.
+
+This also fixes a task metric refresh bug so task-count metrics are
+updated after scheduler tasks are drained to zero.
+
+Fixes #50800
+
+## Changes
+
+- Add a per-executor singleflight for collection info recovery.
+- Keep caller cancellation independent from the shared metadata lookup.
+- Add tests covering non-caching behavior and caller cancellation.
+- Refresh task metrics on empty scheduler dispatches without publishing
+pre-removal task counts.
+
+## Test Plan
+
+- [x] `gofumpt -l internal/querycoordv2/task/executor.go
+internal/querycoordv2/task/executor_test.go
+internal/querycoordv2/task/scheduler.go`
+- [x] `git diff --check upstream/master...HEAD`
+
+Signed-off-by: sijie-ni-0214 &lt;sijie.ni@zilliz.com&gt;
+
+- enhance: Update drop function field design doc (#50913)
+
+## Summary
+
+- Update the drop collection field design doc with the final
+drop-function semantics introduced by PR
+https://github.com/milvus-io/milvus/pull/50471.
+- Document the split between detach function and drop function field
+behavior.
+- Align RootCoord, Proxy, SDK cache invalidation, and testing strategy
+descriptions with the current implementation.
+
+issue: #48983
+
+Design doc:
+docs/design-docs/design_docs/20260413-drop-collection-field-design.md
+
+## Test Plan
+
+- [x] git diff --check upstream/master..HEAD
+- [x] rg stale drop-function wording in
+docs/design-docs/design_docs/20260413-drop-collection-field-design.md
+
+Signed-off-by: sijie-ni-0214 &lt;sijie.ni@zilliz.com&gt;
+
+- enhance: Reduce segment load resource lock contention (#50340)
+
+Fixes #50334
+
+## What changed
+- Move segment loading resource estimation outside the committed
+resource lock to reduce lock hold time.
+- Re-sample physical memory and disk usage after estimation while
+holding the lock, so physical usage and committed loading resource are
+checked consistently.
+- Fix batched GPU memory accounting and release tiered eviction loading
+resource if GPU validation fails after reservation.
+
+## Verification
+- gofumpt -l internal/querynodev2/segments/segment_loader.go
+internal/querynodev2/segments/segment_loader_test.go
+- git diff --check 1cc43cdef8303a92584c8e84afdd15fdabdef8eb..HEAD
+- go test -v -count=1 -tags dynamic,test -gcflags=&#34;all=-N -l&#34;
+-ldflags=&#34;-r ${MILVUS_WORK_DIR}/cmake_build/lib -r
+${MILVUS_WORK_DIR}/internal/core/output/lib&#34;
+./internal/querynodev2/segments -run
+&#34;TestSegmentLoader/TestSegmentLoaderDetailSuite/(TestCheckLoadingResourceWithDiskLimit|TestCheckLoadingResourceWithMemoryLimit|TestCheckSegmentGpuMemSizeWithBatchedEstimates|TestRequestResource)&#34;
+-timeout 300s (blocked locally: Package milvus_core was not found in
+pkg-config search path)
+
+---------
+
+Signed-off-by: sijie-ni-0214 &lt;sijie.ni@zilliz.com&gt;
+
+- enhance: reuse segment load info cache during load (#50520)
+
+## Summary
+
+Optimize sealed segment load by reusing the cached metadata already held
+by `SegmentLoadInfo` when computing the initial load diff.
+
+This avoids rebuilding converted index metadata from the protobuf
+snapshot during `ChunkedSegmentSealedImpl::Load()`, while still
+rebuilding the binlog pointer cache for the copied protobuf storage.
+
+issue: #50521
+
+## Test Plan
+
+- `git diff --check upstream/master..HEAD`
+- `/opt/homebrew/opt/llvm@18/bin/clang-format --dry-run --Werror
+--style=file internal/core/src/segcore/ChunkedSegmentSealedImpl.cpp
+internal/core/src/segcore/SegmentLoadInfo.h`
+
+Signed-off-by: sijie-ni-0214 &lt;sijie.ni@zilliz.com&gt;
+
+- fix: make DumpMessages return transaction data messages (#50574)
+
+issue: #50573
+
+## What this PR does
+
+This PR fixes `DumpMessages` transaction handling. When the WAL scanner
+returns an assembled transaction message, `DumpMessages` now expands it
+into separate responses:
+
+- begin transaction message
+- data messages that pass the existing message type filter
+- commit transaction message
+
+This allows recovery and CDC consumers to decode and replay transaction
+data messages correctly.
+
+The PR also supports inclusive start semantics through
+`include_start_message`, while preserving the existing default behavior
+of starting after `start_message_id` for compatibility.
+
+## Tests
+
+- Added unit coverage for default StartAfter policy.
+- Added unit coverage for IncludeStartMessage StartFrom policy.
+- Added unit coverage for transaction expansion and send error handling.
+- Ran `gofmt` and `git diff --check`.
+
+Linked proto change: milvus-io/milvus-proto#616
+
+Signed-off-by: alohaha22 &lt;shawn.work1229@outlook.com&gt;
+
+- test: Update aggregation and groupby E2E coverage (#50963)
+
+## Summary
+- strengthen search aggregation reject coverage for unsupported
+group-by, iterator, and dynamic-field combinations
+- add controlled search order_by + group_by_field + offset regression
+coverage
+- update query aggregation GROUP BY limit and output projection coverage
+to current semantics
+
+issue: #50960
+
+## Test Plan
+- [x] PYTHONPATH=.
+/Users/yanliang.qiao/Documents/Codex/2026-06-30/new-chat/work/milvus-e2e-venv/bin/python
+-m pytest -q --tb=short --disable-warnings --timeout=300 --host
+127.0.0.1 --port 19530 --user root --password Milvus &lt;targeted
+agg/groupby cases&gt;: 11 passed, 1 xfailed in 51.81s
+- [x] git diff --check --
+tests/python_client/milvus_client/test_milvus_client_search_aggregation.py
+tests/python_client/milvus_client/test_milvus_client_search_order.py
+tests/python_client/testcases/test_query_aggregation.py
+
+Milvus test target:
+qa-milvus/yanliang-mas2-milvus-standalone-6686d94498-lhp7k, Running 1/1,
+restart count 0
+
+Signed-off-by: Yanliang Qiao &lt;yanliang.qiao@zilliz.com&gt;
+
+- fix: preserve segment insert log paths for text index (#50959)
+
+issue: #50865
+
+## Summary
+Preserve existing insert log paths when building segment insert files
+for StorageV2 text index builds.
+Fall back to constructing paths from log IDs when the binlog path is
+absent.
+
+Signed-off-by: aoiasd &lt;zhicheng.yue@zilliz.com&gt;
+
+- enhance: add delete/shard by namespace (#50153)
+
+Shard data by namespace.
+
+issue: #50154
+
+---------
+
+Signed-off-by: sunby &lt;sunbingyi1992@gmail.com&gt;
+
+- fix: log intra-cluster no-identity requests at debug level in rootcoord (#50987)
+
+## What
+
+`getCurrentUserVisible{Databases,Collections}` in rootcoord logged an
+expected situation as a misleading warning. With authorization enabled,
+every intra-cluster ListDatabases/ShowCollections call (datacoord /
+querycoord brokers, in-process calls inside mixcoord) carries no user
+identity, hits the fallback branch, and emitted:
+
+```
+[WARN] [&#34;get current user from context failed&#34;]
+[error=&#34;fail to get authorization from the md, authorization:[token]: invalid parameter&#34;]
+```
+
+The wording suggests a request input error, but there is no failed user
+request at all: the RPC deliberately falls back to full visibility and
+succeeds (see the RCA in #50974).
+
+## How
+
+- `contextutil.IsIntraClusterRequest(ctx)`: classifies the request by
+the shape of the incoming gRPC metadata (see table below). The
+authorization key always wins: a request carrying user identity is never
+treated as intra-cluster.
+- rootcoord logs the intra-cluster case at debug level with an explicit
+&#34;fall back to full visibility&#34; message; any other identity-resolution
+failure keeps the warning.
+
+| incoming metadata | classified as | log |
+|---|---|---|
+| carries `authorization` | user request | (unchanged RBAC path) |
+| no metadata at all | in-process intra-cluster call | debug |
+| `ServerID`/`Cluster` keys, no `authorization` | intra-cluster gRPC |
+debug |
+| metadata present, none of the keys | unknown source | warn (kept) |
+
+No behavior change: the AnyWord visibility fallback, the error
+construction in contextutil (shared with user-facing paths and asserted
+on by e2e), and all merr codes are untouched.
+
+## Verification
+
+Live-verified on a 2.6 build of this patch (standalone,
+authorizationEnabled=true):
+- startup intra-cluster calls (no-metadata variant): debug line emitted,
+zero occurrences of the old warning in the whole log;
+- gRPC probe to rootcoord with Cluster metadata and no authorization
+(the variant seen in the 2.6-nightly CI logs): debug;
+- gRPC probe with unrelated metadata only: warning kept;
+- authenticated REST request: succeeds, no new log lines;
+- unauthenticated external request: still rejected at the proxy edge and
+never reaches rootcoord.
+
+On master: package compile + unit tests (`pkg/util/contextutil` incl.
+new `TestIsIntraClusterRequest`, `internal/rootcoord` visibility task
+tests).
+
+issue: #50974
+
+Signed-off-by: zhenshan.cao &lt;zhenshan.cao@zilliz.com&gt;
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- test: Avoid leaking packed fragment mock columns (#50935)
+
+issue: #50934
+
+This PR stabilizes `TestBuildCurrentSegmentFragments_PassesColumns`.
+
+The old test patched `ReadFragmentsFromManifest` with mockey and saved
+the
+`columns` slice from the hook callback for assertions after the callback
+returned. That lets a callback argument crossing the
+mockey/reflect/unsafe
+boundary escape beyond the hook invocation, and Jenkins observed this
+test
+crashing with a Go runtime bad pointer check.
+
+The updated test keeps the focused mockey coverage, but consumes the
+`columns`
+argument inside the callback:
+
+- copy the received `columns` slice before assertion
+- assert the copied value inside the hook callback
+- only carry a plain `called` boolean outside the callback
+
+There is no production behavior change.
+
+Validation:
+
+- `gofmt -w internal/storagev2/packed/exttable_test.go`
+- `git diff --check`
+- `make lint-fix` attempted, but local validation is blocked because
+  pkg-config cannot find `milvus_core`.
+- Targeted Go test attempted after resetting local Milvus dependencies,
+but
+it is blocked in this worktree because pkg-config cannot find
+`milvus_core`
+  and `milvus-storage`.
+- `make build-cpp` was attempted earlier to restore the C++ output, but
+local
+  macOS arm64 linking fails with `milvus::tracer::AutoSpan::AutoSpan`
+  undefined while linking `libmilvus_core.dylib`.
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- fix: avoid null expr index path recursion (#50983)
+
+## Summary
+
+issue: #50980
+
+Fix ARRAY `IS NULL` hang when a scalar BITMAP index is present by
+avoiding recursive `std::call_once` re-entry in
+`PhyNullExpr::DetermineExecPath()`.
+
+This PR also adds a sealed ARRAY + BITMAP null-expression regression
+test.
+
+## Verification
+
+- `clang-format-12 -i internal/core/src/exec/expression/NullExpr.cpp
+internal/core/src/exec/expression/ExprArrayTest.cpp`
+- `git diff --check`
+- built `all_tests`
+- focused C++ tests passed:
+`Expr.TestArrayNullExprWithBitmapIndex:Expr.TestArrayNullExpr:Expr.TestStructArrayParentNullExprUsesRepresentativeSubField:Expr.TestVectorArrayNullExpr`
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- test: complete local cache cleanup coverage (#50947)
+
+issue: #50776
+
+## Summary
+- add sibling-generation cleanup coverage for all local cache prefixes
+- add raw-data lease cleanup coverage for deferred deletion and
+post-cleanup writer rejection
+- keep the change scoped to UT only
+
+## Testing
+- not run locally: `internal/core` unit-test build is blocked in this
+environment because `cmake` is not installed
+
+Signed-off-by: wangting0128 &lt;ting.wang@zilliz.com&gt;
+
+- fix: check indexMeta before executing search on segments (#50783) (#50802)
+
+## Summary
+
+A sealed segment that predates a function-output field added by
+`add_function_field`
+lazy-loads that field&#39;s raw column (so `HasFieldData` becomes true) but
+has **no index
+meta** for it on this segment. A BM25 brute-force search then reached
+`GetFieldIndexMeta(field_id)`, which dereferenced an `end()` iterator —
+the guarding
+`assert` is stripped in release builds — and the QueryNode died with
+`SIGSEGV
+SI_ADDR=(nil)` while copying the garbage index-params map.
+
+## Fix
+
+- `FieldAccessible` now requires `HasIndex || (HasFieldData &amp;&amp;
+HasFieldIndexMeta)`.
+`HasIndex` is checked **first** so the field becomes serviceable again
+the moment its
+index loads — recovery does not depend on `col_index_meta_` ever being
+refreshed
+  (it is set once at construction and never updated on a stale segment).
+- New `virtual HasFieldIndexMeta` (default `true`;
+`ChunkedSegmentSealedImpl` /
+`SegmentGrowingImpl` override via `col_index_meta_` / `index_meta_ -&gt;
+HasField`).
+- Defense-in-depth: `CollectionIndexMeta::GetFieldIndexMeta` `assert` -&gt;
+`AssertInfo`,
+so a missing field throws a `SegcoreError` even under NDEBUG instead of
+UB.
+
+With the gate in place the existing empty-result branch in
+`segment_c.cpp` AsyncSearch
+serves a graceful partial result (the not-yet-indexed old segment
+contributes nothing)
+instead of crashing.
+
+issue: #50783
+
+Signed-off-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+Co-authored-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- feat: define external snapshot API contracts (part1) (#50393)
+
+issue: https://github.com/milvus-io/milvus/issues/44358
+
+design doc:
+docs/design-docs/design_docs/20260609-external-snapshot-export-restore.md
+
+Part 1/3 of the external snapshot cross-bucket restore stack.
+
+This PR defines the API contract and entry surfaces for external
+snapshot export and restore:
+
+- Adds the consolidated design document for cross-bucket external
+snapshot restore.
+- Adds public gRPC, REST, and Go SDK API surfaces for
+RestoreExternalSnapshot and ExportSnapshot.
+- Adds internal DataCoord proto plumbing and generated code needed by
+later implementation PRs.
+- Wires Proxy RBAC grouping and database interceptor behavior for the
+new APIs.
+- Keeps the request contract on a single external_spec field and keeps
+db_name for namespace routing rather than permission scoping.
+
+Validation copied from the commit:
+
+- GOTOOLCHAIN=go1.25.10 go test -c -tags dynamic,test -gcflags=&#34;all=-N
+-l&#34; -ldflags=&#34;-r ${RPATH}&#34; -o /tmp/datacoord-commit1.test
+github.com/milvus-io/milvus/internal/datacoord
+- cd client &amp;&amp; GOTOOLCHAIN=go1.25.10 go test -c -o
+/tmp/client-milvusclient-commit1.test ./milvusclient
+- internal/proxy package compile was blocked locally by missing C++
+header internal/core/output/include/segcore/search_result_export_c.h
+
+---------
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- feat: support function chain API for search rerank (#50786)
+
+issue: https://github.com/milvus-io/milvus/issues/50571
+design doc: docs/design-docs/design_docs/20260624-function-chain-api.md
+
+Add the FunctionChain proto-to-runtime path for ordinary Search L2
+rerank. The change converts public FunctionChain protos into ChainRepr,
+derives caller-independent read/write metadata, validates
+Search-specific inputs in Proxy, and executes public chains through the
+existing rerank pipeline.
+
+Add request validation for duplicate stages, unsupported stages,
+unsupported system inputs/outputs, unknown schema fields, unsupported
+input field types, and hybrid-search usage. Extend REST v2 request
+conversion to accept function_chains.
+
+Replace score_combine with num_combine and add typed parameter readers,
+repr-based FuncChain construction, chain optimization/pruning helpers,
+and model-rerank parameter handling. Add coverage for chain repr
+conversion, function/operator behavior, Proxy planning, search pipeline
+integration, REST conversion, and REST API cases.
+
+Add the Function Chain API design document and update milvus-proto to
+the latest upstream pseudo-version.
+
+Signed-off-by: junjie.jiang &lt;junjie.jiang@zilliz.com&gt;
+
+- fix: Replace stale log call in expression bitwise test (#50972)
+
+issue: https://github.com/milvus-io/milvus/issues/50971
+
+## What changed
+
+- Replaced the stale `log.Info` call in `searchWithBitwiseExpression`
+with `mlog.Info(context.TODO(), ...)`.
+- Kept the file consistent with the current `pkg/v3/mlog` logging
+migration.
+
+## Why
+
+`milvus/master` code-check fails `static-check` because the old `log`
+symbol is no longer imported in
+`tests/integration/expression/expression_test.go`.
+
+## Validation
+
+- `gofmt -w tests/integration/expression/expression_test.go`
+- `git diff --check`
+- `rg -n &#34;\blog\.&#34; tests/integration/expression/expression_test.go`
+- Targeted `golangci-lint` was attempted, but local execution is blocked
+by missing `internal/core/output` cgo artifacts in this worktree. The
+original `undefined: log` typecheck failure no longer appeared before
+the cgo import failure.
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- fix: load vortex text lob refs as binary (#50929)
+
+issue: #50906
+
+Signed-off-by: luzhang &lt;luzhang@zilliz.com&gt;
+Co-authored-by: luzhang &lt;luzhang@zilliz.com&gt;
+
+- enhance: Add Hugging Face inference provider support (#50818)
+
+issue: https://github.com/milvus-io/milvus/issues/50816
+
+Add Hugging Face Inference Providers client support for feature
+extraction and sentence similarity APIs, and wire it into text embedding
+and rerank model providers.
+
+The new provider supports:
+- text embedding via feature-extraction
+- rerank scoring via sentence-similarity
+- Hugging Face router provider selection with hf_provider
+- MILVUS_HUGGINGFACE_API_KEY credential fallback
+- provider config entries for text embedding and rerank
+
+Also add focused tests for the Hugging Face client, rerank provider, and
+paramtable provider docs.
+
+Signed-off-by: junjie.jiang &lt;junjie.jiang@zilliz.com&gt;
+
+- feat: support bitwise operators (&amp;, |, ^) in filter expressions (#50666)
+
+# What
+
+Adds support for bitwise AND (`&amp;`), OR (`|`), and XOR (`^`) operators in
+Milvus filter expressions, enabling queries such as:
+
+```sql
+(flags &amp; 4) == 4      -- check if bit 2 is set
+(permissions | 1) != 0
+(mask ^ 7) == 0
+```
+
+# Why
+
+Bitwise operators are commonly used for bitmask and flag-based filtering
+patterns. Previously, these expressions were unsupported and resulted in
+parse errors.
+
+- Issue: #24490
+- design doc:
+`docs/design-docs/design_docs/20260620-bitwise-filter-operators.md`
+
+# Changes
+
+## Protocol / Plan Definitions
+
+### `pkg/proto/plan.proto`
+- Added `BitAnd = 7`, `BitOr = 8`, and `BitXor = 9` to the `ArithOpType`
+enum.
+
+### `pkg/proto/planpb/plan.pb.go`
+- Added corresponding enum constants manually (protoc unavailable in the
+current environment).
+
+## Parser
+
+### `internal/parser/planparserv2/operators.go`
+- Mapped `BAND`, `BOR`, and `BXOR` tokens to the new protobuf enum
+values.
+- Added constant folding support for literal operands.
+
+### `internal/parser/planparserv2/utils.go`
+- Extended `checkValidModArith()` to reject bitwise operations on
+non-integer types.
+
+### `internal/parser/planparserv2/parser_visitor.go`
+- Implemented:
+  - `VisitBitAnd`
+  - `VisitBitOr`
+  - `VisitBitXor`
+
+## Query Execution Engine
+
+### `internal/core/src/bitset/common.h`
+- Added new operator enum values.
+- Implemented evaluation logic in `ArithCompareOperator`.
+
+### `internal/core/src/exec/expression/BinaryArithOpEvalRangeExpr.h`
+- Added `ArithOpHelper&lt;&gt;` specializations.
+- Added template dispatch support for bitwise operators.
+
+### `internal/core/src/exec/expression/BinaryArithOpEvalRangeExpr.cpp`
+- Added dispatch cases for:
+  - JSON execution paths
+  - Array execution paths
+  - Data execution paths
+  - Index execution paths
+
+### `internal/core/src/bitset/bitset.h`
+- Extended `inplace_arith_compare()` runtime dispatch to support bitwise
+operators.
+
+# Testing
+
+### Parser Tests
+
+```bash
+ok github.com/milvus-io/milvus/internal/parser/planparserv2
+```
+
+### Execution Engine
+
+The C++ implementation follows the existing `Mod` operator pattern and
+will be validated by CI.
+
+cc: @xiaofan-luan
+
+---------
+
+Signed-off-by: Ayush KAshyap &lt;kashyap11ayush02@gmail.com&gt;
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Signed-off-by: xiaofanluan &lt;xiaofan.luan@zilliz.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+Co-authored-by: xiaofanluan &lt;xiaofan.luan@zilliz.com&gt;
+
+- enhance: isolate online-write cgo pool from segment loading and add pool metrics (#50812)
+
+issue: #50811
+related: #49435
+
+## What
+
+On the QueryNode, the load-time delta-log replay (`LoadDeltaData`,
+`UseLoad=true`) and the online forward delete (`segment.Delete`) both
+submit their CGO onto the **same `DynamicPool`** (size `CPUNum`). After
+a compaction, the multi-partition replay burst exhausts the pool,
+starving online `Insert`/`Delete`. Because `deleteNode.Operate` runs
+`ProcessDelete` before `UpdateTSafe`, channel **tSafe freezes for tens
+of seconds**, and Strong-consistency queries fail with `channel tsafe
+stalled` (#49435).
+
+Evidence from the failing master run (traceID
+`b31d6e1626bd4d368961c89e6d4a5652`): `update tsafe` / `start to process
+delete` had a ~19–27s gap exactly overlapping a post-compaction segment
+load; `milvus_querynode_pool_active_threads{pool_name=&#34;DynamicPool&#34;}`
+was pegged at **8/8 for ~27s** while `LoadPool` sat idle at **0/40**.
+
+## Changes
+
+Pool isolation + cleanup (`internal/querynodev2/segments`):
+- Add a dedicated **MutatePool** for the online-write CGO path
+(`segment.Insert`/`segment.Delete`), isolated from load/management work.
+- Route load-time **`LoadDeltaData`** replay and **BM25 stats** load
+onto **LoadPool**.
+- Remove orphaned **WarmupPool**; merge away **BM25LoadPool**.
+- Keep **DeletePool** (it is the `DeleteBatch` dispatch pool, not
+orphaned).
+- Make **DynamicPool**/**DeletePool** size-configurable + hot-reloadable
+(`CPUNum * factor`, default `CPUNum`); add `MutatePoolSizeFactor` /
+`DynamicPoolSizeFactor` / `DeletePoolSizeFactor`.
+
+Observability:
+- Export `capacity / active_threads / queue_depth` for all QueryNode
+pools (`milvus_querynode_pool_*`, MutatePool added) and, newly, for the
+important DataNode pools (`milvus_datanode_pool_*`: compaction-exec,
+index-build, import-exec, io, stats).
+
+## Notes
+
+- This fixes the **resource-exhaustion** half of #49435. The `deleteMut`
+lock decoupling (moving the worker RPC out of the lock so it only guards
+the in-memory catch-up→publish boundary) is tracked as follow-up.
+- The pool &#34;priority&#34; coefficients are pool-size only (no OS scheduling
+priority); isolation guarantees online-write admission, not CPU
+preemption under full saturation.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Signed-off-by: xiaofanluan &lt;xiaofan.luan@zilliz.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- feat: add raw string literals (r&#34;...&#34;) for filter expressions (#50845)
+
+## Summary
+
+Adds **raw string literals** `r&#34;...&#34;` / `R&#39;...&#39;` to filter expressions,
+so a
+backslash can be written verbatim — directly addressing the &#34;needs 8
+backslashes
+to match one&#34; complaint in issue #43864.
+
+Today a backslash is unescaped **twice** inside Milvus before it reaches
+the
+matcher:
+
+1. **String-literal layer** — the parser runs `strconv.Unquote` on
+`&#34;...&#34;`
+   (`\\`→`\`, `\n`→newline, `\&#34;`→`&#34;`, …).
+2. **Pattern layer** — `LIKE` / regex then apply their own escaping.
+
+Each halves the backslash count, so matching a single literal `\` needs
+`&#34;\\\\&#34;` (4) at the expression level. PostgreSQL avoids the extra layer
+because
+`standard_conforming_strings` makes `\` literal in ordinary strings;
+Milvus&#39;s
+string layer behaves like MySQL&#39;s default.
+
+A raw string takes its content **verbatim** (no `Unquote`), removing the
+string-literal layer while leaving the pattern layer intact — exactly
+like
+BigQuery / Spark SQL raw strings (BigQuery&#39;s `LIKE` docs even use
+`r&#39;\%&#39;`).
+
+| Expression | value at matcher | result |
+|---|---|---|
+| `A == r&#34;a\b&#34;` | `a\b` | equals `a\b` |
+| `A like r&#34;\%&#34;` | `\%`→`%` | equals `%` |
+| `A like r&#34;\\%&#34;` | `\\`→`\` | prefix `\` |
+| `A like r&#34;a\\b&#34;` | `a\\`→`a\` | equals `a\b` |
+| `A =~ r&#34;\d+&#34;` | `\d+` | regex `\d+` |
+
+So a literal `\` in `LIKE` becomes `r&#34;\\&#34;` (2) instead of `&#34;\\\\&#34;` (4) —
+matching
+PostgreSQL&#39;s expression-level count.
+
+## Changes
+
+- **`Plan.g4`**: new `RawStringLiteral` lexer token (`[rR]` + quoted
+body),
+`DoubleRChar`/`SingleRChar` fragments, and a `# RawString` alternative
+in
+`expr`. Parser regenerated with ANTLR 4.13.2 (Go target only — the C++
+side
+  executes the serialized plan, no regen needed).
+- **`parser_visitor.go`**: `VisitRawString` emits the content verbatim
+as a
+`VarChar` value; `parseRegexPatternOrTemplate` accepts a raw token as a
+  verbatim regex pattern. Works for `==`, `IN`, `LIKE`, JSON, `=~`.
+- **Design doc**:
+`docs/design-docs/design_docs/20260626-raw_string_literal.md`
+  (prior art, syntax, semantics, compatibility).
+
+## Semantics notes (match Python / BigQuery)
+
+- Backslash is **not** an escape inside a raw string; it is kept
+verbatim.
+- A backslash before the closing quote only prevents termination, so a
+raw
+string cannot end with an odd number of backslashes. Embed a quote by
+using
+  the other quote style (`r&#39;a&#34;b&#39;`).
+
+## Compatibility
+
+Purely additive. Existing `&#34;...&#34;` / `&#39;...&#39;` literals are unchanged; the
+`r`/`R`
+prefix before a quote was previously a syntax error. SDKs need no
+change.
+
+## Stacked on #50843
+
+The first commit is the LIKE escape-model fix from **#50843** (review
+there).
+Together they fully resolve #43864: #50843 makes the `LIKE` pattern
+layer
+correct and PG-aligned, this PR removes the extra string-literal
+backslash
+layer. When #50843 merges, this PR&#39;s diff reduces to the raw-string
+commit.
+
+## Test
+
+`TestExpr_RawString` covers verbatim `==`, `LIKE` (literal `%`/`_`/`\`,
+prefix/inner), single/double-quoted raw strings, raw-vs-normal
+backslash-count
+equivalence, and raw regex. Full `planparserv2` package passes; `gofmt`
+clean.
+
+```
+go test -tags dynamic,test -gcflags=&#34;all=-N -l&#34; -count=1 ./internal/parser/planparserv2/
+```
+
+---------
+
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- enhance: add cache shard disk usage metric (#50733)
+
+## Summary
+- Thread the insert-channel shard through field, index, JSON stats, text
+index, storage v1, and storage v2 load metadata into cachinglayer
+translator metadata.
+- Add cgo shard setters so Go-side load requests can pass shard into C++
+load info.
+- Keep the actual cachinglayer metric definition and CacheSlot
+accounting in companion `milvus-common` PR:
+https://github.com/zilliztech/milvus-common/pull/98
+
+issue: #50941
+
+---------
+
+Signed-off-by: sunby &lt;sunbingyi1992@gmail.com&gt;
+
+- enhance: upgrade knowhere to v3.0.5 (#50902)
+
+## Summary
+
+- Upgrade Knowhere dependency to v3.0.5.
+
+issue: #42937
+
+Signed-off-by: xianliang.li &lt;xianliang.li@zilliz.com&gt;
+
+- enhance: prefetch data before execution (#50275)
+
+issue: #50583
+
+## Summary
+- prefetch scalar expression chunks, vector data, and MVCC timestamp
+chunks before driver execution
+- wait for prefetch completion before consuming prefetched
+MVCC/vector/scalar data
+- size the cgo caller pool from queryNode MaxReadConcurrency and expose
+queryNode.segcore.cgoPoolSizeRatio in milvus.yaml
+
+---------
+
+Signed-off-by: sunby &lt;sunbingyi1992@gmail.com&gt;
+
+- fix: isolate local index cache cleanup paths (#50608)
+
+issue: #48792
+
+Local index cache directories were derived from index metadata. When
+QueryNode releases a segment and then loads the same segment/index
+again, the old and new `DiskFileManagerImpl` instances can point to the
+same local directory.
+
+That makes two races possible:
+- a late writer from the old load can write into the directory used by
+the new load;
+- cleanup can remove a local directory while async writers for that
+directory are still active.
+
+Both races can leave the local disk index state inconsistent during
+load/release concurrency.
+
+This PR fixes the problem in two layers:
+- Add a process-local generation to each `DiskFileManagerImpl` and
+append it to all local index/text/json/ngram/raw-data cache prefixes.
+Old and new file managers no longer share the same local directory,
+while remote paths stay unchanged.
+- Add per-directory RAII write leases. Cleanup closes the directory,
+rejects new writers, and defers `RemoveDir` until active writers release
+their leases.
+
+The disk index raw-data scratch paths and cleanup are routed through
+`DiskFileManagerImpl` so they use the same generation and lease rules.
+
+---------
+
+Signed-off-by: Shawn Wang &lt;shawn.wang@zilliz.com&gt;
+
+- enhance: make etcd client dial timeout configurable (#50901)
+
+## What this PR does
+
+Makes the etcd client dial timeout configurable via `etcd.dialTimeout`
+(milliseconds, default `5000` — unchanged behavior).
+
+## Why
+
+The dial timeout was hardcoded to 5s in `GetRemoteEtcdClient` /
+`GetRemoteEtcdClientWithAuth` / `GetRemoteEtcdSSLClientWithCfg`. On
+newly scaled-out nodes, transient network conditions during pod startup
+(sidecar proxy not fully ready, DNS propagation delay, or etcd
+connection pressure from many nodes starting at once) can push the
+blocking dial past 5s, causing the second etcd client created during
+`streaming.Init()` to panic with `context deadline exceeded`. Operators
+had no way to tune it.
+
+## Changes
+
+- `pkg/util/etcd/etcd_util.go`: add `WithDialTimeout` client option (a
+non-positive value keeps the default).
+- `pkg/util/paramtable/service_param.go`: add `etcd.dialTimeout` param
+and wire it through `EtcdConfig.ClientOptions()`.
+- `configs/milvus.yaml`: document the new option.
+- `pkg/config/etcd_source.go` + `pkg/config/source.go` +
+`pkg/util/paramtable/base_table.go`: thread `dialTimeout` into the
+bootstrap config-source client as well (see below).
+
+Every paramtable-based etcd client honors it: meta kv, coordinator/node
+services, and the woodpecker WAL builder (the `streaming.Init()` path
+from the issue, which already passes `ClientOptions()...`).
+
+## Bootstrap config-source client
+
+The bootstrap config-source client (`pkg/config/etcd_source.go`) is
+created before paramtable is fully ready, so it cannot read
+`etcd.dialTimeout` from etcd itself. But it does not need to:
+`initConfigsFromLocal()` loads the file/env config source *before*
+`initConfigsFromRemote()` builds the `EtcdInfo`, and the client&#39;s
+endpoints/auth/TLS are already read from there. `dialTimeout` is
+threaded through the same `EtcdInfo` path, so a value set in
+`milvus.yaml`/env applies to this client too. A zero/non-positive value
+is a no-op, so unconfigured behavior stays at the 5s default.
+
+The only remaining paths still on the fixed default are CLI/offline
+tools and the etcd `HealthCheck` (which uses a short fixed 3s context) —
+intended.
+
+issue: #50867
+
+---------
+
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Signed-off-by: xiaofanluan &lt;xiaofan.luan@zilliz.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- test: adjust mac code checker triggers (#50909)
+
+This PR disables automatic pull_request triggers for Mac Code Checker
+and separates non-PR concurrency by branch or SHA so master commits are
+not displaced while pending. Test: git diff --check.
+
+---------
+
+Signed-off-by: Zhikun Yao &lt;zhikun.yao@zilliz.com&gt;
+
+- fix: handle unaligned mmap-backed Arrow buffers (#50893)
+
+issue: #50884 
+Align mmap allocations to max_align_t and copy fixed-width Arrow buffers
+when source memory is not aligned for the element type.
+
+Add coverage for mmap allocation alignment.
+
+Signed-off-by: luzhang &lt;luzhang@zilliz.com&gt;
+Co-authored-by: luzhang &lt;luzhang@zilliz.com&gt;
+
+- fix: serialize cached text LOB reader access (#50862)
+
+issue: #50828
+
+---------
+
+Signed-off-by: luzhang &lt;luzhang@zilliz.com&gt;
+Co-authored-by: luzhang &lt;luzhang@zilliz.com&gt;
+
+- test: add schema evolution e2e coverage (#50826)
+
+## What
+- Add drop field e2e coverage for MilvusClient.
+- Add function field e2e coverage.
+- Refine schema evolution e2e coverage.
+- Bump pymilvus test dependency to 3.1.0rc49.
+
+## Test
+- Not run in this turn; PR contains Python e2e test coverage changes.
+
+---------
+
+Signed-off-by: lyyyuna &lt;yiyang.li@zilliz.com&gt;
+
+- enhance: Enable compaction storage format for woodpecker nightly (#50886)
+
+issue: #50884
+
+## What this PR does
+- Enable `dataCoord.compaction.storageVersion` for woodpecker nightly
+values.
+- Enable `dataCoord.compaction.storageFormat` for woodpecker nightly
+values.
+
+## Tests
+- Not run (helm values only).
+
+Signed-off-by: nico &lt;cheng.yuan@zilliz.com&gt;
+
+- fix: filter snapshot segments by channel seek positions (#50827)
+
+issue: #50663
+
+This PR stores per-channel snapshot seek positions and uses each
+segment&#39;s own insert channel seek timestamp when selecting snapshot
+segments. `create_ts` remains a compatibility summary timestamp equal
+to the minimum channel seek timestamp.
+
+It rejects invalid or missing channel seek positions instead of
+falling back to `create_ts`, and updates snapshot metadata roundtrip
+coverage and design notes.
+
+Validation:
+- make generated-proto-without-cpp
+- make milvus
+- make lint-fix
+- git diff --check
+- gofmt -l internal/datacoord/handler.go
+internal/datacoord/handler_test.go internal/datacoord/snapshot_test.go
+pkg/proto/datapb/data_coord.pb.go
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- fix: adjust query node NQ grouping defaults (#50897)
+
+issue: #50896
+
+- query node scheduler: raise NQ grouping defaults to allow larger
+merged query batches
+- paramtable: align built-in and YAML defaults and cover the values in
+default config tests
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+
+- enhance: migrate pkg from gopsutil/v3 to gopsutil/v4 (#50888)
+
+## What
+
+Milvus&#39; own code in `pkg` still imported `github.com/shirou/gopsutil/v3`
+(cpu, disk, mem, process), while the root module already depends on
+`gopsutil/v4` — so the codebase carried **both** major versions. This
+migrates the six `pkg` files to `gopsutil/v4`, unifying our code on one
+major version.
+
+## Why
+
+- One gopsutil major version across the repo instead of two.
+- `gopsutil/v4` drops the `github.com/shoenig/go-m1cpu` (darwin/arm64
+cgo) dependency. See the note below — this PR does not fully remove it,
+but it removes our code&#39;s reliance on the v3 path.
+
+## How
+
+Pure import-path change `gopsutil/v3/*` → `gopsutil/v4/*` in:
+
+- `pkg/util/hardware/hardware_info.go`
+- `pkg/util/hardware/mem_info.go`
+- `pkg/util/hardware/mem_info_darwin.go`
+- `pkg/util/hardware/mem_info_windows.go`
+- `pkg/util/paramtable/component_param.go`
+- `pkg/util/vralloc/alloc.go`
+
+The v3 APIs in use (`cpu.Percent`/`cpu.Times`, `mem.VirtualMemory`,
+`disk.Usage`, `process.NewProcess`) are unchanged in v4, so there is
+**no behavioral difference**. `go.mod`/`go.sum` updated and tidied for
+`pkg` and `client`.
+
+## Notes for reviewers
+
+- **go-m1cpu is not fully removed.** `gopsutil/v3` (and its transitive
+`go-m1cpu`) is still pulled as an indirect dependency by
+`pulsar-client-go` and `woodpecker`, whose latest releases remain on v3.
+Fully dropping it requires those upstreams to move to v4. go-m1cpu only
+compiles on darwin/arm64, so it is never built in Linux production.
+- **Root `go.mod` is unchanged** — it already had `gopsutil/v4` as a
+direct dependency.
+- **`client/go.mod` churn:** besides the v3→v4 indirect bump, `go mod
+tidy` incidentally cleans up pre-existing drift in the client module&#39;s
+indirect list (stale etcd/otel entries no longer needed). Verified with
+Go 1.26.4, matching the module `go` directive.
+
+## Verification
+
+- `go build` of affected `pkg` packages and the `client` module: pass
+- `go test -tags dynamic,test` for `pkg/util/hardware` and
+`pkg/util/vralloc`: pass
+
+issue: #50887
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- enhance: speed up expr parsing with SLL-first two-stage ANTLR prediction (#50782)
+
+issue: #50781
+
+## What this PR does
+
+Two parse-path enhancements in `internal/parser/planparserv2` (no
+grammar regeneration, no public API change):
+
+- **SLL-first two-stage parse** (`parseExpr`): parse with
+`PredictionModeSLL` first; only if SLL cannot decide, rewind the token
+buffer and reparse with full `PredictionModeLL` + default recovery. A
+clean SLL parse is provably identical to a pure-LL parse.
+- **Drop ANTLR&#39;s default `ConsoleErrorListener`** in the pooled
+lexer/parser so a syntax error no longer does stderr I/O on the hot
+failure path.
+
+Note: `antlr-go` v4.13.1 (and upstream `dev`) ship `BailErrorStrategy`
+with an unimplemented `ParseCancellationException` (`panic(&#34;implement
+me&#34;)`), so the standard bail-based two-stage cannot be used; &#34;SLL could
+not decide&#34; is detected via a probe error listener instead.
+
+## Performance — the win is concentrated, not uniform
+
+Parse-only (lex+parse, AST cache bypassed), separate cold-start
+processes, min of repeated runs (GC-noise filtered). The honest
+per-expression picture:
+
+| expression class | example | LL → TS | allocs/op |
+|---|---|---|---|
+| **range compare `a&lt;x&lt;b`** | `10 &lt; Int64Field &lt; 100` | **~58000 → ~8700
+ns (~7× faster)** | **1295 → 184** |
+| equality / comparison | `Int64Field == 100` | ~neutral (±2%) | 175 →
+177 |
+| `in`, `like`, `is null`, JSON, `&amp;&amp;`/`||` | `StringField like &#34;x%&#34;` |
+~neutral (±2%) | +2 |
+| large `in[...]`, bitwise, deep logical | — | ~neutral (±3%) | ~equal |
+
+The grammar&#39;s `Range`/`ReverseRange` alternatives are ambiguous with
+nested `Relational`, which drives ANTLR&#39;s full-LL prediction into a
+pathological path (1295 allocs for one `a&lt;x&lt;b`). SLL resolves it
+directly. **That single class accounts for essentially all of the
+aggregate gain (~-19% ns/op, -21% allocs across a 144-expression
+corpus); every other expression class is within measurement noise of
+LL.** The only added cost is one ~40-byte allocation per parse (the
+probe listener).
+
+So this is high value if range filters (`10 &lt; age &lt; 100`) are common in
+the workload, and neutral otherwise — not a uniform speedup.
+
+## Correctness
+
+The SLL two-stage parse is verified to produce the **exact same parse
+tree** as a pure-LL parse, compared structurally via
+`antlr.TreesStringTree` (an S-expression that encodes nesting — unlike
+`GetText()`, which only concatenates leaf tokens and cannot detect a
+precedence/associativity divergence). Verified across:
+- the existing benchmark corpus (`TestTwoStageMatchesLL`),
+- ~106 valid expressions, simple → complex, covering comparisons,
+arithmetic/bitwise/shift/unary/power, ranges, IN, string/like/regex,
+arrays, JSON, struct fields, null/exists, text/phrase/match_*,
+random_sample, spatial `st_*`, timestamptz (which exercises the SLL→LL
+fallback), template variables, calls and deep nesting
+(`TestTwoStageMatchesLL_Corpus`),
+- 13 malformed expressions, rejected identically by both strategies
+(`TestTwoStageMatchesLL_Invalid`).
+
+Full `planparserv2` package test suite passes;
+`gofumpt`/`gci`/`golangci-lint` clean.
+
+## Evaluated and rejected
+
+Moving the two leading `Timestamptz*` `expr` alternatives out of the
+grammar was measured to change parse time by **&lt;1%** with identical
+allocations (the DFA caches the decision after first use), so it is
+intentionally **not** included.
+
+/kind enhancement
+
+---------
+
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- enhance: scale datanode object-storage IO pool with node size (#50809)
+
+issue: #50808
+
+### What this PR does
+
+The datanode object-storage IO pool (`GetOrCreateIOPool`) bounds how
+many binlog **download/upload** operations run concurrently. It is
+shared by all **compaction** (mix / L0 / sort / clustering) and
+**stats** (sort / text index / json key) tasks on a DataNode.
+
+Its size was hard-capped at **32** with a default of only **16**,
+regardless of node size:
+
+```go
+capacity := paramtable.Get().DataNodeCfg.IOConcurrency.GetAsInt() // default 16
+if capacity &gt; 32 { capacity = 32 }                                // hard-coded since #19892 (2022)
+```
+
+On large nodes this pool — not object-storage bandwidth — became the
+throughput ceiling for compaction/stats IO (notably after bulk import,
+when many sort/compaction tasks contend for it), and an explicit
+`ioConcurrency &gt; 32` was silently clamped back to 32.
+
+### Changes
+
+- `dataNode.dataSync.ioConcurrency` now defaults to **auto (`0` →
+`CPU*2`)** instead of `16`.
+- Removed the hard-coded `&gt; 32` clamp — an explicit value is honored
+as-is.
+- Extracted `ioPoolCapacity()` and added a unit test.
+
+`CPU*2` is safe because these goroutines are network-IO bound and mostly
+blocked on object storage, so concurrency can exceed the CPU count (same
+rationale as the existing stats/multiRead pools in this file).
+
+### Notes / follow-up
+
+Downloads currently materialize whole objects in memory, so concurrency
+must still be raised with memory in mind — the original `32` cap traces
+back to an OOM fix (#33554). Making downloads streaming / range-based
+(so concurrency can be raised further without memory blow-up) is a
+follow-up. Related: #50452 (storage v3 import slowdown).
+
+### Tests
+
+- `TestIOPoolCapacity` (new): explicit config honored; `0` → `CPU*2`.
+- Existing `TestGetOrCreateIOPool`, `TestResizePools` pass.
+
+---------
+
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- enhance: speed up sort compaction in storage.Sort (#50817)
+
+issue: #50815
+
+### What this PR does
+
+`storage.Sort` (the sort-compaction core, `internal/storage/sort.go`)
+was slow and allocation-heavy on wide / many-column segments:
+
+- the row selection was a `[]*index` — one heap allocation per selected
+row;
+- the sort comparator did a `Column()` map lookup + type assert on every
+comparison (`O(N log N)`);
+- the output write did a `Column()` map lookup for every `(row, field)`
+pair.
+
+This optimizes the in-memory sort core while keeping the **same
+signature, output order, and the exact per-batch byte sizing**:
+
+- selection kept in a **value slice** (`[]rowIndex`) instead of
+`[]*index` → no per-row heap alloc;
+- **sort keys extracted into flat per-record slices once**, so the
+comparator does plain slice indexing;
+- each output column&#39;s source array is **resolved once per input
+record** (not per row); rows are then emitted in order and the batch
+flushed **exactly when it reaches `batchSize` bytes** (same as before).
+
+`appendValueAt` and the byte-based flush are reused unchanged, so every
+field type / nullability / default-value, and the &#34;one output record ≤
+batchSize&#34; guarantee, behave identically.
+
+### Results
+
+Measured through a black-box harness that drives the production
+`storage.Sort` and asserts globally non-decreasing PK output.
+Allocations are deterministic; ns/op is directional:
+
+| schema | allocs/op (before → after) | ns/op (before → after) |
+|---|---|---|
+| 100 scalar columns | 232,877 → ~28,000 | ~1540M → ~290M (~5×) |
+| realistic (PK + 5 scalars + vec128) | 201,563 → ~1,500 | ~123M → ~68M
+(~1.8×) |
+| narrow (PK + 2 scalars) | 200,233 → ~240 | ~70M → ~31M (~2.2×) |
+| PK + vector(768) | 207,957 → ~2,700 | ~179M → ~120M (~1.4×) |
+
+Output is order-identical across int64 and varchar PK with scalar,
+vector and 100-column schemas (zero ordering violations). Peak memory is
+unchanged.
+
+### Note on the write loop
+
+A column-major write variant was benchmarked head-to-head against this
+row-major form: it only helped many-scalar-column schemas (~8% on a
+101-column table) and was actually **~14% slower with ~75% more
+allocated bytes on vector-heavy schemas** (its coarser batch flush
+overshoots the byte target). So the simpler **row-major** form (exact
+byte flush, same structure as the original) is kept — it is
+equal-or-better on the common vector-heavy / moderate-width shapes and
+has no batch-overshoot.
+
+### Verification note
+
+The `internal/storage` test binary does not compile in my local
+environment (a stale prebuilt C++ header makes an unrelated
+`internal/util/initcore` test dependency fail), so correctness + speed
+were validated by driving the production `storage.Sort` from a separate
+black-box package and asserting sorted output across all the schemas
+above. The existing `TestSort` / `TestSortByMoreThanOneField` /
+`BenchmarkSort` cover this code and run in CI.
+
+### Follow-up (separate PRs, need a design doc)
+
+- Per-physical-column-group processing to bound peak memory below the
+whole segment.
+- Same columnar treatment for `storage.MergeSort` (used by mix
+compaction).
+
+Relevant to the storage-v3 import slowdown in #50452 (sort compaction is
+on the post-import critical path).
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- test: Increase PyMilvus version to 3.1.0rc52 from master for master branch (#50875)
+
+Automated bump from pymilvus master branch to milvus master branch.
+Updates tests/python_client/requirements.txt.
+
+Signed-off-by: pymilvus-bot &lt;pymilvus@zilliz.com&gt;
+
+- fix: int8/int16 array element stride, nested-sort ByteSize, and uncharged array offsets in struct/scalar array index paths (#50841)
+
+issue: #50840
+
+## What
+
+Fixes pre-existing nested array-index bugs shared by **struct sub-field
+arrays** and **scalar arrays**, with struct-array test coverage.
+
+## Proven bug fixes
+
+- **INT8/INT16 element stride** (`common/Array.h`):
+`ArrayView::get_data` read int8/int16 array elements with the wrong
+stride (they are physically stored as `int32_t`).
+`MATCH_*`/`element_filter` on int8/int16 array elements returned wrong
+values. Now uses the 4-byte stride + narrow, mirroring
+`Array::get_data`.
+- **Nested-sort `ByteSize()`** (`index/ScalarIndexSort.cpp`):
+`BuildWithArrayDataNested` missed `ComputeByteSize()`, so a nested
+numeric array sort index under-reported memory. Added the call.
+- **Uncharged all-zeros array offsets** (`common/ArrayOffsets.h` +
+`segcore/ChunkedSegmentSealedImpl.cpp`): the all-zeros
+`ArrayOffsetsSealed` built for schema-evolution/add-field old rows was
+never charged to the caching layer while the destructor refunds it →
+`~4*(row_count+1)` untracked bytes (OOM risk on large segments). Added
+`ArrayOffsetsSealed::BuildAllZeros` which charges and balances the
+refund.
+
+## Consistency / robustness
+
+- Nested array builds
+(`BitmapIndex`/`ScalarIndexSort`/`StringIndexSort`/`InvertedIndexTantivy`)
+now read rows via `RawValue(i)` instead of `Data()[i]`, matching the
+non-nested `BuildArrayField` path. The in-memory ARRAY `FieldData` is
+dense (`RawValue(i)==Data()[i]`) so this is **behavior-preserving
+today** (not a proven reachable bug); it hardens storage-backed/compact
+FieldData layouts.
+
+## Tests (`BitmapIndexArrayTest.cpp`)
+
+- Nullable nested arrays: NULL rows before valid rows + empty arrays
+mixed, BinarySet `Serialize→Load` and V3 `UploadUnified→LoadUnified`
+round-trips.
+- int8 / int16 element stride (incl. values outside int8 range) vs
+brute-force expectations.
+- Nested sort `ByteSize()&gt;0` + `In`/`Range`/`Reverse_Lookup` query.
+- Add-field all-zeros offsets with balanced resource charge/refund.
+
+Existing `MatchExpr*` / `ElementFilter*` / `BitmapIndexArray*` suites
+pass (160/160). C++ build green.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: xiaofanluan &lt;xiaofan.luan@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix: propagate json stats parquet close errors (#50856)
+
+issue: #50821
+
+Signed-off-by: luzhang &lt;luzhang@zilliz.com&gt;
+Co-authored-by: luzhang &lt;luzhang@zilliz.com&gt;
+
+- fix: reject search iterator v2 in hybrid search (#50605)
+
+## Summary
+
+Reject search iterator v2 for hybrid search because the current response
+metadata model only supports iterator v2 results for a single query
+info. This avoids returning hybrid search hits with empty iterator
+metadata that cannot be used for the next page.
+
+issue: #50407
+
+## Test Plan
+
+- [x] `git diff --check`
+- [x] `make milvus`
+- [x] `MILVUSCONF=/tmp/milvus_issue-50407/configs
+PKG_CONFIG_PATH=$(pwd)/internal/core/output/lib/pkgconfig
+LD_LIBRARY_PATH=$(pwd)/internal/core/output/lib go test -gcflags=&#34;all=-N
+-l&#34; -tags dynamic,test ./internal/proxy -run
+&#34;^TestSearchTask_ArrayOfVectorHybridSearch$&#34; -count=1 -ldflags=&#34;-r
+$(pwd)/internal/core/output/lib&#34;`
+
+Signed-off-by: xianliang.li &lt;xianliang.li@zilliz.com&gt;
+
+- fix: add topology-aware quorum reads and honor configured etcd metadata prefixes in wp (#50187)
+
+issue: #43638 
+
+update woodpecker to [release
+v0.1.31](https://github.com/zilliztech/woodpecker/releases/tag/v0.1.31)
+* fix(dashboard): add server runtime metrics  
+* fix(meta): honor configured etcd metadata prefix    
+* fix: make condition write auto mode fail on verification errors 
+* feat: split cluster, region, and az topology metadata 
+
+update woodpecker to [release
+v0.1.32](https://github.com/zilliztech/woodpecker/releases/tag/v0.1.32)
+* enhance: gate bucket check/create on createBucket for service mode 
+* enhance(docker): run server images as root by default
+* enhance(docker): bundle wp (wpcli) into server images for zero-config
+in-pod ops
+* fix(objectstorage): silence idle-spin DEBUG logs in MinioFileWriter
+sync loop , **related issue:** #48976
+* fix: cut read-path DEBUG log volume (per-read verbosity + idle
+tail-read spin)
+* feat(quorum): make client-side quorum config runtime-tunable via
+Dynamic[T]
+* feat(metrics): active-segment node metric + client dashboard panels 
+* feat: delete-log lifecycle with async local reclaim
+
+update woodpecker to [release
+v0.1.33](https://github.com/zilliztech/woodpecker/releases/tag/v0.1.33)
+* fix(reader): allow reopening at a truncated-but-not-yet-GC&#39;d position
+instead of force-advancing to the truncation point
+
+---------
+
+Signed-off-by: tinswzy &lt;zhenyuan.wei@zilliz.com&gt;
+
+- fix: ignore stale replicated txn body (#50848)
+
+issue: #50846
+
+- streaming replication: treat non-current txn messages covered by the
+replicate checkpoint as stale duplicates
+- replicate tests: cover stale txn body retry while another txn is in
+progress
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+
+- enhance: bump storage to bb3a975 (#50631)
+
+issue: #50630 #50624 
+bump storage to a27f61b
+
+Signed-off-by: jiaqizho &lt;jiaqi.zhou@zilliz.com&gt;</div>
+</div>
+
+<a href="../project/milvus-io_milvus.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

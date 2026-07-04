@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (19 commits) - facebookresearch/faiss - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (19 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a> /
+    Updates in main (19 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-02 04:53 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/facebookresearch/faiss/commits/main" target="_blank">https://github.com/facebookresearch/faiss/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This Faiss update significantly boosts performance and efficiency by implementing memory-mapped I/O for static SVS indices, optimizing vector distance calculations with RISC-V RVV and AVX/AVX512 SIMD instructions. The release also enhances stability and correctness through fixes to Pareto frontier logic and CUDA return checks, alongside resolving several flaky tests. Finally, it improves code quality with extensive Python formatting and linting, and by removing unused C++ includes.
+
+Russian:
+Это обновление Faiss значительно повышает производительность и эффективность за счет реализации ввода-вывода с отображением в память (memory-mapped I/O) для статических индексов SVS и оптимизации вычислений векторных расстояний с помощью инструкций RISC-V RVV и AVX/AVX512 SIMD. Релиз также улучшает стабильность и корректность благодаря исправлениям логики Парето-границы и проверок возвращаемых значений CUDA, а также устранению проблем с несколькими нестабильными тестами. Наконец, он повышает качество кода за счет комплексного форматирования и линтинга Python-файлов, а также удаления неиспользуемых включений C++.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Implement memory-mapped I/O for Flat and static Vamana SVS indices (#5271)
+
+Summary:
+This pull request adds support for memory-mapped I/O (mmap) loading of static SVS (Scalable Vector Search) indices in Faiss, enabling faster and more memory-efficient index loading. The main changes include implementing mmap-based deserialization for static Vamana and Flat indices, updating the index loading logic to use mmap when requested, and adding comprehensive tests for the new functionality.
+
+**Memory-mapped index loading support:**
+
+* Added `map_to` methods to `IndexSVSVamana` and `IndexSVSFlat` for loading static indices directly from memory-mapped files, including logic to manage memory mapping ownership and adjust file positions after mapping.
+
+**Index and file structure updates:**
+
+* Extended `IndexSVSVamana` and `IndexSVSFlat` classes to hold a reference to the mmap owner, ensuring the mapped memory remains valid for the lifetime of the index. Also added forward declarations and includes for mmap-related types.
+* Modified `reset` methods to release memory mappings when the index is reset, preventing resource leaks.
+
+**Testing and interface improvements:**
+
+* Enhanced test utilities and added new tests to verify correct mmap loading for various static Vamana index types, including FP32, FP16, SQI8, LVQ4x4, and LeanVec4x4 in `tests/test_svs.cpp`
+
+These changes collectively provide robust and efficient support for memory-mapped loading of static SVS indices, improving both performance and usability for large-scale vector search applications.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5271
+
+Reviewed By: alibeklfc
+
+Differential Revision: D108313487
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 4ae6dc3e69363b0c792cd56ad26b01bf6a853d28
+
+- faiss/gpu/perf: check CUDA return in PerfIVFPQAdd (clang21 nodiscard) (#5368)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5368
+
+Under Clang 21 (and its HIP/hipify path for AMD GPU builds), the AMD GPU build of the FAISS GPU perf benchmark fails `-Werror,-Wunused-value`:
+
+  error: ignoring return value of type &#39;hipError_t&#39; declared with &#39;nodiscard&#39; attribute [-Werror,-Wunused-value]
+
+`cudaProfilerStop()` / `cudaDeviceSynchronize()` return `cudaError_t`/`hipError_t`, which is `[[nodiscard]]`; the two bare calls -- at the top of `main()` and just before the timing loop -- silently dropped that. Both are wrapped in `CUDA_VERIFY()`, exactly as the rest of this same file already does, so a real device error surfaces rather than being masked.
+
+Differential Revision: D110259824
+
+fbshipit-source-id: 30e2def26e3c8607ec37decef8b3a91aaf790473
+
+- Fix OperatingPoints leaving dominated points on the Pareto frontier for equal-time points (#5334)
+
+Summary:
+`OperatingPoints.add_operating_point` (in `contrib/evaluation.py`) maintains a Pareto-optimal set of `(key, perf, t)` points where higher `perf` and lower `t` are better. The admission test `is_pareto_optimal` rejects a new point when an existing one dominates it using **non-strict** comparisons in both dimensions:
+
+```python
+if perf &gt;= perf_new and t &lt;= t_new:   # existing dominates new
+    return False
+```
+
+But the prune loop that removes previously-stored points the new point now dominates used a **strict** time comparison:
+
+```python
+if perf &gt;= perf2 and t &lt; t2:           # &lt;-- strict on time
+    self.suboptimal_points.append(self.operating_points.pop(i))
+```
+
+Because of this asymmetry, when a new point has **strictly better performance at the same time** as a stored point, the new point is admitted (it is not dominated), but the older point it now dominates is **not** removed. The frontier then contains a point dominated by another point in the same set, breaking the Pareto invariant. Dominated operating points leak into the &#34;optimal&#34; set used by the benchmark/auto-tune machinery (`benchs/bench_fw/utils.py`, `benchs/bench_hybrid_cpu_gpu.py`). This also diverges from the C++ `AutoTune::add` this is documented to port (`faiss/AutoTune.cpp`), which replaces an equal-perf point at lower-or-equal time.
+
+## Fix
+
+Use `t &lt;= t2` in the prune loop so it matches the admission test:
+
+```diff
+-                if perf &gt;= perf2 and t &lt; t2:
++                if perf &gt;= perf2 and t &lt;= t2:
+```
+
+This is safe: identical points never reach the loop (they fail `is_pareto_optimal` and go straight to `suboptimal_points`), so only genuinely dominated points are removed.
+
+## Validation
+
+Extracted the real `is_pareto_optimal` / `add_operating_point` logic verbatim and ran:
+
+- **Targeted:** add `A=(0.5, t=1.0)` then `B=(0.9, t=1.0)`. Before: frontier `[&#39;A&#39;, &#39;B&#39;]` (A dominated by B). After: `[&#39;B&#39;]`.
+- **Fuzz (2000 random sequences, coarse `t` to force equal-time ties):** dominated points left in the frontier — **before: 249, after: 0**.
+
+Added `TestOperatingPoints.test_equal_time_better_perf_shadows` to `tests/test_contrib.py` (pure-Python, no compiled core needed); it fails on `main` and passes with the fix.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5334
+
+Reviewed By: trang-nm-nguyen
+
+Differential Revision: D110116217
+
+Pulled By: limqiying
+
+fbshipit-source-id: 554b2bb92c22eb1c4b00896ec36fa1db46756f06
+
+- feat(riscv): Add RISC-V RVV vector distance kernels (#5354)
+
+Summary:
+This PR adds RISC-V RVV implementations for the float vector distance utilities under `COMPILE_SIMD_RISCV_RVV`.
+
+Implemented RVV specializations include:
+
+* `fvec_norm_L2sqr`
+* `fvec_L2sqr`
+* `fvec_inner_product`
+* `fvec_L1`
+* `fvec_Linf`
+* `fvec_inner_product_batch_4`
+* `fvec_L2sqr_batch_4`
+* `fvec_L2sqr_ny_transposed`
+* `fvec_inner_products_ny`
+* `fvec_L2sqr_ny`
+* `fvec_L2sqr_ny_nearest`
+* `fvec_L2sqr_ny_nearest_y_transposed`
+* `fvec_madd`
+* `fvec_madd_and_argmin`
+
+## Testing
+
+Tested on SG2044 with:
+
+* GCC 15.1
+* openEuler
+* RISC-V RVV enabled build
+
+The RVV results were validated against the scalar implementation, and numerical accuracy is aligned with the scalar path.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5354
+
+Reviewed By: mnorris11
+
+Differential Revision: D110116107
+
+Pulled By: limqiying
+
+fbshipit-source-id: cf6d8e205cfc5f6679c21f1a4e41c0f310d4a315
+
+- De-flake test_flat_panorama across SIMD levels (#5361)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5361
+
+`test_batch_boundaries` flaked (~36%) on the `AVX512_SPR` dispatch variant. The reference `IndexFlat` distance kernel is SIMD-dispatched, so its float reduction order changes with the runtime SIMD level (wide FMA under `AVX512_SPR`), while the `IndexFlatPanorama` kernel is compiled once at baseline and uses the algebraically-equivalent `a*a + b*b - 2ab` decomposition instead of `(a-b)^2`. Both are exact but round differently, so near-tied neighbors reorder at batch boundaries. The earlier scalar de-flake (D109488316 / D109488320, T276491016) only widened the `atol`/`otol` tolerance for the `_NONE` gap, leaving the larger `AVX512_SPR` gap.
+
+Fix: replace the brittle exact-id overlap-rate gate in `assert_search_results_equal` with the tie-aware comparator `faiss.contrib.evaluation.check_ref_knn_with_draws`, which requires distances to match within `rtol` and ids to agree only as sets within each distance tie-group. This is variant-agnostic (covers `NONE` / `AVX2` / `AVX512` / `AVX512_SPR`) and is the standard faiss kNN comparison helper used across the suite.
+
+Reviewed By: mnorris11
+
+Differential Revision: D110092203
+
+fbshipit-source-id: ec6fc8c6114d7dc9bb7b6911478a6d5b0b993b5c
+
+- Fix genuine flake8 lint in faiss Python (F401/F403/F841/B011) (#5351)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5351
+
+Fixes 45 genuine (non-style) flake8 issues across 20 faiss Python files, on top of the black-80 base in this stack. These are real code issues, not formatting.
+
+- `B011` (19): replaced `assert False` / `assert False, &#34;msg&#34;` with `raise AssertionError(...)`. `assert` statements are stripped under `python -O`, so an `assert False` guard silently vanishes in optimized builds; `raise AssertionError` always fires.
+- `F401` (10) / `F403` (7): the intentional star-import re-exports in `python/loader.py` and `python/loader_fb.py` (which expose the SWIG symbols as `faiss.X`) are annotated with `# noqa: F401,F403`; genuinely unused imports in test/bench scripts are removed.
+- `F841` (9): unused local variables removed, or replaced with `_` in tuple unpacking, preserving behavior.
+
+No runtime behavior changes; formatting stays at black width 80.
+
+Reviewed By: mnorris11
+
+Differential Revision: D109739445
+
+fbshipit-source-id: 7d140d86cab9b2df691003bd043fc880a31410cd
+
+- Align faiss .flake8 with black and the 80-char standard (#5350)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5350
+
+Fixes the faiss flake8 configuration so it matches the project&#39;s documented style and stops flagging code that black deliberately formats.
+
+- Sets `max-line-length = 80` to match faiss&#39;s documented coding style (`CONTRIBUTING.md`: &#34;80 character line length&#34;); Python is black-formatted at width 80 in the base of this stack.
+- Switches `ignore` to `extend-ignore`. The previous `ignore = E741` silently *replaced* pycodestyle&#39;s default-disabled list, which re-enabled checks black intentionally violates (`W503`/`W504` line-break placement, `E226` arithmetic spacing, `E121`/`E123`/`E126` continuation indent). `extend-ignore` keeps those defaults off.
+- Adds `E203` (whitespace before `:`) and `W503` (line break before binary operator) — the two documented black-vs-pycodestyle conflicts.
+
+Pure config change; no source files touched.
+
+Reviewed By: mnorris11
+
+Differential Revision: D109739446
+
+fbshipit-source-id: d304e29b9ac034e888509ade16a3fa8fe866eec0
+
+- Format faiss Python files with black (line length 80) (#5349)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5349
+
+# this is a no-op change
+
+Ran `black -l 80` over all tracked Python files under `fbcode/faiss/`, using line length 80 to match faiss&#39;s documented coding style (`CONTRIBUTING.md`: &#34;80 character line length (both for C++ and Python)&#34;). 172 files were reformatted; 28 were already compliant.
+
+This is a pure-formatting change. `black` runs its AST-equivalence safety check on every file, so no identifiers, string/numeric values, operators, or control flow were altered — only whitespace, indentation, line wrapping, blank lines, trailing commas, and string-quote normalization (single to double quotes).
+
+`fbcode/faiss/` is intentionally excluded from Meta&#39;s standard Python autoformatter (`arc f` / `arc lint -a` report no formatter for these paths) because it mirrors to public GitHub, so the Python had drifted out of any consistent style. The C++ is already clang-format-clean (0 of 807 files change), so this effort is Python-only. This diff brings the Python to canonical `black` formatting.
+
+Excluded `demos/index_pq_flat_separate_codes_from_codebook.py`: it contains a Jupyter `!rm` shell-magic line and is not valid Python, so `black` cannot parse it.
+
+This is the base of a 3-diff stack: (1) this black reformat; (2) `.flake8` alignment (max-line-length 80 + black-compatible ignores E203/W503); (3) genuine lint fixes (F401/F403/F841/B011).
+
+Reviewed By: mnorris11
+
+Differential Revision: D109736099
+
+fbshipit-source-id: 9a054635766ed11aa3760a788395babd3d198abf
+
+- faiss/gpu/perf: check cudaProfilerStop() return (fix clang21 -Wunused-value) (#5362)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5362
+
+Under clang21, this fails to compile in the
+HIP-ified build with -Werror,-Wunused-value: the leading cudaProfilerStop() in
+PerfClustering.cpp ignores its return value, which clang21 (via HIP&#39;s
+hipProfilerStop -&gt; hipError_t) treats as [[nodiscard]]:
+
+  PerfClustering.cpp:46:5: error: ignoring return value of type &#39;hipError_t&#39;
+  declared with &#39;nodiscard&#39; attribute [-Werror,-Wunused-value]
+      hipProfilerStop();
+
+Wrap it in CUDA_VERIFY(...) so the return code is inspected, exactly like every
+other CUDA-profiler / sync call in this same file (lines 91, 121, 124). This is
+the file&#39;s own convention; no behavior change for the success path.
+
+Differential Revision: D110109331
+
+fbshipit-source-id: eab3962d0dc53046464711b89a18e8dd18691673
+
+- De-flake bench_transposed_encode (CI timeout) (#5360)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5360
+
+`bench_transposed_encode` is an ad-hoc microbenchmark wired into CI as a plain `python_unittest`. It encodes 1,000,000 vectors with `ProductQuantizer.compute_codes`, single-threaded, repeated 5x, across all SIMD levels (`NONE`/`AVX2`/`AVX512`). Under `-c faiss.dynamic_dispatch=true` all three levels are available (the slow scalar `NONE` path is always available), so all three are timed — roughly tripling the work and pushing wall-clock right at the 600s test deadline (TestInfra showed `duration_min == duration_max == 600s`, avg 424s). It intermittently tripped the deadline, so TestWarden auto-disabled it (T277674127, dups T277525456 / T277525454).
+
+Fix: shrink the deterministic workload (`nb` 1,000,000 -&gt; 50,000, `ntrain` 100,000 -&gt; 20,000, `n_repeat` 5 -&gt; 2) so the run finishes well under the deadline even when DD mode times all three SIMD levels, and add the `tpx_labels.long_running` label for extra timeout headroom. The cross-level `compute_codes` coverage is preserved. The &#34;codes identical across levels&#34; line stays a diagnostic print (not an assertion), because scalar vs FMA reduction-order differences legitimately change nearest-centroid tie-breaks, so exact code equality across SIMD levels is not guaranteed.
+
+___
+
+Differential Revision: D110092205
+
+fbshipit-source-id: 2d4cabaf53e1dba0a1f74b7670f4cbbbebea1dbb
+
+- facebook-unused-include-check in IVFPQ_QueryTables.cpp (#5359)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5359
+
+Reviewed By: limqiying
+
+Differential Revision: D109839934
+
+fbshipit-source-id: e4bddd01f709c4d9974af5fc539dd94c4268dcd9
+
+- facebook-unused-include-check in avx2.cpp (#5358)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5358
+
+Reviewed By: limqiying
+
+Differential Revision: D109840028
+
+fbshipit-source-id: a8550829b835f6c948d3c39cbba565d96c8e099f
+
+- facebook-unused-include-check in hamming.cpp (#5355)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5355
+
+Reviewed By: limqiying
+
+Differential Revision: D109840214
+
+fbshipit-source-id: 0dfb347cf0210b7d448e2433acc8720f726b9bf9
+
+- facebook-unused-include-check in IndexIVF.cpp (#5356)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5356
+
+Reviewed By: limqiying
+
+Differential Revision: D109839982
+
+fbshipit-source-id: b8ed6cc19fe209aa25df2a4c545289a52ea6c0c3
+
+- facebook-unused-include-check in IndexIVFSpectralHash.cpp (#5357)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5357
+
+Reviewed By: limqiying
+
+Differential Revision: D109840301
+
+fbshipit-source-id: 3efab98ddf9e52099925b3cabe405429ab4dae05
+
+- De-flake test_meta_index.Shards.test_shards (loosen tie-churn tolerance) (#5348)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5348
+
+Failing test: https://www.internalfb.com/intern/test/281475333622770 (`test_meta_index.Shards.test_shards`, DISABLED / ~74% flaky on the `faiss` oncall: https://www.internalfb.com/omh/view/faiss/tests).
+
+The data is seeded (`random_unitary`), so this is not an RNG issue. `IndexShards` merges per-shard top-k by distance; float32 ULP ties at the k=32 boundary reorder neighbors vs. the unsharded `IndexFlatL2` reference, and the threaded shard merge makes the ordering nondeterministic. The mismatch count hovers right at the `nq*k/1000` (0.1%) floor, so it trips ~74% of runs.
+
+Fix: raise the tolerance to `nq*k/100` (1%) with an explanatory comment; a genuine sharding/merge regression collapses thousands of the `nq*k=32000` cells, far above this floor.
+
+Reviewed By: mnorris11
+
+Differential Revision: D109643858
+
+fbshipit-source-id: f33cddacecf956421eedb6e204fa1754c5fb128f
+
+- De-flake test_refine_panorama.test_incremental_add (seed + tolerance) (#5347)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5347
+
+Failing test: https://www.internalfb.com/intern/test/844425256556599 (`test_refine_panorama.TestIndexRefinePanorama_ARM_NEON` - `test_incremental_add`, ~97.5% flaky on the `faiss` oncall: https://www.internalfb.com/omh/view/faiss/tests).
+
+`test_incremental_add` is the only test in the file that draws its incremental batches and queries from a bare unseeded `np.random.rand`, so near-tied neighbors reorder run-to-run. Two compounding causes: (1) unseeded data; (2) `IndexRefineFlat` computes L2 as `(a-b)^2` while `IndexRefinePanorama` uses `a*a+b*b-2ab`, which diverge at the float32 ULP level and trip the default `atol=1e-7`.
+
+Fix: seed the draw with `np.random.seed(1234)` (mirrors the sibling `test_add_search_add_search`) and pass `atol=1e-4` to `assert_search_results_equal`. The strong `otol=1e-3` ID-overlap floor is unchanged, so a real refinement regression still trips the test.
+
+Reviewed By: mnorris11
+
+Differential Revision: D109643860
+
+fbshipit-source-id: aaeed2f0a53e9057f8ed43d0665ecfdfac58cd92
+
+- Faiss OSS nightly autofix (#5346)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5346
+
+Automated fix for the Faiss OSS nightly build.
+
+Reviewed By: mnorris11, junjieqi
+
+Differential Revision: D109631405
+
+fbshipit-source-id: be7eeb70e39b998098cb1781cba4cdcea7ffc083
+
+- Speed up Top1 and Reservoir add_results with AVX2/AVX512 (#5297)
+
+Summary:
+This PR replaces the scalar `add_results` loops in `Top1BlockResultHandler` and `ReservoirBlockResultHandler` with runtime-dispatched SIMD kernels.
+
+### Top1 (k=1)
+
+- **AVX2:** 8-wide branchless argmin/argmax via `_mm256_blendv_ps` / `_mm256_blendv_epi8`, with horizontal reduction and scalar tail.
+- **AVX512:** 16-wide via `_mm512_mask_blend_ps` / `_mm512_mask_blend_epi32`.
+
+### Reservoir (k&gt;1)
+
+- **NONE:** Scalar path with `res.i` and `res.threshold` hoisted into local variables, eliminating per-iteration struct field reloads caused by `float*` / `int64_t*` aliasing.
+- **AVX512:** `VPCOMPRESSPS` + `VPCOMPRESSD` bulk-insert all elements beating the threshold in a single pass. Indices are widened from int32 to int64 via `_mm512_cvtepi32_epi64`. Falls back to the scalar path when reservoir capacity &lt; 32 (2× lane width), where compress setup cost outweighs throughput benefit.
+
+### Performance
+
+Benchmarking using `benchs/bench_index_flat.py` (on Xeon) gives the below gains.
+
+```
++-----+------+------+------+-------+
+|  d  | k=10 | k=32 | k=64 | k=100 |
++-----+------+------+------+-------+
+|  16 | +10% | +15% | +28% |  +31% |
+|  32 |  +7% | +12% | +25% |  +28% |
+|  64 |  +7% | +11% | +21% |  +25% |
+| 128 |  +7% | +10% | +18% |  +19% |
++-----+------+------+------+-------+
+```
+k=1 is neutral — distance compute dominates at all tested dimensions.
+
+Raw results (old and new): https://gist.github.com/mulugetam/82ef99c25f532f7439070c802b746865
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5297
+
+Reviewed By: mdouze
+
+Differential Revision: D108307969
+
+Pulled By: mnorris11
+
+fbshipit-source-id: b50fcb45875d8c2a416dc3f3f1923748a694c584</div>
+</div>
+
+<a href="../project/facebookresearch_faiss.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
