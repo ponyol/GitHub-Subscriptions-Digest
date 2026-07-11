@@ -1,0 +1,1602 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (32 commits) - tensorlakeai/tensorlake - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (32 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/tensorlakeai_tensorlake.html">tensorlakeai/tensorlake</a> /
+    Updates in main (32 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/tensorlakeai_tensorlake.html">tensorlakeai/tensorlake</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-11 05:55 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/tensorlakeai/tensorlake/commits/main" target="_blank">https://github.com/tensorlakeai/tensorlake/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Недавние обновления CLI и SDK TensorLake значительно повышают производительность и удобство использования. Основные улучшения включают значительно ускоренные операции `tl fs mount` за счет сокращения сетевых обращений, упрощенную интеграцию с обычным Git через `tl git setup` и более надежную синхронизацию файловой системы с согласованием состояния ядра. Обновления также включают автоматические коммиты, управляемые событиями, улучшенное логирование демона, надежную поддержку FSKit в macOS, а также различные исправления стабильности в командах `fs` и `git`.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- tl fs mount: one-round-trip fast path, credential reuse, phase timings (#833)
+
+## Why
+
+`time tl fs mount nomad nomad101` → 5.3s on a sandbox. The daemon.log
+showed the FUSE attach takes 3ms; the rest was a strictly serial chain
+of HTTPS round trips across two processes, about half of it redundant:
+
+1. CLI: mint (or cached) → `list_repos` (existence probe) → `ref_status`
+(seed pre-check) → `create_workspace`
+2. Daemon: **a second unconditional platform mint** → `ref_status` +
+serve-probe of the commit the create response had already named → FUSE
+attach
+3. CLI: readiness poll on a flat 250ms grid
+
+## What
+
+- **One-round-trip fast path**: the CLI attempts `create_workspace`
+outright and classifies the server&#39;s answer for the slow paths — 404
+&#34;not found&#34; → try the target as a workspace id (attach), 400 &#34;has no
+commits&#34; / &#34;does not resolve to a commit&#34; → seed the unborn default
+branch and retry (writable mounts only; same rules and error messages as
+before). `list_repos` and the `ref_status` pre-check leave the common
+path entirely.
+- **Credential reuse**: the daemon reads the config-dir credential cache
+the CLI just wrote (repo scope, then `*`) before minting; the rotation
+task still re-mints before expiry. Kills the second platform-ingress
+mint.
+- **`MountState.start_oid`** → `MountOptions::start_oid` (new in
+gsvc-mount): the daemon adopts the create/attach response&#39;s commit with
+zero round trips of its own; the follow poll reconciles a stale start
+within one interval. Exception: a writable attach of a shared-rw
+workspace follows the target branch (a ref the response says nothing
+about) and still resolves itself.
+- **Readiness poll ramps 15ms→250ms** instead of a flat 250ms grid.
+- **Phase timings**, info level: the CLI logs
+`phase=session|workspace|daemon … &#34;mount timing&#34;` (+`total_ms`) to
+stderr; the daemon logs credential source, `mount: core ready`, warmup,
+and `startup_ms` on the serving line into daemon.log.
+
+Net: daemon startup goes from 3+ serial network calls (incl. a platform
+mint) to zero before the kernel attach; the CLI chain drops from 4 round
+trips to ~1–2 (create, plus mint only when the cache is cold).
+
+## Ordering
+
+Requires gsvc-mount with `MountOptions::start_oid`: **merge
+tensorlakeai/artifact_storage#95 first** — the full CLI build vendors
+gsvc-mount from that repo&#39;s main, so this PR&#39;s `mount`-feature build
+fails until it lands.
+
+## Validation
+
+- `cargo test -p tensorlake-cli --features mount,git-clone` (against
+artifact_storage#95&#39;s gsvc-mount, swapped in via the build-cli-full
+mechanism): 226 passed
+- Default-features build + tests (placeholder crates): 199 passed
+- clippy introduces no new warnings; `cargo fmt` clean
+- Server-side contract test pinning the 404/400 statuses + messages the
+classifier reads lands in artifact_storage#95
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- tl git setup: one-command plain-git wiring (remote + credential helper) (#829)
+
+## What
+
+Makes a TensorLake repo usable with plain `git` — `git push`, `git
+pull`, `git fetch` — through a single command, with no manual `git
+remote add` or `git config` steps.
+
+### `tl git setup [REPO] [--remote &lt;name&gt;] [--create]`
+
+Runs the whole wiring end to end (repo defaults to the worktree
+directory name, remote to `tl`):
+
+1. Verifies the repo exists in the project; `--create` creates it,
+otherwise the error points at `tl git create`.
+2. Points a remote at the repo URL. If **any** existing remote already
+has the URL (e.g. the `origin` a `tl git clone` leaves behind), it is
+reused instead of adding a second name; otherwise the named remote is
+added, or its URL updated in place. URL comparison tolerates trailing
+`/` and `.git`.
+3. Registers the credential helper (below) in the repo&#39;s **local** git
+config.
+4. Smoke-tests with `git ls-remote`, exercising remote → helper → mint →
+server auth in one shot before declaring success.
+
+### `tl git credential-helper` (hidden)
+
+Speaks git&#39;s credential protocol over stdio:
+
+- **get** — serves a cached minted token or mints a repo-scoped one,
+then caches it (`~/.config/tensorlake/git-credentials.toml`, shared with
+`tl fs`). Project and repo are derived from the URL path, which git
+passes because setup enables `credential.&lt;host&gt;.useHttpPath`. Emits
+`password_expiry_utc` so git ≥ 2.41 evicts stale credentials.
+- **erase** — git calls it after a 401; purges the token cache so the
+next fetch re-mints instead of replaying a revoked token.
+- **store** — no-op.
+- Soft failures (not logged in, unknown host, mint error) print a hint
+to **stderr** and nothing to stdout, exiting 0, so git falls through to
+prompting instead of hard-failing. Honors `TENSORLAKE_GIT_TOKEN` for
+local/self-hosted development. Bypasses the interactive login/init guard
+— a helper must never pop a login flow mid-fetch.
+
+### Design decisions
+
+- **Repo-local registration, not global**: the helper command bakes in
+`--organization` (git invokes helpers with arbitrary cwd, far from any
+`.tensorlake/config.toml`), and different repos on one machine can
+belong to different orgs.
+- A leading **empty helper value** resets the inherited helper list,
+keeping macOS&#39;s system-wide `osxkeychain` from storing short-lived
+tokens and replaying them after expiry.
+- `tl git clone` registers the same helper in the fresh checkout, so
+plain git keeps working after the clone-time token expires.
+- The minted-credential cache in `config/files.rs` loses its
+`mount`-feature gate — the helper runs on every fetch/push and must not
+pay a mint round trip each time.
+
+### Also
+
+- `justfile`: `build-cli-full` (and the `build-cli-mount` alias) now
+read the private checkout location from `ARTIFACT_STORAGE_DIR` (default
+`../artifact_storage` unchanged).
+
+## Test plan
+
+- `cargo test -p tensorlake-cli`: 398 passing, including new unit tests
+for protocol parsing, path→project/repo derivation, host mapping, remote
+reuse/add/update against a real `git init` tempdir, and repo-local
+helper registration idempotency.
+- Manual: helper binary exercised directly for wrong-host silence,
+env-token override, store no-op, and logged-out soft failure;
+`--features git-clone` path verified against the real gsvc-codec source
+via `just build-cli-full`.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- tl fs sync: converge kernel view for newly appeared files (ls shows it, cat says ENOENT) (#832)
+
+## Bug
+
+After a clean fast-forward `tl fs sync`, a newly pulled file showed in
+`ls` but `cat` returned ENOENT:
+
+```
+❯ tl fs sync .
+Synced with fa2499f44b8c (0 path(s) pulled); workspace fast-forwarded.
+❯ cat hi.txt
+cat: hi.txt: No such file or directory
+❯ ls
+hi.txt
+```
+
+A lookup answered ENOENT before the sync lives on as a kernel-cached
+negative dentry that readdir traffic never revalidates. Two gaps made it
+stick: the refresh delta only named paths the mount had already served
+(a first-appearance name is in neither `rebound` nor `staled`), and the
+sync-side probe — the only convergence lever on macOS/FSKit, which has
+no kernel notify channel — ran for conflict paths only.
+
+## Fix
+
+- **Overlay** (`refresh_outputs`, replacing `translate_delta` + the
+ad-hoc probe list): one pass over the delta produces both FUSE
+invalidations (Linux notifier: `inval_entry` on the live parent drops
+the negative dentry) and merged-coordinate probe expectations, with
+shared shadow/interned filters so the two views cannot drift.
+- **Daemon**: every poll site (ref watcher, auto-commit post-seal poll,
+`refresh` control op) banks probe expectations in a shared accumulator;
+the `refresh` control op drains the whole backlog into its reply
+(`&#34;changed&#34;: [{path, present, size?}], &#34;complete&#34;: bool`). A background
+poll that consumes the very ref advance a concurrent sync triggered no
+longer swallows the probe list.
+- **`tl fs sync` / `tl fs snapshot`**: converge the kernel view over the
+drained probe list on macOS — `Present`/`Absent` per change kind, and
+`FileSize` (with `msync(MS_INVALIDATE)` page purge) for rebound files so
+modified content doesn&#39;t serve stale cached bytes. Linux keeps relying
+on the notifier. Warnings surface a pre-fix daemon (remount to fix) and
+incomplete enumeration (stat-walk fallback, where appearance info is
+unknowable).
+- **`converge_kernel_view`**: deadline checked per path, later rounds
+re-probe only unsettled paths — bounds branch-jump-sized syncs.
+- Wire shape is a shared serde type (`KernelExpectation`), so daemon and
+CLI cannot drift.
+
+## Dependencies
+
+Requires the matching gsvc-mount change (`RefreshDelta::appeared:
+Option&lt;Vec&lt;String&gt;&gt;` + rebound sizes on `InvalEntry`) from the
+artifact_storage PR — vendored at build time via `just build-cli-full`.
+
+## Testing
+
+- `cargo test -p tensorlake-cli --features mount,git-clone` with real
+mount sources swapped in: 219 passed.
+- artifact_storage: gsvc-mount unit tests + full `e2e_git` suite (105
+passed), including a new regression assert that a name ENOENT&#39;d before a
+snapshot is reported in `appeared` after the ref moves.
+- Clippy clean on the touched code; placeholder crate sources restored
+(no private source committed).
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- tl git create: mint a push credential; tl fs: default the mount path to the CWD&#39;s mount (#831)
+
+## What
+
+**`tl git create` (and `tl git repo create`)** now makes new repos
+immediately usable:
+
+- Prints the remote URL, a ready-to-run `tl git push &lt;repo&gt; &lt;branch&gt;`
+example, and a repo-scoped short-lived credential
+(username/password/expiry) for CI or direct HTTP access.
+- `--json` output gains a `credential` object alongside `repo`/`url`.
+- The creation is reported before minting: if the mint fails (env-token
+dev setups, PATs without token scope, transient errors), the command
+still succeeds with a `run tl git token &lt;repo&gt;` warning — no more &#34;repo
+already exists&#34; retry traps after a partial failure.
+
+**`tl fs` path-addressed commands** (`snapshot`, `promote`, `sync`,
+`status`, `restore`, `diff`, `unmount`) now default their
+mounted-directory argument to the registered mount containing the
+current directory, so from inside a mount you can just run:
+
+```
+tl fs snapshot
+tl fs status
+tl fs promote main
+tl fs diff abc123 def456
+```
+
+`promote`/`restore` use clap&#39;s `allow_missing_positional` so a single
+positional binds to the branch/version; explicit paths still work
+everywhere.
+
+## Guardrails
+
+The new optionality creates ambiguities; these keep the old explicit
+errors where a silent reinterpretation would mislead:
+
+- `tl fs promote &lt;mount-dir&gt;` (branch forgotten) is rejected with a
+usage error instead of publishing the CWD mount onto a branch named
+after the directory. Same check for `restore`. Bare branch names like
+`feature/x` are unaffected — only registered mounts, absolute/`./`/`../`
+spellings, and existing directories trigger it.
+- `tl fs diff` shifts a leading arg into the snapshot slot only when it
+isn&#39;t path-shaped; typo&#39;d or stale mount paths keep the &#34;not a tl fs
+mount&#34; error.
+- CWD-mount matching compares registry keys both raw and canonicalized,
+so mountpoints whose leaf is a symlink still resolve.
+- The mount-path resolution is a single match in `run_fs_command`
+feeding one `mount_dir` local used by scope hydration and dispatch,
+rather than per-variant rebuilds.
+
+## Testing
+
+- `cargo test -p tensorlake-cli` (192 tests) and `cargo test -p
+tensorlake-cli --features mount,git-clone` with the private gsvc sources
+swapped in (219 tests) both pass.
+- New parse tests cover the optional path, `promote`/`restore`
+single-arg binding, and rejection of the zero-arg forms of
+`promote`/`restore` without a branch/version.
+- Reviewed with an 8-angle adversarial code review; all confirmed
+findings fixed in this PR.
+
+Note: `tl git create` output (including `--json`) now contains a live
+short-lived repo-scoped token by design; if CI log hygiene becomes a
+concern, a flag to suppress it is an easy follow-up.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- Bump version to 0.5.69 (#828)
+
+Lockstep version bump `0.5.68` → `0.5.69` across all published
+Tensorlake packages (Python / Rust / CLI / npm), via
+`.github/scripts/bump_version.py`.
+
+This release carries the detached-commit-job poll fixes: #826 (poll
+route) and #827 (long-poll pacing, timeout margin, `poll_url` wire
+mirror, call-site regression test).
+
+Files updated:
+- `Cargo.toml` (`[workspace.package] version`, inherited by all four
+Rust crates)
+- `pyproject.toml` (`tensorlake` Python SDK)
+- `crates/rust-cloud-sdk-py/pyproject.toml`
+(`tensorlake-rust-cloud-sdk`)
+- `typescript/package.json` (`tensorlake` npm)
+- `Cargo.lock` (refreshed: the four workspace crates → 0.5.69)
+
+No code changes.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- Review fixes for the detached-job poll path: single poll site, long-poll, encoded params, call-site regression test (#827)
+
+Applies all client-side findings from the #826 code review.
+
+## Changes
+
+**Single poll site (reuse).** The detached-job poll loop and the pub
+`commit_job_status` were token-for-token the same request; both now go
+through a private `commit_job_get`, the only place the
+`commits/jobs/{id}` route is built. The load-bearing comment (submit
+route ≠ poll route; the workspace-scoped jobs route does not exist)
+lives there. The single-use route helpers from #826 are gone.
+
+**`wait_generation` long-poll (efficiency).** The server&#39;s
+`commits/jobs/{id}` route already supports
+`?wait_generation=&amp;timeout_ms=` (clamped 100–55000 ms) and returns a
+`generation` counter. The client now:
+- deserializes `generation` (new optional `CommitJobStatus` field,
+`serde(default)` — absent on older servers),
+- seeds it from the 202 body so the first poll already long-polls (25s
+hold, under the 30s request timeout),
+- falls back to the previous 500ms→2s backoff for servers without
+generations or polls that come back unheld (elapsed-time guard so a
+server that ignores the param is never hammered).
+
+One held request per state transition instead of ~T/2 short polls per
+job.
+
+**Atomic submit-route/branch decision (simplification).** Restored the
+single `match` on `workspace_snapshot` deciding `(commit_suffix,
+branch)` together — the #826 split into two independently-derived
+expressions is undone.
+
+**Percent-encoded path params (hardening, pre-existing).** `ws_id` and
+`job_id` now go through `encode_path_segment` like `project`/`repo`
+always did, closing the query-smuggling hole on the pub
+`commit_job_status` API.
+
+**Call-site-honest regression test (test-coverage).** The old test
+asserted helper string outputs and had a tautological `assert_ne!` —
+reverting the buggy call-site line would have kept it green. The new
+`detached_snapshot_push_polls_commit_job_route` drives the real
+`push_files` flow against a local canned-response HTTP server (tokio
+`TcpListener`, no new dev-deps): known-oid file → session → snapshot
+submit → 202 detach → poll; it asserts the submit hit
+`workspaces/{id}/snapshots` and **every** poll hit `commits/jobs/{id}`,
+with the mock 404ing all other routes exactly like the real server.
+
+## Wire compatibility
+
+`generation` is a new **optional** response field the server already
+emits — no request shape changed, so no companion artifact_storage PR is
+required for this. (The remaining review finding — the 202 carrying no
+`Location`/poll URL — is server-side and lands separately in
+artifact_storage.)
+
+Verified: `cargo test -p tensorlake --lib` — 135 passed, 1 ignored
+(live-server test); `cargo check -p tensorlake-cli` clean.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- fix: poll detached snapshot jobs on the commit-job route, not the snapshot submit route (#826)
+
+## Bug
+
+A `tl fs snapshot` whose server-side commit outlives the inline grace
+window (large snapshots) fails **client-side** with a 404, even though
+the snapshot commits durably server-side.
+
+`push_files` built the detached-job poll URL by appending
+`/jobs/{job_id}` to the *submit* suffix:
+
+```rust
+let poll_suffix = format!(&#34;{commit_suffix}/jobs/{job_id}&#34;);
+```
+
+For a workspace snapshot `commit_suffix` is `workspaces/{id}/snapshots`,
+so it polled `workspaces/{id}/snapshots/jobs/{job_id}` — **a route the
+server does not expose**. The only job-poll route is `GET
+.../commits/jobs/{job_id}` (artifact_storage `http.rs`), and its handler
+(`commit_job_status` → `get_commit_job(repo, job_id)`) is
+**kind-agnostic**: snapshot jobs live in the same repo-keyed table
+(`submit_workspace_snapshot_job` → `submit_commit_job_on_ref` →
+`create_commit_job`, `kind = Snapshot`), so they resolve fine there.
+
+Reachability: `workspace_snapshot` returns `commit_job_response(...,
+submission=true)`, which is `202 ACCEPTED` for a non-terminal job → the
+SDK sets `accepted = true` and enters the poll loop → 404.
+
+## Fix (client-only)
+
+- Split the submit-suffix and poll-suffix into named helpers
+(`commit_submit_suffix` / `commit_job_poll_suffix`) so they can&#39;t be
+conflated again.
+- The poll suffix is always the repo-scoped commit-job route
+(`commits/jobs/{job_id}`), for every commit kind. This is identical to
+the previous behavior for branch commits.
+- Routed the out-of-band `commit_job_status` through the same helper
+(single source of truth — it already used this route).
+- Regression test `detached_job_always_polls_commit_job_route` asserting
+the poll route never derives from the snapshot submit suffix.
+
+No server or wire-format change: it polls an existing route with the
+existing `CommitJobStatus` response shape, so no companion
+artifact_storage PR is required.
+
+Verified: `cargo test -p tensorlake --lib artifact_storage::ingest` — 14
+passed, 1 ignored (the live-server integration test).
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- Bump version to 0.5.68 (#825)
+
+Lockstep version bump `0.5.67` → `0.5.68` across all published
+Tensorlake packages (Python / Rust / CLI / npm), via
+`.github/scripts/bump_version.py`.
+
+Files updated:
+- `Cargo.toml` (`[workspace.package] version`, inherited by all four
+Rust crates)
+- `pyproject.toml` (`tensorlake` Python SDK)
+- `crates/rust-cloud-sdk-py/pyproject.toml`
+(`tensorlake-rust-cloud-sdk`)
+- `typescript/package.json` (`tensorlake` npm)
+- `Cargo.lock` (refreshed: the four workspace crates → 0.5.68)
+
+No code changes.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- tl fs snapshot: live progress spinner + per-phase timings; share the push progress sink with tl git push (#824)
+
+## What
+
+`tl fs snapshot` previously printed a single negotiation line
+(`uploading 0 of 0 chunks (rest already stored)` — confusing for
+small-file pushes, which skip chunk negotiation entirely) and a bare
+summary. It now:
+
+- narrates every phase on an indicatif steady-tick spinner: enumerating
+changes → preparing → hashing → negotiating → uploading → committing →
+refreshing the mount view (same live wording as `tl git push`)
+- appends total wall time to the summary and adds a per-phase breakdown
+line:
+
+```
+Snapshot d5172716… (668 file(s), 557 of 557 chunks uploaded in 1.83s)
+  enumerate 41ms  prepare 6ms  push 1.78s  refresh 12ms
+```
+
+`push` covers the whole `push_files` call (hash + negotiate + upload +
+server-side commit), and sub-second phases render as milliseconds
+instead of `0.00s`.
+
+## Shared progress sink
+
+The `PushEvent`→spinner mapping is extracted into
+`commands::push_progress_spinner`, now used by both `tl git push` and
+`tl fs snapshot`, so the two commands report identical progress wording
+and can&#39;t drift (they had already diverged once). Net for git.rs: −55
+lines. `tl git push` picks up the clearer `uploading N of M chunks (rest
+already stored)` phrasing.
+
+## Notes
+
+- Rebased on main after #822; snapshot&#39;s pending-rename set is folded
+into the clean-check, the `preparing N change(s)` count, and the prepare
+phase bucket.
+- Known tradeoff (unchanged from `tl git push` behavior): on a hidden
+draw target (piped stderr / non-TTY) spinner messages are dropped, so
+scripted runs only get the final summary — except the detached-commit
+job id, which still prints.
+- Follow-ups queued from a review pass (not in this PR): clear the
+spinner on early-error paths via `ProgressFinish::AndClear`, move the
+helper + bar construction into `output/`, stream the detached-job line
+to stderr when hidden.
+
+Verified: `cargo check -p tensorlake-cli` (default features) and `cargo
+check -p tensorlake-cli --features mount,git-clone` with
+gsvc-mount/gsvc-codec vendored from artifact_storage origin/main — both
+clean.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- tl fs: fix renamed-inode resolution, honest errnos, daemon logging; rename committed directories instantly (#822)
+
+## Summary
+
+Root-caused from a live sandbox where `git clone` inside a tlfs mount
+died with `fatal: unknown error occurred while reading the configuration
+files`, then followed the thread to directory renames generally. Two
+commits:
+
+### Commit 1 — rename re-key, honest errnos, daemon logging
+
+**1. Rename left the moved file un-stat-able (the git breaker).**
+`OverlayFs::rename` physically moved the upper file but never updated
+the in-memory inode table. The kernel keeps the source&#39;s nodeid and
+re-points its dentry at the destination, so ino-based `getattr`/`open`
+resolved the vacated source path and returned ENOENT — every renamed
+file became a readdir-visible phantom (`-????????? config`). Git writes
+`HEAD`, `config`, refs and all lockfiles via write-temp-then-rename, so
+`git init`/`clone` inside a mount produced repos whose own config could
+not be read back. Fix: `InodeTable::rename(src, dst)` re-keys the
+interned node (and any interned subtree), reconciles overwrites, and
+`forget` only evicts the index entry when it still points at that ino.
+Four unit tests pin the behavior.
+
+**2. rmdir non-empty → ENOTEMPTY (was EIO).** `rmdir` returned
+`Protocol(&#34;directory not empty&#34;)`, which both bindings&#39; errno maps sent
+to the `_ =&gt; EIO` catch-all — so `rm`/`mv` onto an existing directory
+reported `Input/output error`. Now `MountError::NotEmpty` → `ENOTEMPTY`
+in both bindings, with mapping regression tests.
+
+**3. Committed-dir rename → ENOTSUP (was EIO)** — superseded within this
+PR by commit 2, which makes the operation *work*; the variant and
+mapping remain for other unsupported operations.
+
+**4. The daemon finally logs.** `daemon.log` existed but was always
+empty — no tracing subscriber was ever installed. Now: `tl fs daemon`
+installs a `tracing-subscriber` (workspace dep, compiled only with the
+`mount` feature) writing to stderr — `daemon.log` for detached daemons,
+the terminal for `--foreground`; a `--log-level` flag (default `info`,
+explicit flag, no env vars) on both `tl fs mount` and `tl fs daemon`;
+lifecycle events (serving / shutdown / volume-busy / session-ended); `tl
+fs status` prints the log path (text and `--json`).
+
+### Commit 2 — rename committed directories instantly (v1 of
+tensorlakeai/artifact_storage#88)
+
+`rename(2)` of a committed (lower-backed) directory breaks every tool
+that reorganizes directories on a mount (`git mv`, refactoring scripts,
+`shutil.move`). Content addressing makes a directory move the cheapest
+operation in the system — the subtree oid never changes — so the gap was
+purely mount-side. **Design: record at syscall time, reconcile at seal
+time.**
+
+- **Overlay redirect:** a pending-rename table (`destination →
+true-lower source`, persisted to `redirects.json` in the state dir).
+`rename(2)` records an entry, whiteouts the source, and moves local
+state (child copy-ups, deletion markers) under the new name — metadata
+only, unbounded I/O never enters the syscall. Chains compose to one hop;
+reads resolve through a longest-prefix remap (lower-binding walks,
+lookup/readdir of destination roots, whiteout shielding, refresh-delta
+translation); removing or overwriting a destination drops its entry.
+- **Seal reconciliation:** each pending rename expands to per-file
+`PushSource::KnownOid` upserts — zero bytes read or uploaded — plus the
+source delete. Wired into both sealers: `tl fs snapshot` (new
+`expand_redirects` control op; the daemon must be running when renames
+are pending — publishing the source delete without the destination would
+lose the subtree) and the auto-commit loop. Entries are consumed only
+once the lower serves the sealed commit; a reaper heals the crash/lag
+window by detecting entries whose source vanished and destination
+materialized.
+- **UX:** `tl fs status` shows `R src -&gt; dst` (and `pending_renames` in
+`--json`); `sync` refuses while renames are pending; `promote` counts
+them.
+
+Follow-up (v2, artifact_storage): a tree-reference commit op to publish
+a move as one tree edit instead of O(files) by-oid rows — tracked in
+tensorlakeai/artifact_storage#88.
+
+## Dependencies
+
+Companion PR tensorlakeai/artifact_storage#87 adds the
+`NotEmpty`/`Unsupported` variants to `gsvc-mount` and **must land
+first** for vendored `--features mount` builds. Default (placeholder)
+builds are unaffected.
+
+## Testing
+
+- 22 `commands::fs` unit tests pass under the vendor swap (4
+inode-rename re-key, 4 errno-mapping, 5
+redirect-table/whiteout-shielding, plus existing sealer/enumeration
+tests); clippy clean on touched files.
+- **Both live-server integration tests pass** against a local
+`gsvc-server` (open auth), including the new
+`overlay_renames_committed_directory_and_seals_by_reference`: instant
+rename → redirect-served reads (content, exec bits, nested dirs) → edits
++ deletes inside the moved tree → chained re-move → by-oid seal + source
+delete → ref advance → reap → byte-identical lower-served destination.
+- Default no-mount build compiles.
+- The errno repros were verified against a live sandbox mount
+(`tl-sbx`); full end-to-end revalidation there needs a Linux build with
+this change.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- SDK/CLI: non-default streaming mode for sandbox image builds (cas-streaming) (#741)
+
+## Summary
+
+SDK half of the content-addressed streaming rootfs build contract
+(design: tensorlakeai/compute-engine-internal#1121). Opt-in,
+non-default: existing builds are unchanged.
+
+- `tensorlake sbx image create --streaming` (CLI) / `streaming` option
+(SDK, node + python bindings): requests `rootfsFormat: cas-streaming` at
+prepare time.
+- CAS-aware completion: `complete_request_from_metadata` reads the
+builder&#39;s prepare metadata (manifest URI, image sha, image size,
+`rootfs_disk_bytes`) instead of the `.tlsnap` fields.
+- Async admission: `/complete` now returns 202 for streaming builds
+while the trusted ingest service verifies and admits chunks; the SDK
+polls the build endpoint (`wait_for_build_completed`, 3 s interval, 30
+min cap) until the build finalizes or fails.
+
+Once built, streaming images are handled by the dataplane transparently
+— no server/executor opt-in flags.
+
+## Testing
+
+- `cargo build -p tensorlake -p tensorlake-cli` clean after rebase onto
+main.
+- `cargo test -p tensorlake --lib sandbox_images`: 28 passed.
+
+Companion PRs: tensorlakeai/firecracker#40,
+tensorlakeai/platform-api#572, compute-engine-internal
+(dataplane/server/ingest service).
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Eugene Batalov &lt;eugene@tensorlake.ai&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Move the git-clone feature and fast-clone engine from the SDK to the CLI (#821)
+
+## Why
+
+The crates.io release workflow fails on `cargo publish`:
+
+```
+error: failed to verify manifest at `.../crates/cloud-sdk/Cargo.toml`
+Caused by:
+  all dependencies must have a version requirement specified when publishing.
+  dependency `gsvc-codec` does not specify a version
+```
+
+`gsvc-codec` is the private packfile codec — in this repo it exists only
+as a resolution-only placeholder (`publish = false`, `compile_error!`
+body). It can never be on crates.io, so adding a version requirement is
+not an option: the published manifest would reference a nonexistent (and
+squattable) crates.io name, and Cargo resolves optional deps into
+lockfiles even when the feature is off, breaking every downstream `cargo
+build` of `tensorlake`.
+
+## What
+
+The `git-clone` feature never belonged in the published SDK crate:
+
+- `fastclone.rs`&#39;s production code is self-contained — its only
+`crate::` imports were inside the `#[ignore]`d live-server integration
+test
+- its only consumer is the CLI&#39;s `tl git clone`
+- crates.io users could never enable it anyway, since it requires the
+private codec vendored in at build time
+
+So this moves the module to `crates/cli/src/commands/git/fastclone.rs` —
+the path `crates/VENDORED_FROM` already documented — and hangs
+`git-clone = [&#34;dep:gsvc-codec&#34;]` off the CLI crate, exactly parallel to
+how the `mount` feature already consumes the `gsvc-mount` placeholder.
+The published `tensorlake` manifest no longer mentions `gsvc-codec` at
+all, so plain `cargo publish` works with no publish-time manifest
+surgery. The vendor-private-crates flow and `just build-cli-full` are
+untouched.
+
+Also drops the now-nonexistent `tensorlake/git-clone` from the
+full-feature test run in `tests.yaml`, and updates the placeholder&#39;s
+comment to point at the CLI.
+
+## Validation
+
+- `cargo check -p tensorlake -p tensorlake-cli` and `cargo test -p
+tensorlake-cli --no-run` pass with features off
+- With the real `gsvc-mount`/`gsvc-codec` sources swapped in (same
+swap/restore as `build-cli-full`): `cargo check --features
+mount,git-clone` passes and `cargo test -p tensorlake-cli --features
+mount,git-clone` passes — 208 tests, 0 failures, both bins, placeholders
+restored afterward
+- `cargo publish --dry-run` in `crates/cloud-sdk` — the exact command
+that failed in CI — packages, verifies, and reaches the upload step
+cleanly
+
+Note for release: 0.5.66 never made it to crates.io (the publish is what
+failed), so no version bump should be needed — re-run the crates.io
+workflow after this merges.
+
+Companion-PR note: the fast-clone client&#39;s vendored-copy sync target
+moved paths; worth a heads-up in artifact_storage&#39;s AGENTS.md.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- tl fs: truthful setup, survivable mount lifecycle on macOS (#820)
+
+## Problem
+
+Running `tl fs mount` on macOS hit a chain of rough edges, each reported
+as something it wasn&#39;t:
+
+1. `tl fs setup` printed `Extension registered and enabled.` while
+`mount -F` kept failing with `Module ai.tensorlake.tlfs.fsmodule is
+disabled!`. Root cause: `fskit_agent` only re-reads its allowlist at
+launch, the `pkill -x fskit_agent` nudge is a no-op (the agent ignores
+SIGTERM outright on macOS 26.5, and SIP blocks `launchctl kickstart`),
+and the readiness check only re-read the files setup had just written —
+files right ≠ served.
+2. ^C on `tl fs mount --foreground` stranded the FSKit volume: the
+kernel kept it attached with no daemon behind it, serving `Connection
+refused` forever.
+3. `tl fs unmount` on that state printed `Unmounted …` without detaching
+anything — the dead-daemon branch assumed daemon-death means the mount
+is gone, which is only true for Linux FUSE — then deleted the local
+state, leaving an undetachable orphan.
+4. Every subsequent mount at that path failed with `IO error: File
+exists (os error 17)` (`create_dir_all` on a covered mountpoint), and
+later with fskitd&#39;s `The file couldn&#39;t be saved because a file with the
+same name already exists` (a stale LiveFS record for the path, leaked
+when the volume vanished without a proper unmount).
+5. `--foreground` silently doubled as an op-trace firehose, and failure
+messages printed guidance for both OSes at once.
+
+## Changes
+
+**`tl fs setup` proves readiness against the live agent, not the
+files.**
+- New probe: a `mount -F -t tlfs` against a guaranteed-refused loopback
+URL; the error text is the verdict (`is disabled` = stale/disabled
+agent, `Connection refused` = module served end to end).
+- A stale agent is restarted with SIGTERM → verified exit → SIGKILL
+escalation, only when no FSKit volume is being served (mount-table
+check; apfs excluded since system volumes are kext-mounted).
+- No early return on open disk gates, so re-running `tl fs setup` after
+a failed mount repairs the stale agent.
+- `--check` probes before printing `✓ ready` and reports a stale agent
+with the remedy.
+
+**Mount lifecycle around dead daemons is survivable end to end.**
+- The daemon handles SIGINT/SIGTERM: detach the volume, then exit; a
+busy volume refuses the first signal with an explanation, a second
+signal force-exits.
+- `tl fs unmount` with a dead daemon detaches any leftover volume before
+forgetting local state (and refuses, volume intact, if detach fails). It
+also detaches fully orphaned volumes with no registry entry remaining.
+- Mount preflight names poisoned mountpoints with the exact remedy
+instead of `File exists`: a still-attached dead volume → `tl fs unmount
+&lt;path&gt;`; a stale fskitd LiveFS record (`/Library/Application
+Support/livefsd/settings.plist`, world-readable) → the exact `sudo
+plutil -remove mounts.&lt;i&gt; …` command, before any server-side workspace
+is created.
+- The `mount(8)` `is disabled` failure now names the stale agent instead
+of pointing at System Settings.
+
+**UX.**
+- `[vfs …]` op tracing is now opt-in via `--trace-ops` (requires
+`--foreground`).
+- Daemon-startup failure guidance is compiled per-OS: the macOS binary
+prints only macOS advice, Linux only Linux.
+
+Also bumps the lockstep version to 0.5.66 (lockfiles regenerated).
+
+## Verification
+
+All paths exercised live on macOS 26.5 (Apple Silicon) against real
+broken states, reproduced then repaired:
+- stale-agent state (allowlist enabled on disk, agent holding a
+pre-enablement snapshot): `--check` detects it, `setup` repairs it
+(agent restart observed, probe confirms served);
+- SIGINT on a foreground mount: `unmounting …`, volume detached, process
+exited;
+- SIGKILL&#39;d daemon (zombie volume): preflight names it, `unmount`
+detaches it, re-mount succeeds;
+- orphaned volume with the registry entry removed: `unmount` detaches
+it;
+- poisoned LiveFS record for `~/work`: preflight fails fast with the
+exact `plutil` remedy, no workspace leaked;
+- foreground mount without `--trace-ops`: zero trace lines; clap rejects
+`--trace-ops` without `--foreground`.
+
+`cargo test -p tensorlake-cli`: 384 passed. Builds clean with and
+without the `mount` feature.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+Co-authored-by: Diptanu Choudhury &lt;diptanuc@gmail.com&gt;
+
+- Bump version to 0.5.65 (#819)
+
+Lockstep version bump to 0.5.65 (Python / Rust / CLI / npm) via
+`bump_version.py`; `Cargo.lock` refreshed on build.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- tl fs setup: state the macOS version floor, and diagnose Linux too (#817)
+
+Follow-up to #815. Two gaps a user would hit:
+
+- **The macOS requirement was invisible.** The TLFS extension needs
+macOS 26 (Tahoe)+ on Apple Silicon (LSMinimumSystemVersion 26.0, 26-era
+FSKit APIs), but nothing said so — on an older OS LaunchServices
+silently refuses to register the bundle and the user loops forever on
+&#34;extension did not register&#34;. Now the mount pre-flight and `setup` fail
+fast with `needs macOS 26 (Tahoe) or later on Apple Silicon; this is
+macOS &lt;v&gt;` (read via `sw_vers`), and `--check` prints an `os:` line plus
+a single ✓/✗ verdict and next action.
+- **`tl fs setup --check` errored outright on Linux** instead of
+helping. It&#39;s now a real cross-platform doctor: on Linux it reports
+`/dev/fuse` (exists? openable?), `fusermount3`, and `/etc/mtab`, then a
+verdict and the exact fixes — `sudo` as the works-everywhere path, or
+the one-time unprivileged-FUSE setup commands. Running as root
+short-circuits to &#34;ready&#34;. Mount&#39;s Linux errors now point at `tl fs
+setup` for the full diagnosis.
+
+Verified live: macOS `--check` reports the floor and a green verdict on
+26.5; a Linux sandbox build compiles clean, the doctor reports ✓ ready
+on a fixed image, root short-circuits, and a deliberately degraded env
+prints the precise per-item fix commands (shown below).
+
+```
+/dev/fuse: present but not readable/writable (needs mode 666, or use sudo)
+fusermount3: not found (install the fuse3 package, or use sudo)
+/etc/mtab: missing (unprivileged unmount will fail without it)
+
+✗ unprivileged FUSE is not fully set up. Fastest path — run with sudo ...
+  sudo tl fs mount &lt;file-system&gt; &lt;path&gt;
+Or enable unprivileged FUSE once (needs root):
+  sudo apt-get install fuse3   # provides the setuid fusermount3 helper
+  sudo chmod 666 /dev/fuse
+  sudo ln -s /proc/self/mounts /etc/mtab
+```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- tl fs mount --auto-commit-interval-secs: event-driven async snapshots with an append fast path (#818)
+
+## What
+
+`tl fs mount &lt;target&gt; &lt;path&gt; --auto-commit-interval-secs &lt;N&gt;` makes the
+mount daemon seal local changes into workspace snapshot commits every N
+seconds, asynchronously. `tl fs snapshot` stays the on-demand
+seal-and-clear. Read-only mounts reject the flag; `tl fs status` and the
+mount output surface it.
+
+## How it stays cheap
+
+**Event-driven dirty index (no scanning).** Every `OverlayFs` mutation
+records `path → (generation, kind, min written offset)` inline — the
+daemon *is* the write path, so dirtiness is never re-discovered by
+walking. An idle tick is one atomic load. The index rebuilds from disk
+at daemon start and after `tl fs restore` (new `reindex` control op).
+
+**Incremental seals.** The workspace ref advances with each snapshot, so
+each commit carries only paths touched since the last sealed generation.
+Unchanged dirty files are served by the lower and never re-hashed or
+re-sent. The overlay is deliberately not cleared: clear-after-push is
+only safe with writes quiesced (racing writes would drop; open write
+handles would orphan) — the upper keeps shadowing byte-identical sealed
+content.
+
+**Append fast path — O(appended bytes).** New `PushSource::StablePrefix`
+in the SDK reuses the previous seal&#39;s CDC chunk list for the untouched
+prefix; FastCDC restarts its rolling state at every boundary, so resumed
+chunking equals a full re-chunk exactly (unit-tested). Dedup-path files
+never send a client blob oid (identity comes from server read-back), so
+the prefix is never re-read at all. The upload pass now also seeks past
+chunks the server already has instead of re-reading them — a win for
+every mostly-deduped push. The daemon feeds this from a per-path chunk
+cache returned via `PushOptions::collect_file_chunks`.
+
+## Also fixed along the way
+
+- A resurrection race: a path deleted right after being sealed (before
+the lower advanced) wrote no whiteout and silently reappeared. The
+daemon now polls the ref immediately after each push and tombstones
+vanished-but-recently-sealed paths.
+- The daemon&#39;s heartbeat held a static git credential that went stale
+~1h into a mount&#39;s life; heartbeats and auto-commits now share the
+rotation task&#39;s refreshed `(user, token)` slot.
+
+## Measured (local gsvc-server, macOS FSKit, debug build)
+
+| Scenario | Before | After |
+|---|---|---|
+| Idle tick | tree walk + stat per dirty file | one atomic load |
+| 1-byte change, 500 MB dirty | 22.3 s | ~tick-instant |
+| Append 1 MB to 500 MB file | full re-hash (~27 s) | seals within a 2 s
+tick |
+| In-mount read+write+ls during a push | — | 22–40 ms (idle baseline 33
+ms) |
+
+Correctness verified live: 5 append seals with adversarial sizes (517 B
+… 3 MB) reconstruct byte-identical content on a fresh mount (`cmp` over
+68 MB); deletes propagate; `tl fs snapshot`/`promote`/`restore`
+interplay intact. 202 tests pass with `--features mount`, 535 across
+both crates default; new unit tests cover `resolve_seal` routing, the
+tombstone arm, stable-prefix selection, and CDC resume equivalence.
+
+Companion PR in artifact_storage fixes a pre-existing mount bug this
+work surfaced (cold sequential reads of large files EIO when the
+server&#39;s rate limiter trips — the vendored `FsClient` had no retry
+handling); link to follow.
+
+Note for release: version bump ships separately per convention (`python
+.github/scripts/bump_version.py`) — the `tensorlake` crate gains public
+SDK surface (`PushSource::StablePrefix`,
+`PushOptions::collect_file_chunks`, `PushReport::file_chunks`).
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- artifact_storage client: parallel fast-clone downloads, maintenance structures, zero-copy pushes (#816)
+
+Client-side follow-ups from a review of the artifact_storage SDK module
+against the disaggregated-git design notes. Companion server PR:
+tensorlakeai/artifact_storage#76.
+
+## Changes
+
+**Fast clone: parallel artifact downloads.** `fast_clone` downloaded
+every pack, its idx, and every large blob strictly sequentially. Each
+artifact is an independent immutable file with its own content-addressed
+cache path, so they now run as one download-job stream with bounded
+concurrency (4 in flight). Wall-clock for multi-pack / many-blob
+manifests follows the largest artifact instead of the sum of all of
+them. Range-resume, validation, and the downloaded/reused stats
+accounting are unchanged (the fold is order-independent).
+
+**Fast clone: maintenance structures after install.** A fresh fast clone
+had no commit-graph and no multi-pack-index, so the first `git log` /
+`blame` / `status` in a large checkout paid a full history walk across N
+packs. After checkout the clone now runs `git commit-graph write
+--reachable --changed-paths` (always) and `git multi-pack-index write`
+(multi-pack installs) — best-effort, so an old git still produces a
+working clone; the commands are recorded in
+`FastCloneStats::git_commands` either way.
+
+**Ingest: zero-copy `PushSource::Bytes`.** Every reader construction did
+`Cursor::new(b.clone())`, and each file is read twice (hash pass +
+upload pass), so an in-memory source was duplicated up to twice its
+size. Readers now borrow the buffer (`Cursor::new(b.as_slice())`), and
+the whole-file small-path hash reads a borrowed slice.
+
+**`repo_info`:** the branches and refs requests are independent — now
+issued concurrently via `try_join!`.
+
+## Testing
+
+- `cargo test -p tensorlake --lib` — 132 passed (default features).
+- `cargo test -p tensorlake --features git-clone --lib` (real gsvc-codec
+swapped in) — 137 passed.
+- Live e2e against a local gsvc-server running the companion branch:
+- `push_paths_roundtrip_against_local_server` — passes (validates the
+zero-copy ingest paths end-to-end: tokened/batch upload, dedup,
+known-oid commit).
+- **New** `fast_clone_roundtrip_against_local_server` (added in this PR,
+`#[ignore]`d like the ingest one) — pushes via the API, fast-clones,
+asserts checkout contents, a working `git log`, and the commit-graph on
+disk.
+
+Note: all packages release in lockstep — bump the shared version
+(`python .github/scripts/bump_version.py &lt;new-version&gt;`) before cutting
+a release with this change.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- macOS: automate all three FSKit enablement gates; honest setup --check (#815)
+
+Fixes for the first two macOS field reports:
+
+**Enablement is a triple gate**, and we only handled/reported the first
+two:
+1. LaunchServices registration (app launch)
+2. pluginkit election (`pluginkit -e use`, the `+`)
+3. **fskit_agent&#39;s per-user allowlist** (`~/Library/Group
+Containers/group.com.apple.fskit.settings/enabledModules.plist`) — what
+the System Settings toggle actually writes, and the gate `mount -F`
+checks (&#34;Module … is disabled!&#34;)
+
+One user&#39;s System Settings pane failed to even show the FSKit entry
+after an OS upgrade; another had pluginkit `+` but a closed gate 3,
+while `tl fs setup --check` claimed &#34;registered and enabled&#34;.
+
+Changes:
+- `tl fs setup` and the mount pre-flight now flip gates 2+3
+automatically (pluginkit election, allowlist append via plutil JSON
+round-trip, `fskit_agent` restart). System Settings becomes the printed
+fallback only when that doesn&#39;t take.
+- `--check` reports all three gates, naming the closed one.
+- `tl fs mount repo:main` on a fresh `tl git create` repo failed with
+`base &#34;main&#34; does not resolve to a commit` while `tl fs mount repo`
+worked — an unborn **default** branch is now seeded whether implied or
+named (other branch names stay strict).
+
+Verified live on macOS 26.5: simulated the disabled-allowlist state
+(`--check` correctly reports it), setup repaired it with no Settings
+visit, and a real FSKit mount of an unborn repo by branch name served
+reads and writes end to end.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- Fix CLI install instructions (#814)
+
+Changes the `pip install tensorlake` install instructions to the `curl |
+sh` method
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Fix empty-file tl git push; tl git token takes the repo positionally (#813)
+
+## Empty files no longer break `tl git push` on staging servers
+
+Pushing a worktree containing a zero-byte file failed against servers
+that advertise small-file staging:
+
+```
+Error: Server error: 400 Bad Request - chunk length 0 outside (0, 8388608]
+```
+
+`chunk_source_whole` (the whole-file identity pass for files under the
+small-file threshold) emitted a single zero-length chunk for empty
+files, electing them onto the tokened/batch upload path whose
+zero-length frame the server rejects. The CDC pass already returns an
+**empty chunk list** for empty input — which is what routes a file to
+inline `content` at commit — so the whole-file pass now matches that
+contract. The blob oid still hashes to git&#39;s empty-blob oid
+(`e69de29b…`).
+
+- Unit test pins both passes to the same empty-input result.
+- The local-server roundtrip test now pushes an empty file end-to-end.
+
+## `tl git token` takes the repo positionally
+
+Like `push` and `commit-status` (#812) before it:
+
+```
+tl git token &lt;repo&gt;   # repo-scoped credential (was --repo &lt;repo&gt;)
+tl git token          # project-wide credential, unchanged
+```
+
+Parse tests cover positional, omitted, and rejected `--repo` forms.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- sudo tl fs mount serves the invoking user, not root (#811)
+
+Team decision: unprivileged FUSE can&#39;t be guaranteed across environments
+(other sandbox providers may ship `/dev/fuse` root-only, no setuid
+fusermount3 — and `mount(2)` always needs CAP_SYS_ADMIN). `sudo tl fs
+mount` is the universal fallback, but a naive root mount is a trap: FUSE
+rejects every other user&#39;s access, so the volume is invisible to the
+human who asked for it.
+
+This makes the sudo path first-class:
+
+- **MountState records the mount&#39;s owner** — `SUDO_UID`/`SUDO_GID` when
+invoked via sudo, the current user otherwise (serde-defaulted, old state
+files behave as before).
+- **The daemon presents every file as owned by that user** and mounts
+with `allow_other` when its identity differs from the owner.
+`DefaultPermissions` stays on, so the presented owner&#39;s file modes still
+gate access for everyone.
+- **The Linux pre-flight documents both paths**: its `/dev/fuse` /
+fusermount3 errors now offer `sudo tl fs mount` as the works-everywhere
+alternative alongside the one-time unprivileged-FUSE setup, and a sudo
+mount prints exactly what will happen (volume presented to `$SUDO_USER`;
+run snapshot/promote/unmount with sudo too, since mount state lives in
+root&#39;s home).
+
+macOS is untouched — FSKit user mounts never need sudo.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- tl git commit-status takes the repo positionally (#812)
+
+`tl git push` already moved to positional (`tl git push &lt;repo&gt; [branch]
+&lt;paths&gt;...`); `commit-status` was the last repo-addressed command still
+demanding `--repo`. Now:
+
+```
+tl git commit-status &lt;repo&gt; &lt;job-id&gt;
+```
+
+The job-id hint printed by a detaching push is updated to match, plus
+parse tests.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- Stop shipping CLI through PyPI and npm (#809)
+
+## Summary
+- stop distributing the Rust `tl` / `tensorlake` CLI through PyPI and
+npm packages
+- build the Python wheel directly from the `_cloud_sdk` PyO3 crate
+instead of the CLI crate
+- remove npm CLI binary build/download/package paths while keeping SDK
+native bindings and helper scripts
+- keep standalone CLI release builds as the only customer CLI
+distribution path
+
+## Validation
+- `git diff --check`
+- parsed all `.github/workflows/*.yaml` with Ruby YAML
+- `npm test`
+- `npm run typecheck`
+- `npm pack --dry-run --ignore-scripts`
+- `cargo metadata --no-deps --format-version 1`
+- `python3 -m maturin build --release --out dist-package-check`
+- `python3 .github/scripts/verify_wheel.py
+&#34;dist-package-check/tensorlake-*.whl&#34; tensorlake._cloud_sdk
+tensorlake.cli.deploy --expect-script function-executor --expect-script
+tensorlake-deploy --reject-script tl --reject-script tensorlake`
+- `python3 -m maturin sdist --out dist-sdist-check`
+- unpacked sdist and ran `cargo metadata --no-deps --format-version 1
+--manifest-path crates/rust-cloud-sdk-py/Cargo.toml`
+
+Note: standalone full-feature CLI builds still require the private
+artifact_storage crates that CI vendors at runtime.
+
+- Add repository SDK APIs (#808)
+
+## Summary
+- add Python and TypeScript repository clients backed by the Rust cloud
+SDK
+- expose repository CRUD, refs/branches, Git credentials, push worktree,
+merge, and conflict-record APIs
+- move reusable fastclone/ingest logic into the Rust core so CLI and
+SDKs share it
+- require API-key based SDK setup for repository clients; PATs remain
+CLI-only
+- bump CLI/SDK versions to 0.5.62
+
+## Tests
+- cargo fmt
+- cargo check -p tensorlake -p tensorlake-rust-cloud-sdk-py -p
+tensorlake-rust-cloud-sdk-node
+- cargo test -p tensorlake artifact_storage::merge
+- npm run typecheck
+- npm test -- --run tests/repositories.test.ts
+- python3 -m py_compile src/tensorlake/repositories.py
+tests/test_repositories.py
+- git diff --check
+
+- Merge API clients: SDK wire types + tl fs sync / promote --merge / tl git merge (#807)
+
+Companion PR to the gsvc server-side merge stack (`docs/merge-design.md`
+in artifact_storage, PRs 1–4 + workspace sync): duplicates the merge
+wire shapes into the cloud SDK (per the wire-type rule) and gives the
+CLI the complete merge workflow.
+
+## cloud-sdk
+
+- New `artifact_storage::merge` module: `MergeRequest` / `MergeReport` /
+`MergeConflict` / `MergeStats` / `MergeConflictRecord` / `Signature`,
+with `repo_merge()` (`POST /repos/{repo}/merge`) and
+`commit_conflicts()` (`GET /commits/{oid}/conflicts`, 404 → `None`).
+- Shared `expect_json_or_conflict` helper: a 409 whose body is the
+structured conflict report parses as data (fail-policy conflicts publish
+nothing and ride the 409); a plain-text 409 (concurrent ref move) stays
+a `ServerError`.
+- `PromoteWorkspaceRequest` gains `mode` (`&#34;squash&#34; | &#34;full_history&#34; |
+&#34;merge&#34;`) and `author`; the response gains `merged` / `fast_forwarded`
+with serde defaults so pre-merge servers still decode.
+`workspace_promote()` now returns `PromoteOutcome::Promoted |
+Conflicted(MergeReport)`.
+- New `workspace_sync()` (`POST .../workspaces/{id}/sync`) and
+`workspace_promote_preflight()` (parity with the dashboard).
+- `CreateWorkspaceRequest` gains `reconcile_policy` (`&#34;materialize&#34; |
+&#34;lww&#34;`).
+
+## CLI
+
+- `tl fs promote --merge` — two-parent merge commit onto a moved target;
+on conflict prints the per-path report plus the resolution recipe (`tl
+fs sync` → fix markers → snapshot → re-promote).
+- `tl fs sync` — the missing step of the resolution loop: server-side
+rebase-style pull of the target branch into the workspace. Refuses on a
+dirty overlay (local changes would shadow synced markers), polls out the
+425 index-lag window, then refreshes the mount&#39;s lower layer immediately
+and converges the kernel view of conflicted paths so diff3 markers
+appear at once. `--fail-on-conflict` for the strict variant.
+- `tl git merge &lt;repo&gt; &lt;ours&gt; &lt;theirs&gt;` (`--preflight`, `--deep`,
+`--materialize`, `--base`, `--json`) — plumbing over `POST /merge`;
+fail-policy conflicts exit non-zero having published nothing.
+- `tl git conflicts &lt;repo&gt; &lt;commit&gt;` — the structured conflict record of
+a materialized merge.
+
+## Testing
+
+- 5 new serde tests pin the wire shapes to the exact JSON the server
+emits (from `origin/merge-atomicity-pr9` in artifact_storage); promote
+decoding is tested against pre-merge server responses. Full SDK suite:
+125 passed.
+- Builds verified: default features, `--no-default-features`, and a
+type-check with the real gsvc-mount/gsvc-codec sources swapped in (`just
+build-cli-full` path).
+
+## Notes
+
+- Only merge preflight (PR 1) is on artifact_storage `main` today;
+commit mode / sync / merge-mode promote need the `merge-atomicity-pr9`
+stack deployed. The CLI degrades to plain server errors against older
+servers.
+- Version bump (`python .github/scripts/bump_version.py`) deliberately
+left to the release maintainer.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- Linux unmount uses fusermount3; failed daemon startups explain themselves (#806)
+
+Found by testing `tl fs` end-to-end in a tensorlake sandbox (Ubuntu
+24.04):
+
+- **fusermount3**: fuse3 systems ship only `fusermount3` (no
+`fusermount` compat name). The daemon&#39;s unmount spawned `fusermount`,
+failed instantly, and misreported a free volume as busy. It now tries
+`fusermount3` then `fusermount`.
+- **Daemon startup diagnostics**: a daemon that dies on startup (EACCES
+on `/dev/fuse`, missing fusermount3, disabled FSKit extension) produced
+only &#34;mount daemon did not come up&#34;. Its stderr now lands in
+`&lt;state-dir&gt;/daemon.log`, the mount error quotes the last lines, and the
+hint names the actual Linux requirements (mode-666 `/dev/fuse`, fuse3
+package, `/etc/mtab`).
+
+Verified in the sandbox after fixing its image gaps by hand: mount →
+write → snapshot → unmount all pass (unmount 0.1s).
+
+Note for the sandbox base image (separate repo): it needs `/dev/fuse`
+mode 666 (ships 600 root:root today), the `fuse3` package, and the
+standard `/etc/mtab -&gt; /proc/self/mounts` symlink for `tl fs mount` to
+work out of the box.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- Make tl git push use current Git worktree (#805)
+
+## Summary
+- change `tl git push` to accept positional `&lt;repo&gt; [branch]`,
+defaulting branch to `main`
+- remove explicit path arguments and push the current Git worktree root
+instead
+- fail before upload when run outside a Git worktree
+- keep pushed repo paths relative to the worktree root
+
+## Tests
+- `cargo fmt --check`
+- `cargo test -p tensorlake-cli`
+
+- Fast, honest, wedge-proof unmounts (#804)
+
+Unmount used to feel hung and could wedge for real. Measured on macOS
+26.5 (FSKit) and fixed at three layers:
+
+- **Slow + silent**: the daemon replied to `shutdown` before unmounting,
+so the CLI&#39;s post-shutdown wait silently covered the whole FSKit
+teardown. It now unmounts first and replies with the outcome, and the
+CLI shows a spinner over that round trip. Clean unmounts measure ~1.3s
+and are visibly alive.
+- **Busy volumes orphaned the mount**: umount(8) fails EBUSY when
+something holds the volume (a shell cd&#39;d inside), and the old daemon
+exited anyway — leaving a zombie kernel mount with a dead backend (the
+`rmdir`-hangs case). The daemon now stays alive and answers &#34;volume is
+busy&#34;; the CLI reports it (bounded, ~10s worst case) and the mount stays
+fully usable. For a genuinely wedged teardown the umount child is
+deliberately left running — killing it cannot abort an in-flight detach.
+- **The 50-minute wedge**: still-mounted checks used
+`statfs(mountpoint)`, which calls into the filesystem and blocks
+*uninterruptibly* while that filesystem&#39;s unmount is in flight —
+measured wedging the daemon for 50 minutes in state U. They now read the
+mount table via `getfsstat(MNT_NOWAIT)`, which never touches the fs.
+
+Also mounts with `-o nobrowse` (advisory: fskitd on 26.5 accepts but
+does not yet apply MNT_DONTBROWSE; kept so Finder/Spotlight exclusion
+arrives free when it does).
+
+Verified end-to-end on a live workspace: clean unmount 1.3s with
+spinner; busy unmount errors at ~10s with the volume left serving reads;
+re-run after the holder exits unmounts cleanly; daemon-dead unmount
+cleans local state in &lt;1s.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- Path-addressed fs commands resolve their scope from the mount state (#803)
+
+Org/project resolution walks up from the CWD looking for
+`.tensorlake/config.toml`, so `tl fs snapshot &lt;path&gt;` run from a
+directory with no config up-tree — e.g. from inside the mount itself —
+dropped into the interactive init flow. Worse, that flow then wrote its
+`config.toml` INTO the mounted workspace, and the snapshot sealed it
+into the file system.
+
+The mount already knows its scope: `MountState` gains `organization_id`
+(serde default, so old state files load), and
+`snapshot`/`promote`/`status`/`restore`/`diff`/`unmount` hydrate the
+auth context from the mount state before the auth guard runs. They now
+work from any CWD without prompting; `mount`/`ls`/`rm` (which need a
+project before any mount exists) keep the existing resolution.
+
+Also clamps the &#34;N of M chunks uploaded&#34; summaries: small files skip
+chunk negotiation (token-only commits), so uploads can exceed the
+negotiated count — snapshot printed &#34;3 of 0 chunks&#34;, and `tl git push`&#39;s
+dedup subtraction could panic on u64 underflow.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- Embed the notarized TLFS.app into darwin release builds (#802)
+
+`tl fs setup` previously always downloaded `TLFS-&lt;version&gt;.app.zip` from
+the GitHub release. The zip is ~97 KB against a multi-MB binary, so
+official darwin builds now embed it (`TLFS_APP_ZIP` env consumed by
+`crates/cli/build.rs` → `include_bytes!`):
+
+- **Official release builds**: `tl fs setup` installs the embedded app
+offline — app/CLI version lockstep is guaranteed by construction (the
+VFS wire protocol has no version negotiation beyond HELLO, so skew
+prevention matters).
+- **Source builds**: nothing embedded; setup falls back to downloading
+the release asset matching the CLI version, as before.
+- `--from &lt;path-or-url&gt;` still overrides both.
+
+CI: the darwin build job now `needs: tlfs-app` and embeds its artifact.
+Also flips `tlfs-app` to a required job now that the signing secrets are
+provisioned and cli-v0.5.60 shipped the first notarized TLFS.app end to
+end.
+
+Verified locally: both cfg branches compile (binary grows by exactly the
+zip size when embedded), 193 CLI tests pass, workflow YAML validated.
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- tl fs: versioned filesystem workspaces on artifact storage (#795)
+
+Client half of
+[artifact_storage#24](https://github.com/tensorlakeai/artifact_storage/issues/24).
+`tl fs` speaks artifact-storage workspaces end to end — mounting is
+kernel-native on both platforms: **FUSE on Linux, FSKit on macOS** (no
+kernel extension, no macFUSE, no sudo), and no materialized-directory
+fallback by design.
+
+## Product surface
+
+```bash
+tl fs create --name my-fs          # an artifact-storage repo, seeded so it mounts immediately
+tl fs mount my-fs ./work           # kernel mount: lazy reads, local overlay for writes
+# ...work in the mount...
+tl fs snapshot ./work -m &#34;wip&#34;     # the overlay IS the dirty set → chunk upload → ref advances
+tl fs promote ./work main          # squash by default; --full-history opts into the chain
+tl fs restore ./work &lt;snapshot&gt;    # differential overlay refill from any snapshot
+tl fs status / diff / pin / unmount / workspaces
+```
+
+Registry (`create/ls/rm`) routes to artifact-storage repos instead of
+the platform file-systems API; `tl sbx fs` untouched. Windows builds
+keep the portable commands and fail mounts immediately with a clear
+unsupported error.
+
+## Architecture
+
+One Rust brain, thin per-platform kernel bindings:
+
+- **`crates/gsvc-mount` vendored** from artifact_storage (read-only
+mount core: native-API client, immutable commit-keyed caches,
+ref-following with open-handle pinning, counted inode table), including
+the credential-rotation API from artifact_storage#34 — a live mount
+can&#39;t rebuild its client, so the daemon re-mints and swaps the token in
+place.
+- **`OverlayFs`** (VFS-agnostic, kernel-free-testable): upper dir +
+whiteout-marker tree over the core. Copy-up on first write; merged
+readdir; whiteouts hide whole subtrees; lookups always re-resolve the
+lower backing so a snapshot&#39;s ref advance reaches new lookups while
+kernel-held inos keep their commit; lower reads absorb post-snapshot
+`IndexNotReady` with a bounded settle-poll instead of surfacing EAGAIN.
+- **Per-mount daemon**: mount session, ref watcher, 20-minute lease
+heartbeat, credential rotation, and a line-JSON control socket
+(`ping`/`refresh`/`clear_upper`/`shutdown`). `tl fs mount` spawns it
+detached; failed startup deletes the orphan workspace.
+- **Linux**: `fuser` glue in-process (pure-Rust `/dev/fuse`), compiled
+unconditionally.
+- **macOS**: production **FSKit** module (`platform/macos/tlfs`, Swift
+`FSUnaryFileSystem`) — the sandboxed appex can&#39;t read daemon state or
+hold credentials, so it proxies a small VFS wire protocol to the daemon
+over localhost TCP (`tlfs://127.0.0.1:&lt;port&gt;/&lt;secret&gt;`, per-mount
+getentropy secret, HELLO-gated). Wire protocol + server live in
+`vfsserver.rs`; packaging/registration mechanics are documented in
+`platform/macos/tlfs/README.md` and the validated `fskit-hello`
+prototype.
+- **Snapshot = enumerate the overlay** (`upper/` + `wh/`): no scanning,
+no manifests, no mtime heuristics. After publish: follow the ref, clear
+the overlay — the merged view is unchanged, now lower-backed. Restore
+reads everything from the server first (does no harm on failure), then
+refills the overlay differentially; the workspace ref (history) is
+untouched.
+
+## Kernel cache coherence (macOS)
+
+Restore/snapshot mutate the overlay behind the kernel&#39;s back and FSKit
+has no invalidation-push API, so coherence is engineered from what the
+kernel honors (measured on macOS 26.5 lifs): real content mtimes on the
+wire (upper = disk mtime, lower = first-seen time of the pinned commit),
+directory verifiers derived from the dir&#39;s mtime, real `itemID`s on
+every packed entry, and a bounded `converge_kernel_view` pass after
+restore that re-opens changed paths (close-to-open revalidation), purges
+cached pages via `msync(MS_INVALIDATE)`, and breaks pinned negative
+dentries with an `EEXIST` probe. Result: restore returns in ~0.1s with
+open/read and listings fully coherent; details and residual caveats in
+the module README.
+
+## Validation
+
+- **Overlay integration test** (ignored-by-default, runs against a local
+`gsvc-server`): merged reads, copy-up, whiteouts, merged readdir, rmdir
+empty-check, rename, and the full snapshot round-trip through the
+workspace ref.
+- **Production end-to-end** against api.tensorlake.ai with real PAT→mint
+auth: create → FSKit mount (1.6s) → kernel writes → snapshot →
+immediately coherent listings → cross-commit restores (~1.2s, both
+directions) → squash promote → fresh-mount read-back → clean unmounts.
+Prod surfaced the 425/index-latency windows now handled by restore&#39;s
+poll-out and the overlay&#39;s settle-poll.
+- **Cross-platform**: `cargo check` clean for `aarch64-apple-darwin`,
+`x86_64-unknown-linux-gnu`, and `x86_64-pc-windows-gnu` (cfg-equivalent
+to the shipped msvc target); SDK crates unaffected; 196 unit tests pass.
+- **Remaining:**
+- Kernel-mount smoke on Linux (this workstation has no FUSE runtime);
+suggest a CI job running the overlay test plus a real
+mount/snapshot/promote loop before merge.
+- `tl fs rm` is denied in prod — minted git credentials can&#39;t delete
+repos (fail-closed); needs a server-side scope decision or routing
+through the platform API.
+- Suggested: a `cargo check --target x86_64-pc-windows-msvc` CI job so
+mount-side changes can&#39;t silently break the Windows CLI.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- Refresh sandbox proxy routing after resume (#801)
+
+## Summary
+- refresh Python and TypeScript sandbox proxy clients after blocking
+`resume()` by fetching fresh `SandboxInfo` and eagerly rebuilding
+routing state
+- keep `wait=false` fire-and-return, document that it does not refresh
+cached routing, and preserve explicit proxy overrides as resolved-once
+values
+- add a best-effort TTY-only CLI post-resume URL tip while keeping
+non-TTY output script-safe
+- bump release metadata and locks to `0.5.59` across Python, TypeScript,
+Rust, and CLI packages
+
+## Details
+- guard post-resume rebinding on `RUNNING` plus `sandbox_url` unless an
+explicit override is present
+- build replacement proxy clients before swapping handle state so failed
+rebinds leave the old proxy intact
+- keep resume timeout behavior bounded by the original deadline,
+including sync post-resume refresh and async timeout typing
+- protect TypeScript lazy proxy resolution from clobbering eagerly
+refreshed post-resume routing
+
+## Verification
+- `poetry run python tests/sandbox/test_client_rust_backend.py`
+- `poetry run python tests/sandbox/test_client_rust_backend_async.py`
+- `npm test -- --run tests/sandbox.test.ts tests/client.test.ts`
+- `cargo fmt --check`
+- `cargo test -p tensorlake-cli`
+- `git diff --check`</div>
+</div>
+
+<a href="../project/tensorlakeai_tensorlake.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

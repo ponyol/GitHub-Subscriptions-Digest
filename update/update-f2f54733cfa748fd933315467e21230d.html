@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (7 commits) - microsoft/onnxruntime-genai - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (7 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/microsoft_onnxruntime-genai.html">microsoft/onnxruntime-genai</a> /
+    Updates in main (7 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/microsoft_onnxruntime-genai.html">microsoft/onnxruntime-genai</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-10 20:30 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/microsoft/onnxruntime-genai/commits/main" target="_blank">https://github.com/microsoft/onnxruntime-genai/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This series of updates substantially improves the system&#39;s security and stability. It enhances model loading by defaulting `trust_remote_code` to false, requiring explicit user opt-in, and introduces warnings for remote code execution. Additionally, multiple memory safety issues were resolved, including heap out-of-bounds vulnerabilities in beam search and C API functions, as well as a `new-delete-type-mismatch` in C API handle destruction. A critical fix for WebGPU graph capture with recurrent states was also implemented.
+
+---
+
+Данная серия обновлений существенно улучшает безопасность и стабильность системы. Она улучшает загрузку моделей, устанавливая по умолчанию `trust_remote_code` в значение `false`, что требует явного согласия пользователя, и добавляет предупреждения о выполнении удаленного кода. Помимо этого, были устранены многочисленные проблемы с безопасностью памяти, включая уязвимости выхода за границы кучи в функциях Beam Search и C API, а также ошибку несоответствия типов `new-delete` при уничтожении дескрипторов C API. Также было реализовано критическое исправление для захвата графа WebGPU с рекуррентными состояниями.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Update trust_remote_code (#2256)
+
+This pull request improves the handling of the `trust_remote_code` (or
+`hf_remote`) option when loading models from Hugging Face repositories,
+making the default behavior more secure and ensuring users must
+explicitly opt in to executing remote code. It also updates
+documentation and adds warnings to inform users about the security
+implications.
+
+**Security and behavior changes:**
+
+* Changed the default for `hf_remote`/`trust_remote_code` to `False` in
+both `builder.py` and `base.py`, so arbitrary code from Hugging Face
+repositories is never executed unless the user explicitly enables it.
+This matches the default behavior in the `transformers` library.
+[[1]](diffhunk://#diff-11d14636083c4529597f09601b8f66e5df0094978debab425bfe6dd850cfcb50L199-R214)
+[[2]](diffhunk://#diff-8a33668cd8981709ba426dab1b3d3145bd0756d1ebf1203657ba8b8aae860d45L89-R103)
+* Added warnings in both `builder.py` and `base.py` to clearly notify
+users when they have enabled `hf_remote`/`trust_remote_code` and explain
+the associated security risks.
+[[1]](diffhunk://#diff-11d14636083c4529597f09601b8f66e5df0094978debab425bfe6dd850cfcb50L199-R214)
+[[2]](diffhunk://#diff-8a33668cd8981709ba426dab1b3d3145bd0756d1ebf1203657ba8b8aae860d45L89-R103)
+
+**User interface and argument handling:**
+
+* Added a `--trust_remote_code` command-line argument to
+`awq-quantized-model.py`, and ensured this option is only forwarded to
+model/tokenizer loading if the user has explicitly set it.
+[[1]](diffhunk://#diff-a2b2e6bb32d7bd2dbfd980b04d4de97851bf0f12108a1be09a0c880cb68567efR49-R59)
+[[2]](diffhunk://#diff-a2b2e6bb32d7bd2dbfd980b04d4de97851bf0f12108a1be09a0c880cb68567efL58-R71)
+[[3]](diffhunk://#diff-a2b2e6bb32d7bd2dbfd980b04d4de97851bf0f12108a1be09a0c880cb68567efR153)
+* Updated the help text for `hf_remote` in argument parsing to clarify
+the new default and the security implications.
+
+**Documentation updates:**
+
+* Updated the documentation in `README.md` to accurately describe the
+new default (`hf_remote=false`) and the risks of enabling remote code
+execution.
+
+- Reject vocab_size &lt; 2 for beam search to fix OOB in BeamSearch_Cpu::SelectTop (#2272)
+
+## Summary
+
+Fixes a heap out-of-bounds read/write (CWE-787 / CWE-125) reachable from
+a malicious `genai_config.json`.
+
+`BeamSearch_Cpu::SelectTop` builds an index array of `total_elements =
+num_beams * vocab_size` entries and `partial_sort`s it to surface the
+top `top_k = 2 * num_beams` candidates:
+
+```cpp
+const size_t top_k = 2 * params_-&gt;search.num_beams;
+const size_t total_elements = num_beams * vocab_size;
+assert(total_elements &gt;= top_k);              // compiled out under NDEBUG
+select_top_idx_.resize(total_elements);
+std::partial_sort(begin, begin + top_k, end, ...);  // middle past end when top_k &gt; total_elements
+```
+
+When `vocab_size == 1` (and `num_beams &gt;= 2`), `total_elements =
+num_beams &lt; top_k = 2*num_beams`, so `begin + top_k` points past the end
+of `select_top_idx_`. `std::partial_sort` heapifies `[begin,
+begin+top_k)`, reading and move-writing slots beyond the allocation. The
+only guard was an `assert`, which is compiled out in the shipped release
+builds (`NDEBUG`). The path is reached from the normal generation loop
+(`GenerateNextToken` -&gt; `SelectTop`).
+
+## Fix
+
+- **`src/generators.cpp`**: reject beam search (`num_beams &gt; 1`) with
+`vocab_size &lt; 2` in the `Generator::Generator` validator (primary fix,
+at creation). `total_elements &gt;= top_k` reduces exactly to `vocab_size
+&gt;= 2`.
+- **`src/search.cpp`**: replace the compiled-out `assert(total_elements
+&gt;= top_k)` with a runtime check that throws, so release builds are
+protected as defense-in-depth.
+- **`test/sampling_tests.cpp`**: add
+`BeamSearchVocabSizeTooSmallThrowsCpu`, overlaying `vocab_size = 1` with
+`num_beams = 2` and asserting `OgaGenerator::Create` throws.
+
+Note: the greedy path (`GreedySearch_Cpu::SelectTop`, `num_beams == 1`)
+uses `std::max_element` and is unaffected.
+
+## Testing
+
+New regression test follows the existing `SamplingTests` overlay
+pattern. Local build isn&#39;t available in my environment (root-owned build
+dir / jiafa-dev container needed); relying on CI to build and run the
+C++ unit tests.
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+- webgpu: fix RecurrentState graph capture with shared buffer aliasing (#2244)
+
+## Summary
+
+- `RecurrentState::share_buffers_` now derives from
+`past_present_share_buffer` config (same pattern as
+`DefaultKeyValueCache`) instead of being hardcoded to `false` for WebGPU
+- Add a graph-capture guard that throws when `share_buffers_` is false
+and graph capture is requested, matching the existing guard in
+`kv_cache.cpp`
+- Add `Ort::Experimental::Get_*_Fn` accessor shim to `onnxruntime_api.h`
+so genai builds against ORT builds where
+`onnxruntime_experimental_cxx_api.h` cannot be included directly
+
+## Motivation
+
+WebGPU graph capture freezes GPU buffer handles at the first captured
+decode step. `RecurrentState` was using separate past/present buffers
+for WebGPU with a per-step C++ pointer swap — but graph capture ignores
+those swaps on replay, so every decode step after the first read a stale
+buffer, producing garbage output.
+
+With `past_present_share_buffer: true`, the ORT `LinearAttention` and
+`CausalConvWithState` kernels detect the aliased buffers via
+`initial_state_in_present_state` / `conv_state_in_present_state` and
+switch to a single `read_write` binding, which satisfies the WebGPU spec
+constraint that originally motivated the per-device split. Buffer
+handles stay stable across graph capture replays.
+
+The original comment in the code noted a TODO to remove the WebGPU
+special case once the ORT WebGPU EP kernels natively supported
+past/present buffer sharing — that support is already present, so this
+PR resolves the TODO.
+
+## Test plan
+
+- [x] `Qwen3.5-0.8B-webgpu-fused` correctness test: all queries pass
+with `enableGraphCapture=1`
+- [x] `Qwen3.5-0.8B-webgpu-fused` multi-gen test: sequential and
+overlapping generators pass with `enableGraphCapture=1`
+- [x] Both tests also pass with `enableGraphCapture=0` (no regression on
+non-graph-capture path)
+- [x] clang-format: no issues on changed files
+- [x] Build: succeeds against local ORT WebGPU EP build
+
+- Add bounds checking to OgaSequencesGetSequence C API functions (#2260)
+
+## Description
+
+`OgaSequencesGetSequenceCount` and `OgaSequencesGetSequenceData`
+accessed the underlying vector via `operator[]` without validating the
+`sequence` index. When a caller passes an index `&gt;=
+OgaSequencesCount()`, this results in an out-of-bounds read of heap
+memory (undefined behavior), which can disclose adjacent heap contents.
+
+This mirrors the validation already present in
+`OgaAppendTokenToSequence`, which checks the index before access.
+
+## Changes
+
+- `OgaSequencesGetSequenceCount`: return `0` when `sequence &gt;= size()`.
+- `OgaSequencesGetSequenceData`: return `nullptr` when `sequence &gt;=
+size()`.
+- Returning a value (instead of throwing) keeps a valid C ABI so no C++
+exception crosses the C API boundary. This protects all language
+bindings (C, C++, Python, C#, Java) that route through these functions.
+- `OgaCreateTensorFromBuffer`: reject negative shape dimensions, guard
+the byte-count multiplication against `size_t` overflow, and reject a
+null `shape_dims` with a non-zero count (defense-in-depth).
+- Added `CAPITests.SequencesOutOfBoundsAccess` unit test (no model
+required) verifying valid access works and out-of-bounds indices return
+`0` / `nullptr`.
+
+## Testing
+
+Built the library and unit tests, and ran:
+
+```
+[ RUN      ] CAPITests.AppendTokensToSequence
+[       OK ] CAPITests.AppendTokensToSequence
+[ RUN      ] CAPITests.SequencesOutOfBoundsAccess
+[       OK ] CAPITests.SequencesOutOfBoundsAccess
+[ RUN      ] CAPITests.MaxLength
+[       OK ] CAPITests.MaxLength
+[  PASSED  ] 3 tests.
+```
+
+Replaces #2257 (recreated as a non-fork branch so CI can run).
+
+---------
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+- Add regression tests for top_k exceeding vocab_size (#2265)
+
+## Summary
+
+Adds C API regression tests guarding against an out-of-bounds (heap OOB)
+access that could previously be triggered when `top_k` exceeded the
+model&#39;s `vocab_size` (reported via MSRC).
+
+## Background
+
+A heap OOB in `GreedySearch_Cpu::SampleTopK()` / `SampleTopKTopP()`
+(`src/search.cpp`): when `top_k &gt; vocab_size`,
+`std::partial_sort(indices.begin(), indices.begin() + k, indices.end(),
+...)` reads/writes past the `indices` allocation.
+
+Investigation shows the vulnerability is **already fixed** on `main`:
+- `src/generators.cpp` (`InitializeSamplingMethod`) rejects both `top_k
+&lt; 0` and `top_k &gt; vocab_size` with a clear error at generator creation.
+- `SampleTopK` / `SampleTopKTopP` clamp `k = std::min(k, vocab_size)`.
+- The CUDA sampling path (`src/cuda/cuda_sampling.cu`) clamps `k` to
+`vocab_size`.
+
+However, there was **no test** guarding this behavior. This PR adds that
+coverage.
+
+## Changes
+
+- `test/c_api_tests.cpp`: add `TopKExceedsVocabSizeThrows` and
+`TopKTopPExceedsVocabSizeThrows`, which set `top_k` well above any
+`vocab_size` and assert that `OgaGenerator::Create` throws instead of
+proceeding to an OOB access.
+
+## Testing
+
+Tests follow the existing `Phi2Test` C API test pattern. Local build
+isn&#39;t available in my environment; relying on CI to build and run the
+C++ unit tests.
+
+---------
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+- Fix new-delete-type-mismatch in C API opaque handle destroy functions (#2271)
+
+The Oga* opaque handle types in src/ort_genai_c.cpp are defined via
+multiple inheritance from the internal type and the empty `OgaAbstract`
+marker. On ABIs that do not apply empty-base optimization across
+multiple inheritance by default (notably MSVC without
+`__declspec(empty_bases)`), `sizeof(OgaX) &gt; sizeof(BaseX)`. Objects are
+allocated as the internal base type (`new Generators::BaseX(...)` in the
+matching OgaCreate*/ReturnUnique helpers), so `delete p` on the `OgaX*`
+made the C++17 sized-delete operator pass a mismatched allocation size
+to the allocator, corrupting heap metadata (ASan:
+new-delete-type-mismatch, e.g. 5128 vs 5136 bytes for OgaConfig).
+
+Fix: every owning `OgaDestroy*` now deletes through the internal base
+type that was actually allocated:
+
+    delete static_cast&lt;Generators::BaseX*&gt;(p);
+
+so `operator new` and `operator delete` see the same size on every ABI.
+Applied to all 12 owning destroy paths: OgaDestroyResult,
+OgaDestroySequences, OgaDestroyConfig, OgaDestroyGenerator,
+OgaDestroyTokenizerStream, OgaDestroyImages, OgaDestroyAudios,
+OgaDestroyNamedTensors, OgaDestroyRuntimeSettings,
+OgaDestroyStringArray, and OgaDestroyStreamingProcessor. The
+ExternalRefCounted destroys (Model, Tokenizer, Tensor,
+MultiModalProcessor, Adapters, Engine, Request, GeneratorParams) are
+untouched because they call `ExternalRelease()` and never `delete`.
+
+The struct definitions and `OgaAbstract` type are unchanged, so the
+public ABI is preserved and the accidental-construction type-safety
+protection is retained.
+
+- fix(ci): use GHCR instead of ACR for workflow docker caches (#2264)
+
+Azure resources should be read-only from GH workflows.</div>
+</div>
+
+<a href="../project/microsoft_onnxruntime-genai.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

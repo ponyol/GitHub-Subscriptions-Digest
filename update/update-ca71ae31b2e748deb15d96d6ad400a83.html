@@ -1,0 +1,3404 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (31 commits) - kagent-dev/kagent - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (31 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/kagent-dev_kagent.html">kagent-dev/kagent</a> /
+    Updates in main (31 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/kagent-dev_kagent.html">kagent-dev/kagent</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-10 18:17 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/kagent-dev/kagent/commits/main" target="_blank">https://github.com/kagent-dev/kagent/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Этот выпуск значительно повышает надежность агентов за счет улучшения проверок готовности SandboxAgent и включения локального хранения состояния сеанса для декларативных агентов, а также исправления взаимоблокировки Postgres. Он также повышает гибкость развертывания благодаря опциональной поддержке HTTPRoute для пользовательского интерфейса, `nodeSelector` и аннотаций для Helm-чартов агентов. Важные инфраструктурные обновления включают повышение версии Substrate агента до v0.0.8 и реорганизованную, управляемую через CLI систему миграции баз данных, наряду с предоставлением более полных метаданных агентов и добавлением Claude в качестве целевого объекта песочницы ACP.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- feat(helm): add UI HTTPRoute (#2165)
+
+## Summary
+
+Adds an optional Gateway API `HTTPRoute` for the UI. It is off by
+default so existing installs are unaffected.
+
+- `ui.httpRoute`: lets users front the UI with a Gateway API
+implementation such as kgateway or Istio or Envoy Gateway instead of the
+OpenShift `Route` or the bundled oauth2-proxy.
+
+## Changes
+
+### HTTPRoute (`ui.httpRoute`)
+
+- New template `templates/ui-httproute.yaml` gated behind
+`ui.httpRoute.enabled` (default `false`).
+- Supports `parentRefs` and `hostnames` and per-rule `matches` /
+`filters` / `timeouts`.
+- When a rule omits `backendRefs` it defaults to the UI `Service` on
+`ui.service.ports.port`.
+
+```gotemplate
+{{- if .Values.ui.httpRoute.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+...
+{{- end }}
+```
+
+## Testing
+
+Added helm-unittest suite `tests/ui-httproute_test.yaml`.
+
+```
+helm unittest helm/kagent
+```
+
+## References
+
+- Kubernetes Gateway API concept:
+https://kubernetes.io/docs/concepts/services-networking/gateway/
+- Gateway API project docs: https://gateway-api.sigs.k8s.io/
+- HTTPRoute resource:
+https://gateway-api.sigs.k8s.io/api-types/httproute/
+
+## Notes
+
+- No change to existing rendered output when `ui.httpRoute.enabled`
+stays at its default.
+
+Signed-off-by: younsl &lt;cysl@kakao.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- Gate SandboxAgent actor readiness on the app serving traffic (#2205)
+
+# Description
+Gates SandboxAgent actor readiness on the agent actually serving HTTP
+traffic, instead of only on a golden snapshot existing.
+
+`buildSandboxAgentActorTemplate` now sets the substrate `Readyz` probe
+on the kagent container:
+
+- Path: `/.well-known/agent-card.json` — the same path the Kubernetes
+Deployment readiness probe already uses for declarative and BYO agents,
+and the standard A2A agent-card location. The path is set explicitly
+because substrate&#39;s `Readyz` default (`/readyz`) is not served by either
+ADK runtime or by typical BYO A2A servers.
+- Port: `80` (`substrateKagentListenPort`), the port substrate routes
+actor traffic to.
+
+With `Readyz` set, substrate does not report the actor ready — and
+`Run`/`Restore` RPCs do not return success — until the container answers
+200. A SandboxAgent whose app crashes on startup or listens on the wrong
+port now stays `Ready=False` with the ActorTemplate never reaching
+`PhaseReady`, instead of reporting `Ready=True` with a golden snapshot
+that captured only the pause container and a first chat that fails or
+hangs.
+
+# Behavior changes (not breaking)
+
+- **One-time golden rebuild on upgrade.** The ActorTemplate
+name/config-hash is unchanged, so existing SandboxAgents roll through
+the spec-drift recreate path once: the template is deleted and
+recreated, and a fresh golden snapshot is built on the next reconcile.
+This is a single rebuild per existing agent, not a hot loop.
+- **Previously-&#34;Ready&#34; broken agents become NotReady.** Any agent that
+reported `Ready=True` but never actually served traffic on port 80 will
+now (correctly) report `Ready=False` with an `ActorTemplateNotReady`
+reason.
+- Known interaction: on current substrate, a golden build that fails
+(because the app never becomes ready) can hold a worker slot until
+capacity is reclaimed. That is a pre-existing substrate behavior for
+failed golden builds; this change makes such failures visible at build
+time instead of at first chat.
+
+Signed-off-by: Jeremy Alvis &lt;jeremy.alvis@solo.io&gt;
+
+- feat(sandbox-agents): Store session state in `durableDir` volume for declarative sandbox agents (#2171)
+
+**Overview**
+- Sandbox Agents using the `python` and `go` declarative runtimes are
+now configured by default to use a local store for session data. By
+default, the sqlite db now points to the Sandbox Agent&#39;s `durableDir`
+volume.
+- Session metadata is mirrored to the postgres database to support APIs
+that fetch session information ie: `GET /sessions/{id}`.
+- A new `KAGENT_SESSION_DB_URL` was added to control the `go` and
+`python` declarative runtimes behavior to choose which session service
+type.
+- local session store for BYO agents are explicitly not supported since
+it requires the BYO agents user to implement support for local session
+store. If BYO agents implement local session store and would like to
+leverage this feature using the same aforementioned env var, the
+`kagent.dev/local-session-storage` annotation has been added to override
+existing behavior.
+
+
+**Testing**
+- Tested both python and go runtimes using the sandbox agent CR across
+multiple turns with config rollout (the change was to the prompt to tell
+the agent to respond in french) in between turns to ensure data history
+remains intact across config rollout.
+
+Python runtime sqlite db history:
+
+[python-runtime-sql.md](https://github.com/user-attachments/files/29812074/python-runtime-sql.md)
+&lt;img width=&#34;1253&#34; height=&#34;692&#34; alt=&#34;Screenshot 2026-07-08 at 1 53 08 PM&#34;
+src=&#34;https://github.com/user-attachments/assets/90f66918-597d-43d6-826e-8c4d30fec2e3&#34;
+/&gt;
+
+
+Go runtime sqlite db history
+
+[go-runtime-sql.md](https://github.com/user-attachments/files/29812091/go-runtime-sql.md)
+&lt;img width=&#34;1263&#34; height=&#34;611&#34; alt=&#34;Screenshot 2026-07-08 at 1 52 57 PM&#34;
+src=&#34;https://github.com/user-attachments/assets/20092b4f-87a4-4f9c-bc0a-af1ba5872e56&#34;
+/&gt;
+
+---------
+
+Signed-off-by: JM Huibonhoa &lt;jm.huibonhoa@solo.io&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- fix(adk): annotate serialize_metadata_value as str | dict (#2173)
+
+### What
+
+`serialize_metadata_value` in
+`python/packages/kagent-adk/src/kagent/adk/converters/event_converter.py`
+accepted arbitrary metadata values, but its annotation and docstring
+said it always returned `str`. Pydantic values were already returned as
+`dict` objects through `model_dump(...)`, and that structured metadata
+is intentional because consumers such as the UI read fields like token
+usage directly.
+
+### Fix
+
+Update the helper contract to return `str | dict[str, Any]` and document
+the structured metadata behavior. For Pydantic values, keep returning a
+dict, but serialize with `model_dump(mode=&#34;json&#34;, exclude_none=True,
+by_alias=True)` so the metadata is JSON-compatible, omits `None` fields,
+and preserves aliases. Non-Pydantic values still fall back to
+`str(value)`.
+
+### Tests
+
+Expanded `TestSerializeMetadataValue` to cover:
+
+- structured Pydantic metadata staying as a dict,
+- aliases via `by_alias=True`,
+- omitted `None` fields via `exclude_none=True`,
+- enum values serialized in JSON mode, and
+- plain values still serializing to strings.
+
+Verification:
+
+- `cd python &amp;&amp; uv run ruff format
+packages/kagent-adk/src/kagent/adk/converters/event_converter.py
+packages/kagent-adk/tests/unittests/converters/test_event_converter.py`
+- `cd python &amp;&amp; uv run ruff check
+packages/kagent-adk/src/kagent/adk/converters/event_converter.py
+packages/kagent-adk/tests/unittests/converters/test_event_converter.py`
+- `cd python &amp;&amp; uv run pytest packages/kagent-adk/tests/unittests/` -&gt;
+341 passed, 1 skipped
+- `cd python &amp;&amp; uv run pytest
+packages/kagent-adk/tests/unittests/converters/test_event_converter.py`
+-&gt; 4 passed
+
+Signed-off-by: Anas Khan &lt;83116240+anxkhn@users.noreply.github.com&gt;
+Co-authored-by: Jet Chiang &lt;pokyuen.jetchiang-ext@solo.io&gt;
+
+- feat: add claude ACP sandbox target (#2189)
+
+## Summary
+
+- Adds a `claude` target to `docker/acp-sandbox/Dockerfile` using
+`@agentclientprotocol/claude-agent-acp@0.58.1` (wraps
+`@anthropic-ai/claude-agent-sdk`) on top of the `node-base` stage (Node
+≥22 required)
+- Unlike the `openclaw` target, no sandbox-local gateway is needed —
+`claude-agent-acp` speaks ACP over stdio directly, so the shim runs it
+as its child: `CMD [&#34;--&#34;, &#34;claude-agent-acp&#34;]`
+- Wires `build-acp-sandbox-claude` into the Makefile and adds
+`acp-sandbox-claude` to the build matrix in both `ci.yaml` and
+`tag.yaml`
+- Documents the full image family (including Claude) in
+`docker/acp-sandbox/README.md`
+
+## ACP handshake status
+
+Verified locally at v0.58.1: `initialize` returns `protocolVersion: 1`,
+`agentInfo.version: &#34;0.58.1&#34;`, `authMethods: []`. Authentication is via
+`ANTHROPIC_API_KEY` injected at runtime — no separate `authenticate`
+step.
+
+Still to verify: full `session/prompt` round-trip reaches the model, and
+the in-memory session model holds across bridge reconnects.
+
+## Test plan
+
+- [ ] CI builds and pushes `acp-sandbox-claude` image successfully
+- [ ] Smoke test: `docker run --rm -p 9000:9000 -e
+ANTHROPIC_API_KEY=&lt;key&gt; kagent/acp-sandbox-claude` + `websocat -1
+ws://localhost:9000/acp` → `initialize` succeeds
+- [ ] `make build-acp-sandbox-claude` works locally
+- [ ] `make build-acp-sandbox` now includes the claude target
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: Avri Chen-Roth &lt;avri210984@gmail.com&gt;
+Signed-off-by: Avri Chen-Roth &lt;the-mentor@users.noreply.github.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+Co-authored-by: Copilot Autofix powered by AI &lt;175728472+Copilot@users.noreply.github.com&gt;
+
+- docs: list bash in get_skill_tools Returns docstring (#2198)
+
+```
+## What
+
+`get_skill_tools` in `python/packages/kagent-openai/src/kagent/openai/tools/_tools.py`
+returns five tools:
+
+    return [get_skill_tool(skills_directory), read_file, write_file, edit_file, bash]
+
+but its `Returns:` docstring only listed the first four, omitting `bash`:
+
+    A list of FunctionTool instances: skills tool, read_file, write_file, edit_file
+
+This updates the docstring to enumerate all five tools so it matches what the
+function actually returns.
+
+## Why
+
+`get_skill_tools` is the entry point that assembles the toolset granted to a
+skills-enabled agent. `bash` is a real tool (`@function_tool(name_override=&#34;bash&#34;)`)
+that executes shell commands, so leaving it out of the docstring understates the
+capability, and security, surface: a reader relying on the docstring would not
+realize a shell-execution tool is included in the returned set.
+
+## Change
+
+    -        A list of FunctionTool instances: skills tool, read_file, write_file, edit_file
+    +        A list of FunctionTool instances: skills tool, read_file, write_file, edit_file, and bash
+
+## Testing
+
+Documentation-only change; no behavior is affected. `ruff check` and
+`ruff format --check` pass on the file.
+```
+
+Signed-off-by: Anas Khan &lt;83116240+anxkhn@users.noreply.github.com&gt;
+
+- test(adk): assert real tls_insecure_skip_verify tag in omitempty test (#2199)
+
+### What
+
+`TestMarshalJSON_OmitemptyFields` (`go/api/adk/types_test.go`) checks
+that
+zero-valued `omitempty` fields are omitted from the marshalled model
+JSON by
+listing the expected-absent JSON keys in `wantAbsent`. The OpenAI and
+Anthropic
+cases listed `&#34;tls_disable_verify&#34;`, but no Go struct field serializes
+to that
+key: the TLS-verify field on `BaseModel` is
+
+```go
+TLSInsecureSkipVerify *bool `json:&#34;tls_insecure_skip_verify,omitempty&#34;`
+```
+
+so it marshals to `tls_insecure_skip_verify`. Because the marshaller
+never emits
+`tls_disable_verify`, `raw[&#34;tls_disable_verify&#34;]` was always absent and
+the
+assertion was vacuously true, it could never fail. As a result the
+`omitempty`
+behavior of the TLS-verify pointer was not actually covered by this
+test.
+`tls_disable_verify` is a Python-only legacy validation alias
+(`python/packages/kagent-adk/.../types.py`, via `AliasChoices`) and has
+never
+been a Go json tag.
+
+This changes the two `wantAbsent` entries to the real json tag
+`tls_insecure_skip_verify` so the assertion exercises the intended
+omission
+behavior. No production code is touched; the `,omitempty` tag is already
+correct,
+so the corrected test stays green on the current code.
+
+### Why it is correct
+
+The sibling presence test `TestMarshalJSON_BaseModelFields` already
+asserts on
+`raw[&#34;tls_insecure_skip_verify&#34;]`, confirming that is the tag the
+marshaller
+emits and that the absent-key form was a copy/paste slip from the Python
+field
+name.
+
+### How it was verified
+
+Temporarily dropping `,omitempty` from `BaseModel.TLSInsecureSkipVerify`
+makes the
+corrected test fail:
+
+```
+field &#34;tls_insecure_skip_verify&#34; should be omitted when zero-valued, but was present
+```
+
+while the previous `tls_disable_verify` assertion still passed under the
+same
+broken condition, demonstrating the old check was a no-op. Restoring
+`,omitempty`
+makes the corrected test pass again.
+
+Local checks (module `github.com/kagent-dev/kagent/go`, go 1.26):
+
+- `go test ./api/adk/ -run TestMarshalJSON_OmitemptyFields -v` -&gt; PASS
+(4/4)
+- `go test -race ./api/adk/` -&gt; PASS
+- `gofmt -l`, `go vet ./api/adk/`, `golangci-lint run ./api/adk/...` -&gt;
+clean / 0 issues
+
+Signed-off-by: Anas Khan &lt;83116240+anxkhn@users.noreply.github.com&gt;
+
+- Add SKIP_MIGRATIONS to run migrations out-of-band (#2170)
+
+## Description
+
+Adds a `SKIP_MIGRATIONS` opt-out so database migrations can run
+out-of-band (e.g. from a CI/CD pipeline) instead of at controller
+startup.
+
+- New `--skip-migrations` controller flag (settable via the
+`SKIP_MIGRATIONS` env var; default off — startup migrations remain the
+default behavior).
+- When set, the controller applies nothing and instead calls the new
+`migrations.VerifyMigrated`, refusing to start against a database that
+is not fully migrated. Per source: a missing tracking table, a version
+behind the binary&#39;s embedded max, or a dirty tracking table is a startup
+error with an actionable message; a database ahead of the binary boots
+in compatibility mode, matching `RunUp`.
+- `VerifyMigrated` issues only `SELECT`s — it deliberately does not open
+golang-migrate, which creates the tracking table on every open — so the
+verification works on a connection whose role has no DDL privileges.
+- Helm: new `database.postgres.skipMigrations` value (default `false`)
+rendered into the controller configmap as `SKIP_MIGRATIONS`, plus a
+NOTES warning when enabled reminding the operator that migrations must
+be applied out-of-band before install/upgrade.
+
+## Testing
+Verified on a kind cluster: upgrade with `skipMigrations=true` boots and
+logs `database schema verified`; renaming a tracking table makes the
+controller exit with `tracking table &#34;vector_schema_migrations&#34; does not
+exist — the database has not been migrated; apply migrations out-of-band
+or unset SKIP_MIGRATIONS`; restoring the table recovers.
+
+Fresh install without migrations returns:
+```
+{&#34;level&#34;:&#34;error&#34;,&#34;ts&#34;:&#34;2026-07-06T17:37:17Z&#34;,&#34;logger&#34;:&#34;setup&#34;,&#34;msg&#34;:&#34;database migration verification failed&#34;,&#34;error&#34;:&#34;source core: tracking table \&#34;schema_migrations\&#34; does not exist - the database has not been migrated; apply migrations out-of-band or unset SKIP_MIGRATIONS&#34;,&#34;stacktrace&#34;:&#34;github.com/kagent-dev/kagent/go/core/pkg/app.Start\n\t/workspace/core/pkg/app/app.go:482\nmain.main\n\t/workspace/core/cmd/controller/main.go:34\nruntime.main\n\t/usr/lib/go/src/runtime/proc.go:290&#34;}
+```
+
+Controller starts up correctly when migrations are manually run against
+the db:
+```
+❯ ./go/core/bin/kagent-local db migrate up
+applied 9 migration(s); schema is up to date
+```
+
+---------
+
+Signed-off-by: Jeremy Alvis &lt;jeremy.alvis@solo.io&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- fix: fix typos in part_converter comments (#2195)
+
+fixes two typos in TODO comments: suervice -&gt; surface, accordinlgy -&gt;
+accordingly
+
+Signed-off-by: mesutoezdil &lt;mesudozdil@gmail.com&gt;
+
+- chore(deps): update anthropic[vertex] requirement from &gt;=0.49.0 to &gt;=0.116.0 in /python (#2160)
+
+Updates the requirements on
+[anthropic[vertex]](https://github.com/anthropics/anthropic-sdk-python)
+to permit the latest version.
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/releases&#34;&gt;anthropic[vertex]&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;v0.116.0&lt;/h2&gt;
+&lt;h2&gt;0.116.0 (2026-07-02)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/compare/v0.115.1...v0.116.0&#34;&gt;v0.115.1...v0.116.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add agent-memory-2026-07-22 beta header (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/e181d5c1b233d5b0b313c78b27cf1dd27f620e74&#34;&gt;e181d5c&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Changelog&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/blob/main/CHANGELOG.md&#34;&gt;anthropic[vertex]&#39;s
+changelog&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;0.116.0 (2026-07-02)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/compare/v0.115.1...v0.116.0&#34;&gt;v0.115.1...v0.116.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add agent-memory-2026-07-22 beta header (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/e181d5c1b233d5b0b313c78b27cf1dd27f620e74&#34;&gt;e181d5c&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;0.115.1 (2026-07-01)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/compare/v0.115.0...v0.115.1&#34;&gt;v0.115.0...v0.115.1&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Chores&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; remove some nonfunctional types from the SDKs
+(&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/5e7c431ef31b72b3f1f59902e678316fea14d983&#34;&gt;5e7c431&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;0.115.0 (2026-06-30)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/compare/v0.114.0...v0.115.0&#34;&gt;v0.114.0...v0.115.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for Managed Agents event delta
+streaming, agent overrides, reverse pagination, vault credential
+injection scoping, and agent and deployment webhook events (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/8c23f7ef103c287362364c12503de85eb31f07fb&#34;&gt;8c23f7e&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;0.114.0 (2026-06-30)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/compare/v0.113.0...v0.114.0&#34;&gt;v0.113.0...v0.114.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for claude-sonnet-5 (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/b893033b32951e0e2e04afa36a3a7eb016ae4b99&#34;&gt;b893033&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Bug Fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;agent_toolset:&lt;/strong&gt; allow absolute paths that resolve
+inside workdir (&lt;a
+href=&#34;https://redirect.github.com/anthropics/anthropic-sdk-python/issues/121&#34;&gt;#121&lt;/a&gt;)
+(&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/0105529fe15b1f80bbf9c56f4ae684fdfa10e2b3&#34;&gt;0105529&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;0.113.0 (2026-06-29)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/compare/v0.112.0...v0.113.0&#34;&gt;v0.112.0...v0.113.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for 20260318 web fetch and support
+tools (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/88dbfb14a2a838eda889469ad7fe07a47618e85f&#34;&gt;88dbfb1&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Bug Fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;async count_tokens missing output_format/output_config merge block
+(&lt;a
+href=&#34;https://redirect.github.com/anthropics/anthropic-sdk-python/issues/162&#34;&gt;#162&lt;/a&gt;)
+(&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/122c95811566bf6f5cbc682ae0a74972ae75a223&#34;&gt;122c958&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;!-- raw HTML omitted --&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;... (truncated)&lt;/p&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/d2f6543ee7995adcae74666a5d37b3d9743debfe&#34;&gt;&lt;code&gt;d2f6543&lt;/code&gt;&lt;/a&gt;
+release: 0.116.0&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/4253c06287654e30031e47630e499e1a4fb2d214&#34;&gt;&lt;code&gt;4253c06&lt;/code&gt;&lt;/a&gt;
+feat(api): add agent-memory-2026-07-22 beta header&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/5e98d72deb656466fe384e9821b602d863cba284&#34;&gt;&lt;code&gt;5e98d72&lt;/code&gt;&lt;/a&gt;
+release: 0.115.1&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/5385af6a7237d22a0a470e5163d31510d58ae1df&#34;&gt;&lt;code&gt;5385af6&lt;/code&gt;&lt;/a&gt;
+chore(api): remove some nonfunctional types from the SDKs&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/e4283c3a4805af2ae6a1326afaf299686c673f62&#34;&gt;&lt;code&gt;e4283c3&lt;/code&gt;&lt;/a&gt;
+release: 0.115.0&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/d1a933e3a58074a3372e4d304d6330cbdd98bef7&#34;&gt;&lt;code&gt;d1a933e&lt;/code&gt;&lt;/a&gt;
+feat(api): add support for Managed Agents event delta streaming, agent
+overri...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/53582ad741ff4695960673e2fe1e792ea87e931f&#34;&gt;&lt;code&gt;53582ad&lt;/code&gt;&lt;/a&gt;
+codegen metadata&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/6e9f197b3d0bf63b63faeb895ddd2422af286cee&#34;&gt;&lt;code&gt;6e9f197&lt;/code&gt;&lt;/a&gt;
+release: 0.114.0&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/ab10964f48c54c691e96f29f03dd7c600452c817&#34;&gt;&lt;code&gt;ab10964&lt;/code&gt;&lt;/a&gt;
+feat(api): add support for claude-sonnet-5&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/commit/8a004a2f0fb909a3cc701fcf8290ae18f9fa2723&#34;&gt;&lt;code&gt;8a004a2&lt;/code&gt;&lt;/a&gt;
+fix(agent_toolset): allow absolute paths that resolve inside workdir (&lt;a
+href=&#34;https://redirect.github.com/anthropics/anthropic-sdk-python/issues/121&#34;&gt;#121&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-python/compare/v0.49.0...v0.116.0&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- feat: expose icon, provider, documentation URL and version on agent A2A card (#2188)
+
+## What
+
+Adds four optional fields to the v1alpha2 `AgentSpec` and surfaces them
+on the agent&#39;s A2A
+[`AgentCard`](https://a2a-protocol.org/latest/specification/#441-agentcard):
+
+- `iconUrl` →
+[`AgentCard.iconUrl`](https://a2a-protocol.org/latest/specification/#441-agentcard)
+- `documentationUrl` →
+[`AgentCard.documentationUrl`](https://a2a-protocol.org/latest/specification/#441-agentcard)
+- `version` →
+[`AgentCard.version`](https://a2a-protocol.org/latest/specification/#441-agentcard)
+- `provider` (`organization` + `url`) → [`AgentCard.provider` /
+`AgentProvider`](https://a2a-protocol.org/latest/specification/#442-agentprovider)
+
+## Why
+
+The A2A `AgentCard` builder (`GetA2AAgentCard`) only emitted `name`,
+`description`, `capabilities`, `skills`, and the default I/O modes. The
+card struct carries icon, provider, documentation URL, and version, but
+there was no CRD field to populate them, so A2A clients (the UI, remote
+agents discovering this one) received a card with no icon, attribution,
+docs link, or version. These fields let agent authors advertise that
+metadata.
+
+## Notes
+
+- All fields are optional and `omitempty`. When unset, the emitted card
+is byte-for-byte unchanged from today (`version` stays empty rather than
+being defaulted).
+- The URL-shaped fields (`iconUrl`, `documentationUrl`, `provider.url`)
+carry `+kubebuilder:validation:Format=uri`, so the apiserver rejects
+non-URI values at admission. `provider.url` previously used
+`minLength=1`; `format=uri` also rejects the empty string, so the
+constraint is strictly tighter. This is the one non-additive part: a
+value the A2A library would accept as a plain string can now be rejected
+on write.
+- Applies to both `Declarative` and `BYO` agents, since both resolve
+through the same `GetA2AAgentCard` builder.
+- Scoped to v1alpha2 (current storage version); v1alpha1 left untouched.
+- CRD manifests regenerated via `controller-gen` and synced into
+`helm/kagent-crds`.
+
+## Testing
+
+- Extended the table-driven `TestGetA2AAgentCard` unit test to cover the
+four fields (set and unset).
+- Added `TestE2EAgentCardMetadata`, which creates an agent with the
+metadata set and asserts the served `/.well-known/agent-card.json`
+round-trips it.
+
+---------
+
+Signed-off-by: QuentinBisson &lt;quentin@giantswarm.io&gt;
+Signed-off-by: Quentin Bisson &lt;quentin@giantswarm.io&gt;
+
+- Add kagent db migrate CLI for out-of-band migrations (#2168)
+
+&gt; [!IMPORTANT]
+&gt; Branched off of https://github.com/kagent-dev/kagent/pull/2094, so
+will be rebased after that merges.
+
+## Description
+
+Adds a `kagent db migrate` command group for running and inspecting
+database migrations out-of-band from server startup.
+
+```
+kagent db migrate up                    # apply all pending migrations, every registered source
+kagent db migrate status [--output json] # aggregate + per-source applied/pending breakdown
+kagent db migrate version               # per-source current versions (--source filters)
+kagent db migrate down N  --source core # roll back the N most-recent migrations on one source
+kagent db migrate goto V  --source core # move one source to version V (0 = empty schema)
+kagent db migrate force V --source core # assert a version without running SQL (recovery)
+```
+
+- New exported packages `go/core/pkg/cli/db` and
+`go/core/pkg/cli/db/migrate`; `NewCommand(sources ...migrations.Source)`
+takes the source list explicitly so downstream consumers can wire their
+own sources.
+- The connection comes from `--db-url`, falling back to the controller&#39;s
+`POSTGRES_DATABASE_URL` env var. The vector track is gated on the
+controller&#39;s `DATABASE_VECTOR_ENABLED` env var (default enabled).
+- New `migrations.WithMigrator` export: the CLI opens migrators through
+the orchestrator&#39;s own schema handling, tracking-table config, and
+advisory-lock identity, so a CLI invocation racing a booting server
+serializes.
+- `up`, `down`, and `goto` refuse a dirty source and report the `force`
+invocation that clears it; the CLI never auto-recovers (startup remains
+the automatic tier). `status`/`version` report dirty state instead of
+refusing.
+- `force 0` clears the version record entirely (recovery when a track&#39;s
+first migration fails dirty); any other value must be a shipped
+migration version.
+- `down` on an empty track reports &#34;no migrations to roll back&#34; instead
+of golang-migrate&#39;s raw &#34;file does not exist&#34;.
+- `status --output json` has a frozen field shape locked by
+`TestStatusJSONShape`.
+- Help output for the `db` subtree hides the root&#39;s server-oriented
+persistent flags (`--kagent-url`, `-n`, `-o`, `--timeout`, etc.); db
+commands talk to Postgres directly.
+
+## Testing
+
+Version:
+```
+❯ ./go/core/bin/kagent-local db migrate version
+core: 6
+vector: 3
+```
+
+Fresh install:
+```
+❯ ./go/core/bin/kagent-local db migrate status
+9 migration(s) applied, 0 pending
+  core: 6 applied (at v6), 0 pending
+  vector: 3 applied (at v3), 0 pending
+
+kagent=# \dt
+                   List of tables
+ Schema |           Name           | Type  | Owner
+--------+--------------------------+-------+--------
+⋮
+(17 rows)
+```
+
+Down (Rollback):
+```
+kagent=# \dt
+                   List of tables
+ Schema |           Name           | Type  | Owner
+--------+--------------------------+-------+--------
+⋮
+(17 rows)
+
+❯ ./go/core/bin/kagent-local db migrate down 1 --source core 
+rolled back 1 migration(s)
+
+❯ ./go/core/bin/kagent-local db migrate status              
+8 migration(s) applied, 1 pending
+  core: 5 applied (at v5), 1 pending
+  vector: 3 applied (at v3), 0 pending
+
+kagent=# \dt
+                   List of tables
+ Schema |           Name           | Type  | Owner
+--------+--------------------------+-------+--------
+⋮
+(15 rows)
+```
+
+Goto:
+```
+❯ ./go/core/bin/kagent-local db migrate goto 1 --source core
+schema is at version 1
+
+kagent=# \dt
+                   List of tables
+ Schema |           Name           | Type  | Owner
+--------+--------------------------+-------+--------
+ public | memory                   | table | kagent
+ public | schema_migrations        | table | kagent
+ public | vector_schema_migrations | table | kagent
+(3 rows)
+```
+
+Force:
+```
+kagent=# select * from schema_migrations;
+ version | dirty
+---------+-------
+       6 | f
+(1 row)
+
+❯ ./go/core/bin/kagent-local db migrate force 1 --source core 
+version 1 marked as applied
+
+kagent=# select * from schema_migrations;
+ version | dirty
+---------+-------
+       1 | f
+(1 row)
+```
+
+Goto + Up:
+```
+❯ ./go/core/bin/kagent-local db migrate goto 1 --source core
+schema is at version 1
+
+❯ ./go/core/bin/kagent-local db migrate goto 1 --source vector
+schema is at version 1
+
+❯ ./go/core/bin/kagent-local db migrate status                
+2 migration(s) applied, 7 pending
+  core: 1 applied (at v1), 5 pending
+  vector: 1 applied (at v1), 2 pending
+
+❯ ./go/core/bin/kagent-local db migrate up                    
+applied 7 migration(s); schema is up to date
+```
+
+---------
+
+Signed-off-by: Jeremy Alvis &lt;jeremy.alvis@solo.io&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- docs: fix stale references and wording (#2184)
+
+Fix stale and incorrect content across docs and templates.
+
+Signed-off-by: mesutoezdil &lt;mesudozdil@gmail.com&gt;
+
+- chore(deps): update wheel requirement from &gt;=0.46.2 to &gt;=0.47.0 in /python (#2161)
+
+Updates the requirements on [wheel](https://github.com/pypa/wheel) to
+permit the latest version.
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/pypa/wheel/releases&#34;&gt;wheel&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;0.47.0&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Added the &lt;code&gt;wheel info&lt;/code&gt; subcommand to display metadata
+about wheel files without unpacking them (&lt;a
+href=&#34;https://redirect.github.com/pypa/wheel/issues/639&#34;&gt;#639&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Fixed &lt;code&gt;WheelFile&lt;/code&gt; raising &lt;code&gt;Missing RECORD
+file&lt;/code&gt; when the wheel filename contains uppercase characters (e.g.
+&lt;code&gt;Django-3.2.5.whl&lt;/code&gt;) but the &lt;code&gt;.dist-info&lt;/code&gt; directory
+inside uses normalized lowercase naming (&lt;a
+href=&#34;https://redirect.github.com/pypa/wheel/issues/411&#34;&gt;#411&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Changelog&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/pypa/wheel/blob/main/docs/news.rst&#34;&gt;wheel&#39;s
+changelog&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h1&gt;Release Notes&lt;/h1&gt;
+&lt;p&gt;&lt;strong&gt;0.47.0 (2026-04-22)&lt;/strong&gt;&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Added the &lt;code&gt;wheel info&lt;/code&gt; subcommand to display metadata
+about wheel files without
+unpacking them (&lt;code&gt;[#639](https://github.com/pypa/wheel/issues/639)
+&amp;lt;https://github.com/pypa/wheel/issues/639&amp;gt;&lt;/code&gt;_)&lt;/li&gt;
+&lt;li&gt;Fixed &lt;code&gt;WheelFile&lt;/code&gt; raising &lt;code&gt;Missing RECORD
+file&lt;/code&gt; when the wheel filename contains
+uppercase characters (e.g. &lt;code&gt;Django-3.2.5.whl&lt;/code&gt;) but the
+&lt;code&gt;.dist-info&lt;/code&gt; directory
+inside uses normalized lowercase naming
+(&lt;code&gt;[#411](https://github.com/pypa/wheel/issues/411)
+&amp;lt;https://github.com/pypa/wheel/issues/411&amp;gt;&lt;/code&gt;_)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;0.46.3 (2026-01-22)&lt;/strong&gt;&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Fixed &lt;code&gt;ImportError: cannot import name &#39;_setuptools_logging&#39;
+from &#39;wheel&#39;&lt;/code&gt; when
+installed alongside an old version of setuptools and running the
+&lt;code&gt;bdist_wheel&lt;/code&gt;
+command (&lt;code&gt;[#676](https://github.com/pypa/wheel/issues/676)
+&amp;lt;https://github.com/pypa/wheel/issues/676&amp;gt;&lt;/code&gt;_)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;0.46.2 (2026-01-22)&lt;/strong&gt;&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Restored the &lt;code&gt;bdist_wheel&lt;/code&gt; command for compatibility with
+&lt;code&gt;setuptools&lt;/code&gt; older than
+v70.1&lt;/li&gt;
+&lt;li&gt;Importing &lt;code&gt;wheel.bdist_wheel&lt;/code&gt; now emits a
+&lt;code&gt;FutureWarning&lt;/code&gt; instead of a
+&lt;code&gt;DeprecationWarning&lt;/code&gt;&lt;/li&gt;
+&lt;li&gt;Fixed &lt;code&gt;wheel unpack&lt;/code&gt; potentially altering the permissions
+of files outside of the
+destination tree with maliciously crafted wheels (CVE-2026-24049)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;0.46.1 (2025-04-08)&lt;/strong&gt;&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Temporarily restored the &lt;code&gt;wheel.macosx_libfile&lt;/code&gt; module
+(&lt;code&gt;[#659](https://github.com/pypa/wheel/issues/659)
+&amp;lt;https://github.com/pypa/wheel/issues/659&amp;gt;&lt;/code&gt;_)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;0.46.0 (2025-04-03)&lt;/strong&gt;&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Dropped support for Python 3.8&lt;/li&gt;
+&lt;li&gt;Removed the &lt;code&gt;bdist_wheel&lt;/code&gt; setuptools command
+implementation and entry point.
+The &lt;code&gt;wheel.bdist_wheel&lt;/code&gt; module is now just an alias to
+&lt;code&gt;setuptools.command.bdist_wheel&lt;/code&gt;, emitting a deprecation
+warning on import.&lt;/li&gt;
+&lt;li&gt;Removed vendored &lt;code&gt;packaging&lt;/code&gt; in favor of a run-time
+dependency on it&lt;/li&gt;
+&lt;li&gt;Made the &lt;code&gt;wheel.metadata&lt;/code&gt; module private (with a
+deprecation warning if it&#39;s
+imported&lt;/li&gt;
+&lt;li&gt;Made the &lt;code&gt;wheel.cli&lt;/code&gt; package private (no deprecation
+warning)&lt;/li&gt;
+&lt;li&gt;Fixed an exception when calling the &lt;code&gt;convert&lt;/code&gt; command
+with an empty description
+field&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;0.45.1 (2024-11-23)&lt;/strong&gt;&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Fixed pure Python wheels converted from eggs and wininst files
+having the ABI tag in
+the file name&lt;/li&gt;
+&lt;/ul&gt;
+&lt;!-- raw HTML omitted --&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;... (truncated)&lt;/p&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/wheel/commit/efd83a750f07a33462ea2eed365fd8dac9e51442&#34;&gt;&lt;code&gt;efd83a7&lt;/code&gt;&lt;/a&gt;
+Created a new release&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/wheel/commit/bb69216d35588c2a0febc2d9a130727fe6e46ee3&#34;&gt;&lt;code&gt;bb69216&lt;/code&gt;&lt;/a&gt;
+Reordered the changelog entries&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/wheel/commit/d5a1763ce927618bfa7d82abe334d0d14a93cc37&#34;&gt;&lt;code&gt;d5a1763&lt;/code&gt;&lt;/a&gt;
+fix(wheelfile): resolve .dist-info path case-insensitively when reading
+wheel...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/wheel/commit/5718957928ece25eb0d1c12023c71dea4fcb5cf9&#34;&gt;&lt;code&gt;5718957&lt;/code&gt;&lt;/a&gt;
+[pre-commit.ci] pre-commit autoupdate (&lt;a
+href=&#34;https://redirect.github.com/pypa/wheel/issues/685&#34;&gt;#685&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/wheel/commit/625806845ae5756be3cc0f9d44832c29079c0954&#34;&gt;&lt;code&gt;6258068&lt;/code&gt;&lt;/a&gt;
+chore: log_level is better than log_cli_level (&lt;a
+href=&#34;https://redirect.github.com/pypa/wheel/issues/684&#34;&gt;#684&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/wheel/commit/2975debc789682b3a448b134611acc6962a93eb3&#34;&gt;&lt;code&gt;2975deb&lt;/code&gt;&lt;/a&gt;
+Require tox &amp;gt;= 4.22&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/wheel/commit/47674ba770e5ee72d679b7eb32b558e0c177640d&#34;&gt;&lt;code&gt;47674ba&lt;/code&gt;&lt;/a&gt;
+chore: add check-sdist to checks (&lt;a
+href=&#34;https://redirect.github.com/pypa/wheel/issues/681&#34;&gt;#681&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/wheel/commit/56223f6f8dfa8d3d40923f24dcf159204698d7b6&#34;&gt;&lt;code&gt;56223f6&lt;/code&gt;&lt;/a&gt;
+&lt;code&gt;__package__&lt;/code&gt; → &lt;code&gt;__spec__.parent&lt;/code&gt; (&lt;a
+href=&#34;https://redirect.github.com/pypa/wheel/issues/679&#34;&gt;#679&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/wheel/commit/0ce509e02dc3cd1b7b0bdf868482de062b3c21c3&#34;&gt;&lt;code&gt;0ce509e&lt;/code&gt;&lt;/a&gt;
+Added the wheel info subcommand (&lt;a
+href=&#34;https://redirect.github.com/pypa/wheel/issues/669&#34;&gt;#669&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/wheel/commit/39039c0f3446c1ed5ec52621e98bc2bad8178a06&#34;&gt;&lt;code&gt;39039c0&lt;/code&gt;&lt;/a&gt;
+Improved the index page&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/pypa/wheel/compare/0.46.3...0.47.0&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- Remove cr.kagent.dev alias usage (#2177)
+
+## Summary
+- replace cr.kagent.dev image defaults and test expectations with
+ghcr.io
+- download CLI install assets from GitHub releases instead of the
+cr.kagent.dev alias
+- update release docs and generated translator golden outputs
+
+## Testing
+- go test ./core/internal/controller/translator/agent
+./core/pkg/sandboxbackend/substrate
+- helm unittest -f &#39;tests/*deployment*&#39; helm/kagent
+- git diff --check
+
+Note: full helm unittest helm/kagent still fails on the existing
+agent-nodeselector_test.yaml suite unrelated to this change.
+
+Signed-off-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- Switch migrator to orchestrator and manage downstream migrations (#2094)
+
+## Description
+
+Restructures the DB migration machinery from two hardcoded tracks
+(`core`, `vector`) into a single orchestrator that applies an ordered
+list of `Source` descriptors. Downstream consumers register their own
+`Source`s instead of shipping a duplicate runner, so track ordering and
+failure handling stay centralized in one place.
+
+This is the first step toward broader migration rollback tooling.
+
+## What changed
+
+- `Source` descriptor + orchestrator: new `Source{Name, Schema,
+TrackingTable, FS, Dir, PreCheck}` and `RunUp(ctx, url, []Source)`.
+`BuiltinSources(vectorEnabled)` builds the built-in set: `core` always,
+`vector` (with the pgvector `PreCheck`) when enabled.
+- Conditional registration, not skip predicates: the vector track is
+gated by whether its `Source` is registered rather than a flag inside
+the runner, so `vectorEnabled` no longer leaks into the orchestrator
+contract.
+- Prechecks run up front: all `PreCheck`s run before any source is
+applied, preserving the existing fail-fast pgvector behavior (verified
+before `core` runs).
+- Compensating rollback across N sources: if a later source fails,
+already-applied sources roll back to their pre-run versions in reverse
+order, each preserving the `prevVersion == 0` guard (don&#39;t roll a
+freshly-installed source back to 0). This generalizes today&#39;s &#34;roll core
+back if vector fails&#34;. Failed compensating rollbacks are surfaced via
+`errors.Join` rather than log-only.
+- Schema isolation (`Source.Schema != &#34;&#34;`): a non-empty schema scopes
+the track. The orchestrator creates the schema (`CREATE SCHEMA IF NOT
+EXISTS`), pins `search_path` on the DSN, and scopes the tracking table
+via `migratepgx.Config.SchemaName`. Schema names are validated
+(lowercase identifier, so the quoted `CREATE SCHEMA` and the case-folded
+`search_path` can&#39;t diverge) and quoted. Built-in tracks use `Schema ==
+&#34;&#34;`, which resolves to the connection default (`public`), unchanged from
+today.
+- Source validation: rejects two sources colliding on the same `(schema,
+tracking table)`, including the case where `Schema == &#34;&#34;` resolves to a
+schema another source names explicitly (`checkResolvedSchemaCollisions`,
+run with a live connection).
+- Extension-point change: `app.Start`&#39;s `MigrationRunner` DI callback is
+removed in favor of `extraSources []migrations.Source`; built-in sources
+run first, then downstream extras in registration order.
+
+## Breaking change
+
+`app.Start(getExtensionConfig, migrationRunner)` becomes
+`app.Start(getExtensionConfig, extraSources []migrations.Source)`. The
+`MigrationRunner` type is removed; downstream consumers register sources
+instead, and migrate to that in the same release.
+`cmd/controller/main.go` passes `nil` (a valid empty source list).
+
+## Behavior preserved
+
+Same tracking tables (`schema_migrations`, `vector_schema_migrations`),
+same ahead-of-binary compatibility mode, same dirty-and-ahead hard
+error, same `ErrNoChange` no-op, same `prevVersion == 0` rollback-skip
+guard, same fail-fast pgvector check. `golang-migrate`&#39;s pgx driver
+still checks out a single dedicated connection for the session-scoped
+advisory lock; the pool is not capped because the driver pins lock and
+migration work to that connection.
+
+## Testing
+
+- Manual upgrade test from 0.9.10
+- New table-driven + testcontainers coverage: multi-source ordering,
+compensating rollback across three sources (incl. the `prev == 0`
+guard), schema-scoped source, precheck-runs-before-any-apply,
+source-collision validation, schema-name validation, `withSearchPath`,
+and empty/nil no-op.
+- Existing `core`/`vector` scenarios adapted to the new signature; all
+prior behaviors retained.
+- `go build`, `go vet`, and the container-free tests pass; the
+testcontainers suite requires Docker.
+
+---------
+
+Signed-off-by: Jeremy Alvis &lt;jeremy.alvis@solo.io&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- docs(python): fix KAgentSession import path in kagent-openai README (#2163)
+
+```markdown
+## What
+
+The Session Management example in `python/packages/kagent-openai/README.md`
+imports `KAgentSession` from a package path that does not exist:
+
+```python
+from kagent.openai.agent._session_service import KAgentSession
+```
+
+There is no `agent` subpackage under `kagent/openai/`. The directory
+`src/kagent/openai/` contains the flat modules `_a2a.py`, `_agent_executor.py`,
+`_event_converter.py`, `_session_service.py`, and a `tools/` package. Running
+the snippet as written raises:
+
+```
+ModuleNotFoundError: No module named &#39;kagent.openai.agent&#39;
+```
+
+## Fix
+
+Point the import at `kagent.openai._session_service`, where `KAgentSession` is
+actually defined (`_session_service.py`) and how the package&#39;s own code imports
+it (`_agent_executor.py` uses `from ._session_service import KAgentSession`):
+
+```python
+from kagent.openai._session_service import KAgentSession
+```
+
+## Verification
+
+With the `kagent-openai` package installed:
+
+```console
+$ python -c &#34;from kagent.openai.agent._session_service import
+KAgentSession&#34;
+ModuleNotFoundError: No module named &#39;kagent.openai.agent&#39;
+
+$ python -c &#34;from kagent.openai._session_service import KAgentSession&#34;
+# imports cleanly
+```
+
+Docs-only change; no source behavior is affected.
+```
+
+Signed-off-by: Anas Khan &lt;83116240+anxkhn@users.noreply.github.com&gt;
+Co-authored-by: Jet Chiang &lt;pokyuen.jetchiang-ext@solo.io&gt;
+
+- chore(deps): update langsmith[otel] requirement from &gt;=0.4.30 to &gt;=0.9.8 in /python (#2159)
+
+Updates the requirements on
+[langsmith[otel]](https://github.com/langchain-ai/langsmith-sdk) to
+permit the latest version.
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/langchain-ai/langsmith-sdk/releases&#34;&gt;langsmith[otel]&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;v0.9.8&lt;/h2&gt;
+&lt;h2&gt;What&#39;s Changed&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Add aread_project in python SDK by &lt;a
+href=&#34;https://github.com/KiewanVillatel&#34;&gt;&lt;code&gt;@​KiewanVillatel&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langsmith-sdk/pull/3157&#34;&gt;langchain-ai/langsmith-sdk#3157&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;refactor: rename client-facing SDK online_evaluator to evaluator by
+&lt;a href=&#34;https://github.com/sineha-mani&#34;&gt;&lt;code&gt;@​sineha-mani&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langsmith-sdk/pull/3158&#34;&gt;langchain-ai/langsmith-sdk#3158&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;release(python): bump py version to 0.9.8 by &lt;a
+href=&#34;https://github.com/KiewanVillatel&#34;&gt;&lt;code&gt;@​KiewanVillatel&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langsmith-sdk/pull/3159&#34;&gt;langchain-ai/langsmith-sdk#3159&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;Full Changelog&lt;/strong&gt;: &lt;a
+href=&#34;https://github.com/langchain-ai/langsmith-sdk/compare/v0.9.7...v0.9.8&#34;&gt;https://github.com/langchain-ai/langsmith-sdk/compare/v0.9.7...v0.9.8&lt;/a&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langsmith-sdk/commit/8f18b112fedabe12ecfe5c3e264903026c5ae21f&#34;&gt;&lt;code&gt;8f18b11&lt;/code&gt;&lt;/a&gt;
+release(python): bump py version to 0.9.8 (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langsmith-sdk/issues/3159&#34;&gt;#3159&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langsmith-sdk/commit/78f528638935311aa5b1299ac8e5558a054d3bd5&#34;&gt;&lt;code&gt;78f5286&lt;/code&gt;&lt;/a&gt;
+refactor: rename client-facing SDK online_evaluator to evaluator (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langsmith-sdk/issues/3158&#34;&gt;#3158&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langsmith-sdk/commit/ef6b76747fccdc6314450ec4286a64e769628017&#34;&gt;&lt;code&gt;ef6b767&lt;/code&gt;&lt;/a&gt;
+Add aread_project in python SDK (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langsmith-sdk/issues/3157&#34;&gt;#3157&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langsmith-sdk/commit/b5c9d0137bfc92f497271db6f887653d57d66372&#34;&gt;&lt;code&gt;b5c9d01&lt;/code&gt;&lt;/a&gt;
+chore(release): bump version to 0.9.7 (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langsmith-sdk/issues/3153&#34;&gt;#3153&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langsmith-sdk/commit/cf2cb5a1e73c59a10dd5af7f0216f0c933daf18f&#34;&gt;&lt;code&gt;cf2cb5a&lt;/code&gt;&lt;/a&gt;
+feat(integrations): set ls_provider/ls_model_name on voice llm runs for
+cost ...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langsmith-sdk/commit/41d0594e86a5c2087f68601d108aa83fecc837d0&#34;&gt;&lt;code&gt;41d0594&lt;/code&gt;&lt;/a&gt;
+feat(integrations): attribute voice traces via ls_integration metadata
+(&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langsmith-sdk/issues/3144&#34;&gt;#3144&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langsmith-sdk/commit/1f72f18828deb66f40272b6cff9ab4c524abc8ce&#34;&gt;&lt;code&gt;1f72f18&lt;/code&gt;&lt;/a&gt;
+feat(integrations): add Google ADK Live voice tracing integration (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langsmith-sdk/issues/3115&#34;&gt;#3115&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langsmith-sdk/commit/93361c068deedf60102df00766d8ba0f7486665a&#34;&gt;&lt;code&gt;93361c0&lt;/code&gt;&lt;/a&gt;
+release(python): bump py version to 0.9.6 (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langsmith-sdk/issues/3149&#34;&gt;#3149&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langsmith-sdk/commit/f1aeaebaf424af73e68158f89f43c8918c1059de&#34;&gt;&lt;code&gt;f1aeaeb&lt;/code&gt;&lt;/a&gt;
+fix: remove duplicate opentelemetry-exporter-gcp entries breaking
+uv.lock (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langsmith-sdk/issues/3&#34;&gt;#3&lt;/a&gt;...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langsmith-sdk/commit/83a3024a2d8bd4fc6ac447be81f5e1d136821669&#34;&gt;&lt;code&gt;83a3024&lt;/code&gt;&lt;/a&gt;
+release(js): bump to 0.7.15 (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langsmith-sdk/issues/3150&#34;&gt;#3150&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/langchain-ai/langsmith-sdk/compare/v0.4.30...v0.9.8&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+
+- feat: add nodeSelector support to agent helm charts (#2145)
+
+## What
+
+Adds an optional `nodeSelector` value to every chart under
+`helm/agents/`, allowing agent pods to be constrained to nodes with
+matching labels.
+
+## Why
+
+There was no way to control agent pod scheduling via the Helm charts.
+This is needed for environments that pin workloads to specific node
+pools, e.g.:
+
+```yaml
+nodeSelector:
+  disktype: ssd
+```
+
+## How
+
+- Added a `nodeSelector` block (guarded by `{{- with
+.Values.nodeSelector }}`) to the shared `agent.deploymentSpec` helper in
+each agent&#39;s `_helpers.tpl`. It renders into the Agent CRD&#39;s
+`spec.declarative.deployment.nodeSelector`, which `SharedDeploymentSpec`
+already supports.
+- Added `nodeSelector: {}` (documented) to each agent&#39;s `values.yaml`.
+When unset it is omitted, so there is no change for existing users.
+
+Works standalone and from the main `kagent` chart via subchart value
+propagation, keyed by dependency name:
+
+```yaml
+helm-agent:
+  nodeSelector:
+    disktype: ssd
+k8s-agent:
+  nodeSelector:
+    disktype: ssd
+```
+
+Agents covered: `k8s`, `kgateway`, `istio`, `promql`, `observability`,
+`argo-rollouts`, `helm`, `cilium-policy`, `cilium-manager`,
+`cilium-debug`.
+
+## Testing
+
+- Added a `helm-unittest` suite
+(`helm/kagent/tests/agent-nodeselector_test.yaml`) with 20 tests — for
+each of the 10 agent charts, one asserting `nodeSelector` is omitted by
+default and one asserting it renders at
+`spec.declarative.deployment.nodeSelector` when set. The agent charts
+depend on parent-chart helpers, so the suite runs through the `kagent`
+chart (targeting each `charts/&lt;agent&gt;/templates/agent.yaml`) and is
+picked up by the existing `helm unittest helm/kagent` CI step.
+- Full suite passes: `16 test suites / 235 tests`. Confirmed the new
+tests genuinely guard the change — removing the `nodeSelector` block
+from the helper makes the override assertions fail.
+- `helm template` on a standalone agent chart renders `nodeSelector`
+under `deployment:` when set, and omits it when unset (default).
+- Built the full `helm/kagent` chart via the repo&#39;s flow (stamped
+`Chart.yaml` files + `helm dependency update`) and confirmed `helm
+template` with `helm-agent.nodeSelector` / `k8s-agent.nodeSelector`
+overrides propagates the value into the rendered Agent CRDs.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: Avri Chen-Roth &lt;avri210984@gmail.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- docs(python): fix kagent-langgraph README import to kagent.langgraph (#2167)
+
+The Quick Start in the `kagent-langgraph` package README opens with:
+
+```python
+from kagent_langgraph import KAgentApp
+```
+
+`kagent_langgraph` is the distribution name (`name = &#34;kagent-langgraph&#34;`
+in
+`pyproject.toml`), not an importable module, so running that first line
+raises:
+
+```
+ModuleNotFoundError: No module named &#39;kagent_langgraph&#39;
+```
+
+The package ships `KAgentApp` in the `kagent.langgraph` namespace
+(exported from
+`python/packages/kagent-langgraph/src/kagent/langgraph/__init__.py`).
+This is
+already what the LangGraph samples and the sibling package READMEs use:
+
+- `python/samples/langgraph/*/cli.py` -&gt; `from kagent.langgraph import
+KAgentApp`
+- `python/packages/kagent-crewai/README.md` -&gt; `from kagent.crewai
+import KAgentApp`
+- `python/packages/kagent-openai/README.md` -&gt; `from kagent.openai
+import KAgentApp`
+
+This change corrects the single import line so the Quick Start uses the
+same
+namespace as the rest of the repo:
+
+```diff
+-from kagent_langgraph import KAgentApp
++from kagent.langgraph import KAgentApp
+```
+
+Scope note: this fixes the `ModuleNotFoundError` on the import statement
+only. The
+rest of the Quick Start snippet is left as-is in this PR.
+
+### Verification
+
+With the package installed:
+
+```
+$ python -c &#34;from kagent.langgraph import KAgentApp; print(KAgentApp)&#34;
+&lt;class &#39;kagent.langgraph._a2a.KAgentApp&#39;&gt;
+```
+
+The previous form fails:
+
+```
+$ python -c &#34;import kagent_langgraph&#34;
+ModuleNotFoundError: No module named &#39;kagent_langgraph&#39;
+```
+
+Docs-only change; no code paths affected.
+
+---
+
+## Notes for the maintainers to expect (kept out of the PR body)
+
+- Single-line, docs-only. Per CONTRIBUTING &#34;Small changes (bug fixes)&#34;
+(&lt;100 LoC),
+  this goes straight to a PR; no prior issue is required.
+- DCO sign-off is present on the commit (required by CONTRIBUTING &gt;
+DCO).
+- Conventional Commit `docs(python):` matches repo precedent (e.g. #1699
+ported
+  these package READMEs under the same scope).
+
+Signed-off-by: Anas Khan &lt;83116240+anxkhn@users.noreply.github.com&gt;
+Co-authored-by: J.M. Huibonhoa &lt;jmhbh@users.noreply.github.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- update CODEOWNERS to use more flexible team values
+
+Signed-off-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- feat(helm/kagent): support deployment annotations (#2143)
+
+Add support for deployment-level annotations on the controller and UI
+deployments.
+
+Allows configuring a global annotations map that applies to all
+deployments, as well as component-specific overrides via
+`controller.annotations` and `ui.annotations`.
+
+---------
+
+Signed-off-by: Anthony Hausman &lt;anthony.hausman@backmarket.com&gt;
+
+- fix(deps): bump google-adk to 1.32.0 for Anthropic thinking blocks (#2172)
+
+### What this does
+
+Bumps the resolved `google-adk` version in `python/uv.lock` from
+`1.31.1` to
+`1.32.0`, and adds a regression test guarding the floor.
+
+Fixes #2136.
+
+### Why
+
+The lockfile resolved `google-adk 1.31.1`. In that version,
+`content_block_to_part()` only decodes `text` and `tool_use` content
+blocks and
+raises `NotImplementedError(&#34;Not supported yet.&#34;)` for anything else.
+Anthropic
+models that emit thinking blocks (Claude Sonnet 5 runs adaptive thinking
+by
+default) return a `ThinkingBlock`, so every request routed through the
+ADK
+Anthropic path fails with:
+
+```
+NotImplementedError: Not supported yet.
+  .../google/adk/models/anthropic_llm.py, in content_block_to_part
+```
+
+`kagent`&#39;s `KAgentAnthropicLlm` subclasses google-adk&#39;s `AnthropicLlm`
+and
+inherits this response-decoding path, so it is affected as reported.
+
+Support for `ThinkingBlock` and `RedactedThinkingBlock` was added
+upstream in
+`google-adk 1.32.0`. The dependency spec in
+`python/packages/kagent-adk/pyproject.toml` is already
+`google-adk&gt;=1.28.1,&lt;2`,
+which permits `1.32.0`; only the lock was behind. This change moves the
+lock to
+the first version that decodes thinking blocks, staying within the
+existing
+`&lt;2` bound, so it is the minimal fix for the reported crash.
+
+### The regression test
+
+`python/packages/kagent-adk/tests/unittests/models/test_anthropic.py`
+gets a new
+
+`TestAnthropicThinkingBlock.test_thinking_block_decodes_to_thought_part`.
+It
+decodes a `ThinkingBlock` through `content_block_to_part` (the exact
+path
+`KAgentAnthropicLlm` inherits) and asserts the result is a thought
+`Part`
+(`part.thought is True`, `part.text == &#34;working through it&#34;`).
+
+The test fails on `google-adk 1.31.1` with the exact
+`NotImplementedError` from
+the issue and passes on `1.32.0`, so it also guards against a silent
+downgrade
+below the fixed floor.
+
+### Testing
+
+- Full Python suite: `cd python &amp;&amp; uv run pytest ./packages/**/tests/`
+-&gt;
+  514 passed, 1 skipped.
+- New test: red on `google-adk 1.31.1`, green on `1.32.0`.
+- Lint: `uv run ruff check` and `ruff format --diff .` clean on the
+changed test
+  file.
+
+### Scope
+
+The lockfile diff is limited to the `google-adk` version line plus its
+sdist and
+wheel URL/hash/size/upload-time entries; no other package moved.
+
+---
+
+## Suggested labels / metadata
+
+- Type: bug fix (dependency). Small change (&lt;100 LoC) per CONTRIBUTING,
+so a
+  normal (non-draft) PR with the regression test is appropriate.
+- No CHANGELOG file convention in this repo; none needed.
+
+Signed-off-by: Anas Khan &lt;83116240+anxkhn@users.noreply.github.com&gt;
+
+- chore(deps): bump node from 20-bookworm-slim to 26-bookworm-slim in /python (#2154)
+
+Bumps node from 20-bookworm-slim to 26-bookworm-slim.
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+
+- ci: pin actions/checkout to v6 in release workflow (#2164)
+
+```markdown
+## What
+
+The three `actions/checkout` steps in `.github/workflows/tag.yaml` use the
+mutable `@main` ref:
+
+- `.github/workflows/tag.yaml:34` (push-images job)
+- `.github/workflows/tag.yaml:74` (push-helm-chart job)
+- `.github/workflows/tag.yaml:99` (release-python-packages job)
+
+This pins all three to `actions/checkout@v6`, matching the rest of the repo.
+
+## Why
+
+`tag.yaml` is the release/publish workflow: it pushes production images to
+ghcr.io, publishes the Python packages to PyPI, and cuts GitHub releases, so it
+runs with `packages: write` / `contents: write`. `@main` is a mutable ref, which
+means the checkout action code that executes during a release is not
+reproducible and silently tracks whatever is on `actions/checkout`&#39;s default
+branch. Pinning to a released major (`@v6`) is the exact reproducibility /
+supply-chain property GitHub recommends, and it matters most in the
+highest-privilege workflow.
+
+This also brings the three refs under Dependabot. Dependabot already bumps the
+repo&#39;s version-pinned `actions/checkout` refs (for example the open v6 -&gt; v7 PR),
+but it cannot update a `@main` ref, so these three are currently excluded from
+the repo&#39;s own update flow. Pinning them keeps all four checkout steps in
+`tag.yaml` in lockstep with future bumps.
+
+`tag.yaml` is the only workflow in the repo that still uses `@main`; every other
+workflow, and this workflow&#39;s own `release` job, already pins `actions/checkout@v6`.
+
+## Changes
+
+- `.github/workflows/tag.yaml`: `actions/checkout@main` -&gt; `actions/checkout@v6`
+  at the three checkout steps (lines 34, 74, 99). No behavior change.
+
+## Testing
+
+Workflow-only change, so there is no unit-test surface. Verified statically:
+
+- `rg -n &#39;actions/checkout@&#39; .github/workflows/tag.yaml` shows all four checkout
+  steps on `@v6`, with no `@main` remaining.
+- The workflow still parses as valid YAML and `actionlint` reports no new
+  findings on the file.
+```
+
+Signed-off-by: Anas Khan &lt;83116240+anxkhn@users.noreply.github.com&gt;
+Co-authored-by: Eitan Yarmush &lt;eitan.yarmush@solo.io&gt;
+
+- feat(substrate): bump agent substrate to 0.0.8 (#2140)
+
+## Summary
+
+Bumps kagent&#39;s substrate dependency to substrate `v0.0.8` and updates
+every actor call site for the new atespace-scoped identity model.
+
+### Code changes
+
+- **`ActorRef` refactor** — substrate v0.0.8 replaces the flat `ActorId
+string` field on `Get/Create/Resume/Suspend/DeleteActorRequest` (and the
+new `PauseActorRequest`) with `ActorRef{Atespace, Name}`. Every method
+on `substrate.Client` grew an `atespace` parameter, and every caller was
+updated to pass it through. Introduces an `EnsureAtespace` helper that
+idempotently creates an atespace before the first actor is created in it
+(substrate returns `FailedPrecondition: Atespace X not found`
+otherwise).
+- **Atespace = k8s namespace (1:1 mapping)** — for actors kagent
+creates, atespace is the SandboxAgent/AgentHarness&#39;s Kubernetes
+namespace. Golden actors continue to live in substrate&#39;s reserved
+`ate-golden` atespace. `sandboxbackend.Handle` gained an `Atespace`
+field so cross-reconcile lookups (`GetStatus`, `DeleteAgentHarness`) can
+address the actor.
+- **DNS/Host header shape** — atenet-router now expects
+`&lt;name&gt;.&lt;atespace&gt;.actors.resources.substrate.ate.dev`. `ActorHost` and
+`GatewayRouterTarget` signatures updated accordingly, propagated through
+the ACP proxy handler and the A2A round-tripper.
+- **`SnapshotsConfig` defaults** — bug fix surfaced by PR #2109 making
+`ActorTemplate.spec` immutable. Kagent&#39;s `desired` spec left
+`OnPause`/`OnCommit` as zero-value empty strings while the API server
+defaulted them to `Full` on admission, so
+`apiequality.Semantic.DeepEqual(existing, desired)` reported drift on
+every reconcile, causing an infinite delete/recreate loop on the
+`ActorTemplate` CR. Kagent now sets both fields to `SnapshotScopeFull`
+explicitly in `agent_lifecycle.go` (SandboxAgent) and
+`lifecycle_actortemplate.go` (AgentHarness).
+- **HTTP API** — `SubstrateActorEntry.Atespace` added to the
+`/api/substrate/status` response so the UI can surface the new field.
+
+### Helm / build ergonomics
+
+- **`SUBSTRATE_REPO` override** — `Makefile` +
+`helm/kagent/Chart-template.yaml` +
+`helm/kagent-crds/Chart-template.yaml` now template the substrate
+subchart repository, so local dev can point at a self-published chart
+without hand-editing.
+- **`scripts/kind/setup-kind.sh`** — env-driven `REG_NAME` / `REG_PORT`
+/ `REG_SCHEME` / `REG_INTERNAL_PORT` so an already-running local
+registry (HTTPS, non-standard port, etc.) can be reused instead of
+unconditionally creating `kind-registry`.
+- **`scripts/controller-digest-ldflags.sh`** —
+`DIGEST_CURL_INSECURE=true` env var to skip TLS verification when the
+digest resolver hits a self-signed local registry.
+
+### Verified locally
+
+Full E2E on colima+kind+substrate v0.0.8 published charts:
+- `SandboxAgent` (declarative, `runtime: go`) reaches `Ready=True`, chat
+round-trip through the config-hashed session-actor path works.
+- `AgentHarness` (`backend: openclaw`) reaches `Ready=True`, chat via
+the shared-actor ACP path works.
+
+---
+
+## Local E2E validation (substrate v0.0.8)
+
+Verified against substrate v0.0.8&#39;s published OCI chart — no local
+substrate build required.
+
+### Prerequisites
+
+- **Colima with `--vm-type vz`** on Apple Silicon. Docker Desktop&#39;s
+linuxkit kernel breaks gVisor checkpoint/restore on arm64.
+  ```sh
+  brew install colima docker
+  colima start --cpu 8 --memory 16 --disk 60 --vm-type vz
+  ```
+- **Docker Desktop OFF.** It silently squats `127.0.0.1:5001` with its
+own registry the moment it launches, and every `docker push
+localhost:5001/...` from your Mac hits Docker Desktop&#39;s stale registry
+instead of colima&#39;s kind-registry.
+  ```sh
+  osascript -e &#39;quit app &#34;Docker&#34;&#39;
+  lsof -iTCP:5001 -sTCP:LISTEN   # must be empty
+  ```
+- `OPENAI_API_KEY` exported in your shell.
+- This branch checked out.
+
+### 1. Kind cluster + local registry
+
+```sh
+cd ~/Repositories/kagent
+bash scripts/kind/setup-kind.sh
+```
+
+Creates a `kagent` kind cluster, a `kind-registry` container (host port
+5001 → container port 5000), and installs a containerd `hosts.toml` on
+the node aliasing `localhost:5001` → `http://kind-registry:5000` so
+kubelet can pull our locally-built images.
+
+### 2. Buildx builder on the `kind` network
+
+Buildx&#39;s default `--driver-opt network=host` can&#39;t reach `kind-registry`
+by name. Recreate the builder on the `kind` docker network with a
+buildkitd config that marks the local registries HTTP so pushes don&#39;t
+try HTTPS:
+
+```sh
+docker buildx rm kagent-builder-v0.23.0 2&gt;/dev/null || true
+cat &gt; /tmp/buildkitd.toml &lt;&lt; &#39;BLDKD&#39;
+[registry.&#34;kind-registry:5000&#34;]
+  http = true
+  insecure = true
+[registry.&#34;localhost:5001&#34;]
+  http = true
+  insecure = true
+BLDKD
+docker buildx create --name kagent-builder-v0.23.0 \
+  --platform linux/amd64,linux/arm64 \
+  --driver docker-container --driver-opt network=kind \
+  --config /tmp/buildkitd.toml --use
+```
+
+### 3. Build + push kagent images
+
+```sh
+DOCKER_REGISTRY=kind-registry:5000 make build
+```
+
+This will fail at the `build-controller` step because
+`controller-digest-ldflags.sh` runs on the host, where `kind-registry`
+doesn&#39;t resolve. Everything up to and including the sandbox images is
+pushed successfully. Re-run just the controller step against the
+host-reachable `localhost:5001` alias (same registry, content-addressed
+digests are identical):
+
+```sh
+DIGEST_LDFLAGS=$(CONTAINER_RUNTIME=docker \
+  APP_IMG=localhost:5001/kagent-dev/kagent/app:v0.10.0-beta1-14-g841e8077 \
+  APP_FULL_IMG=localhost:5001/kagent-dev/kagent/app:v0.10.0-beta1-14-g841e8077-full \
+  GOLANG_ADK_IMG=localhost:5001/kagent-dev/kagent/golang-adk:v0.10.0-beta1-14-g841e8077 \
+  GOLANG_ADK_FULL_IMG=localhost:5001/kagent-dev/kagent/golang-adk:v0.10.0-beta1-14-g841e8077-full \
+  ACP_SANDBOX_OPENCLAW_IMG=localhost:5001/kagent-dev/kagent/acp-sandbox-openclaw:v0.10.0-beta1-14-g841e8077 \
+  ACP_SANDBOX_HERMES_IMG=localhost:5001/kagent-dev/kagent/acp-sandbox-hermes:v0.10.0-beta1-14-g841e8077 \
+  bash scripts/controller-digest-ldflags.sh)
+
+docker buildx build --push --platform linux/arm64 \
+  --build-arg VERSION=v0.10.0-beta1-14-g841e8077 \
+  --build-arg LDFLAGS=&#34;-X github.com/kagent-dev/kagent/go/core/internal/version.Version=v0.10.0-beta1-14-g841e8077 -X github.com/kagent-dev/kagent/go/core/internal/version.GitCommit=841e8077 -X github.com/kagent-dev/kagent/go/core/internal/version.BuildDate=$(date -u &#39;+%Y-%m-%d&#39;) ${DIGEST_LDFLAGS}&#34; \
+  --build-arg DOCKER_REPO=kagent-dev/kagent \
+  --build-arg DOCKER_REGISTRY=kind-registry:5000 \
+  --build-arg BASE_IMAGE_REGISTRY=cgr.dev \
+  --build-arg TOOLS_GO_VERSION=1.26.3 \
+  --build-arg TOOLS_UV_VERSION=0.10.4 \
+  --build-arg TOOLS_PYTHON_VERSION=3.13 \
+  --build-arg TOOLS_NODE_VERSION=24 \
+  --build-arg BUILD_PACKAGE=core/cmd/controller/main.go \
+  -t kind-registry:5000/kagent-dev/kagent/controller:v0.10.0-beta1-14-g841e8077 \
+  -f go/Dockerfile go/
+```
+
+### 4. Install kagent CRDs (with substrate CRDs enabled)
+
+```sh
+helm upgrade --install kagent-crds helm/kagent-crds \
+  --namespace kagent --create-namespace \
+  --kube-context kind-kagent --wait --timeout 3m \
+  --set kmcp.enabled=true \
+  --set substrate.enabled=true
+```
+
+### 5. Install kagent + substrate v0.0.8
+
+Pulls the substrate subchart from
+`oci://ghcr.io/kagent-dev/substrate/helm` (the default) at the version
+pinned in `go/go.mod`. No local substrate build.
+
+```sh
+helm upgrade --install kagent helm/kagent \
+  --namespace kagent --kube-context kind-kagent --wait --timeout 10m \
+  --set registry=localhost:5001 \
+  --set tag=v0.10.0-beta1-14-g841e8077 \
+  --set imagePullPolicy=Always \
+  --set providers.openAI.apiKey=&#34;$OPENAI_API_KEY&#34; \
+  --set providers.default=openAI \
+  --set kmcp.enabled=true --set kmcp.image.tag=0.3.0 \
+  --set substrate.enabled=true \
+  --set-json &#39;substrate.atelet.extraArgs=[&#34;--localhost-registry-replacement=kind-registry:5000&#34;]&#39; \
+  --set controller.substrate.enabled=true \
+  --set controller.substrate.ateApiEndpoint=dns:///kagent-api.kagent.svc:443 \
+  --set controller.substrate.ateApiInsecure=true \
+  --set controller.substrate.atenetRouterURL=http://kagent-atenet-router.kagent.svc:80 \
+  --set controller.substrate.ateApiServer.namespace=kagent \
+  --set controller.substrate.ateApiServer.serviceAccount=kagent-ate-api-server \
+  --set controller.substrate.workerPoolName=kagent-default \
+  --set substrateWorkerPool.create=true \
+  --set substrateWorkerPool.ateomImage=ghcr.io/kagent-dev/substrate/ateom-gvisor:v0.0.8 \
+  --set substrateWorkerPool.sandboxClass=gvisor \
+  --set grafana-mcp.enabled=false \
+  --set observability-agent.enabled=false
+```
+
+Two overrides worth calling out:
+
+-
+`substrate.atelet.extraArgs=[--localhost-registry-replacement=kind-registry:5000]`
+Atelet uses `go-containerregistry` directly to pull the ActorTemplate
+container image (not containerd), so containerd&#39;s `hosts.toml` alias on
+the kind node doesn&#39;t apply to it. This flag tells atelet&#39;s puller: for
+any ref starting with `localhost:*`, rewrite the hostname to
+`kind-registry:5000` (which resolves inside pods via cluster DNS on the
+kind docker network) AND parse it with `name.Insecure` so the fetch is
+plain HTTP. Both effects come from that single flag.
+
+- `controller.substrate.ateApiServer.{namespace,serviceAccount}` —
+Substrate is deployed as a subchart of kagent, so `substrate.fullname`
+prefixes every resource with the release name. The ate-api-server SA
+ends up as `kagent-ate-api-server` in the `kagent` namespace (not the
+default `ate-api-server` in `ate-system`). Kagent&#39;s
+`substrate-ate-api-rbac.yaml` needs the correct namespace + SA to bind
+its secret-read Role for `KAGENT_CONFIG_JSON` env resolution during
+`CallAteletRestore`.
+
+### 6. Apply the default gVisor `SandboxConfig`
+
+Substrate ships the CRD but not a default `SandboxConfig` resource.
+Without one, `ate-controller` fails resume with `no default
+SandboxConfig for class &#34;gvisor&#34;`:
+
+```sh
+kubectl --context kind-kagent apply -f - &lt;&lt;&#39;SBX&#39;
+apiVersion: ate.dev/v1alpha1
+kind: SandboxConfig
+metadata:
+  name: gvisor-default
+spec:
+  sandboxClass: gvisor
+  default: true
+  assets:
+    amd64:
+      runsc:
+        url: &#34;gs://gvisor/releases/release/20260622/x86_64/runsc&#34;
+        sha256: &#34;f18a948bf9c8bbb54eb998549a3a8d719a1c7de2efbe8fdd2ff0ee5fecd06f19&#34;
+    arm64:
+      runsc:
+        url: &#34;gs://gvisor/releases/release/20260622/aarch64/runsc&#34;
+        sha256: &#34;62eee121f8c188e347c428acc96f111568ede3be37b906046b6f28bbe2cc40c0&#34;
+SBX
+```
+
+### 7. Verify with a SandboxAgent
+
+```sh
+kubectl --context kind-kagent apply -f - &lt;&lt;&#39;SA&#39;
+apiVersion: kagent.dev/v1alpha2
+kind: SandboxAgent
+metadata:
+  name: substrate-demo
+  namespace: kagent
+spec:
+  type: Declarative
+  description: Minimal SandboxAgent running on Agent Substrate (gVisor).
+  declarative:
+    runtime: go
+    modelConfig: default-model-config
+    systemMessage: |
+      You are a helpful assistant running inside a gVisor-sandboxed actor
+      on Agent Substrate. Answer concisely.
+  substrate:
+    workerPoolRef:
+      name: kagent-default
+SA
+
+kubectl --context kind-kagent get sandboxagent -n kagent -w
+# NAME             READY   ACCEPTED
+# substrate-demo   True    True
+```
+
+### 8. Verify with an AgentHarness
+
+```sh
+kubectl --context kind-kagent apply -f - &lt;&lt;&#39;AH&#39;
+apiVersion: kagent.dev/v1alpha2
+kind: AgentHarness
+metadata:
+  name: harness-demo
+  namespace: kagent
+spec:
+  backend: openclaw
+  description: OpenClaw on Agent Substrate
+  modelConfigRef: default-model-config
+  substrate:
+    workerPoolRef:
+      name: kagent-default
+AH
+
+kubectl --context kind-kagent get agentharness -n kagent -w
+# NAME           BACKEND    READY   ID   AGE
+# harness-demo   openclaw   True         ...
+```
+
+### 9. Chat via the UI
+
+```sh
+kubectl --context kind-kagent port-forward -n kagent svc/kagent-ui 3000:8080
+# open http://localhost:3000 → pick substrate-demo or harness-demo → send a message
+```
+
+Signed-off-by: Jonathan Jamroga &lt;jjamroga@gmail.com&gt;
+
+- fix: intermittent Postgres deadlock for concurrent memory searches (#2146)
+
+Close #2135
+
+Fixes intermittent Postgres deadlocks when concurrent memory searches
+update overlapping rows&#39; `access_count` (e.g. `PrefetchMemoryTool`
+fanning out per-sentence searches). Row locks are now acquired in id
+order, and access-count increments are best-effort so a bookkeeping
+failure no longer fails the search.
+
+The root cause is described in #2135 but in short when two concurrent
+search requests return results like `[&#34;memory_1&#34;, &#34;memory_2&#34;]` and
+`[&#34;memory_2&#34;, &#34;memory_1&#34;]`, it will result in a deadlock when trying to
+update the rows.
+
+I&#39;ve added a concurrency test that reproduced the error without this fix
+to the query and passed after the fix.
+
+---------
+
+Signed-off-by: Jet Chiang &lt;pokyuen.jetchiang-ext@solo.io&gt;
+
+- chore(deps): update setuptools requirement from &gt;=61.0 to &gt;=83.0.0 in /python (#2162)
+
+[//]: # (dependabot-start)
+⚠️  **Dependabot is rebasing this PR** ⚠️ 
+
+Rebasing might not happen immediately, so don&#39;t worry if this takes some
+time.
+
+Note: if you make any changes to this PR yourself, they will take
+precedence over the rebase.
+
+---
+
+[//]: # (dependabot-end)
+
+Updates the requirements on
+[setuptools](https://github.com/pypa/setuptools) to permit the latest
+version.
+&lt;details&gt;
+&lt;summary&gt;Changelog&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/pypa/setuptools/blob/main/NEWS.rst&#34;&gt;setuptools&#39;s
+changelog&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h1&gt;v83.0.0&lt;/h1&gt;
+&lt;h2&gt;Features&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Require Python 3.10 or later.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Bugfixes&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;MANIFEST.in&lt;/code&gt; matching (via &lt;code&gt;FileList&lt;/code&gt;) is now
+insensitive to Unicode
+normalization form. A pattern authored in one form (e.g. NFC, as
+typically
+saved by editors) now matches a file whose name is stored on disk in
+another
+(e.g. NFD, as produced by macOS APFS/HFS+). Previously an
+&lt;code&gt;exclude&lt;/code&gt;,
+&lt;code&gt;global-exclude&lt;/code&gt;, &lt;code&gt;recursive-exclude&lt;/code&gt;, or
+&lt;code&gt;prune&lt;/code&gt; rule could silently
+fail to drop a non-ASCII-named file from the source distribution,
+publishing
+it despite the exclusion -- see GHSA-h35f-9h28-mq5c.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Deprecations and Removals&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;pypa/distutils#334&lt;/code&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h1&gt;v82.0.1&lt;/h1&gt;
+&lt;h2&gt;Bugfixes&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Fix the loading of &lt;code&gt;launcher manifest.xml&lt;/code&gt; file. (&lt;a
+href=&#34;https://redirect.github.com/pypa/setuptools/issues/5047&#34;&gt;#5047&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Replaced deprecated &lt;code&gt;json.__version__&lt;/code&gt; with fixture in
+tests. (&lt;a
+href=&#34;https://redirect.github.com/pypa/setuptools/issues/5186&#34;&gt;#5186&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Improved Documentation&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Add advice about how to improve predictability when installing
+sdists. (&lt;a
+href=&#34;https://redirect.github.com/pypa/setuptools/issues/5168&#34;&gt;#5168&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;Misc&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://redirect.github.com/pypa/setuptools/issues/4941&#34;&gt;#4941&lt;/a&gt;,
+&lt;a
+href=&#34;https://redirect.github.com/pypa/setuptools/issues/5157&#34;&gt;#5157&lt;/a&gt;,
+&lt;a
+href=&#34;https://redirect.github.com/pypa/setuptools/issues/5169&#34;&gt;#5169&lt;/a&gt;,
+&lt;a
+href=&#34;https://redirect.github.com/pypa/setuptools/issues/5175&#34;&gt;#5175&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;v82.0.0&lt;/p&gt;
+&lt;!-- raw HTML omitted --&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;... (truncated)&lt;/p&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/setuptools/commit/6519f728c6f23c992df81a5691ef7655184a20eb&#34;&gt;&lt;code&gt;6519f72&lt;/code&gt;&lt;/a&gt;
+Bump version: 82.0.1 → 83.0.0&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/setuptools/commit/d1151b125b29a6ee1c7db860f7ee6c365d525b5f&#34;&gt;&lt;code&gt;d1151b1&lt;/code&gt;&lt;/a&gt;
+Merge pull request &lt;a
+href=&#34;https://redirect.github.com/pypa/setuptools/issues/5250&#34;&gt;#5250&lt;/a&gt;
+from pypa/feature/distutils-d7633fbed&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/setuptools/commit/a2df31e6a741b0fe775969618fe6a3a3d032e900&#34;&gt;&lt;code&gt;a2df31e&lt;/code&gt;&lt;/a&gt;
+Capture removal of dry_run parameter in changelog.&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/setuptools/commit/00144dc3fb6d023fd81cdc26c380a012b084df9b&#34;&gt;&lt;code&gt;00144dc&lt;/code&gt;&lt;/a&gt;
+Moved newsfragment to the release where it occurred.&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/setuptools/commit/a4a5a2b160357be77626aa077ddd1d8ee53be50f&#34;&gt;&lt;code&gt;a4a5a2b&lt;/code&gt;&lt;/a&gt;
+Add news fragment.&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/setuptools/commit/77470c23c35031c9e37d7512694ac5ca52bfcaac&#34;&gt;&lt;code&gt;77470c2&lt;/code&gt;&lt;/a&gt;
+Merge &lt;a
+href=&#34;https://github.com/pypa/distutils&#34;&gt;https://github.com/pypa/distutils&lt;/a&gt;
+into feature/distutils-d7633fbed&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/setuptools/commit/3c43897420f25a1be1afe6eaa905d056009cc736&#34;&gt;&lt;code&gt;3c43897&lt;/code&gt;&lt;/a&gt;
+Merge pull request &lt;a
+href=&#34;https://redirect.github.com/pypa/setuptools/issues/5247&#34;&gt;#5247&lt;/a&gt;
+from pypa/copilot/fix-pypy-version-issue&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/setuptools/commit/bb6ea66b4bd01cb35d7c68a1bc61b96d59190269&#34;&gt;&lt;code&gt;bb6ea66&lt;/code&gt;&lt;/a&gt;
+Bump PyPy from 3.10 to 3.11 in CI workflow&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/setuptools/commit/a2bc3aca2f55eb9b93ea633e58ba68170ce14451&#34;&gt;&lt;code&gt;a2bc3ac&lt;/code&gt;&lt;/a&gt;
+Fix broken intersphinx reference to build&#39;s installation docs&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/pypa/setuptools/commit/2d6a739c64cfedc65e1f635af7b52340aac8d99b&#34;&gt;&lt;code&gt;2d6a739&lt;/code&gt;&lt;/a&gt;
+Use stacked parametrize decorators instead of itertools.product&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/pypa/setuptools/compare/v61.0.0...v83.0.0&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+
+Dependabot will resolve any conflicts with this PR as long as you don&#39;t
+alter it yourself. You can also trigger a rebase manually by commenting
+`@dependabot rebase`.
+
+[//]: # (dependabot-automerge-start)
+[//]: # (dependabot-automerge-end)
+
+---
+
+&lt;details&gt;
+&lt;summary&gt;Dependabot commands and options&lt;/summary&gt;
+&lt;br /&gt;
+
+You can trigger Dependabot actions by commenting on this PR:
+- `@dependabot rebase` will rebase this PR
+- `@dependabot recreate` will recreate this PR, overwriting any edits
+that have been made to it
+- `@dependabot show &lt;dependency name&gt; ignore conditions` will show all
+of the ignore conditions of the specified dependency
+- `@dependabot ignore this major version` will close this PR and stop
+Dependabot creating any more for this major version (unless you reopen
+the PR or upgrade to it yourself)
+- `@dependabot ignore this minor version` will close this PR and stop
+Dependabot creating any more for this minor version (unless you reopen
+the PR or upgrade to it yourself)
+- `@dependabot ignore this dependency` will close this PR and stop
+Dependabot creating any more for this dependency (unless you reopen the
+PR or upgrade to it yourself)
+
+
+&lt;/details&gt;
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+
+- chore(deps): bump the python-minor-patch group in /python with 3 updates (#2158)
+
+Bumps the python-minor-patch group in /python with 3 updates:
+[typing-extensions](https://github.com/python/typing_extensions),
+[uvicorn](https://github.com/Kludex/uvicorn) and
+[langgraph](https://github.com/langchain-ai/langgraph).
+
+Updates `typing-extensions` from 4.15.0 to 4.16.0
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/python/typing_extensions/releases&#34;&gt;typing-extensions&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;4.16.0&lt;/h2&gt;
+&lt;p&gt;No changes since 4.16.0rc2.&lt;/p&gt;
+&lt;p&gt;Changes since 4.15.0:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Make &lt;code&gt;typing_extensions.TypeAliasType&lt;/code&gt;&#39;s
+&lt;code&gt;__module__&lt;/code&gt; attribute writable. Backport of CPython PR &lt;a
+href=&#34;https://redirect.github.com/python/cpython/pull/149172&#34;&gt;#149172&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;Fix setting of &lt;code&gt;__required_keys__&lt;/code&gt; and
+&lt;code&gt;__optional_keys__&lt;/code&gt; when inheriting keys with the same
+name.&lt;/li&gt;
+&lt;li&gt;Add support for &lt;code&gt;AsyncIterator&lt;/code&gt;, &lt;code&gt;io.Reader&lt;/code&gt;,
+&lt;code&gt;io.Writer&lt;/code&gt; and &lt;code&gt;os.PathLike&lt;/code&gt; protocols as bases
+for other protocols.&lt;/li&gt;
+&lt;li&gt;Fix incorrect behaviour on Python 3.9 and Python 3.10 that meant
+that calling &lt;code&gt;isinstance&lt;/code&gt; with
+&lt;code&gt;typing_extensions.Concatenate[...]&lt;/code&gt; or
+&lt;code&gt;typing_extensions.Unpack[...]&lt;/code&gt; as the first argument could
+have a different result in some situations depending on whether or not a
+profiling function had been set using &lt;code&gt;sys.setprofile&lt;/code&gt;. This
+affected both CPython and PyPy implementations. Patch by Brian
+Schubert.&lt;/li&gt;
+&lt;li&gt;Fix &lt;code&gt;__init_subclass__()&lt;/code&gt; behavior in the presence of
+multiple inheritance involving an &lt;code&gt;@deprecated&lt;/code&gt;-decorated
+base class. Backport of CPython PR &lt;a
+href=&#34;https://redirect.github.com/python/cpython/pull/138210&#34;&gt;#138210&lt;/a&gt;
+by Brian Schubert.&lt;/li&gt;
+&lt;li&gt;Raise &lt;code&gt;TypeError&lt;/code&gt; when attempting to subclass
+&lt;code&gt;typing_extensions.ParamSpec&lt;/code&gt; on Python 3.9. The
+&lt;code&gt;typing&lt;/code&gt; implementation has always raised an error, and the
+&lt;code&gt;typing_extensions&lt;/code&gt; implementation has raised an error on
+Python 3.10+ since &lt;code&gt;typing_extensions&lt;/code&gt; v4.6.0. Patch by Brian
+Schubert.&lt;/li&gt;
+&lt;li&gt;Add the &lt;code&gt;bound&lt;/code&gt;, &lt;code&gt;covariant&lt;/code&gt;,
+&lt;code&gt;contravariant&lt;/code&gt;, and &lt;code&gt;infer_variance&lt;/code&gt; parameters
+to &lt;code&gt;TypeVarTuple&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;Officially support the &lt;code&gt;bound&lt;/code&gt;, &lt;code&gt;covariant&lt;/code&gt;,
+&lt;code&gt;contravariant&lt;/code&gt; and &lt;code&gt;infer_variance&lt;/code&gt; parameters to
+&lt;code&gt;ParamSpec&lt;/code&gt;. Improve the validation of these parameters at
+runtime.&lt;/li&gt;
+&lt;li&gt;Rename &lt;code&gt;typing_extensions.Sentinel&lt;/code&gt; to
+&lt;code&gt;typing_extensions.sentinel&lt;/code&gt;, following the name that has
+been adopted for &lt;code&gt;builtins.sentinel&lt;/code&gt; on Python 3.15.
+&lt;code&gt;typing_extensions.Sentinel&lt;/code&gt; is retained as a soft-deprecated
+alias for backwards compatibility.&lt;/li&gt;
+&lt;li&gt;Add support for pickling sentinels.&lt;/li&gt;
+&lt;li&gt;Sentinels now preserve their identity when copied or
+deep-copied.&lt;/li&gt;
+&lt;li&gt;Deprecate passing &lt;code&gt;name&lt;/code&gt; as a keyword argument or
+&lt;code&gt;repr&lt;/code&gt; as a positional argument to the &lt;code&gt;sentinel&lt;/code&gt;
+constructor.&lt;/li&gt;
+&lt;li&gt;The default repr of a sentinel &lt;code&gt;X =
+sentinel(&amp;quot;X&amp;quot;)&lt;/code&gt; is now &lt;code&gt;X&lt;/code&gt; rather than
+&lt;code&gt;&amp;lt;X&amp;gt;&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;Deprecate arbitrary attribute assignments to sentinels.&lt;/li&gt;
+&lt;li&gt;Deprecate subclassing sentinels.&lt;/li&gt;
+&lt;li&gt;Add support for Python 3.15.&lt;/li&gt;
+&lt;li&gt;Avoid a &lt;code&gt;DeprecationWarning&lt;/code&gt; when &lt;code&gt;deprecated&lt;/code&gt;
+is applied to a coroutine function on Python 3.14.0.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;4.16.0rc2&lt;/h2&gt;
+&lt;p&gt;Changes since 4.16.0rc1:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Avoid a &lt;code&gt;DeprecationWarning&lt;/code&gt; when &lt;code&gt;deprecated&lt;/code&gt;
+is applied to a coroutine function on Python 3.14.0.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;Changes since 4.15.0:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Make &lt;code&gt;typing_extensions.TypeAliasType&lt;/code&gt;&#39;s
+&lt;code&gt;__module__&lt;/code&gt; attribute writable. Backport of CPython PR &lt;a
+href=&#34;https://redirect.github.com/python/cpython/pull/149172&#34;&gt;#149172&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;Fix setting of &lt;code&gt;__required_keys__&lt;/code&gt; and
+&lt;code&gt;__optional_keys__&lt;/code&gt; when inheriting keys with the same
+name.&lt;/li&gt;
+&lt;li&gt;Add support for &lt;code&gt;AsyncIterator&lt;/code&gt;, &lt;code&gt;io.Reader&lt;/code&gt;,
+&lt;code&gt;io.Writer&lt;/code&gt; and &lt;code&gt;os.PathLike&lt;/code&gt; protocols as bases
+for other protocols.&lt;/li&gt;
+&lt;li&gt;Fix incorrect behaviour on Python 3.9 and Python 3.10 that meant
+that calling &lt;code&gt;isinstance&lt;/code&gt; with
+&lt;code&gt;typing_extensions.Concatenate[...]&lt;/code&gt; or
+&lt;code&gt;typing_extensions.Unpack[...]&lt;/code&gt; as the first argument could
+have a different result in some situations depending on whether or not a
+profiling function had been set using &lt;code&gt;sys.setprofile&lt;/code&gt;. This
+affected both CPython and PyPy implementations. Patch by Brian
+Schubert.&lt;/li&gt;
+&lt;li&gt;Fix &lt;code&gt;__init_subclass__()&lt;/code&gt; behavior in the presence of
+multiple inheritance involving an &lt;code&gt;@deprecated&lt;/code&gt;-decorated
+base class. Backport of CPython PR &lt;a
+href=&#34;https://redirect.github.com/python/cpython/pull/138210&#34;&gt;#138210&lt;/a&gt;
+by Brian Schubert.&lt;/li&gt;
+&lt;li&gt;Raise &lt;code&gt;TypeError&lt;/code&gt; when attempting to subclass
+&lt;code&gt;typing_extensions.ParamSpec&lt;/code&gt; on Python 3.9. The
+&lt;code&gt;typing&lt;/code&gt; implementation has always raised an error, and the
+&lt;code&gt;typing_extensions&lt;/code&gt; implementation has raised an error on
+Python 3.10+ since &lt;code&gt;typing_extensions&lt;/code&gt; v4.6.0. Patch by Brian
+Schubert.&lt;/li&gt;
+&lt;li&gt;Add the &lt;code&gt;bound&lt;/code&gt;, &lt;code&gt;covariant&lt;/code&gt;,
+&lt;code&gt;contravariant&lt;/code&gt;, and &lt;code&gt;infer_variance&lt;/code&gt; parameters
+to &lt;code&gt;TypeVarTuple&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;Officially support the &lt;code&gt;bound&lt;/code&gt;, &lt;code&gt;covariant&lt;/code&gt;,
+&lt;code&gt;contravariant&lt;/code&gt; and &lt;code&gt;infer_variance&lt;/code&gt; parameters to
+&lt;code&gt;ParamSpec&lt;/code&gt;. Improve the validation of these parameters at
+runtime.&lt;/li&gt;
+&lt;li&gt;Rename &lt;code&gt;typing_extensions.Sentinel&lt;/code&gt; to
+&lt;code&gt;typing_extensions.sentinel&lt;/code&gt;, following the name that has
+been adopted for &lt;code&gt;builtins.sentinel&lt;/code&gt; on Python 3.15.
+&lt;code&gt;typing_extensions.Sentinel&lt;/code&gt; is retained as a soft-deprecated
+alias for backwards compatibility.&lt;/li&gt;
+&lt;li&gt;Add support for pickling sentinels.&lt;/li&gt;
+&lt;li&gt;Sentinels now preserve their identity when copied or
+deep-copied.&lt;/li&gt;
+&lt;li&gt;Deprecate passing &lt;code&gt;name&lt;/code&gt; as a keyword argument or
+&lt;code&gt;repr&lt;/code&gt; as a positional argument to the &lt;code&gt;sentinel&lt;/code&gt;
+constructor.&lt;/li&gt;
+&lt;li&gt;The default repr of a sentinel &lt;code&gt;X =
+sentinel(&amp;quot;X&amp;quot;)&lt;/code&gt; is now &lt;code&gt;X&lt;/code&gt; rather than
+&lt;code&gt;&amp;lt;X&amp;gt;&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;Deprecate arbitrary attribute assignments to sentinels.&lt;/li&gt;
+&lt;li&gt;Deprecate subclassing sentinels.&lt;/li&gt;
+&lt;li&gt;Add support for Python 3.15.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;4.16.0rc1&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Make &lt;code&gt;typing_extensions.TypeAliasType&lt;/code&gt;&#39;s
+&lt;code&gt;__module__&lt;/code&gt; attribute writable. Backport of CPython PR &lt;a
+href=&#34;https://redirect.github.com/python/cpython/pull/149172&#34;&gt;#149172&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;Fix setting of &lt;code&gt;__required_keys__&lt;/code&gt; and
+&lt;code&gt;__optional_keys__&lt;/code&gt; when inheriting keys with the same
+name.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;!-- raw HTML omitted --&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;... (truncated)&lt;/p&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Changelog&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/python/typing_extensions/blob/main/CHANGELOG.md&#34;&gt;typing-extensions&#39;s
+changelog&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h1&gt;Release 4.16.0 (July 2, 2025)&lt;/h1&gt;
+&lt;p&gt;No user-facing changes since 4.16.0rc2.&lt;/p&gt;
+&lt;h1&gt;Release 4.16.0rc2 (June 25, 2026)&lt;/h1&gt;
+&lt;ul&gt;
+&lt;li&gt;Avoid a &lt;code&gt;DeprecationWarning&lt;/code&gt; when &lt;code&gt;deprecated&lt;/code&gt;
+is applied to a coroutine function on
+Python 3.14.0.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h1&gt;Release 4.16.0rc1 (June 24, 2026)&lt;/h1&gt;
+&lt;ul&gt;
+&lt;li&gt;Make &lt;code&gt;typing_extensions.TypeAliasType&lt;/code&gt;&#39;s
+&lt;code&gt;__module__&lt;/code&gt; attribute writable.
+Backport of CPython PR
+&lt;a
+href=&#34;https://redirect.github.com/python/cpython/pull/149172&#34;&gt;#149172&lt;/a&gt;.&lt;/li&gt;
+&lt;li&gt;Fix setting of &lt;code&gt;__required_keys__&lt;/code&gt; and
+&lt;code&gt;__optional_keys__&lt;/code&gt; when inheriting
+keys with the same name.&lt;/li&gt;
+&lt;li&gt;Add support for &lt;code&gt;AsyncIterator&lt;/code&gt;, &lt;code&gt;io.Reader&lt;/code&gt;,
+&lt;code&gt;io.Writer&lt;/code&gt; and &lt;code&gt;os.PathLike&lt;/code&gt; protocols
+as bases for other protocols.&lt;/li&gt;
+&lt;li&gt;Fix incorrect behaviour on Python 3.9 and Python 3.10 that meant
+that
+calling &lt;code&gt;isinstance&lt;/code&gt; with
+&lt;code&gt;typing_extensions.Concatenate[...]&lt;/code&gt; or
+&lt;code&gt;typing_extensions.Unpack[...]&lt;/code&gt; as the first argument could
+have a different
+result in some situations depending on whether or not a profiling
+function had been
+set using &lt;code&gt;sys.setprofile&lt;/code&gt;. This affected both CPython and
+PyPy implementations.
+Patch by Brian Schubert.&lt;/li&gt;
+&lt;li&gt;Fix &lt;code&gt;__init_subclass__()&lt;/code&gt; behavior in the presence of
+multiple inheritance involving
+an &lt;code&gt;@deprecated&lt;/code&gt;-decorated base class. Backport of CPython PR
+&lt;a
+href=&#34;https://redirect.github.com/python/cpython/pull/138210&#34;&gt;#138210&lt;/a&gt;
+by Brian Schubert.&lt;/li&gt;
+&lt;li&gt;Raise &lt;code&gt;TypeError&lt;/code&gt; when attempting to subclass
+&lt;code&gt;typing_extensions.ParamSpec&lt;/code&gt; on
+Python 3.9. The &lt;code&gt;typing&lt;/code&gt; implementation has always raised an
+error, and the
+&lt;code&gt;typing_extensions&lt;/code&gt; implementation has raised an error on
+Python 3.10+ since
+&lt;code&gt;typing_extensions&lt;/code&gt; v4.6.0. Patch by Brian Schubert.&lt;/li&gt;
+&lt;li&gt;Add the &lt;code&gt;bound&lt;/code&gt;, &lt;code&gt;covariant&lt;/code&gt;,
+&lt;code&gt;contravariant&lt;/code&gt;, and &lt;code&gt;infer_variance&lt;/code&gt; parameters
+to &lt;code&gt;TypeVarTuple&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;Officially support the &lt;code&gt;bound&lt;/code&gt;, &lt;code&gt;covariant&lt;/code&gt;,
+&lt;code&gt;contravariant&lt;/code&gt; and &lt;code&gt;infer_variance&lt;/code&gt;
+parameters to &lt;code&gt;ParamSpec&lt;/code&gt;. Improve the validation of these
+parameters at runtime.&lt;/li&gt;
+&lt;li&gt;Rename &lt;code&gt;typing_extensions.Sentinel&lt;/code&gt; to
+&lt;code&gt;typing_extensions.sentinel&lt;/code&gt;, following the
+name that has been adopted for &lt;code&gt;builtins.sentinel&lt;/code&gt; on Python
+3.15.
+&lt;code&gt;typing_extensions.Sentinel&lt;/code&gt; is retained as a soft-deprecated
+alias for backwards
+compatibility.&lt;/li&gt;
+&lt;li&gt;Add support for pickling sentinels.&lt;/li&gt;
+&lt;li&gt;Sentinels now preserve their identity when copied or
+deep-copied.&lt;/li&gt;
+&lt;li&gt;Deprecate passing &lt;code&gt;name&lt;/code&gt; as a keyword argument or
+&lt;code&gt;repr&lt;/code&gt; as a positional argument
+to the &lt;code&gt;sentinel&lt;/code&gt; constructor.&lt;/li&gt;
+&lt;li&gt;The default repr of a sentinel &lt;code&gt;X =
+sentinel(&amp;quot;X&amp;quot;)&lt;/code&gt; is now &lt;code&gt;X&lt;/code&gt; rather than
+&lt;code&gt;&amp;lt;X&amp;gt;&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;Deprecate arbitrary attribute assignments to sentinels.&lt;/li&gt;
+&lt;li&gt;Deprecate subclassing sentinels.&lt;/li&gt;
+&lt;li&gt;Add support for Python 3.15.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/python/typing_extensions/commit/f29cd28d8ed7642cafb1d18daf5aa41be6a5c0aa&#34;&gt;&lt;code&gt;f29cd28&lt;/code&gt;&lt;/a&gt;
+Prepare relase 4.16.0 (&lt;a
+href=&#34;https://redirect.github.com/python/typing_extensions/issues/774&#34;&gt;#774&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/python/typing_extensions/commit/43174610ec0c407ce05ad750077c4e62b9192b2b&#34;&gt;&lt;code&gt;4317461&lt;/code&gt;&lt;/a&gt;
+Bump version to 4.16.0rc2.dev (&lt;a
+href=&#34;https://redirect.github.com/python/typing_extensions/issues/772&#34;&gt;#772&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/python/typing_extensions/commit/4f71098e5be84798d36416bbca0e776223ee40f9&#34;&gt;&lt;code&gt;4f71098&lt;/code&gt;&lt;/a&gt;
+Prepare release 4.16.0rc2 (&lt;a
+href=&#34;https://redirect.github.com/python/typing_extensions/issues/771&#34;&gt;#771&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/python/typing_extensions/commit/37ed08a11f3b7c05234f8963ab97e3ebdbdc16a2&#34;&gt;&lt;code&gt;37ed08a&lt;/code&gt;&lt;/a&gt;
+Remove use of &lt;code&gt;asyncio.coroutines.iscoroutinefunction()&lt;/code&gt; (&lt;a
+href=&#34;https://redirect.github.com/python/typing_extensions/issues/769&#34;&gt;#769&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/python/typing_extensions/commit/8dcc5594cbe5a4e348245fea6ce160ce93ed6601&#34;&gt;&lt;code&gt;8dcc559&lt;/code&gt;&lt;/a&gt;
+Improve &lt;code&gt;TypedDict&lt;/code&gt; documentation (&lt;a
+href=&#34;https://redirect.github.com/python/typing_extensions/issues/770&#34;&gt;#770&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/python/typing_extensions/commit/224f8d50551d26f0d603093596c3a47a7302a46f&#34;&gt;&lt;code&gt;224f8d5&lt;/code&gt;&lt;/a&gt;
+Post-release followups for 3.16.0rc1 (&lt;a
+href=&#34;https://redirect.github.com/python/typing_extensions/issues/767&#34;&gt;#767&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/python/typing_extensions/commit/777de3eb5f4562e2054d1d7ce707f098b1f4fd2f&#34;&gt;&lt;code&gt;777de3e&lt;/code&gt;&lt;/a&gt;
+Prepare release 4.16.0rc1 (&lt;a
+href=&#34;https://redirect.github.com/python/typing_extensions/issues/766&#34;&gt;#766&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/python/typing_extensions/commit/890be90f1545e7d5fa904dfa3154d5f03c96782c&#34;&gt;&lt;code&gt;890be90&lt;/code&gt;&lt;/a&gt;
+Type variable tuple variance (&lt;a
+href=&#34;https://redirect.github.com/python/typing_extensions/issues/741&#34;&gt;#741&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/python/typing_extensions/commit/0e0545866d78458b668dc52d2edc411f6e39540d&#34;&gt;&lt;code&gt;0e05458&lt;/code&gt;&lt;/a&gt;
+Pin SQLAlchemy third-party tests to pytest==9.0.3 (&lt;a
+href=&#34;https://redirect.github.com/python/typing_extensions/issues/765&#34;&gt;#765&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/python/typing_extensions/commit/d2777468c274202ec290103b34313e50cf040229&#34;&gt;&lt;code&gt;d277746&lt;/code&gt;&lt;/a&gt;
+docs: add version compatibility table (&lt;a
+href=&#34;https://redirect.github.com/python/typing_extensions/issues/733&#34;&gt;#733&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/python/typing_extensions/compare/4.15.0...4.16.0&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `uvicorn` from 0.49.0 to 0.50.0
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/Kludex/uvicorn/releases&#34;&gt;uvicorn&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;Version 0.50.0&lt;/h2&gt;
+&lt;h2&gt;What&#39;s Changed&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Memoize trusted host checks to avoid re-parsing the client IP per
+request by &lt;a href=&#34;https://github.com/Kludex&#34;&gt;&lt;code&gt;@​Kludex&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/pull/2970&#34;&gt;Kludex/uvicorn#2970&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;Cache the &lt;code&gt;asgi&lt;/code&gt; scope sub-dict per connection by &lt;a
+href=&#34;https://github.com/Kludex&#34;&gt;&lt;code&gt;@​Kludex&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/pull/2976&#34;&gt;Kludex/uvicorn#2976&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;Build a fresh &lt;code&gt;asgi&lt;/code&gt; scope dict per request by &lt;a
+href=&#34;https://github.com/Kludex&#34;&gt;&lt;code&gt;@​Kludex&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/pull/2977&#34;&gt;Kludex/uvicorn#2977&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;Replace click.style with an internal ANSI style helper by &lt;a
+href=&#34;https://github.com/Kludex&#34;&gt;&lt;code&gt;@​Kludex&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/pull/2981&#34;&gt;Kludex/uvicorn#2981&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;Avoid copying single-frame WebSocket payloads in websockets-sansio
+by &lt;a href=&#34;https://github.com/Kludex&#34;&gt;&lt;code&gt;@​Kludex&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/pull/2983&#34;&gt;Kludex/uvicorn#2983&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;Deprecate the legacy websockets implementation and default
+&lt;code&gt;auto&lt;/code&gt; to websockets-sansio by &lt;a
+href=&#34;https://github.com/Kludex&#34;&gt;&lt;code&gt;@​Kludex&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/pull/2985&#34;&gt;Kludex/uvicorn#2985&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;Exit with a dedicated code on startup failure and stop the
+supervisor when a worker can&#39;t boot by &lt;a
+href=&#34;https://github.com/Kludex&#34;&gt;&lt;code&gt;@​Kludex&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/pull/3001&#34;&gt;Kludex/uvicorn#3001&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;Skip the eager app import in the parent when spawning workers by &lt;a
+href=&#34;https://github.com/Kludex&#34;&gt;&lt;code&gt;@​Kludex&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/pull/3012&#34;&gt;Kludex/uvicorn#3012&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;Full Changelog&lt;/strong&gt;: &lt;a
+href=&#34;https://github.com/Kludex/uvicorn/compare/0.49.0...0.50.0&#34;&gt;https://github.com/Kludex/uvicorn/compare/0.49.0...0.50.0&lt;/a&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Changelog&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/Kludex/uvicorn/blob/main/docs/release-notes.md&#34;&gt;uvicorn&#39;s
+changelog&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;0.50.0 (July 4, 2026)&lt;/h2&gt;
+&lt;p&gt;If you use WebSockets, note that &lt;code&gt;--ws auto&lt;/code&gt; now picks the
+&lt;code&gt;websockets-sansio&lt;/code&gt; implementation. You shouldn&#39;t need it,
+but you can pin &lt;code&gt;--ws websockets&lt;/code&gt; to get the deprecated
+legacy one back.&lt;/p&gt;
+&lt;h3&gt;Changed&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Exit with the dedicated code 3 on any startup failure: app loading,
+socket bind and lifespan startup errors previously exited with a mix of
+0, 1 and 3 (&lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/issues/3001&#34;&gt;#3001&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Stop the multiprocess supervisor when a worker exits with code 3
+instead of restarting it forever (&lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/issues/3001&#34;&gt;#3001&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Default &lt;code&gt;--ws auto&lt;/code&gt; to &lt;code&gt;websockets-sansio&lt;/code&gt;
+when websockets is installed (&lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/issues/2985&#34;&gt;#2985&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Skip the eager app import in the parent process with
+&lt;code&gt;--reload&lt;/code&gt; or &lt;code&gt;--workers&lt;/code&gt;, fixing a memory
+regression introduced in 0.47.0 (&lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/issues/3012&#34;&gt;#3012&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Build a fresh &lt;code&gt;asgi&lt;/code&gt; scope dict per request (&lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/issues/2977&#34;&gt;#2977&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Cache the &lt;code&gt;asgi&lt;/code&gt; scope sub-dict per connection (&lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/issues/2976&#34;&gt;#2976&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Avoid copying single-frame WebSocket payloads in
+&lt;code&gt;websockets-sansio&lt;/code&gt; (&lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/issues/2983&#34;&gt;#2983&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Memoize trusted host checks in &lt;code&gt;ProxyHeadersMiddleware&lt;/code&gt;
+(&lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/issues/2970&#34;&gt;#2970&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Replace &lt;code&gt;click.style&lt;/code&gt; with an internal ANSI style helper
+(&lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/issues/2981&#34;&gt;#2981&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Deprecated&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;Deprecate the legacy &lt;code&gt;websockets&lt;/code&gt; implementation; use
+&lt;code&gt;websockets-sansio&lt;/code&gt; or &lt;code&gt;wsproto&lt;/code&gt; instead (&lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/issues/2985&#34;&gt;#2985&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Kludex/uvicorn/commit/21d2c16fd162ce0e92b5c35f4aadca63a8b12e2d&#34;&gt;&lt;code&gt;21d2c16&lt;/code&gt;&lt;/a&gt;
+Version 0.50.0 (&lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/issues/3013&#34;&gt;#3013&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Kludex/uvicorn/commit/6c42e8d63bc41e7b721d30b33ff97c7e2fc27ce4&#34;&gt;&lt;code&gt;6c42e8d&lt;/code&gt;&lt;/a&gt;
+Skip the eager app import in the parent when spawning workers (&lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/issues/3012&#34;&gt;#3012&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Kludex/uvicorn/commit/56a4631c98bdfa8f4712214e3910add5e5e7d7ba&#34;&gt;&lt;code&gt;56a4631&lt;/code&gt;&lt;/a&gt;
+Exit with a dedicated code on startup failure and stop the supervisor
+when a ...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Kludex/uvicorn/commit/3314dfcc18835a4d4afbac4b0c4b8f0ee0d5095d&#34;&gt;&lt;code&gt;3314dfc&lt;/code&gt;&lt;/a&gt;
+chore(deps): bump the github-actions group with 4 updates (&lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/issues/3007&#34;&gt;#3007&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Kludex/uvicorn/commit/e8a31bca03254b8457c4c89596e310282cc33edc&#34;&gt;&lt;code&gt;e8a31bc&lt;/code&gt;&lt;/a&gt;
+chore(deps): bump the python-packages group across 1 directory with 9
+updates...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Kludex/uvicorn/commit/8d088b18f1ead0d75a0603d983300717079f9025&#34;&gt;&lt;code&gt;8d088b1&lt;/code&gt;&lt;/a&gt;
+Deprecate the legacy websockets implementation and default
+&lt;code&gt;auto&lt;/code&gt; to websocke...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Kludex/uvicorn/commit/5b08cf6374430ce47de74ff2e594b277d09db17e&#34;&gt;&lt;code&gt;5b08cf6&lt;/code&gt;&lt;/a&gt;
+Avoid copying single-frame WebSocket payloads in websockets-sansio (&lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/issues/2983&#34;&gt;#2983&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Kludex/uvicorn/commit/bf3f60c28e92178878ecf043b858ab55cd97c223&#34;&gt;&lt;code&gt;bf3f60c&lt;/code&gt;&lt;/a&gt;
+Replace click.style with an internal ANSI style helper (&lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/issues/2981&#34;&gt;#2981&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Kludex/uvicorn/commit/eea1bcc895349d0f3c5e2fe8229d6484f801a1c4&#34;&gt;&lt;code&gt;eea1bcc&lt;/code&gt;&lt;/a&gt;
+Build a fresh &lt;code&gt;asgi&lt;/code&gt; scope dict per request (&lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/issues/2977&#34;&gt;#2977&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/Kludex/uvicorn/commit/afed2116795358dee707dbfc890b9eb5106d4720&#34;&gt;&lt;code&gt;afed211&lt;/code&gt;&lt;/a&gt;
+Cache the &lt;code&gt;asgi&lt;/code&gt; scope sub-dict per connection (&lt;a
+href=&#34;https://redirect.github.com/Kludex/uvicorn/issues/2976&#34;&gt;#2976&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/Kludex/uvicorn/compare/0.49.0...0.50.0&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `langgraph` from 1.2.6 to 1.2.7
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/langchain-ai/langgraph/releases&#34;&gt;langgraph&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;langgraph==1.2.7&lt;/h2&gt;
+&lt;p&gt;Changes since 1.2.6&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;release(langgraph): 1.2.7 (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/8223&#34;&gt;#8223&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;fix(langgraph): snapshot &lt;code&gt;DeltaChannel&lt;/code&gt; overwrite
+supersteps (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/8125&#34;&gt;#8125&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;fix(langgraph): Make &lt;code&gt;Overwrite&lt;/code&gt; survive JSON roundtrips
+(&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/8127&#34;&gt;#8127&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;chore(deps): bump redis in /libs/langgraph (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/7976&#34;&gt;#7976&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;chore(deps): bump langsmith from 0.8.0 to 0.8.18 in /libs/langgraph
+(&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/8176&#34;&gt;#8176&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;chore(deps): bump jupyterlab from 4.5.7 to 4.5.9 in /libs/langgraph
+(&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/8164&#34;&gt;#8164&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;fix(langgraph): emit valid UUIDs for exit-mode delta task_ids for
+langgraph-api (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/8165&#34;&gt;#8165&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;chore(deps): bump bleach from 6.3.0 to 6.4.0 in /libs/langgraph (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/8107&#34;&gt;#8107&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;chore(deps): bump cryptography from 46.0.7 to 48.0.1 in
+/libs/langgraph (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/8106&#34;&gt;#8106&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;chore(deps): bump jupyter-server from 2.18.0 to 2.20.0 in
+/libs/langgraph (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/8134&#34;&gt;#8134&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;chore(deps): bump tornado from 6.5.6 to 6.5.7 in /libs/langgraph (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/8108&#34;&gt;#8108&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;chore(deps): bump pyjwt from 2.12.0 to 2.13.0 in /libs/langgraph (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/8092&#34;&gt;#8092&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langgraph/commit/5931a5f0b313feff24e2516a586c55601b868ac1&#34;&gt;&lt;code&gt;5931a5f&lt;/code&gt;&lt;/a&gt;
+release(langgraph): 1.2.7 (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/8223&#34;&gt;#8223&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langgraph/commit/9a27693c64d3a0d6847dfe1c3d57e301cbf15bbf&#34;&gt;&lt;code&gt;9a27693&lt;/code&gt;&lt;/a&gt;
+fix(langgraph): snapshot &lt;code&gt;DeltaChannel&lt;/code&gt; overwrite supersteps
+(&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/8125&#34;&gt;#8125&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langgraph/commit/1b5ca0a1b1e1889879e43536fc5efd0739a3c479&#34;&gt;&lt;code&gt;1b5ca0a&lt;/code&gt;&lt;/a&gt;
+fix(langgraph): Make &lt;code&gt;Overwrite&lt;/code&gt; survive JSON roundtrips (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/8127&#34;&gt;#8127&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langgraph/commit/d2f97191abc457954dff23ee1d9342516128ec01&#34;&gt;&lt;code&gt;d2f9719&lt;/code&gt;&lt;/a&gt;
+chore(deps): bump redis in /libs/langgraph (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/7976&#34;&gt;#7976&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langgraph/commit/c1aad8b46053303c34151e4d05bad1ac0fd17ef5&#34;&gt;&lt;code&gt;c1aad8b&lt;/code&gt;&lt;/a&gt;
+chore(deps-dev): bump starlette from 1.0.1 to 1.3.1 in /libs/sdk-py (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/8104&#34;&gt;#8104&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langgraph/commit/d5dfeaf033227776efdd21e91e5dd200125d623a&#34;&gt;&lt;code&gt;d5dfeaf&lt;/code&gt;&lt;/a&gt;
+chore(deps): bump starlette from 1.0.1 to 1.3.1 in /libs/cli (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/8105&#34;&gt;#8105&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langgraph/commit/bdb323efbbecdf9e417f8928471db4d9877bf332&#34;&gt;&lt;code&gt;bdb323e&lt;/code&gt;&lt;/a&gt;
+chore(deps): bump langsmith from 0.8.0 to 0.8.18 in
+/libs/checkpoint-sqlite (...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langgraph/commit/31f69551b7b7f4c30b5ff7f5849e681a6c023be2&#34;&gt;&lt;code&gt;31f6955&lt;/code&gt;&lt;/a&gt;
+chore(deps): bump langsmith from 0.8.0 to 0.8.18 in
+/libs/checkpoint-postgres...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langgraph/commit/6b767dea5f61acb08a2f0248510201d35991c647&#34;&gt;&lt;code&gt;6b767de&lt;/code&gt;&lt;/a&gt;
+chore(deps): bump langsmith from 0.8.2 to 0.8.18 in
+/libs/checkpoint-conforma...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/langchain-ai/langgraph/commit/e6574a854fcb60bb47e9f2ee463e01662a6d1a91&#34;&gt;&lt;code&gt;e6574a8&lt;/code&gt;&lt;/a&gt;
+chore(deps): bump langsmith from 0.8.0 to 0.8.18 in /libs/cli (&lt;a
+href=&#34;https://redirect.github.com/langchain-ai/langgraph/issues/8172&#34;&gt;#8172&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/langchain-ai/langgraph/compare/1.2.6...1.2.7&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+
+Dependabot will resolve any conflicts with this PR as long as you don&#39;t
+alter it yourself. You can also trigger a rebase manually by commenting
+`@dependabot rebase`.
+
+[//]: # (dependabot-automerge-start)
+[//]: # (dependabot-automerge-end)
+
+---
+
+&lt;details&gt;
+&lt;summary&gt;Dependabot commands and options&lt;/summary&gt;
+&lt;br /&gt;
+
+You can trigger Dependabot actions by commenting on this PR:
+- `@dependabot rebase` will rebase this PR
+- `@dependabot recreate` will recreate this PR, overwriting any edits
+that have been made to it
+- `@dependabot show &lt;dependency name&gt; ignore conditions` will show all
+of the ignore conditions of the specified dependency
+- `@dependabot ignore &lt;dependency name&gt; major version` will close this
+group update PR and stop Dependabot creating any more for the specific
+dependency&#39;s major version (unless you unignore this specific
+dependency&#39;s major version or upgrade to it yourself)
+- `@dependabot ignore &lt;dependency name&gt; minor version` will close this
+group update PR and stop Dependabot creating any more for the specific
+dependency&#39;s minor version (unless you unignore this specific
+dependency&#39;s minor version or upgrade to it yourself)
+- `@dependabot ignore &lt;dependency name&gt;` will close this group update PR
+and stop Dependabot creating any more for the specific dependency
+(unless you unignore this specific dependency or upgrade to it yourself)
+- `@dependabot unignore &lt;dependency name&gt;` will remove all of the ignore
+conditions of the specified dependency
+- `@dependabot unignore &lt;dependency name&gt; &lt;ignore condition&gt;` will
+remove the ignore condition of the specified dependency and ignore
+conditions
+
+
+&lt;/details&gt;
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+
+- chore(deps): bump debian from 12-slim to 13-slim in /python (#2155)
+
+Bumps debian from 12-slim to 13-slim.
+
+
+[![Dependabot compatibility
+score](https://dependabot-badges.githubapp.com/badges/compatibility_score?dependency-name=debian&amp;package-manager=docker&amp;previous-version=12-slim&amp;new-version=13-slim)](https://docs.github.com/en/github/managing-security-vulnerabilities/about-dependabot-security-updates#about-compatibility-scores)
+
+Dependabot will resolve any conflicts with this PR as long as you don&#39;t
+alter it yourself. You can also trigger a rebase manually by commenting
+`@dependabot rebase`.
+
+[//]: # (dependabot-automerge-start)
+[//]: # (dependabot-automerge-end)
+
+---
+
+&lt;details&gt;
+&lt;summary&gt;Dependabot commands and options&lt;/summary&gt;
+&lt;br /&gt;
+
+You can trigger Dependabot actions by commenting on this PR:
+- `@dependabot rebase` will rebase this PR
+- `@dependabot recreate` will recreate this PR, overwriting any edits
+that have been made to it
+- `@dependabot show &lt;dependency name&gt; ignore conditions` will show all
+of the ignore conditions of the specified dependency
+- `@dependabot ignore this major version` will close this PR and stop
+Dependabot creating any more for this major version (unless you reopen
+the PR or upgrade to it yourself)
+- `@dependabot ignore this minor version` will close this PR and stop
+Dependabot creating any more for this minor version (unless you reopen
+the PR or upgrade to it yourself)
+- `@dependabot ignore this dependency` will close this PR and stop
+Dependabot creating any more for this dependency (unless you reopen the
+PR or upgrade to it yourself)
+
+
+&lt;/details&gt;
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+
+- chore(deps): bump the go-minor-patch group in /go with 8 updates (#2157)
+
+Bumps the go-minor-patch group in /go with 8 updates:
+
+| Package | From | To |
+| --- | --- | --- |
+|
+[github.com/anthropics/anthropic-sdk-go](https://github.com/anthropics/anthropic-sdk-go)
+| `1.52.0` | `1.56.0` |
+|
+[github.com/aws/aws-sdk-go-v2/config](https://github.com/aws/aws-sdk-go-v2)
+| `1.32.25` | `1.32.27` |
+|
+[github.com/jedib0t/go-pretty/v6](https://github.com/jedib0t/go-pretty)
+| `6.8.1` | `6.8.2` |
+| [google.golang.org/adk](https://github.com/google/adk-go) | `1.4.0` |
+`1.5.0` |
+| [github.com/aws/aws-sdk-go-v2](https://github.com/aws/aws-sdk-go-v2) |
+`1.42.0` | `1.42.1` |
+|
+[github.com/aws/aws-sdk-go-v2/service/bedrockruntime](https://github.com/aws/aws-sdk-go-v2)
+| `1.54.0` | `1.54.2` |
+| [github.com/ollama/ollama](https://github.com/ollama/ollama) |
+`0.30.11` | `0.31.1` |
+| [google.golang.org/grpc](https://github.com/grpc/grpc-go) | `1.81.1` |
+`1.82.0` |
+
+Updates `github.com/anthropics/anthropic-sdk-go` from 1.52.0 to 1.56.0
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/releases&#34;&gt;github.com/anthropics/anthropic-sdk-go&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;v1.56.0&lt;/h2&gt;
+&lt;h2&gt;1.56.0 (2026-07-02)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/compare/v1.55.1...v1.56.0&#34;&gt;v1.55.1...v1.56.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add agent-memory-2026-07-22 beta header (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/5bcfda43d70d05ea124f6b6efa678807b8aba064&#34;&gt;5bcfda4&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;v1.55.1&lt;/h2&gt;
+&lt;h2&gt;1.55.1 (2026-07-01)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/compare/v1.55.0...v1.55.1&#34;&gt;v1.55.0...v1.55.1&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Chores&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; remove some nonfunctional types from the SDKs
+(&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/9bd3d099c5c5cb69f7011376a63a882216d30fcb&#34;&gt;9bd3d09&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;v1.55.0&lt;/h2&gt;
+&lt;h2&gt;1.55.0 (2026-06-30)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/compare/v1.54.0...v1.55.0&#34;&gt;v1.54.0...v1.55.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for Managed Agents event delta
+streaming, agent overrides, reverse pagination, vault credential
+injection scoping, and agent and deployment webhook events (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/021ef45adcc13691ce8e8f234b9b5ae387a565ae&#34;&gt;021ef45&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;v1.54.0&lt;/h2&gt;
+&lt;h2&gt;1.54.0 (2026-06-30)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/compare/v1.53.0...v1.54.0&#34;&gt;v1.53.0...v1.54.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for claude-sonnet-5 (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/232cfe6f8889dc30dd759a4027e95f5c9ece46d1&#34;&gt;232cfe6&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Bug Fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;agenttoolset:&lt;/strong&gt; allow absolute paths that resolve
+inside workdir (&lt;a
+href=&#34;https://redirect.github.com/anthropics/anthropic-sdk-go/issues/93&#34;&gt;#93&lt;/a&gt;)
+(&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/3735258e449804336781339ef25fa7008fc8717f&#34;&gt;3735258&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;v1.53.0&lt;/h2&gt;
+&lt;h2&gt;1.53.0 (2026-06-29)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/compare/v1.52.0...v1.53.0&#34;&gt;v1.52.0...v1.53.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for 20260318 web fetch and support
+tools (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/6396455a220b3e37cc87ce44b6d1e615d6386c74&#34;&gt;6396455&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;!-- raw HTML omitted --&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;... (truncated)&lt;/p&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Changelog&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/blob/main/CHANGELOG.md&#34;&gt;github.com/anthropics/anthropic-sdk-go&#39;s
+changelog&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;1.56.0 (2026-07-02)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/compare/v1.55.1...v1.56.0&#34;&gt;v1.55.1...v1.56.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add agent-memory-2026-07-22 beta header (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/5bcfda43d70d05ea124f6b6efa678807b8aba064&#34;&gt;5bcfda4&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;1.55.1 (2026-07-01)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/compare/v1.55.0...v1.55.1&#34;&gt;v1.55.0...v1.55.1&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Chores&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; remove some nonfunctional types from the SDKs
+(&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/9bd3d099c5c5cb69f7011376a63a882216d30fcb&#34;&gt;9bd3d09&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;1.55.0 (2026-06-30)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/compare/v1.54.0...v1.55.0&#34;&gt;v1.54.0...v1.55.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for Managed Agents event delta
+streaming, agent overrides, reverse pagination, vault credential
+injection scoping, and agent and deployment webhook events (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/021ef45adcc13691ce8e8f234b9b5ae387a565ae&#34;&gt;021ef45&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;1.54.0 (2026-06-30)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/compare/v1.53.0...v1.54.0&#34;&gt;v1.53.0...v1.54.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for claude-sonnet-5 (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/232cfe6f8889dc30dd759a4027e95f5c9ece46d1&#34;&gt;232cfe6&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Bug Fixes&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;agenttoolset:&lt;/strong&gt; allow absolute paths that resolve
+inside workdir (&lt;a
+href=&#34;https://redirect.github.com/anthropics/anthropic-sdk-go/issues/93&#34;&gt;#93&lt;/a&gt;)
+(&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/3735258e449804336781339ef25fa7008fc8717f&#34;&gt;3735258&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;1.53.0 (2026-06-29)&lt;/h2&gt;
+&lt;p&gt;Full Changelog: &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/compare/v1.52.0...v1.53.0&#34;&gt;v1.52.0...v1.53.0&lt;/a&gt;&lt;/p&gt;
+&lt;h3&gt;Features&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; add support for 20260318 web fetch and support
+tools (&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/6396455a220b3e37cc87ce44b6d1e615d6386c74&#34;&gt;6396455&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h3&gt;Chores&lt;/h3&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;api:&lt;/strong&gt; accept user profile ID&#39;s when counting tokens
+(&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/d31ba27f74d9a39dcaaabe8dc0d37b5b811c150c&#34;&gt;d31ba27&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;docs:&lt;/strong&gt; updates to descriptions and example values
+(&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/cb00f34a3c75e9f183d569321ff2de6da8efc29c&#34;&gt;cb00f34&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/b0e07bb34ffc0d018c89b5cec8f62a7b823927f3&#34;&gt;&lt;code&gt;b0e07bb&lt;/code&gt;&lt;/a&gt;
+release: 1.56.0&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/bd037f0ef5a4f84c1c8c353c34a3f23e4c461598&#34;&gt;&lt;code&gt;bd037f0&lt;/code&gt;&lt;/a&gt;
+feat(api): add agent-memory-2026-07-22 beta header&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/20fc6757ff5b07edc463c8a3f351278c441c9ff5&#34;&gt;&lt;code&gt;20fc675&lt;/code&gt;&lt;/a&gt;
+release: 1.55.1&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/5334242e2072201152584fbf7d0a4a61112e4dbf&#34;&gt;&lt;code&gt;5334242&lt;/code&gt;&lt;/a&gt;
+chore(api): remove some nonfunctional types from the SDKs&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/e9e55c19655c8b479417f2e5a40ed935239408e4&#34;&gt;&lt;code&gt;e9e55c1&lt;/code&gt;&lt;/a&gt;
+release: 1.55.0&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/4cedec36c895012e3bb2240af386704bc9ca09d6&#34;&gt;&lt;code&gt;4cedec3&lt;/code&gt;&lt;/a&gt;
+feat(api): add support for Managed Agents event delta streaming, agent
+overri...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/0d53ec383d21e6969abb8b776a30176ff2178a8c&#34;&gt;&lt;code&gt;0d53ec3&lt;/code&gt;&lt;/a&gt;
+codegen metadata&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/1ac9b883a4fc3ab9aec6d5fff8e8e08f3c16a0d6&#34;&gt;&lt;code&gt;1ac9b88&lt;/code&gt;&lt;/a&gt;
+release: 1.54.0&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/1012ad45fd210fee87e8e5a9906e61ed4bde9bac&#34;&gt;&lt;code&gt;1012ad4&lt;/code&gt;&lt;/a&gt;
+feat(api): add support for claude-sonnet-5&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/commit/7ae106c01d1212c557077e45c2e471502cc68748&#34;&gt;&lt;code&gt;7ae106c&lt;/code&gt;&lt;/a&gt;
+fix(agenttoolset): allow absolute paths that resolve inside workdir (&lt;a
+href=&#34;https://redirect.github.com/anthropics/anthropic-sdk-go/issues/93&#34;&gt;#93&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/anthropics/anthropic-sdk-go/compare/v1.52.0...v1.56.0&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `github.com/aws/aws-sdk-go-v2/config` from 1.32.25 to 1.32.27
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/b4784c17b51e7f4dff48ac6016a09e21eeb683a8&#34;&gt;&lt;code&gt;b4784c1&lt;/code&gt;&lt;/a&gt;
+Release 2026-07-01&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/97c02011cd799bba5dfb0589a736a32cb064e80c&#34;&gt;&lt;code&gt;97c0201&lt;/code&gt;&lt;/a&gt;
+Regenerated Clients&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/66872388a6564704668f302c3b87d9cd9ae5531f&#34;&gt;&lt;code&gt;6687238&lt;/code&gt;&lt;/a&gt;
+Update endpoints model&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/995297f1602ed868e23913487a14d7d1b92af6d6&#34;&gt;&lt;code&gt;995297f&lt;/code&gt;&lt;/a&gt;
+Update API model&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/c26cfc66401e3ff465a9520f0f73f4e9474a338d&#34;&gt;&lt;code&gt;c26cfc6&lt;/code&gt;&lt;/a&gt;
+Fix bump smithy-go to cover multiple issues (&lt;a
+href=&#34;https://redirect.github.com/aws/aws-sdk-go-v2/issues/3461&#34;&gt;#3461&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/fae66b855c063cbf7f41c44541e037bbb7b0a106&#34;&gt;&lt;code&gt;fae66b8&lt;/code&gt;&lt;/a&gt;
+Set transfer manager error as the first error seen, preventing race
+condition...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/cf0eabd47c16a9733688171e157b288f843375d5&#34;&gt;&lt;code&gt;cf0eabd&lt;/code&gt;&lt;/a&gt;
+Release 2026-06-30&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/ad0c0913e69f26b12c23e55df3572e8e61aff5b1&#34;&gt;&lt;code&gt;ad0c091&lt;/code&gt;&lt;/a&gt;
+Regenerated Clients&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/196e961fd8138d0918f57ce3549c1ae25fc5ce89&#34;&gt;&lt;code&gt;196e961&lt;/code&gt;&lt;/a&gt;
+Update endpoints model&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/1529ead9d1a40beee31b0ad347cf082a5eb039a6&#34;&gt;&lt;code&gt;1529ead&lt;/code&gt;&lt;/a&gt;
+Update API model&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/compare/config/v1.32.25...config/v1.32.27&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `github.com/jedib0t/go-pretty/v6` from 6.8.1 to 6.8.2
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/jedib0t/go-pretty/releases&#34;&gt;github.com/jedib0t/go-pretty/v6&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;v6.8.2&lt;/h2&gt;
+&lt;h2&gt;What&#39;s Changed&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;text: trim to display width so CJK content respects maxLen by &lt;a
+href=&#34;https://github.com/greymoth-jp&#34;&gt;&lt;code&gt;@​greymoth-jp&lt;/code&gt;&lt;/a&gt; in
+&lt;a
+href=&#34;https://redirect.github.com/jedib0t/go-pretty/pull/410&#34;&gt;jedib0t/go-pretty#410&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;New Contributors&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/greymoth-jp&#34;&gt;&lt;code&gt;@​greymoth-jp&lt;/code&gt;&lt;/a&gt;
+made their first contribution in &lt;a
+href=&#34;https://redirect.github.com/jedib0t/go-pretty/pull/410&#34;&gt;jedib0t/go-pretty#410&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;Full Changelog&lt;/strong&gt;: &lt;a
+href=&#34;https://github.com/jedib0t/go-pretty/compare/v6.8.1...v6.8.2&#34;&gt;https://github.com/jedib0t/go-pretty/compare/v6.8.1...v6.8.2&lt;/a&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/jedib0t/go-pretty/commit/a4201b7b2d04f245060b134c56ad4bd81982f42b&#34;&gt;&lt;code&gt;a4201b7&lt;/code&gt;&lt;/a&gt;
+text: trim to display width so CJK content respects maxLen (&lt;a
+href=&#34;https://redirect.github.com/jedib0t/go-pretty/issues/410&#34;&gt;#410&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;See full diff in &lt;a
+href=&#34;https://github.com/jedib0t/go-pretty/compare/v6.8.1...v6.8.2&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `google.golang.org/adk` from 1.4.0 to 1.5.0
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/google/adk-go/releases&#34;&gt;google.golang.org/adk&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;v1.5.0&lt;/h2&gt;
+&lt;h2&gt;What&#39;s Changed&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Add v2 checks by &lt;a
+href=&#34;https://github.com/kdroste-google&#34;&gt;&lt;code&gt;@​kdroste-google&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/937&#34;&gt;google/adk-go#937&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;Context unification: switch all to not deprecated by &lt;a
+href=&#34;https://github.com/kdroste-google&#34;&gt;&lt;code&gt;@​kdroste-google&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/935&#34;&gt;google/adk-go#935&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: bump x/net and otel OTLP exporters to fix nightly govulncheck
+failures by &lt;a
+href=&#34;https://github.com/karolpiotrowicz&#34;&gt;&lt;code&gt;@​karolpiotrowicz&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/994&#34;&gt;google/adk-go#994&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;chore: complete Node 24 migration for GitHub Actions by &lt;a
+href=&#34;https://github.com/karolpiotrowicz&#34;&gt;&lt;code&gt;@​karolpiotrowicz&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/996&#34;&gt;google/adk-go#996&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;feat: Add ability to set custom clock and UUID providers by &lt;a
+href=&#34;https://github.com/DABH&#34;&gt;&lt;code&gt;@​DABH&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/964&#34;&gt;google/adk-go#964&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;feat(agent): add StrictContextMock test double by &lt;a
+href=&#34;https://github.com/wolo-lab&#34;&gt;&lt;code&gt;@​wolo-lab&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/1019&#34;&gt;google/adk-go#1019&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: Allow manual setting of session IDs by &lt;a
+href=&#34;https://github.com/dietb&#34;&gt;&lt;code&gt;@​dietb&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/721&#34;&gt;google/adk-go#721&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;docs: add AGENTS.md for AI coding agents by &lt;a
+href=&#34;https://github.com/karolpiotrowicz&#34;&gt;&lt;code&gt;@​karolpiotrowicz&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/1045&#34;&gt;google/adk-go#1045&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix(agentengine): support Gemini Enterprise AgentSpace streams by &lt;a
+href=&#34;https://github.com/jankrynauw&#34;&gt;&lt;code&gt;@​jankrynauw&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/777&#34;&gt;google/adk-go#777&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;Got rid of context.Background by &lt;a
+href=&#34;https://github.com/kdroste-google&#34;&gt;&lt;code&gt;@​kdroste-google&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/1062&#34;&gt;google/adk-go#1062&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix: update built-in load_memory tool for compatibility with
+VertexAiSessionService by &lt;a
+href=&#34;https://github.com/nicholasbreckwoldt&#34;&gt;&lt;code&gt;@​nicholasbreckwoldt&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/793&#34;&gt;google/adk-go#793&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;Main linter fixes by &lt;a
+href=&#34;https://github.com/kdroste-google&#34;&gt;&lt;code&gt;@​kdroste-google&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/1068&#34;&gt;google/adk-go#1068&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;fix(conformance): Add &amp;quot;system_instruction&amp;quot; keyNode
+processing by &lt;a
+href=&#34;https://github.com/baptmont&#34;&gt;&lt;code&gt;@​baptmont&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/1075&#34;&gt;google/adk-go#1075&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;test(session/vertexai): add table-driven tests for
+FunctionCall/Response ID mapping by &lt;a
+href=&#34;https://github.com/nuthalapativarun&#34;&gt;&lt;code&gt;@​nuthalapativarun&lt;/code&gt;&lt;/a&gt;
+in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/739&#34;&gt;google/adk-go#739&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;New Contributors&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;https://github.com/DABH&#34;&gt;&lt;code&gt;@​DABH&lt;/code&gt;&lt;/a&gt; made their
+first contribution in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/964&#34;&gt;google/adk-go#964&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;https://github.com/dietb&#34;&gt;&lt;code&gt;@​dietb&lt;/code&gt;&lt;/a&gt; made
+their first contribution in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/721&#34;&gt;google/adk-go#721&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/jankrynauw&#34;&gt;&lt;code&gt;@​jankrynauw&lt;/code&gt;&lt;/a&gt; made
+their first contribution in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/777&#34;&gt;google/adk-go#777&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/nicholasbreckwoldt&#34;&gt;&lt;code&gt;@​nicholasbreckwoldt&lt;/code&gt;&lt;/a&gt;
+made their first contribution in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/793&#34;&gt;google/adk-go#793&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/nuthalapativarun&#34;&gt;&lt;code&gt;@​nuthalapativarun&lt;/code&gt;&lt;/a&gt;
+made their first contribution in &lt;a
+href=&#34;https://redirect.github.com/google/adk-go/pull/739&#34;&gt;google/adk-go#739&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;Full Changelog&lt;/strong&gt;: &lt;a
+href=&#34;https://github.com/google/adk-go/compare/v1.4.0...v1.5.0&#34;&gt;https://github.com/google/adk-go/compare/v1.4.0...v1.5.0&lt;/a&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/google/adk-go/commit/caf798a0a20c46c498a5b736a16b433a81daf839&#34;&gt;&lt;code&gt;caf798a&lt;/code&gt;&lt;/a&gt;
+test(session/vertexai): add table-driven tests for FunctionCall/Response
+mapp...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/google/adk-go/commit/53502666c10261bdd2a95f56eddec3562333717f&#34;&gt;&lt;code&gt;5350266&lt;/code&gt;&lt;/a&gt;
+fix(conformance): Add &amp;quot;system_instruction&amp;quot; keyNode processing
+(&lt;a
+href=&#34;https://redirect.github.com/google/adk-go/issues/1075&#34;&gt;#1075&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/google/adk-go/commit/44e3d67a427dcf834f79025299ccbfa287605f52&#34;&gt;&lt;code&gt;44e3d67&lt;/code&gt;&lt;/a&gt;
+Main linter fixes (&lt;a
+href=&#34;https://redirect.github.com/google/adk-go/issues/1068&#34;&gt;#1068&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/google/adk-go/commit/ca2e3d5cc614ec61ddb09f845ae8d1b73bc387b6&#34;&gt;&lt;code&gt;ca2e3d5&lt;/code&gt;&lt;/a&gt;
+fix: update built-in load_memory tool for compatibility with
+VertexAiSessionS...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/google/adk-go/commit/b304aafa8b9f3925f8d4e91f1539e02224f78a24&#34;&gt;&lt;code&gt;b304aaf&lt;/code&gt;&lt;/a&gt;
+Get rid of context.Background (&lt;a
+href=&#34;https://redirect.github.com/google/adk-go/issues/1062&#34;&gt;#1062&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/google/adk-go/commit/fea859618d79dfca3d288b558ae569452edc9269&#34;&gt;&lt;code&gt;fea8596&lt;/code&gt;&lt;/a&gt;
+fix(agentengine): support Gemini Enterprise AgentSpace streams (&lt;a
+href=&#34;https://redirect.github.com/google/adk-go/issues/777&#34;&gt;#777&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/google/adk-go/commit/bfab1bd76649e84bb3f6c17ec8a337a33d05d031&#34;&gt;&lt;code&gt;bfab1bd&lt;/code&gt;&lt;/a&gt;
+docs: add AGENTS.md for AI coding agents (&lt;a
+href=&#34;https://redirect.github.com/google/adk-go/issues/1045&#34;&gt;#1045&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/google/adk-go/commit/90091e2a7f80cf506d602b12d593f8eb0b09af26&#34;&gt;&lt;code&gt;90091e2&lt;/code&gt;&lt;/a&gt;
+fix: Allow manual setting of session IDs (&lt;a
+href=&#34;https://redirect.github.com/google/adk-go/issues/721&#34;&gt;#721&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/google/adk-go/commit/9f6080f96a0828cc7b574d14850e0990ef31e661&#34;&gt;&lt;code&gt;9f6080f&lt;/code&gt;&lt;/a&gt;
+feat(agent): add StrictContextMock test double (&lt;a
+href=&#34;https://redirect.github.com/google/adk-go/issues/1019&#34;&gt;#1019&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/google/adk-go/commit/c6f168f5fd62e1203af7616ed03d11e42eda286a&#34;&gt;&lt;code&gt;c6f168f&lt;/code&gt;&lt;/a&gt;
+feat: add platform clock and UUID provider seams for deterministic event
+crea...&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/google/adk-go/compare/v1.4.0...v1.5.0&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `github.com/aws/aws-sdk-go-v2` from 1.42.0 to 1.42.1
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/b4784c17b51e7f4dff48ac6016a09e21eeb683a8&#34;&gt;&lt;code&gt;b4784c1&lt;/code&gt;&lt;/a&gt;
+Release 2026-07-01&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/97c02011cd799bba5dfb0589a736a32cb064e80c&#34;&gt;&lt;code&gt;97c0201&lt;/code&gt;&lt;/a&gt;
+Regenerated Clients&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/66872388a6564704668f302c3b87d9cd9ae5531f&#34;&gt;&lt;code&gt;6687238&lt;/code&gt;&lt;/a&gt;
+Update endpoints model&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/995297f1602ed868e23913487a14d7d1b92af6d6&#34;&gt;&lt;code&gt;995297f&lt;/code&gt;&lt;/a&gt;
+Update API model&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/c26cfc66401e3ff465a9520f0f73f4e9474a338d&#34;&gt;&lt;code&gt;c26cfc6&lt;/code&gt;&lt;/a&gt;
+Fix bump smithy-go to cover multiple issues (&lt;a
+href=&#34;https://redirect.github.com/aws/aws-sdk-go-v2/issues/3461&#34;&gt;#3461&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/fae66b855c063cbf7f41c44541e037bbb7b0a106&#34;&gt;&lt;code&gt;fae66b8&lt;/code&gt;&lt;/a&gt;
+Set transfer manager error as the first error seen, preventing race
+condition...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/cf0eabd47c16a9733688171e157b288f843375d5&#34;&gt;&lt;code&gt;cf0eabd&lt;/code&gt;&lt;/a&gt;
+Release 2026-06-30&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/ad0c0913e69f26b12c23e55df3572e8e61aff5b1&#34;&gt;&lt;code&gt;ad0c091&lt;/code&gt;&lt;/a&gt;
+Regenerated Clients&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/196e961fd8138d0918f57ce3549c1ae25fc5ce89&#34;&gt;&lt;code&gt;196e961&lt;/code&gt;&lt;/a&gt;
+Update endpoints model&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/1529ead9d1a40beee31b0ad347cf082a5eb039a6&#34;&gt;&lt;code&gt;1529ead&lt;/code&gt;&lt;/a&gt;
+Update API model&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/compare/v1.42.0...v1.42.1&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `github.com/aws/aws-sdk-go-v2/service/bedrockruntime` from
+1.54.0 to 1.54.2
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/728f21ff766e27bf28e6f30c0c1508c4cb7b2ed5&#34;&gt;&lt;code&gt;728f21f&lt;/code&gt;&lt;/a&gt;
+Release 2024-05-16&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/3dbd5ca5f293349a3436e8c0a4356ba72e0c490c&#34;&gt;&lt;code&gt;3dbd5ca&lt;/code&gt;&lt;/a&gt;
+Regenerated Clients&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/c87adfdc5853309f70c99930c969e943415a09c6&#34;&gt;&lt;code&gt;c87adfd&lt;/code&gt;&lt;/a&gt;
+Update endpoints model&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/e209d0203c888d53107127b84e642fe422f283d2&#34;&gt;&lt;code&gt;e209d02&lt;/code&gt;&lt;/a&gt;
+Update API model&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/ef4a9a08e7a129380e18a1a810857f19534d31a9&#34;&gt;&lt;code&gt;ef4a9a0&lt;/code&gt;&lt;/a&gt;
+internal: capture user-agent in metrics (&lt;a
+href=&#34;https://redirect.github.com/aws/aws-sdk-go-v2/issues/2644&#34;&gt;#2644&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/c964dbd88bc9424349a9225b044ec2322e07f4cb&#34;&gt;&lt;code&gt;c964dbd&lt;/code&gt;&lt;/a&gt;
+Release 2024-05-15&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/ce843953a9cb4c9d2dff75dd5a5c967655c4c8ef&#34;&gt;&lt;code&gt;ce84395&lt;/code&gt;&lt;/a&gt;
+Regenerated Clients&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/8de91199530fabf1702a2cefab3cee6e065879bc&#34;&gt;&lt;code&gt;8de9119&lt;/code&gt;&lt;/a&gt;
+Update API model&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/05fcf66f17486b8ce9b7372c19910ad68a85a730&#34;&gt;&lt;code&gt;05fcf66&lt;/code&gt;&lt;/a&gt;
+internal: true up internal metrics collection for post-SRA middleware
+(&lt;a
+href=&#34;https://redirect.github.com/aws/aws-sdk-go-v2/issues/2642&#34;&gt;#2642&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/commit/114842762c6ffd78ebce1850e31a387992d10acf&#34;&gt;&lt;code&gt;1148427&lt;/code&gt;&lt;/a&gt;
+reformat signer/v4 package doc (&lt;a
+href=&#34;https://redirect.github.com/aws/aws-sdk-go-v2/issues/2640&#34;&gt;#2640&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;See full diff in &lt;a
+href=&#34;https://github.com/aws/aws-sdk-go-v2/compare/service/s3/v1.54.0...service/s3/v1.54.2&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `github.com/ollama/ollama` from 0.30.11 to 0.31.1
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/ollama/ollama/releases&#34;&gt;github.com/ollama/ollama&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;v0.31.1&lt;/h2&gt;
+&lt;h2&gt;Faster Gemma 4 on Apple Silicon&lt;/h2&gt;
+&lt;!-- raw HTML omitted --&gt;
+&lt;p&gt;Gemma 4 is now significantly faster in Ollama on Apple Silicon,
+generating tokens nearly 90% faster on average across a coding-agent
+benchmark by leveraging multi-token prediction (MTP). Ollama auto-tunes
+how many tokens to draft as it runs, so the speedup is on by default,
+requires no configuration, and does not change the model&#39;s output.&lt;/p&gt;
+&lt;h2&gt;What&#39;s Changed&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;Tightened Gemma 4 MoE model loading in the MLX engine&lt;/li&gt;
+&lt;li&gt;Updated the MLX engine to the latest version, including a new
+small-batch matmul kernel&lt;/li&gt;
+&lt;li&gt;Updated the underlying llama.cpp engine to build 9840&lt;/li&gt;
+&lt;li&gt;Improved Gemma 4 multi-token prediction (MTP) performance&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;Full Changelog&lt;/strong&gt;: &lt;a
+href=&#34;https://github.com/ollama/ollama/compare/v0.30.12...v0.31.1&#34;&gt;https://github.com/ollama/ollama/compare/v0.30.12...v0.31.1&lt;/a&gt;&lt;/p&gt;
+&lt;h2&gt;v0.30.12&lt;/h2&gt;
+&lt;h2&gt;What&#39;s Changed&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;tools: ignore braces inside JSON strings when detecting tool call
+end by &lt;a
+href=&#34;https://github.com/aditya-786&#34;&gt;&lt;code&gt;@​aditya-786&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16937&#34;&gt;ollama/ollama#16937&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;mlx: bump dependency by &lt;a
+href=&#34;https://github.com/dhiltgen&#34;&gt;&lt;code&gt;@​dhiltgen&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16935&#34;&gt;ollama/ollama#16935&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;llama.cpp update by &lt;a
+href=&#34;https://github.com/dhiltgen&#34;&gt;&lt;code&gt;@​dhiltgen&lt;/code&gt;&lt;/a&gt; in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16960&#34;&gt;ollama/ollama#16960&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h2&gt;New Contributors&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/aditya-786&#34;&gt;&lt;code&gt;@​aditya-786&lt;/code&gt;&lt;/a&gt; made
+their first contribution in &lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/pull/16937&#34;&gt;ollama/ollama#16937&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;&lt;strong&gt;Full Changelog&lt;/strong&gt;: &lt;a
+href=&#34;https://github.com/ollama/ollama/compare/v0.30.11...v0.30.12-rc0&#34;&gt;https://github.com/ollama/ollama/compare/v0.30.11...v0.30.12-rc0&lt;/a&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/ollama/ollama/commit/710292ff4f191d8da9f6a4230804fbc693338d4a&#34;&gt;&lt;code&gt;710292f&lt;/code&gt;&lt;/a&gt;
+mlx: tighten up gemma4 moe loading code (&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/issues/16964&#34;&gt;#16964&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/ollama/ollama/commit/ada1eb516354a0428c48202b1a8966550056df8e&#34;&gt;&lt;code&gt;ada1eb5&lt;/code&gt;&lt;/a&gt;
+launch: check for min version for hermes desktop (&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/issues/16912&#34;&gt;#16912&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/ollama/ollama/commit/1c5ebbf5f4a41d37b65e100b4938ec6f710b74fe&#34;&gt;&lt;code&gt;1c5ebbf&lt;/code&gt;&lt;/a&gt;
+llama.cpp update (&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/issues/16960&#34;&gt;#16960&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/ollama/ollama/commit/7926b99e0e9fb1bb0d7a1a4613ef904025647f62&#34;&gt;&lt;code&gt;7926b99&lt;/code&gt;&lt;/a&gt;
+mlx: bump dependency (&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/issues/16935&#34;&gt;#16935&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/ollama/ollama/commit/32a97b7493786e5784e4445e80c1a078c14c255f&#34;&gt;&lt;code&gt;32a97b7&lt;/code&gt;&lt;/a&gt;
+tools: ignore braces inside JSON strings when detecting tool call end
+(&lt;a
+href=&#34;https://redirect.github.com/ollama/ollama/issues/16937&#34;&gt;#16937&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;See full diff in &lt;a
+href=&#34;https://github.com/ollama/ollama/compare/v0.30.11...v0.31.1&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+Updates `google.golang.org/grpc` from 1.81.1 to 1.82.0
+&lt;details&gt;
+&lt;summary&gt;Release notes&lt;/summary&gt;
+&lt;p&gt;&lt;em&gt;Sourced from &lt;a
+href=&#34;https://github.com/grpc/grpc-go/releases&#34;&gt;google.golang.org/grpc&#39;s
+releases&lt;/a&gt;.&lt;/em&gt;&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;h2&gt;Release 1.82.0&lt;/h2&gt;
+&lt;h1&gt;Behavior Changes&lt;/h1&gt;
+&lt;ul&gt;
+&lt;li&gt;server: Remove support for
+&lt;code&gt;GRPC_GO_EXPERIMENTAL_DISABLE_STRICT_PATH_CHECKING&lt;/code&gt;
+environment varibale. Strict incoming RPC path validation (which has
+been the default since &lt;code&gt;v1.79.3&lt;/code&gt;) can no longer be disabled.
+(&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/9112&#34;&gt;#9112&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;transport: Add environment variable to change the default max header
+list size from &lt;code&gt;16MB&lt;/code&gt; to &lt;code&gt;8KB&lt;/code&gt;. This may be
+enabled by setting
+&lt;code&gt;GRPC_GO_EXPERIMENTAL_ENABLE_8KB_DEFAULT_HEADER_LIST_SIZE=true&lt;/code&gt;.
+This will be enabled by default in a subsequent release. (&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/9019&#34;&gt;#9019&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;balancer: Load Balancing policy registry is now case-sensitive. Set
+&lt;code&gt;GRPC_GO_EXPERIMENTAL_CASE_SENSITIVE_BALANCER_REGISTRIES=false&lt;/code&gt;
+(and file an issue) to revert to case-insensitive behavior. (&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/9017&#34;&gt;#9017&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h1&gt;New Features&lt;/h1&gt;
+&lt;ul&gt;
+&lt;li&gt;experimental/stats: Expose a new API,
+&lt;code&gt;NewContextWithLabelCallback&lt;/code&gt;, to register a callback that is
+invoked when telemetry labels are added. (&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/8877&#34;&gt;#8877&lt;/a&gt;)
+&lt;ul&gt;
+&lt;li&gt;Special Thanks: &lt;a
+href=&#34;https://github.com/seth-epps&#34;&gt;&lt;code&gt;@​seth-epps&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;client: Return a portion of the response body in the error message,
+when the client receives an unexpected non-gRPC HTTP response, to make
+debugging easier. (&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/8929&#34;&gt;#8929&lt;/a&gt;)
+&lt;ul&gt;
+&lt;li&gt;Special Thanks: &lt;a
+href=&#34;https://github.com/chengxilo&#34;&gt;&lt;code&gt;@​chengxilo&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;server: Add environment variable
+&lt;code&gt;GRPC_GO_SERVER_GOROUTINE_LABELS&lt;/code&gt; that controls setting
+&lt;code&gt;runtime/pprof.Labels&lt;/code&gt; on goroutines spawned by the server.
+Set &lt;code&gt;GRPC_GO_SERVER_GOROUTINE_LABELS=grpc.method=true&lt;/code&gt; to add
+the &lt;code&gt;grpc.method&lt;/code&gt; label on goroutines spawned to handle
+incoming requests. (&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/9082&#34;&gt;#9082&lt;/a&gt;)
+&lt;ul&gt;
+&lt;li&gt;Special Thanks: &lt;a
+href=&#34;https://github.com/dfinkel&#34;&gt;&lt;code&gt;@​dfinkel&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;/ul&gt;
+&lt;h1&gt;Bug Fixes&lt;/h1&gt;
+&lt;ul&gt;
+&lt;li&gt;xds/server: Fix a memory leak of HTTP filter instances occurring
+when route configurations are updated in-place during a Route Discovery
+Service (RDS) update. (&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/9138&#34;&gt;#9138&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;grpc: In the deprecated &lt;code&gt;gzip&lt;/code&gt; Compressor (used via the
+deprecated &lt;code&gt;WithCompressor&lt;/code&gt; dial option), enforce the
+&lt;code&gt;MaxRecvMsgSize&lt;/code&gt; limit on the decompressed message buffer,
+preventing excessive memory allocation from highly compressed payloads.
+(&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/9114&#34;&gt;#9114&lt;/a&gt;)
+&lt;ul&gt;
+&lt;li&gt;Special Thanks: &lt;a
+href=&#34;https://github.com/evilgensec&#34;&gt;&lt;code&gt;@​evilgensec&lt;/code&gt;&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/li&gt;
+&lt;li&gt;stats/opentelemetry: Record retry attempts,
+&lt;code&gt;grpc.previous-rpc-attempts&lt;/code&gt;, at the call level and not the
+attempt level. (&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/8923&#34;&gt;#8923&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;encoding: Ensure &lt;code&gt;Close()&lt;/code&gt; is always called on readers
+returned from &lt;code&gt;Compressor.Decompress&lt;/code&gt; if possible. (&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/9135&#34;&gt;#9135&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;channelz: Fix the &lt;code&gt;LastMessageSentTimestamp&lt;/code&gt; and
+&lt;code&gt;LastMessageReceivedTimestamp&lt;/code&gt; fields in
+&lt;code&gt;SocketMetrics&lt;/code&gt; to ensure they contain correct timestamp
+values. (&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/9109&#34;&gt;#9109&lt;/a&gt;)&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/blockquote&gt;
+&lt;/details&gt;
+&lt;details&gt;
+&lt;summary&gt;Commits&lt;/summary&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/grpc/grpc-go/commit/bd239854f0ab7f1ee63457d47f7c1d2675e1f736&#34;&gt;&lt;code&gt;bd23985&lt;/code&gt;&lt;/a&gt;
+Change version to 1.82.0 (&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/9170&#34;&gt;#9170&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/grpc/grpc-go/commit/0f3086db7a755b6af83a90809471dd7f645b345a&#34;&gt;&lt;code&gt;0f3086d&lt;/code&gt;&lt;/a&gt;
+Fix minor issues not covered by PR &lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/9137&#34;&gt;#9137&lt;/a&gt;
+(&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/9147&#34;&gt;#9147&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/grpc/grpc-go/commit/fef07fbb2b94b668e8daca1f6b70433dcd36c1c8&#34;&gt;&lt;code&gt;fef07fb&lt;/code&gt;&lt;/a&gt;
+internal: Split v3procservicepb import into pb and grpc for extproc (&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/9163&#34;&gt;#9163&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/grpc/grpc-go/commit/91dd64f4b83cb5134e279d1126ebb1ccf47d4d31&#34;&gt;&lt;code&gt;91dd64f&lt;/code&gt;&lt;/a&gt;
+transport: surface subsequent data when receiving non-gRPC header (&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/8929&#34;&gt;#8929&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/grpc/grpc-go/commit/adc97de9521a9f377dab5e911039842dc4de23e5&#34;&gt;&lt;code&gt;adc97de&lt;/code&gt;&lt;/a&gt;
+test/kokoro: add config for regional-td test (&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/9158&#34;&gt;#9158&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/grpc/grpc-go/commit/57c9ff14e05b535ee6995ba49bc882b287a175de&#34;&gt;&lt;code&gt;57c9ff1&lt;/code&gt;&lt;/a&gt;
+xds: ensure full-string matching for RBAC Filter rules (&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/9148&#34;&gt;#9148&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/grpc/grpc-go/commit/b58f32d9ff07c612d64e677bd826bcbec88af9bd&#34;&gt;&lt;code&gt;b58f32d&lt;/code&gt;&lt;/a&gt;
+server: Set a pprof label on new stream goroutines (&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/9082&#34;&gt;#9082&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/grpc/grpc-go/commit/6c98be31ce0aec1592b783b0edb16916eb5acd89&#34;&gt;&lt;code&gt;6c98be3&lt;/code&gt;&lt;/a&gt;
+refactor(transport): extract shared stream state handling logic in
+`loopyWrit...&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/grpc/grpc-go/commit/bcaa6f4df4546c86e12ef3e95852c7baf7a08d67&#34;&gt;&lt;code&gt;bcaa6f4&lt;/code&gt;&lt;/a&gt;
+rls: only reset backoff on recovery from TRANSIENT_FAILURE (&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/9137&#34;&gt;#9137&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;&lt;a
+href=&#34;https://github.com/grpc/grpc-go/commit/429e6e06363a01f0dd9f9b6b9cf0c0e6617cda12&#34;&gt;&lt;code&gt;429e6e0&lt;/code&gt;&lt;/a&gt;
+balancer: expose endpoint weight and hostname as experimental APIs (&lt;a
+href=&#34;https://redirect.github.com/grpc/grpc-go/issues/9074&#34;&gt;#9074&lt;/a&gt;)&lt;/li&gt;
+&lt;li&gt;Additional commits viewable in &lt;a
+href=&#34;https://github.com/grpc/grpc-go/compare/v1.81.1...v1.82.0&#34;&gt;compare
+view&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+&lt;/details&gt;
+&lt;br /&gt;
+
+
+Dependabot will resolve any conflicts with this PR as long as you don&#39;t
+alter it yourself. You can also trigger a rebase manually by commenting
+`@dependabot rebase`.
+
+[//]: # (dependabot-automerge-start)
+[//]: # (dependabot-automerge-end)
+
+---
+
+&lt;details&gt;
+&lt;summary&gt;Dependabot commands and options&lt;/summary&gt;
+&lt;br /&gt;
+
+You can trigger Dependabot actions by commenting on this PR:
+- `@dependabot rebase` will rebase this PR
+- `@dependabot recreate` will recreate this PR, overwriting any edits
+that have been made to it
+- `@dependabot show &lt;dependency name&gt; ignore conditions` will show all
+of the ignore conditions of the specified dependency
+- `@dependabot ignore &lt;dependency name&gt; major version` will close this
+group update PR and stop Dependabot creating any more for the specific
+dependency&#39;s major version (unless you unignore this specific
+dependency&#39;s major version or upgrade to it yourself)
+- `@dependabot ignore &lt;dependency name&gt; minor version` will close this
+group update PR and stop Dependabot creating any more for the specific
+dependency&#39;s minor version (unless you unignore this specific
+dependency&#39;s minor version or upgrade to it yourself)
+- `@dependabot ignore &lt;dependency name&gt;` will close this group update PR
+and stop Dependabot creating any more for the specific dependency
+(unless you unignore this specific dependency or upgrade to it yourself)
+- `@dependabot unignore &lt;dependency name&gt;` will remove all of the ignore
+conditions of the specified dependency
+- `@dependabot unignore &lt;dependency name&gt; &lt;ignore condition&gt;` will
+remove the ignore condition of the specified dependency and ignore
+conditions
+
+
+&lt;/details&gt;
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;</div>
+</div>
+
+<a href="../project/kagent-dev_kagent.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

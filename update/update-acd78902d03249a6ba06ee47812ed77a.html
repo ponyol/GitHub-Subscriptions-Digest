@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (26 commits) - facebookresearch/faiss - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (26 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a> /
+    Updates in main (26 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-11 00:33 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/facebookresearch/faiss/commits/main" target="_blank">https://github.com/facebookresearch/faiss/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Faiss received several performance enhancements, including parallelizing `IndexIVFPQ` inverted list appends, optimizing HNSWPanorama by 1.2x, and accelerating distance computations and polysemous training with AVX-512 and AVX2 SIMD instructions. New features include EDEN quantizer indexes for improved recall and MSE, and a robust multi-GPU CAGRA to HNSW build with `cuVS all_neighbors`. Key bug fixes address CUDA/cuVS compatibility, ensure correct `IndexRefine::range_search` behavior by filtering out-of-radius results, and add Python type stubs to conda packages.
+
+---
+
+В Faiss было внесено несколько улучшений производительности, включая распараллеливание добавления векторов в инвертированные списки в `IndexIVFPQ`, оптимизацию HNSWPanorama на 1.2x, а также ускорение вычислений расстояний и обучения Polysemous благодаря инструкциям AVX-512 и AVX2 SIMD. Среди новых функций представлены индексы квантования EDEN для улучшения полноты и уменьшения MSE, а также надежный механизм многопроцессорной сборки CAGRA в HNSW с использованием `cuVS all_neighbors`. Кроме того, были исправлены критические ошибки, связанные с совместимостью CUDA/cuVS, обеспечена корректная фильтрация результатов за пределами радиуса в `IndexRefine::range_search` и добавлены заглушки типов Python в пакеты conda.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Fix cuVS GPU CI timeout: pin CUDA toolkit to 13.2 (#5401)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5401
+
+`faiss/gpu/test/test_gpu_index_serialize.py` was timing out (10 min hard cap) on the GitHub `Linux x86_64 GPU w/ cuVS (cmake)` job, hanging inside `index_cpu_to_gpu` on the first cuVS GPU operation.
+
+Root cause: D106837134 bumped the conda cuVS toolkit from CUDA 12.9 to 13.3. The 13.3 `cudart` deadlocks cuVS GPU kernels on the T4 runner. The change&#39;s stated intent was only to pull `libnvJitLink` up to 13.3 — the conda `libcuvs=26.06` build links it and needs the `__nvJitLinkCreate_13_3` symbol — but `cuda-nvcc`, `cuda-cudart-dev`, `cuda-cupti`, and `cuda-nvtx` were bumped to 13.3 alongside it. CUDA 13.2 is already the version used by both the non-cuVS GPU job and the pip-wheel cuVS build (whose GPU smoke test passes on the same T4 runner class), and it matches the runner driver. Only `libnvJitLink` actually needs to be 13.3.
+
+Fix: pin the CUDA toolkit (`cuda-nvcc`/`cuda-cudart-dev`/`cuda-cupti`/`cuda-nvtx` and `cuda-version`) back to 13.2 for the cuVS cmake build, keeping the explicit `libnvjitlink&gt;=13.3,&lt;14` pin so `libcuvs` still loads.
+
+passed in https://github.com/facebookresearch/faiss/actions/runs/29109874975/job/86419354334?pr=5401
+
+Reviewed By: alibeklfc
+
+Differential Revision: D111466548
+
+fbshipit-source-id: 6eef20488605981f2326aaa2fb628b3315b9ed75
+
+- Parallelize inverted-list append loop in IndexIVFPQ::add_core_o (#5382)
+
+Summary:
+The bulk-add path in `IndexIVFPQ::add_core_o` appended encoded vectors to the inverted lists in a serial loop (marked `TODO: parallelize?`), while the base `IndexIVF::add_core` has sharded this work across threads. The result is that `add()` throughput stopped scaling with thread count with the serial append becoming the bottleneck at high thread counts.
+
+This PR applies the same pattern already used in `IndexIVF::add_core`:
+
+- **Shard lists across threads** by `key % num_threads == rank`, so each inverted list is only ever appended to by one thread. Per-list append order (and hence the resulting index) is identical to the serial version.
+- **Replace non-thread-safe `direct_map.add_single_id()` calls** with the existing thread-safe `DirectMapAdd` helper.
+- **Count ignored (`key &lt; 0`) entries via an OpenMP reduction**; rank 0 handles their direct-map entries and residual zeroing.
+
+**Bug Fix**
+
+Also fixes a bug on the `key &lt; 0` path: the `residuals_2` memset zeroed row 0 (`residuals_2`) instead of row `i` (`residuals_2 + i * d`).
+
+**Benchmark**
+
+```bash
+numactl -N 0 -m 0 python benchs/bench_all_ivf/bench_all_ivf.py --db sift1M --indexkey IVF4096,PQ32
+```
+
+Times are for the append phase as reported by verbose `add_core` timings, with coarse assignment precomputed.
+
+```
++---------+------------+-----------+---------+
+| threads | before (s) | after (s) | speedup |
++---------+------------+-----------+---------+
+|       1 |      0.052 |     0.052 |    1.0x |
+|       4 |      0.053 |     0.033 |    1.6x |
+|      16 |      0.054 |     0.015 |    3.6x |
+|      60 |      0.116 |     0.018 |    6.4x |
++---------+------------+-----------+---------+
+```
+
+The gain grows with higher thread counts, and would be expected to grow further with cheaper encodes (smaller M) or larger batches, where the append phase is a larger share of total add time.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5382
+
+Reviewed By: alibeklfc
+
+Differential Revision: D111382054
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 42c67b0c0c74fa25603c261d3075435fbfee6bf4
+
+- fix: bs add n fix valid counter skip (#5383)
+
+Summary:
+isn&#39;t valid counter == 0 means all vectors are filtered out?
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5383
+
+Reviewed By: alibeklfc
+
+Differential Revision: D111382361
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 15b0f1031f8cfa9cc217d440baf8cf7daec646ef
+
+- Always widen IndexRefine::range_search base radius by k_factor (#5395)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5395
+
+Addresses mdouze&#39;s review feedback on D110513829.
+
+`IndexRefine::range_search` scaled the base index&#39;s search radius by `k_factor` using a metric- and sign-dependent formula (`radius / k_factor` for non-negative similarity radii, `radius * k_factor` otherwise) and rejected `k_factor &lt; 1` via `FAISS_THROW_IF_NOT(kf &gt;= 1)`. Per reviewer guidance, remove both: always compute `base_radius = radius * k_factor` and let the user choose a `k_factor` that widens the base search for their metric.
+
+Correctness is unaffected: the exact radius filter added in D110513829 still drops every candidate whose refined distance falls outside the requested radius, so `k_factor` only trades off recall vs. work, never returns out-of-radius results.
+
+Reviewed By: mdouze
+
+Differential Revision: D111286236
+
+fbshipit-source-id: f3b66ca6c1b8d03ad34d6e92834aaf3a0e30009a
+
+- Add EDEN quantizer indexes (#5278)
+
+Summary:
+Adds EDEN and IVF-EDEN index types, using Lloyd-Max centroids from the EDEN paper with the original unbiased scale as the default. The implementation also supports the biased MSE-minimizing scale as an option.
+
+References:
+- EDEN: Vargaftik et al., ICML 2022, https://proceedings.mlr.press/v162/vargaftik22a.html
+- Biased scale: DRIVE, NeurIPS 2021, https://papers.nips.cc/paper/2021/hash/0397758f8990c1b41b81b43ac389ab9f-Abstract.html
+
+This PR includes:
+- `IndexEDEN` and `IndexIVFEDEN`
+- factory strings such as `EDEN`, `EDEN4`, `IVF16,EDEN4`, and `EDEN4BIASED`
+- serialization/deserialization
+- focused tests
+- `benchs/bench_eden.py` for EDEN vs RaBitQ recall, quantization MSE, and speed comparisons
+
+## Benchmark Summary
+
+Benchmarks compare EDEN against RaBitQ using `recall@10` and reconstruction MSE. Parameters for the accuracy/MSE sweep: `nt=4000`, `nb=4000`, `nq=200`, `k=10`, `qb=0`, one thread, 300 bootstrap samples.
+
+Across all HR/RR rotated 2-bit and 4-bit rows in the sweep, EDEN reduced quantization MSE by 14.7% on average and improved recall by +0.0106 absolute on average. For rotated 4-bit rows, EDEN reduced MSE by 23.4% on average and improved recall by +0.0150 absolute on average.
+
+Representative rows:
+
+| d | distribution | rotation | bits | RaBitQ recall | EDEN recall | recall delta | MSE reduction |
+|---:|---|---|---:|---:|---:|---:|---:|
+| 64 | gaussian | RR | 4 | 0.8630 | 0.8835 | +0.0205 | 30.64% |
+| 256 | laplace | RR | 4 | 0.8750 | 0.9035 | +0.0285 | 25.02% |
+| 1024 | laplace | RR | 4 | 0.8865 | 0.9070 | +0.0205 | 20.00% |
+| 1536 | gaussian | RR | 4 | 0.8700 | 0.8895 | +0.0195 | 19.17% |
+| 64 | laplace | RR | 2 | 0.6125 | 0.6480 | +0.0355 | 10.49% |
+| 256 | gaussian | HR | 2 | 0.6185 | 0.6400 | +0.0215 | 6.83% |
+
+Search-time benchmark parameters: `nt=5000`, `nb=10000`, `nq=50`, `k=1`, one thread, 7 repeats.
+
+| d | 1-bit EDEN/RaBitQ | 2-bit EDEN/RaBitQ | 4-bit EDEN/RaBitQ |
+|---:|---:|---:|---:|
+| 64 | 0.74x | 0.57x | 0.92x |
+| 256 | 0.68x | 0.75x | 1.34x |
+| 1024 | 0.78x | 1.02x | 1.87x |
+| 1536 | 0.81x | 1.00x | 1.71x |
+| 4096 | 0.87x | 1.05x | 1.71x |
+
+EDEN is faster than or near RaBitQ for 1-bit and 2-bit in these flat-search measurements. 4-bit EDEN improves MSE/recall but is slower at high dimensions because it uses Lloyd-Max centroid lookup and per-vector scaling rather than RaBitQ’s bitwise/popcount-style kernels.
+
+## Verification
+
+- `tests/test_eden.py`: 7 passed, 16 subtests passed
+- rebased on latest `facebookresearch/faiss:main`
+- branch is one commit over upstream main
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5278
+
+Test Plan: buck test //faiss/tests/:test_eden
+
+Reviewed By: mnorris11
+
+Differential Revision: D110218915
+
+Pulled By: mdouze
+
+fbshipit-source-id: 556772dfe8c8e5b61e4e37d454e97ee317a7b665
+
+- Panorama HNSW Optimizations (~x1.2) (#5190)
+
+Summary:
+Perf improvements on HNSWPanorama, removing regressions on lower-dimensional datasets (such as SIFT or Deep). Overall achieves a 1.2x speedup over the existing code.
+
+1. Hides cache misses in HNSW by popping multiple elements at once from the candidate heap.
+2. Applies FixedWidth for levels that are multiples of 8.
+3. Disables (in benchmarks) the visited-set optimization: the hash set fallback performs terribly on the golden datasets (e.g. SIFT and GIST). **We should consider updating this threshold in a different PR.**
+
+There is another optimization that improves performance by an additional ~10%, but it requires inlining the coefficients directly into the vectors (i.e. the `cum_sums`) to reduce cache misses. The downside is that this breaks backward compatibility. Any advice, mnorris11?
+
+A ~10% gain feels meaningful enough that it might be worth it. From the results we currently have in our WIP paper, this optimization seems to push Faiss&#39; (Panorama) HNSW much closer to the top tier on vector search benchmarks. The problem is that keeping backward compatibility cleanly has been pretty awkward so far, since we’d likely need to maintain two code paths 😓
+
+The overall goal is to make the overhead low enough that there’s little reason to ever use the standard HNSW path, and changing the layout seems to help quite a bit there.
+
+&lt;img width=&#34;803&#34; height=&#34;336&#34; alt=&#34;Screenshot 2026-05-07 at 12 25 15 AM&#34; src=&#34;https://github.com/user-attachments/assets/675e8f10-6935-4d7b-b8a8-440f0f7d5631&#34; /&gt;
+
+Thanks aknayar for his help on this PR.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5190
+
+Reviewed By: alibeklfc
+
+Differential Revision: D105385379
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 36bc36c330cf55da61e043f99eca576d70abf55d
+
+- Optimize the DistanceComputerByte::compute_code_distance with AVX512F, AVX512BW, AVX512VL instructions (#5067)
+
+Summary:
+Using AVX-512 F/BW/VL instructions to optimize the DistanceComputerByte::compute_code_distance to improve vector load.
+
+Test with one million 128 dimensional vectors: L2 and Inner Product calculation: &gt;1.3X performance improvement.
+Significant performance gains are achieved when dimensionality exceeds 16.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5067
+
+Reviewed By: alibeklfc
+
+Differential Revision: D106149104
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 247b0b85c61bce4fa44dea7931311aa3a4ed77a6
+
+- Include Python type stubs (__init__.pyi, py.typed) in conda packages (#5394)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5394
+
+## Summary
+
+see https://github.com/facebookresearch/faiss/issues/5261
+
+The type stubs added in PR #4840 (`__init__.pyi` and `py.typed`) ship in the pip wheel but are missing from the conda packages, as reported on GitHub for faiss 1.14.2. Users installing `faiss-cpu`/`faiss-gpu` from conda get no type hints.
+
+Faiss has two independent Python packaging paths:
+
+- The **pip/wheel** build is driven by `pyproject.toml` (scikit-build-core) and packages files from CMake `install()` directives, which already handle the stubs (`python/CMakeLists.txt`), so the wheel gets them.
+- The **conda** build (`conda/*/build-pkg.sh`) instead `cd`s into the CMake build dir and runs `setup.py install`. `setup.py` only copies the stubs if they exist in the cwd (`os.path.exists(&#34;__init__.pyi&#34;)`), but the `configure_file(... COPYONLY)` block in `python/CMakeLists.txt` that stages the hand-written Python sources into the build dir did not include `__init__.pyi` or `py.typed`. So the stubs were never staged, the `os.path.exists` checks returned False, and conda silently dropped them.
+
+This adds the two stub files to that `configure_file` staging block so the conda `setup.py install` flow can see them, mirroring how the `.py` sources are staged. `setup.py` already lists `*.pyi`/`py.typed` in `package_data`, so no change is needed there.
+
+To prevent silent regressions, the conda `test:` sections (which previously only ran unit tests and checked the `.so` files) now assert both stub files are present in the installed `faiss` package.
+
+## Test Plan
+
+Staging check (no full conda build):
+
+```
+cmake -B /tmp/faiss_py -DFAISS_ENABLE_GPU=OFF -DPython_EXECUTABLE=$(which python) faiss/python
+ls /tmp/faiss_py/__init__.pyi /tmp/faiss_py/py.typed  # both present with fix, absent before
+```
+
+Full conda package:
+
+```
+conda build conda/faiss
+PKG=$(conda build conda/faiss --output | grep faiss-cpu)
+tar tf &#34;$PKG&#34; | grep -E &#34;faiss/(__init__\.pyi|py\.typed)&#34;  # both listed
+```
+
+The new `test:` command in the recipe also fails the build if either stub is missing.
+
+Reviewed By: alibeklfc
+
+Differential Revision: D111144696
+
+fbshipit-source-id: 17277cfb883107639ac57db5880b82c2153ac647
+
+- Guard constant/zero-norm query in RaBitQ query quantization (#5381)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5381
+
+In `ScalarQuantizer`/RaBitQ query quantization (`RaBitQUtils.cpp`), a constant query vector -- all components equal, e.g. the zero vector -- has `v_max == v_min`, so the per-component `delta` is 0. `inv_delta = 1/delta` was then `+inf`, making `(v_q - v_min) * inv_delta == 0 * inf == NaN`, which is rounded and cast to `uint8_t` -- undefined behavior (UBSan: float-cast-overflow) and garbage query codes.
+
+Guard it: `inv_delta = (delta &gt; 0) ? 1/delta : 0`. A constant query carries no directional signal, so quantizing every component to 0 is the correct degenerate result; downstream distance estimation and (in callers) reranking then behave sanely instead of hitting UB.
+
+Found via UBSan on a MyRocks XDB-V RaBitQ KNN query with a zero query vector.
+
+Reviewed By: mnorris11
+
+Differential Revision: D110242938
+
+fbshipit-source-id: ce8aa05e08f8bb5304ff958706772944e84ddeab
+
+- RaBitQ: Clamp L2 distance estimate to &gt;=0 (#5393)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5393
+
+When the two vectors are equal (for example, if you pick a doc vector `d` as your query vector `q` and then estimate `&lt;x, d&gt;`) due to some floating point arithmetic issues the L2 distance can go very slightly negative.  Then when you take the square root of a negative number (in Unicorn) you get an error.  To avoid this clamp to zero.
+
+Ex:
+```
+or_minus_c_l2sqr = 5.39125443e+01    (A)
+qr_to_c_L2sqr   = 5.39125290e+01    (B)
+dp_multiplier    = 8.98244381e+00
+final_dot        = 6.00199175e+00
+cross_term       = 1.07825104e+02    (C = 2 * dp_multiplier * final_dot)
+pre_dist       = -3.05175781e-05 (A + B - C)
+```
+
+Note that the FastScan path already does this so there is a discrepancy being amended here.
+
+Reviewed By: ddrcoder
+
+Differential Revision: D110219339
+
+fbshipit-source-id: 9dfa70e4797f64830df1c6542456112dc9a54785
+
+- RaBitQ SIMD-optimized bit-plane operation (#5392)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5392
+
+{F1991891064}
+
+RaBitQ distance computation needs the quantized query bits laid out in &#34;bit-plane&#34; format.  The transformation operation for this has to happen for every single residual therefore it is a fixed cost per-iterator.  I noticed that this was quite significant for very high cluster counts.
+
+the code for it is:
+```
+for (size_t idim = 0; idim &lt; d; idim++) {
+  for (size_t iv = 0; iv &lt; qb; iv++) {
+    const bool bit = ((rotated_qq[idim] &amp; (1 &lt;&lt; iv)) != 0);
+    rearranged_rotated_qq[iv * offset + idim / 8] |=
+      bit ? (1 &lt;&lt; (idim % 8)) : 0;
+  }
+}
+```
+
+When qb=4, each dimension is 4-bits wide representing values 0-15.  `rotated_qq[i]` is all 4 bits for dimension i.  We need to rotate into bit-plan so that `bit_plane_j` is all the j-bits.  That is, `bit_plane_3` is `d` bits, each one the 3rd bit of its qb=4 dimension.  Right now this is done with a for-each-dimension for-each-bit double loop as seen above.
+
+Instead of going one-dimension-at-a-time we can do SIMD 32 dimensions at once with a 256-bit AVX2 register.  Turn those 0-15 into uint8 (this way it works for any qb &lt;= 8, the higher bits are just set to 0) and load 32 into a register, then for each bit plane j, mask every uint8 with 1 &lt;&lt; j and check if the bit is set.  Then use `movemask` to compress just the 1/0 result from 256 bits down to 32 bits.  That&#39;s the block the plane needs.
+
+Number of operations is reduced by 32.
+
+Reviewed By: alibeklfc
+
+Differential Revision: D101289092
+
+fbshipit-source-id: baa81f56edfdab70d0129d1319a089b7acfef54f
+
+- Validate legacy IVFFlat per-list codes size against ids size (#5259)
+
+Summary:
+The legacy `IvFl`/`IvFL` on-disk inverted-list formats in `read_index_up` serialize per-list `ids` and `codes` as two independent `READVECTOR` calls with no cross-check between their lengths. A malformed file can produce a list where `codes[i].size()` does not equal `ids[i].size() * code_size`.
+
+This matters at the CPU → GPU clone path: `GpuIndexIVFFlat::copyFrom` → `IVFBase::copyInvertedListsFrom` → `IVFBase::addEncodedVectorsToList_` derives its `memcpy` length from `list_size` (which derives from `ids.size()`) and copies that many bytes out of the codes buffer. When `codes[i]` is shorter than `ids[i].size() * code_size`, the `memcpy` reads past the heap allocation.
+
+The current `ilar`/`IwFl` reader (`read_InvertedLists_up`) already validates this invariant via the `mul_no_overflow` + `FAISS_THROW_IF_NOT_FMT` pattern. This PR brings the legacy `IvFl`/`IvFL` branches in `read_index_up` to parity with that validation.
+
+## Reproduction (pre-patch)
+
+A malformed legacy IVFFlat file with `d=128`, `nlist=1`, `ids[0].size()=1`, `codes[0].size()=511` bytes driven through the public API path `faiss::read_index()` → `faiss::gpu::index_cpu_to_gpu()` produces (host AddressSanitizer):
+
+```
+ERROR: AddressSanitizer: heap-buffer-overflow on address 0x... at pc 0x...
+READ of size 512 at 0x... thread T0
+    #0 memcpy
+    https://github.com/facebookresearch/faiss/issues/1 faiss::gpu::IVFBase::addEncodedVectorsToList_
+    https://github.com/facebookresearch/faiss/issues/2 faiss::gpu::IVFBase::copyInvertedListsFrom
+    https://github.com/facebookresearch/faiss/issues/3 faiss::gpu::GpuIndexIVFFlat::copyFrom
+    https://github.com/facebookresearch/faiss/issues/4 faiss::gpu::ToGpuCloner::clone_Index
+    https://github.com/facebookresearch/faiss/issues/5 faiss::gpu::index_cpu_to_gpu
+
+0x... is located 0 bytes after 511-byte region
+allocated by thread T0 here:
+    ... faiss::MaybeOwnedVector&lt;unsigned char&gt;::resize
+    ... faiss::read_index_up
+```
+
+The read is 512 bytes from a 511-byte heap allocation — boundary-minimal 1-byte over-read. The same shape fires deterministically across seeds with codes sizes 64..511 bytes (per-seed mapping available on request).
+
+## After the patch
+
+The same file now produces a clean throw at parse time, before the GPU clone path is reached:
+
+```
+Error in faiss::read_index_up(IOReader*, int)::&lt;lambda(size_t)&gt; at faiss/impl/index_read.cpp:1843:
+Legacy IVFFlat inverted list 0: codes size 511 bytes does not match ids size 1 * code_size 512 = 512 bytes
+```
+
+The `memcpy` site in `IVFBase::addEncodedVectorsToList_` is never reached.
+
+## Scope
+
+The patched lane affects consumers who load a legacy `IvFl`/`IvFL`-format `.index` file **and** clone it to GPU via `faiss::gpu::index_cpu_to_gpu`. Pure CPU-side consumers of legacy files that don&#39;t exercise the GPU clone path were not demonstrated to hit this exact sink; this PR is the parity fix at the reader. The sink (`IVFBase::addEncodedVectorsToList_(idx_t, const void*, const idx_t*, idx_t)`) takes the codes as `const void*` with no length and physically cannot validate its own input — the reader is the only layer that knows both the buffer and its true size, which is why the fix lives there.
+
+## Verification
+
+Built and verified on the actual target hardware: NVIDIA GB10 (Blackwell, aarch64), driver 580.95.05, CUDA 13.0. Build flags `-fsanitize=address,undefined -fno-omit-frame-pointer -g -O1`. Harness invokes `faiss::read_index(IOReader*)` then `faiss::gpu::index_cpu_to_gpu(provider, device, index, opts)`, deterministic 3× repro of the original failure. Pre-patch: all 7 adversarial seeds (codes sizes 64, 128, 256, 320, 384, 511 bytes against expected 512; and one with `ids[0].size()=4`, codes=512 bytes against expected 2048) fire `heap-buffer-overflow READ`. Post-patch: all 7 fire the new `FAISS_THROW_IF_NOT_FMT` at parse time and the GPU clone path is never reached.
+
+## Affected file
+
+`faiss/impl/index_read.cpp` — 27 insertions, 0 removals. No interface change, no on-disk format change. Well-formed legacy files (where `codes.size() == ids.size() * code_size`, which the writer preserves) are unaffected.
+
+## Follow-up (out of scope here)
+
+The deeper fix — deprecating the legacy `IvFl`/`IvFL` format in favor of the validated current `IwFl` format — is a maintainer policy call rather than something to bundle in this PR. Happy to file a separate discussion issue if useful.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5259
+
+Reviewed By: alibeklfc
+
+Differential Revision: D111114356
+
+Pulled By: mnorris11
+
+fbshipit-source-id: b246153be808e25ab72461bd87cc40549a95fbfc
+
+- Remove dead code in quantize_ex_bits to avoid wasted compute (#5384)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5384
+
+Reviewed By: alibeklfc
+
+Differential Revision: D110958833
+
+Pulled By: trang-nm-nguyen
+
+fbshipit-source-id: d831f76bd718e34cc91be6df90c78bd32262db79
+
+- Improve ranklist intersection size (#5237)
+
+Summary:
+This PR changes the logic of the `ranklist_intersection_size` function to use an std::unordered_set instead of a bit-flag-on-payload trick and of a sort + binary-search. Now it works with ints bigger than 2^60 since some ids might not be incrementally generated, and we could encounter them.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5237
+
+Reviewed By: alibeklfc
+
+Differential Revision: D107264260
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 66fbbc11a121900b31ac99952d1daed844b65097
+
+- faiss: support METRIC_L1 and extra metrics in IndexFlat range_search (#5391)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5391
+
+Fixes https://github.com/facebookresearch/faiss/issues/5353
+
+it is marginally less performant than implementing in extra_distances to avoid the decode memcpy, but it keeps the change simple.
+
+Reviewed By: alibeklfc
+
+Differential Revision: D111062845
+
+fbshipit-source-id: 76b3465d639e5f7891f46c878fe20454addd1de0
+
+- Add multi-GPU CAGRA → HNSW build with trainAllNeighbors and multi-GPU optimize (#5282)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5282
+
+Adds `GpuIndexCagra::trainAllNeighbors()`: builds a single unified HNSW index for a large dataset sharded across multiple GPUs using cuVS `all_neighbors` (overlapping-cluster kNN graph, no stitching) plus a multi-GPU graph-optimize pass, then `copyTo(IndexHNSWCagra)`.
+
+End-to-end pipeline (Approach D):
+1. Data load: stream real `prefilter_embedding` vectors from Hive (`feed_fblearner/test_unicorn_model_streaming_full_dump_fbr_umia_i2i_clic_ts`) in-process via Koski into a preallocated host `(N, 129)` float32 array. No Manifold file, no tiling, no duplicate vectors. A Manifold `.npy` + `--n` tiling path is retained as a fallback.
+2. kNN graph: `cuvs::neighbors::all_neighbors::build` with IVF-PQ per-cluster construction across 8 GPUs; overlapping clusters provide cross-cluster connectivity so no post-hoc stitching is needed.
+3. Optimize/prune: multi-GPU 2-hop detour counting (custom `kern_detour_count` kernel) + CPU pruning + reverse-graph construction; prunes `intermediate_graph_degree` down to `graph_degree`.
+4. Convert: `copyTo(IndexHNSWCagra)` with `base_level_only=True` — use the CAGRA graph directly as HNSW level-0, skipping upper-level construction.
+5. Serialize the HNSW index to disk.
+
+API: `trainAllNeighbors(n, x, devices, n_clusters, overlap_factor, multi_gpu_optimize, build_algo, refinement_rate, ivfpq_search_batch)` on `GpuIndexCagra`, followed by `copyTo(IndexHNSWCagra)`.
+
+Approaches evaluated (D recommended):
+- A: independent HNSW per GPU shard via `IndexShards` -- fast build, but serving-time query cost multiplies by the number of graphs.
+- B: SNMG CAGRA + GPU brute-force stitching -- poor recall (0.82).
+- C: SNMG CAGRA + CPU HNSW stitching -- good recall, slow at scale.
+- D: `all_neighbors` + multi-GPU optimize -- best recall/speed/query-cost trade-off.
+
+Key optimizations and knobs:
+- Multi-GPU detour counting: ~120x speedup on the optimize phase.
+- IVF-PQ per-cluster build: ~2.3x faster than NN-descent for `all_neighbors`.
+- `base_level_only` copyTo: ~59x faster CAGRA-&gt;HNSW conversion.
+- New `refinement_rate` knob (IVF-PQ refinement multiplier; previously hardcoded).
+- New `ivfpq_search_batch` knob: caps the IVF-PQ search `max_internal_batch_size` (cuVS default 131072) to bound the GPU search workspace; recall-neutral.
+
+100M memory tuning: at 100M real vectors the cuVS IVF-PQ build OOMs on H100 (96 GB) with the default search batch (a 12.76 GB workspace) and at `intermediate_graph_degree=48`. Capping `ivfpq_search_batch` (e.g. 8192) and/or lowering `igd` to 32/24 makes it fit while keeping recall@10 &gt;= 0.95. (The earlier &#34;0.902 @ 100M&#34; number was on 50M tiled 2x, which has duplicate vectors and is not representative.)
+
+Build/runtime note: the MAST H100 fleet runs the CUDA 13.0 driver, so the fbpkg must be built for it: `buck2 build mode/opt -c fbcode.nvcc_arch=h100 --modifier ovr_config//third-party/cuda/constraints:13.0 //faiss/gpu/test:bench_approaches`. Otherwise cuVS kernels fail at runtime with `cudaErrorInvalidKernelImage`.
+
+Files: `faiss/gpu/GpuIndexCagra.{cu,h}` (API + knobs), `faiss/gpu/test/bench_approaches.py` (benchmark + Koski Hive loader + isolated index-build timing), `faiss/gpu/test/BUCK` (Koski dep), `users/mnorris/launch_mast.sh` (single MAST launcher), `users/mnorris/STITCH_OPTIMIZATION.md` (design notes, results, debugging log).
+
+Reviewed By: junjieqi
+
+Differential Revision: D106837134
+
+fbshipit-source-id: f6072e9a41c4f6f2040496db8286c425a79195a8
+
+- Speed up polysemous training with AVX-512.
+
+Summary:
+This PR adds AVX-512 implementations of the four hot functions in polysemous training (`compute_cost` and `cost_update` for both `ReproduceWithHammingObjective` and `ReproduceDistancesObjective`), integrated via FAISS&#39;s SIMD dynamic dispatch framework. It speeds up the training phase by up to **1.09x**.
+
+### Benchmarks
+
+Training phase of `benchs/bench_polysemous_sift1m.py` on Sapphire Rapids (SPR):
+
+```bash
+$ numactl -m 0 -C 0-7 python benchs/bench_polysemous_sift1m.py
+```
+
+| Build | Median training time | Speedup |
+|-------|---------------------|---------|
+| Scalar (baseline) | ~4.29 s | 1.00x |
+| AVX-512 (this PR) | ~3.95 s | 1.09x |
+
+Search accuracy and latency are unchanged — the optimization only affects the training path.
+
+Reviewed By: mdouze
+
+Differential Revision: D106200518
+
+fbshipit-source-id: d0037ef29c3eababf0b6d15f37c03a05b13a7cd5
+
+- faiss: fix IndexIDMap range_search crash with empty SearchParameters (#5388)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5388
+
+IndexIDMap::range_search checked only if params is non-null, then
+unconditionally constructed IDSelectorTranslated with params-&gt;sel.
+When an empty SearchParameters() is passed, sel is nullptr, leading
+to null dereference in IDSelectorTranslated::is_member -&gt; crash/hang.
+
+This mirrors the existing guard in search_ex which checks
+params &amp;&amp; params-&gt;sel. Update range_search to same logic and pass
+through params when sel is null, so empty SearchParameters behaves
+same as no params.
+
+I also took a quick look at other search functions. They all use this pattern if they support IDSelector (some do not).
+
+Fixes https://github.com/facebookresearch/faiss/issues/5332
+
+Reviewed By: alibeklfc
+
+Differential Revision: D110987904
+
+fbshipit-source-id: 3d87625cfc733e9ff6c7352f13e167feceae8d76
+
+- Fix PyCallbackShardingFunction to properly decrement references (#5389)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5389
+
+see https://github.com/facebookresearch/faiss/issues/5352
+
+just need to copy from is_member above.
+
+Reviewed By: alibeklfc
+
+Differential Revision: D110992143
+
+fbshipit-source-id: 94950d5a9e365c720f687aea447ac8f2274bb028
+
+- Filter out-of-radius results in IndexRefine::range_search (#5370)
+
+Summary:
+`IndexRefine::range_search` recomputes exact distances for the candidates returned by the base index, but it never re-checks those distances against the radius. Since the base index selects candidates using *approximate* distances, a candidate can be within the radius according to the base index yet outside it once the exact distance is computed. As a result `range_search` can return entries whose reported (correct) distance is larger than the requested radius, which breaks the range-search contract.
+
+Fixes https://github.com/facebookresearch/faiss/issues/5367.
+
+## Reproduction
+
+```python
+import numpy as np, faiss
+
+d = 1
+xb = np.array([[0.49]], dtype=&#34;float32&#34;)
+xq = np.array([[0.0]], dtype=&#34;float32&#34;)
+radius = 0.2376990169286728          # just below the exact L2 distance (0.2401)
+
+base = faiss.IndexScalarQuantizer(d, faiss.ScalarQuantizer.QT_6bit, faiss.METRIC_L2)
+base.train(np.linspace(0, 1, 256, dtype=&#34;float32&#34;).reshape(-1, 1))
+base.add(xb)
+flat = faiss.IndexFlat(d, faiss.METRIC_L2); flat.add(xb)
+
+index = faiss.IndexRefine(base, flat)
+lims, D, I = index.range_search(xq, radius)
+print(D)   # [0.24010001] -&gt; returned even though 0.2401 &gt; radius
+```
+
+Before the fix the vector is returned with a distance that exceeds the radius; after the fix it is correctly excluded.
+
+## Fix
+
+After refinement, drop candidates whose exact distance falls outside the radius and rebuild `lims`, using the same comparison the base index applies (`CMax`/`CMin::cmp`), so L2 and similarity metrics are handled consistently. The compaction runs serially because the results are packed into a single contiguous per-query array; the parallel distance-recompute loop is unchanged.
+
+## Tests
+
+Extended `TestIndexRefineRangeSearch` to assert that every distance returned by the refined `range_search` is within the radius (the previous test only checked the distances were correct, not that they were in range), and added an `SQ6` case whose coarser quantization is more likely to produce near-boundary mismatches.
+
+## Note on behavior
+
+Results can only shrink: candidates that were previously returned in violation of the radius are now excluded. Counts from `range_search` may therefore be smaller than before for indexes wrapped in `IndexRefine`.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5370
+
+Reviewed By: mnorris11
+
+Differential Revision: D110513829
+
+Pulled By: trang-nm-nguyen
+
+fbshipit-source-id: 58b198759d27fd8efb97bbcd5ff50f58c801da05
+
+- facebook-unused-include-check in IndexBinaryHNSW.cpp (#5379)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5379
+
+Reviewed By: trang-nm-nguyen
+
+Differential Revision: D110581546
+
+fbshipit-source-id: d46f1e24a5257ba7f7117b2c426fe7d54af345c0
+
+- Keep distances_simdlib256.h include in distances_simd.cpp (unused-include false positive) (#5380)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5380
+
+`facebook-unused-include-check` flags `#include &lt;faiss/utils/simd_impl/distances_simdlib256.h&gt;` in `faiss/utils/distances_simd.cpp` as unused (T278317194), but this is a false positive.
+
+`distances_simd.cpp` sets `#define THE_SIMD_LEVEL SIMDLevel::NONE` and then includes `distances_simdlib256.h`, which contains explicit template specializations parameterized on `THE_SIMD_LEVEL` — `fvec_sub`, `fvec_add` (both overloads), and `compute_PQ_dis_tables_dsub2`. This translation unit is the *sole* place the `SIMDLevel::NONE` versions of those specializations are defined; the primary templates in `distances.h` are pure declarations with no generic body, and the sibling TUs (`distances_avx2.cpp`, `distances_aarch64.cpp`) only emit the AVX2 / ARM_NEON specializations for their own `THE_SIMD_LEVEL`. The NONE path is always reachable through `with_simd_level_256bit` dispatch (it is the scalar fallback), so removing the include would leave those specializations undefined and break the link.
+
+No symbol from the header is referenced *by name* in the .cpp, which is why the checker flags it — this is the standard per-level codegen idiom in faiss. Resolve the false positive by marking the include `// IWYU pragma: keep` (which the checker honors) plus a short comment explaining why it must stay, rather than deleting it.
+
+___
+
+Differential Revision: D110781200
+
+fbshipit-source-id: 5beb5516b112252e14cedab05d1d534b48e8bf62
+
+- facebook-unused-include-check in IndexIVFPQFastScan.cpp (#5378)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5378
+
+Reviewed By: trang-nm-nguyen
+
+Differential Revision: D110581212
+
+fbshipit-source-id: f355a96f8de9d074a5fba90fa1bf0092f4227cbc
+
+- Adding cuVS IVF-SQ backend (#5306)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5306
+
+Reviewed By: alibeklfc
+
+Differential Revision: D110389160
+
+Pulled By: mnorris11
+
+fbshipit-source-id: d4c7a66ad7ebe2bab822a065a61dd26ccd36129e
+
+- facebook-unused-include-check in avx2.cpp (#5377)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5377
+
+Reviewed By: trang-nm-nguyen
+
+Differential Revision: D110583076
+
+fbshipit-source-id: d9e7767d7e5c1e2aa504a80398cd96d7991bb1bf
+
+- facebook-unused-include-check in test_ivf_early_termination.cpp (#5376)
+
+Summary: Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5376
+
+Reviewed By: trang-nm-nguyen
+
+Differential Revision: D110580914
+
+fbshipit-source-id: 8db2a72958019d8750e2191bb8712effd335084a</div>
+</div>
+
+<a href="../project/facebookresearch_faiss.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

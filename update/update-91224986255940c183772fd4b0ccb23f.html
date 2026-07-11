@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (100 commits) - infiniflow/ragflow - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (100 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/infiniflow_ragflow.html">infiniflow/ragflow</a> /
+    Updates in main (100 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/infiniflow_ragflow.html">infiniflow/ragflow</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-11 06:57 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/infiniflow/ragflow/commits/main" target="_blank">https://github.com/infiniflow/ragflow/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This update addresses a critical bug in the Python agent, ensuring `Await Response` nodes within loops now correctly pause for user input on every iteration instead of just the first. It also includes an urgent fix for a Docker build failure that was blocking all pull requests. Other significant changes involve making the blob storage size threshold configurable, improving pipeline compilation and document update logic, and extensively enhancing the Go agent with new search tool integrations (Google, Wikipedia, DuckDuckGo) and advanced ingestion capabilities.
+
+---
+
+Это обновление исправляет критическую ошибку в Python-агенте, гарантируя, что узлы `Await Response` внутри циклов теперь корректно приостанавливаются для ввода пользователя на каждой итерации, а не только на первой. Оно также включает срочное исправление ошибки сборки Docker, которая блокировала все запросы на слияние. Среди других значительных изменений — возможность настройки порогового значения размера блочного хранилища, улучшение логики компиляции конвейеров и обновления документов, а также всестороннее улучшение Go-агента с новыми интеграциями поисковых инструментов (Google, Wikipedia, DuckDuckGo) и расширенными возможностями приема данных.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- PY: fix admin error (#16827)
+
+### Summary
+
+Sync code from EE
+
+Signed-off-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- fix(agent): Await Response pauses on every Loop iteration (#16794)
+
+## What
+
+An **Await Response** (`UserFillUp`) node placed inside a **Loop** now
+pauses and waits for a fresh user response on **every** iteration,
+instead of only on the first one.
+
+## Problem
+
+When a `UserFillUp` node lives inside a `Loop`, it only paused for input
+on the first iteration. On subsequent iterations the loop ran straight
+through, silently reusing the answer the user gave the first time.
+
+Root cause is in `UserFillUp._invoke` / the canvas wait-check
+(`agent/canvas.py`). The wait-check decides whether to pause by calling
+`Canvas._is_input_field_satisfied` on the node&#39;s form fields — a field
+counts as satisfied as soon as its `value` is not `None`:
+
+```python
+@staticmethod
+def _is_input_field_satisfied(field):
+    ...
+    if value is None:
+        return False
+    return True
+```
+
+The same component object is reused across loop iterations, and
+`UserFillUp._invoke` writes the answer into
+`self._param.inputs[...][&#34;value&#34;]` via `set_input_value`. Nothing
+cleared those values when the node was re-entered for the next
+iteration, so:
+
+| Iteration | Entry (no answer yet) | Field value | Satisfied? | Result
+|
+|---|---|---|---|---|
+| 1 | fresh | `None` | no | pauses ✅ |
+| 1 | resume w/ answer | `answer` | yes | continues ✅ |
+| 2 | fresh | `answer` (**stale**) | yes | continues ❌ (should pause) |
+
+## Fix
+
+When a `UserFillUp` is entered without a fresh user answer
+(`merged_inputs` is empty), clear the retained form values so the
+wait-check treats the form as unsatisfied and pauses again:
+
+```python
+merged_inputs = self._merge_runtime_inputs(kwargs.get(&#34;inputs&#34;, {}))
+if not merged_inputs:
+    self._clear_form_values()
+```
+
+- Fresh entry / new loop iteration → no answer supplied → values cleared
+→ node pauses and waits.
+- Resume with an answer → `merged_inputs` is non-empty → values applied
+normally, nothing cleared.
+- Non-loop behavior is unchanged: the first entry already had `None`
+values, so clearing is a no-op there.
+
+`Begin` overrides `_invoke` and is unaffected.
+
+## Tests
+
+Added to
+`test/testcases/test_web_api/test_canvas_app/test_fillup_unit.py`:
+
+- `test_user_fillup_clears_stale_values_on_reentry_without_answer` — a
+retained value is cleared on a fresh entry with no answer (loop
+re-entry).
+- `test_user_fillup_keeps_values_when_answer_supplied` — a supplied
+answer is applied and not cleared.
+
+All unit tests pass and `ruff check` is clean.
+
+## Scope
+
+This targets the Python agent runtime (`agent/`). It is independent of
+any other in-flight Await Response change.
+
+- Refactor: Refine ingestion task state transitions (#16814)
+
+### Summary
+
+Refine ingestion task state transitions
+
+- feat: make blob storage size threshold configurable (#16806)
+
+### Summary
+
+- Make `BLOB_STORAGE_SIZE_THRESHOLD` configurable through an environment
+variable.
+  - Preserve the existing 20 MiB default.
+  - Add tests for the default and configured values.
+
+  ### Why
+
+Blob storage, Seafile, and WebDAV connectors currently use a hardcoded
+20 MiB limit. Self-hosted users
+cannot raise this limit without modifying the source code inside the
+container.
+
+  ### Testing
+
+  - `test/unit_test/data_source/test_config.py`: 2 passed
+- `ruff check common/data_source/config.py
+test/unit_test/data_source/test_config.py`
+
+  Fixes #16634
+
+- fix: improve pipeline compilation, template updates, and document resets (#16815)
+
+### What problem does this PR solve?
+
+- Clear stale pipeline IDs and generated data when updating documents
+without `pipeline_id`.
+- Support tree compilation results in pipeline workflows.
+- Update compilation templates in place while preserving existing
+template IDs.
+- Improve duplicate-template validation messages.
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+- [x] New Feature (non-breaking change which adds functionality)
+
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Fix compilation workflow (#16819)
+
+Dataset_nav can not support large number of documents, introducing AHC
+clustering as well as retrieval engine as the clustering database
+
+- fix(prompt-editor): prevent premature variable path merge during typing (#16811)
+
+### Summary
+
+fix(prompt-editor): prevent premature variable path merge during typing
+
+---------
+
+Co-authored-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Go: format code (#16813)
+
+### Summary
+
+Aligned to EE
+
+Signed-off-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Go: add show users plan quota (#16818)
+
+### Summary
+
+```
+RAGFlow(admin)&gt; show users plan quota 100;
++---------+------------------------------------------+
+| field   | value                                    |
++---------+------------------------------------------+
+| quota   | 100                                      |
+| command | show_users_plan_quota                    |
+| error   | &#39;Show users plan quota&#39; is not supported |
++---------+------------------------------------------+
+```
+
+Signed-off-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- fix ci (#16824)
+
+### Summary
+
+fix ci
+
+- fix(docker): [URGENT] Docker build fails for all PRs - missing web/scripts/prepare.js during npm install (#16821)
+
+## 🚨 Urgent: this breaks the Docker image build for **every** open PR
+
+The `ragflow_tests_elasticsearch` and `ragflow_tests_infinity` jobs —
+which build the image before running tests — currently **fail on all
+pull requests**, not just this one. CI is effectively red repo-wide
+until this lands. **Please review and merge ASAP.**
+
+Example failing runs (from an unrelated PR):
+-
+https://github.com/infiniflow/ragflow/actions/runs/29086020168/job/86341032173
+-
+https://github.com/infiniflow/ragflow/actions/runs/29086020168/job/86341032196
+
+## Symptom
+
+```
+Error: Cannot find module &#39;/ragflow/web/scripts/prepare.js&#39;
+npm error command sh -c node scripts/prepare.js
+ERROR: process &#34;/bin/bash -c cd web &amp;&amp; NODE_OPTIONS=...&#34; did not complete successfully: exit code: 1
+```
+
+## Root cause
+
+`web/package.json` defines:
+
+```json
+&#34;prepare&#34;: &#34;node scripts/prepare.js&#34;
+```
+
+npm runs the `prepare` lifecycle script during `npm install`. But the
+frontend-deps layer in the `Dockerfile` only copies the package
+manifests before installing:
+
+```dockerfile
+COPY web/package.json web/package-lock.json web/.npmrc ./web/
+RUN ... cd web &amp;&amp; npm install     # runs `node scripts/prepare.js` → file not present yet
+```
+
+Since `web/scripts/prepare.js` is not in the image at that point, `npm
+install` aborts and the whole build fails.
+
+## Fix
+
+Copy `web/scripts` before `npm install` so the `prepare` script is
+present:
+
+```dockerfile
+COPY web/package.json web/package-lock.json web/.npmrc ./web/
+COPY web/scripts ./web/scripts
+RUN ... cd web &amp;&amp; npm install
+```
+
+- Minimal and safe: `scripts/prepare.js` only installs lefthook git
+hooks and already no-ops (wrapped in try/catch) inside the image where
+there is no Git repo.
+- Preferred over `--ignore-scripts`, which would also disable
+dependencies&#39; legitimate install scripts.
+- `web/scripts` changes rarely, so build-cache impact on this layer is
+negligible.
+
+## Verification
+
+Build reaches the frontend `npm install` step without the
+`MODULE_NOT_FOUND` error. No application code is touched — this is a
+build-infrastructure fix only.
+
+- Go: Fix error code (#16807)
+
+### Summary
+
+As title.
+
+---------
+
+Signed-off-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- fix(go-agent): `unknown component &#34;Wikipedia&#34;` canvas error. (#16784)
+
+## Summary
+
+- Register Wikipedia component + tool alias
+`wikipedia`/`wikipedia_search`
+- Use `generator=search` to get title/summary/url in one request (was
+N+1)
+- Node params `top_n`/`language` with validation
+- Return `formalized_content` for downstream
+- tests pass
+
+&lt;img width=&#34;1817&#34; height=&#34;972&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/f6d79599-6d1f-4ea6-84f7-ac06d0de13b0&#34;
+/&gt;
+
+- Refactor: drop dead canvas runtime selector and tokenizer embedding wiring (#16809)
+
+Two refactors on the Go port (agent-go-port):
+
+- Remove the dead per-tenant canvas runtime selector (write-only Redis
+scaffolding with no runtime callers) and its dependent metrics/admin
+code.
+- Move the tokenizer embedding-model id from the shared ingestion
+globals into a Tokenizer-scoped setup, and wire the production embedder
+resolver in the ingestion task package.
+
+32 files changed, 861 insertions, 1228 deletions.
+
+- Feat: Rewrite wiki template with reui (#16797)
+
+- Feature: user select pipeline support (#16788)
+
+### Summary
+
+Feature: user select pipeline support
+
+- Go: Update response message (#16803)
+
+### Summary
+
+As title.
+
+---------
+
+Signed-off-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- GO:Cli fix show user storage display truncation (#16805)
+
+### Summary
+
+GO: Cli  fix show user storage display truncation
+
+- feat(go-agent): merge Google Scholar node params with runtime inputs (#16802)
+
+## Summary
+
+- align the Go Google Scholar component with the Python-side config
+pattern
+- merge node-level params with runtime inputs so canvas defaults are
+preserved and per-run inputs can override them
+- add tests covering node param fallback and runtime override behavior
+
+## Verification
+
+- `bash build.sh --test ./internal/agent/component/... -run
+TestGoogleScholar`
+
+&lt;img width=&#34;1873&#34; height=&#34;1165&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/67198c6f-6a0e-43bf-a500-8e88d82b8751&#34;
+/&gt;
+
+- GO: improve model info parsing and add model_id/tenant context to list response (#16804)
+
+- fix: pass ownerTenantId to LLMLabel and related components for improved model fetching (#16800)
+
+- build(deps): bump mistune from 3.2.0 to 3.3.0 (#16799)
+
+Bumps [mistune](https://github.com/lepture/mistune) from 3.2.0 to 3.3.0.
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+
+- build(deps): bump soupsieve from 2.8.1 to 2.8.4 (#16798)
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+
+- Go: set gin mode in admin server (#16801)
+
+### Summary
+
+As title.
+
+---------
+
+Signed-off-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Go: merge duplicate codes (#16783)
+
+### Summary
+
+1. merge heartbeat function.
+2. introduce all environments
+
+---------
+
+Signed-off-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Fix OpenAI agent stream chunk shape (#16402)
+
+### What problem does this PR solve?
+
+Closes #8175.
+
+The Agent OpenAI-compatible streaming path uses `get_data_openai(...,
+stream=True)`, but that helper currently returns a minimal chunk shape.
+The main OpenAI-compatible chat endpoint already includes chunk metadata
+such as `created`, `system_fingerprint`, `usage`, `logprobs`, and
+assistant role/tool placeholders.
+
+This PR aligns the Agent stream helper with that existing
+OpenAI-compatible chunk shape while keeping the current `delta.content`
+behavior and existing reference injection path intact.
+
+### Type of change
+
+- [x] Bug Fix (non-breaking change which fixes an issue)
+- [ ] New Feature (non-breaking change which adds functionality)
+- [ ] Documentation Update
+- [ ] Refactoring
+- [ ] Performance Improvement
+- [ ] Other (please describe):
+
+### Verification
+
+- `./.venv/bin/python -m pytest
+test/unit_test/api/utils/test_api_utils.py -q`
+- `python3 -m py_compile api/utils/api_utils.py
+test/unit_test/api/utils/test_api_utils.py`
+- `uvx ruff check api/utils/api_utils.py
+test/unit_test/api/utils/test_api_utils.py`
+
+---------
+
+Co-authored-by: Harsh Kashyap &lt;harshkashyap@Harshs-MacBook-Pro.local&gt;
+
+- feat(agent): Go ingestion pipeline progress mirroring and DeepDOC parser hardening (#16795)
+
+feat(ingestion): mirror Go pipeline progress into the document table;
+harden resume guards
+- pipeline: bind the owning document via WithDocumentID; after each
+TrackProgress event aggregate ingestion_task_log progress and mirror
+progress/run/progress_msg back into the document table, so GET
+/api/v1/datasets/{dataset_id}/documents reflects live Go pipeline
+progress without a bespoke endpoint.
+- canvas: extend the S3 resume guard to reject legacy no-op nodes (e.g.
+ExitLoop) so component_total equals the count of progress-reporting
+components and the aggregate percent can reach 100%.
+- runtime/canvas: route progress through TrackProgress; add interrupt
+test coverage (r3_interrupt_test.go).
+- dao/entity: add IngestionTask.DocumentID column and AggregateProgress
+support used by the mirror; IngestionTaskLog keeps a Checkpoint column
+alongside the progress fields.
+
+feat(deepdoc): cache DocAnalyzer inference results in Redis (1h TTL)
+- Redis-backed DocAnalyzerCache decorator over inference.Client; cache
+key = &#34;ddoc:cache:&lt;method&gt;:&#34; + sha256 of the JPEG-encoded image bytes
+(deterministic).
+- TTL = 1h; hits skip the inner HTTP call and return cached JSON; inner
+errors are not cached.
+
+refactor(deepdoc): align figure cropping with Python cropout + bounded
+page caches
+- CropSectionByDLA mirrors Python cropout: best-overlap DLA
+figure/equation region, fallback to section bbox per page, vertical
+concat on gray background.
+- sliding-window page-image cache bounds peak memory to the recent
+window instead of the whole PDF.
+- rename DLADebug -&gt; DLARegions across parser/chunker/tests.
+
+refactor(parser): drop lib_type selector; align NewXxxParser with
+NewPDFParser
+- remove config[&#34;lib_type&#34;] lookup and the libType param/field/switch
+from all nine constructors; surface the CGO-required error at
+ParseWithResult time instead of construction time; drop resolveLibType,
+its test, and the four lib_type constants.
+
+feat(utility): add a reusable workerpool for bounded concurrent
+execution
+- internal/utility/workerpool.go (+ tests).
+
+refactor: translate Chinese prose comments to English in non-harness Go
+files.
+
+chore: upgrade github.com/cloudwego/eino from v0.9.9 to v0.9.12.
+
+- fix: align model default handling (#16782)
+
+- fix(go-agent): align Go DuckDuckGo component with canvas input form  (#16775)
+
+## Summary
+
+- register the Go `DuckDuckGo` canvas component and restore its dynamic
+input form metadata
+- align the Go component input/output surface with the current canvas
+usage for `query`, `channel`, and `top_n`
+- fix DuckDuckGo news search in Go by fetching the required `vqd` token
+before calling `news.js`, and add targeted regression tests
+
+## Testing
+
+Passed:
+- `bash build.sh --test ./internal/agent/tool/... -run &#39;DuckDuckGo&#39;`
+- `bash build.sh --test ./internal/agent/component/... -run
+&#39;DuckDuckGo|TestVerifyRegistration_P1&#39;`
+- `bash build.sh --test ./internal/agent/component/... -run
+&#39;DuckDuckGo&#39;`
+
+Not run:
+- frontend tests
+- frontend build
+- full Go test suite
+
+&lt;img width=&#34;1776&#34; height=&#34;1092&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/9f3f8e4b-f6b4-4915-b96c-3c5b8c7b8b30&#34;
+/&gt;
+
+- Fix: update LayoutRecognizeFormField to accept ownerTenantId and refactor model handling in LLM requests (#16781)
+
+- fix: Show full text on hover when text overflows the cards on the list page. (#16787)
+
+- fix(go-agent): add Google search wrapper component and tool registry (#16768)
+
+### Summary
+
+- Implemented googleComponent wrapper to bridge the canvas component
+contract with Eino&#39;s SerpApi-backed GoogleTool.
+- Added parameter alias mapping (query to q, max_results to num) and
+content formatting logic to match Python search result representation.
+- Registered the &#34;Google&#34; component and the &#34;google&#34; tool factory in the
+Go agent runtime to support web search nodes.
+
+&lt;img width=&#34;1776&#34; height=&#34;1092&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/e295ab88-e48c-4fe2-bcb7-47ca5b977c9b&#34;
+/&gt;
+
+- Feat: Add a data compilation layer. (#16777)
+
+### Summary
+
+Feat: Add a data compilation layer.
+
+- Fix: delete unused tenant_llm testcase (#16786)
+
+- Fix: delete tasklet (#16778)
+
+### Summary
+
+1. Fix: delete tasklet
+2. Remove panic in text processing
+
+- fix(ao-agent): add Tavily input_form, wire real search component, and port TavilyExtract to Go (#16693)
+
+### Summary
+
+- TavilySearch now stores api_key from component params and injects it
+into tool calls when runtime inputs omit it.
+- TavilyExtract and BGPT now follow the same stored api_key behavior.
+- Canvas decoding now recovers api_key from graph.nodes[].data.form when
+components[].obj.params.api_key is empty, matching frontend payload
+behavior without changing frontend data.
+- Added regression tests for graph form key recovery and stored key
+injection / caller key precedence.
+
+Tests: build.sh --test ./internal/agent/component ./internal/service —
+all pass.
+
+&lt;img width=&#34;1476&#34; height=&#34;850&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/0be31587-c1ba-4f3e-b43a-4fe0fca5a44c&#34;
+/&gt;
+
+&lt;img width=&#34;1476&#34; height=&#34;850&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/e3edd92c-c62e-4db4-abe2-772bdf4fe1b2&#34;
+/&gt;
+
+- Feat: add embedding support  (#16769)
+
+### Summary
+
+Feat: add embedding support
+
+- Feat: optional url v1 (#16774)
+
+- Fix: resolve shared embedding/LLM model selection errors (#16773)
+
+- Fix: get_by_id (#16765)
+
+- Fix: rm role_id in user.go (#16771)
+
+- refa: resolve tenant model refs consistently (#16744)
+
+- Fix docs (#16770)
+
+- Fix naive chunking for windows (#16767)
+
+`\r` is ignored for splitting boundaries
+
+- Handle searching dataset without embedding model (#16742)
+
+### Summary
+
+Handle searching dataset without embedding model
+
+In this PR, Searching datasets with different embedding models or
+searching dataset with/without embedding models are not allowed. We will
+improve the behavior later.
+
+- Fix: provider name (#16733)
+
+- Fix: Rapid clicking results in multiple message requests being sent. (#16739)
+
+- fix(web): prevent &#39;last saved at&#39; label from vertical stacking in agent home card (#16756)
+
+- Feat: apply prose typography styling to markdown preview (#16752)
+
+- fix: Fixed the empty state styling on the home page. (#16755)
+
+- fix(web): show memory owner name in shared memory card (#16751)
+
+- Fix: prevent auto-incrementing memory name suffix when only permissions change (#16750)
+
+- fix(web): hide folder tab in agent JSON import uploader (#16754)
+
+- Feat: add wiki folder (#16749)
+
+### Summary
+
+Add wiki folders.
+
+- Port agent PRs to GO - 5 (#16667)
+
+### Summary
+
+Port 
+
+https://github.com/infiniflow/ragflow/pull/15376
+https://github.com/infiniflow/ragflow/pull/16401
+https://github.com/infiniflow/ragflow/pull/15484
+https://github.com/infiniflow/ragflow/pull/16685
+
+- fix: update nginx version. fix CVE-2026-9256 (#16732)
+
+### Summary
+Updates the NGINX package used in the RAGFlow Docker image from
+`1.31.0-1~noble` to `1.31.2-1~noble`.
+
+NGINX 1.31.0 is affected by CVE-2026-9256. NGINX 1.31.2 includes
+the corresponding security fix and is available from the official
+NGINX mainline repository for Ubuntu Noble.
+
+### References
+- nginx security advisories:
+https://nginx.org/en/security_advisories.html
+- Vendor advisory: https://my.f5.com/manage/s/article/K000161377
+
+### Fix
+Single-line change in `Dockerfile:62`:
+
+```diff
+-ARG NGINX_VERSION=1.31.0-1~noble
++ARG NGINX_VERSION=1.31.2-1~noble
+
+Co-authored-by: duanyuan &lt;duanyaun@uyuyue.com&gt;
+
+- Feature: task executor migration to go (#16549)
+
+### Summary
+
+Feature: Integrate parser
+
+- Fix Build-in metadata not working (#788) (#16748)
+
+- fixed(go-agent): agent-publish (#16713)
+
+## Summary
+
+This PR updates Go agent publish logic to persist the parent canvas
+update and canvas-version save in the same transaction.
+
+## Changes:
+
+  - Reuse SaveOrReplaceLatest semantics for published versions
+  - Add SaveOrReplaceLatestTx for transactional publish flow
+  - Keep canvas release update and version persistence atomic
+- Add a focused publish test covering canvas and released version state
+
+## Tested:
+
+```
+  bash build.sh --test -run &#39;Test(PublishAgentUpdatesCanvasAndReleasedVersion|UpdateAgentDSLCreatesAndReplacesDraftVersion|
+  UpdateAgentDSLDoesNotOverwriteLatestReleasedVersion)$&#39; ./internal/service ./internal/dao
+```
+
+&lt;img width=&#34;1476&#34; height=&#34;850&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/2c576581-1143-420b-8750-a77aa3c4292d&#34;
+/&gt;
+
+- Fix(go): adapt to new db columns (#16745)
+
+- Go: add more commands and GCS supports (#16741)
+
+### Summary
+
+1. GCS supports
+2. More commands
+```
+RAGFlow(admin)&gt; ping store;
+SUCCESS
+RAGFlow(admin)&gt; ping engine;
+SUCCESS
+RAGFlow(admin)&gt; ping cache;
+SUCCESS
+```
+
+---------
+
+Signed-off-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Fix skill search (#16743)
+
+- fix: issue with memory error message display (#16738)
+
+- Feat: add filter in chat and search page (#16707)
+
+- build(deps): bump golang.org/x/crypto from 0.51.0 to 0.52.0 (#16736)
+
+Bumps [golang.org/x/crypto](https://github.com/golang/crypto) from
+0.51.0 to 0.52.0.
+
+- Dev: need set the stable version (#16730)
+
+Resolve: #16729
+
+- Go: clean release.yml (#16725)
+
+Signed-off-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- fix(service): allow updating memory_type when memory is empty (#16668)
+
+- Feat: v0.27.0 model provider (#16604)
+
+- Go: fix cgo build (#16724)
+
+Signed-off-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Go: remove cgo when build cli (#16723)
+
+### Summary
+
+Fix
+
+Signed-off-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Go: fix release (#16722)
+
+### Summary
+
+Remove ragflow-cli building dependency
+
+Signed-off-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Go: fix ragflow-cli building (#16721)
+
+- Docs: Added v0.26.4 release notes. (#16720)
+
+- Go: add migrate database flag (#16719)
+
+### Summary
+
+--migrate will trigger database migration
+```
+./ragflow_main --api --migrate
+```
+
+Signed-off-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- Docs: Update version references to v0.26.4 in READMEs and docs (#16716)
+
+- fix: prevent memory name from auto-appending (1) on description update (#16714)
+
+- fix(task_executor): fix Langfuse flush/shutdown deadlock that freezes document parsing (#16502)
+
+- Fix broken logo for gitee mirrors (#16709)
+
+- Fix PageIndex is not working (#16704)
+
+Follow on PR #16515
+
+- Fix broken camo cache for french (#16706)
+
+- Fix broken cache for release badge (#16705)
+
+- Fix docker pulls badge  (#16702)
+
+- Go: refactor UUID functions (#16695)
+
+As title
+
+---------
+
+Signed-off-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+- fix: update similarity threshold fallback to use nullish coalescing (#16700)
+
+- Fix cannot run raptor (#16694)
+
+- Fix: ValueError: Operation on closed image (#16697)
+
+- fix(go-pipline): list agents incorrectly filtering out ingestion pipelines (#16698)
+
+- fix(agent): save draft version on agent update (#16691)
+
+- Fix: Referenced files not displaying. (#16696)
+
+- fix: Restrict the agent to using memory compatible with the embedding model. (#16699)
+
+- Go: fix development guide (#16678)
+
+### Summary
+
+Go development guide
+
+---------
+
+Signed-off-by: Jin Hai &lt;haijin.chn@gmail.com&gt;
+
+-   Fix: Prevent text overflow in confirm delete dialog (#16689)
+
+- fix: remove duplicate error toast on memory update failure (#16690)
+
+- fix: strip reasoning model thinking tags from document exports (#16687)
+
+Co-authored-by: noob &lt;yixiao121314@outlook.com&gt;
+
+- Fix Agent Chat not working (#16688)
+
+Follow on this PR: #15484 it break the Agent chat
+
+- feat(agent): support JSON object input on begin node (#16685)
+
+### Summary
+
+Add object as a begin-node parameter type with JSON editor UI, webhook
+schema support, and backend parsing in UserFillUp.
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- fix(go): seed built-in agent templates for Go backend (#16666)
+
+### Summary
+
+The Go backend never seeded the `canvas_template` table, so the &#34;Create
+agent from template&#34; page was blank when the frontend proxies to the Go
+API (`API_PROXY_SCHEME=go`). This PR adds `SeedCanvasTemplates()` in
+`internal/dao`, invoked from `InitDB()` after migrations, which loads
+`agent/templates/*.json` and mirrors Python&#39;s `add_graph_templates()`
+behavior.
+
+Changes:
+- Add `internal/dao/canvas_template_seed.go` to parse and upsert
+built-in templates.
+- Call `SeedCanvasTemplates()` in `InitDB()`.
+- Add `CanvasTypes` (`JSONSlice`) to `entity.CanvasTemplate` so the
+frontend can filter/group by category.
+- Skip seeding gracefully when the templates directory is absent.
+
+This fixes the blank template catalogue in Go mode.
+
+- fix(go-agent): add BGPT component and input form (#16684)
+
+## Summary
+Adds the missing input form metadata for the Go BGPT canvas component.
+
+## Root Cause
+
+The standalone BGPT component was registered in Go, but it did not
+implement GetInputForm(). During component trial run, the backend asks
+the component for its input_form. Since BGPT had none, the API returned:
+
+component has no input_form: BGPT:&lt;node_id&gt;
+
+Python BGPT already exposes the query input form, so the Go component
+needed the same contract.
+
+## Change
+
+Added GetInputForm() to the Go BGPT component with a single query line
+input.
+Added test coverage to ensure BGPT exposes the input form.
+
+## Validation
+
+Backend:
+bash build.sh --test -run TestBGPT ./internal/agent/component
+
+&lt;img width=&#34;1369&#34; height=&#34;1184&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/f99e4a81-2359-42e5-80bb-dcc4e6a63fea&#34;
+/&gt;
+
+&lt;img width=&#34;1736&#34; height=&#34;1152&#34; alt=&#34;image&#34;
+src=&#34;https://github.com/user-attachments/assets/c11240a5-2c42-4d08-88e3-c6dfbf49eedb&#34;
+/&gt;
+
+- refactor: use slices.Contains to simplify code (#16680)
+
+### Summary
+
+There is a [new function](https://pkg.go.dev/slices@go1.21.0#Contains)
+added in the go1.21 standard library, which can make the code more
+concise and easy to read.
+
+Signed-off-by: weifanglab &lt;weifanglab@outlook.com&gt;</div>
+</div>
+
+<a href="../project/infiniflow_ragflow.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

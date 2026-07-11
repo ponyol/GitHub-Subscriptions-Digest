@@ -1,0 +1,3643 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (86 commits) - comet-ml/opik - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (86 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/comet-ml_opik.html">comet-ml/opik</a> /
+    Updates in main (86 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/comet-ml_opik.html">comet-ml/opik</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-10 14:20 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/comet-ml/opik/commits/main" target="_blank">https://github.com/comet-ml/opik/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This release delivers substantial performance and reliability improvements, alongside new features. It addresses issues like double-decompression of gzipped responses and optimizes database queries for log states, dataset items, and project updates, including buffering project last-updated timestamps in Redis. The SDK now supports memory-bound, resumable trace and dataset exports/migrations, preserves tags during CLI export/import, and integrates Mistral AI. Additionally, the release introduces a spend budget for LLM-as-judge evaluators, enhances Claude Agent SDK trace content capture, and redesigns the Optimization Studio UI.
+
+---
+
+**На русском языке:**
+
+Этот выпуск содержит значительные улучшения производительности и надежности, а также новые функции. Он устраняет проблемы, такие как двойная декомпрессия gzip-ответов, и оптимизирует запросы к базам данных для состояний логов, элементов наборов данных и обновлений проектов, включая буферизацию временных меток последнего обновления проекта в Redis. SDK теперь поддерживает экспорт трассировок и миграцию наборов данных с ограниченным объемом памяти и возможностью возобновления, сохраняет теги при экспорте/импорте через CLI и интегрируется с Mistral AI. Кроме того, выпуск вводит бюджет расходов для оценщиков LLM-as-judge, улучшает захват содержимого трассировок Claude Agent SDK и перерабатывает пользовательский интерфейс Optimization Studio.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- [OPIK-7281] Fix outbound gzip response double-decompression (#7413)
+
+* [OPIK-7281] Fix outbound gzip response double-decompression
+
+With jerseyClient.gzipEnabled: true, Dropwizard wires both Apache HttpClient&#39;s
+transparent content decompression and Jersey&#39;s GZipDecoder. HttpClient decodes the
+body but the stale Content-Encoding: gzip header survives into the Jersey response,
+so GZipDecoder gunzips the already-plain stream and readEntity throws
+java.util.zip.ZipException: Not in GZIP format on any outbound call reading a
+gzipped body without a per-call identity-encoding workaround (e.g. OllamaService).
+
+Register a ClientResponseFilter on the shared client (gated on gzipEnabled) that
+strips the stale Content-Encoding/Content-Length after HttpClient&#39;s decode, leaving
+exactly one decode while keeping Accept-Encoding: gzip on the wire. Adds a
+regression test built with gzipEnabled: true, the path config-test.yml skips.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7281] Make gzip regression test serve an explicit gzipped response
+
+Address review: the test relied on WireMock&#39;s default auto-gzip, which made the
+double-decompression path dependent on WireMock config. Serve an explicitly gzipped
+body with Content-Encoding: gzip from a WireMock server with auto-gzip disabled, so
+the path is exercised deterministically regardless of WireMock defaults. Verified it
+still fails with ZipException when the reconciling filter is removed.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7281] Address review nits on the response filter
+
+- Add @NonNull validation on the public filter() responseContext parameter.
+- Use String.strip() instead of trim() for the Content-Encoding value.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7291] [SDK] fix: bound memory in project trace export with chunked flush (#7422)
+
+* [OPIK-7291] [SDK] fix: bound memory in project trace export with chunked flush
+
+export_traces() buffered every trace and span in the project before
+writing any file, so peak memory scaled with project size and OOM&#39;d on
+large projects during `opik export ... all`. Rework it to process traces
+in bounded chunks: page until chunk_target (= page_size) traces need
+downloading, fetch their spans, write them, then discard and continue.
+Peak memory is now proportional to one chunk, and each flushed chunk is
+persisted to the manifest so interrupted exports resume mid-project.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7291] [SDK] fix: address baz-reviewer comments on chunked trace export
+
+- Flush the chunk buffer the moment it reaches chunk_target, mid-page if
+  needed, so peak memory stays bounded to ~one chunk. Previously the flush
+  check ran once per page after the whole page was appended, letting the
+  buffer briefly hold almost two chunks (a nearly full buffer plus a fresh
+  page) and breaking the bounded-memory guarantee.
+
+- Rewrite the bounded-chunk regression test to exercise the public
+  export_traces API and mock only the public REST client boundary
+  (traces.get_traces_by_project / spans.get_spans_by_project) instead of
+  patching private _fetch_* helpers. Assert on the public result tuple and
+  final trace_*.json artifacts, replacing the brittle exact-call-order
+  snapshot ([0, 2, 4]) with robust incremental invariants.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7291] [SDK] fix: cache unbounded span scan across chunks
+
+Address baz-reviewer&#39;s high-severity comment on repeated full-project span
+scans. With the new per-chunk flush, a chunk whose trace ids are not UUIDv7
+makes _spans_trace_id_range_filter() return None, so each chunk fell back to
+an unbounded project-wide span scan — turning a large export into
+O(chunks × full-scan) and making timeouts far more likely.
+
+- Factor the span pagination/grouping into _scan_and_group_spans().
+- When no trace_id range filter can be built, run the unbounded full-project
+  scan once, cache the grouped result, and serve every subsequent chunk from
+  the cache. Bounded (UUIDv7) chunks keep their per-chunk primary-key-pruned
+  scan and bounded memory. A partial (errored) scan is surfaced on every
+  chunk it feeds so the manifest stays incomplete and the next run resumes.
+- Tests: switch the bounded-chunk test to UUIDv7 ids (exercises the per-chunk
+  path) and add a regression test asserting the unbounded scan runs once
+  across three chunks rather than per chunk.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7291] [SDK] fix: don&#39;t cache a partial unbounded span scan
+
+Address review feedback on the unbounded span-scan cache. Previously
+`unbounded_spans_cache` was assigned an empty dict *before* the scan ran, so
+a scan that errored midway left the dict partially populated but non-None —
+every subsequent chunk then reused that partial cache, letting one transient
+429/5xx permanently drop spans for the rest of the export.
+
+- Scan into a local dict and only publish it as the shared cache when the
+  scan completes cleanly. A scan that errors is used for the current chunk
+  (partial spans beat none) and flags had_errors, but is left unpublished so
+  the next chunk retries the scan instead of reusing partial data.
+- Drop the now-unnecessary `unbounded_scan_had_errors` state variable.
+- Add a regression test asserting a transient scan failure is retried by a
+  later chunk (two scan sessions) rather than poisoning the cache.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7291] [SDK] fix: bound span-scan fallback memory to one chunk
+
+Remove the whole-project span cache from the non-UUIDv7 fallback path.
+Caching the full span set to avoid re-scanning reintroduced the unbounded
+memory peak that chunked export exists to prevent (and could leave a
+partial cache after a transient error). Each chunk now scans and keeps
+only its own traces&#39; spans, so peak memory stays bounded to one chunk
+regardless of project size; the rare non-UUIDv7 path trades scan count
+for memory safety. Also collapses the two span-fetch branches and drops
+the now-dead only_known_ids parameter.
+
+Rework the fallback tests accordingly: assert per-chunk scanning (bounded
+memory) instead of single-cached-scan, and inject the transient span-scan
+503 at the public spans.get_spans_by_project boundary rather than the
+private _fetch_spans_page helper, per SDK testing guidelines.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Douglas Blank &lt;doug@comet.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7292] [SDK] fix: preserve tags on CLI export/import for prompts, experiments, datasets (#7421)
+
+* [OPIK-7292] [SDK] fix: preserve tags on CLI export/import for prompts, experiments, datasets
+
+Tags were silently dropped by `opik export`/`opik import` for prompts,
+experiments, and datasets because those exporters used hand-written field
+allowlists that omitted `tags` (and the importers never forwarded them).
+Traces and spans already round-tripped correctly.
+
+- Prompts: serialize `tags` in current_version + history; forward to
+  create_prompt/create_chat_prompt on import.
+- Experiments: add `tags` to the export structure; forward on the plain
+  import-from-disk path (previously only the migrate path did).
+- Datasets: export dataset-level tags via get_tags(); apply on import via
+  the REST update_dataset endpoint (create_dataset has no tags arg).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7292] [SDK] test: assert tags round-trip in CLI export/import e2e suite
+
+Seed tags on the dataset, prompt, chat-prompt, and experiment fixtures and
+assert they survive both the exported files and the re-import. The
+experiment recreate test now also exports the experiment (trace export alone
+emits none) so it actually exercises recreation and verifies tags on the
+recreated experiment.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7292] [SDK] fix: address baz-reviewer comments on tag round-trip
+
+- imports/dataset.py: preserve explicit empty tag lists ([]) — check key
+  presence instead of truthiness and guard the REST update with
+  `is not None` so a re-import can clear pre-existing tags.
+- imports/experiment.py: same fix — pass tags when the field is present
+  (`is not None`) so cleared tag sets round-trip instead of collapsing to
+  tags=None.
+- exports/dataset.py: log a warning (with dataset id/name) when a tag
+  lookup fails in both export paths, so a tagless export is diagnosable.
+- exports/prompt.py: extract shared `_build_version_data` helper to remove
+  the duplicated per-version metadata dict across the three export paths.
+- tests: rename tag round-trip tests to the documented
+  test_WHAT__CASE__EXPECTED convention; add empty-list clear-tags coverage
+  for datasets and experiments plus a dataset tag-update failure-path test
+  asserting the import still inserts items.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7292] [SDK] fix: recover container-level prompt tags on export
+
+Prompt tags live on the prompt container, but get_prompt() /
+retrieve_prompt_version do not surface them (they return empty), so
+`opik export prompt` wrote tags=[] and the round-trip e2e tests failed.
+search_prompts injects container tags, so add a `_resolve_prompt_tags`
+fallback that consults it when the directly-fetched prompt carries none,
+and use it for current_version across all three export paths
+(export_single_prompt, export_prompts_by_ids, export_related_prompts_by_name).
+
+Adds unit coverage for the resolver and for export_single_prompt writing
+container-only tags. Fixes the failing e2e
+test_export_import_prompts_happy_flow / test_export_import_chat_prompts_happy_flow.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7292] [SDK] fix: log prompt tag-resolution failures; test via public API
+
+Address the two remaining baz-reviewer comments on the prompt export path.
+
+- _resolve_prompt_tags no longer swallows search_prompts failures silently.
+  The name-filtered-search fallback and the give-up path both log with a
+  stack trace (debug for the expected name-parse retry, warning when tags
+  can&#39;t be resolved at all), so dropped tags are diagnosable. Resolution
+  stays best-effort and never aborts the export.
+- Stop asserting the private _resolve_prompt_tags helper directly: drop its
+  import and exercise the behavior through export_single_prompt()&#39;s written
+  output instead (object-has-tags skips search; container-only tags recovered
+  from search; search failure still exports with fallback tags).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7292] [SDK] refactor: consolidate prompt export serialization into shared helpers
+
+Extract _build_prompt_export_data and _write_prompt_export_file so the
+current_version/history/downloaded_at payload and file write no longer
+repeat across export_single_prompt, export_prompts_by_ids, and
+export_related_prompts_by_name. Centralizing tag resolution here prevents
+the three paths from drifting and dropping tags on round-trip.
+
+Addresses baz-reviewer comment on duplicated prompt export serialization.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7292] [SDK] test: assert imported chat-prompt tags via search_prompts
+
+The chat-prompt round-trip test read imported tags through
+get_chat_prompt(), but container-level tags are not surfaced by
+retrieve_prompt_version (they come back empty), so the assertion failed
+regardless of import correctness. Read the tags from search_prompts()
+instead, mirroring the text-prompt flow and exports._resolve_prompt_tags.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7292] [SDK] fix: preserve dataset description/visibility on tags-only import
+
+update_dataset() omitted description, which the backend silently nulls
+when absent from the PUT (unlike tags/visibility, it isn&#39;t COALESCEd
+against the existing row). Re-fetch and re-pass description/visibility
+alongside tags so re-imports onto existing datasets don&#39;t wipe them.
+
+Co-Authored-By: Claude Sonnet 5 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Douglas Blank &lt;doug@comet.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- refactor(dataset-items): SELECT DISTINCT trace_id in filter-gate bounds (#7418)
+
+Review (andrescrz): dedupe the trace-id set in the gate bounds and their
+project-resolution subqueries. DISTINCT inside an IN(...) is result-equivalent
+(membership is unchanged) but yields a smaller prepared set.
+
+- [OPIK-7293] [GHA] feat: auto-label PRs by size + surface size in Slack review commands (#7423)
+
+- Update versions to 2.1.22 and bump base version to 2.1.23
+
+- [NA] [SDK] [DOCS] Update automatically OpenAPI spec and Fern code (#7424)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [OPIK-6995] [FS] feat: add per-evaluation spend budget for LLM-as-judge evaluators (#7312)
+
+* [OPIK-6995] [FS] feat: add per-evaluation spend budget for LLM-as-judge evaluators
+
+Add an optional per-rule USD spend budget for agentic (trace + thread)
+LLM-as-judge online evaluators. The budget is a soft wrap-up trigger, not a
+hard ceiling: once cumulative spend reaches the limit, the agentic tool loop
+stops starting new turns and emits a best-effort verdict from the data
+gathered so far (spend may overshoot by the wrap-up call, by design).
+
+- BudgetGuard encapsulates the limit, running spend, and all cost math; spend
+  is computed in-process via CostService (no provider round-trip) from each
+  response&#39;s token usage. A non-positive limit degrades to no-limit.
+- LlmUsageExtractor (extracted from EvaluationEntityFactory) builds the
+  cache-aware usage map for any provider Opik prices.
+- When the budget trips, the monitoring trace is tagged `budget_exceeded` and
+  the wrap-up call uses a distinct instruction (best-effort from partial data
+  rather than &#34;investigation complete&#34;).
+- Span evaluators are excluded: a single LLM call has no loop to wrap up.
+- Frontend: optional &#34;Max cost per evaluation (USD)&#34; field on trace/thread
+  rules (hidden for span scope).
+
+Implements OPIK-6995.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(online-scoring): keep terminal AiMessage when budget trips on a natural stop
+
+Code-review follow-up on the spend-budget change:
+
+- ToolCallLoop: check the no-tool-calls terminal case BEFORE the round/budget
+  gate. Previously a follow-up response that both finished naturally (no tool
+  calls) and tipped spend over the budget hit the budget gate first and returned
+  without appending the terminal AiMessage, so runWithWrapUp re-issued the
+  structured request missing the model&#39;s final reasoning turn. Regression test
+  added (appendsTerminalAiMessageWhenBudgetTripsOnANaturalStop).
+- LlmUsageExtractorTest: cover the null/zero cache-token guard branch (the
+  value&gt;0 check that keeps cost unchanged when caching is off).
+- FE LLMJudgeRuleDetails: guard event.target.valueAsNumber against NaN so an
+  intermediate unparseable numeric input can&#39;t write NaN into maxCostUsd.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(fe): refine budget input — block unsupported symbols, hide spinners, drop min
+
+Max cost per evaluation (USD) field:
+- Block symbols type=number would otherwise accept (comma, sign, exponent) via
+  onKeyDown so only a positive decimal can be entered.
+- Hide the up/down spinner arrows (webkit inner/outer + Firefox textfield).
+- Remove the min={0.000001} attribute so the field no longer surfaces that value
+  by default; positivity is still enforced by the Zod .positive() rule.
+- Use cn() for the conditional className (was string concatenation).
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(online-scoring): address PR review — budget flag placement, log level, FE input
+
+- ToolCallLoop: flag budget_exceeded on the recorder at the point the budget gate
+  actually fires (agentic loop), instead of inferring it post-hoc from
+  shouldWrapUp() in the scorers. Fixes two issues: a natural stop that merely
+  crossed spend is no longer mislabelled, and the tag survives a downstream error
+  (it&#39;s set before the wrap-up/scoring chain can throw). Removed the inferred
+  flagBudgetExceeded() calls from both scorers&#39; map().
+- ToolCallLoop: demote the internal &#34;budget reached&#34; log to debug (the scorer&#39;s
+  user-facing warn is the primary signal). Tests added: flag set on mid-loop
+  budget trip, not set on a natural under-budget stop.
+- FE LLMJudgeRuleDetails: use FormLabel + FormDescription (forms.md) so the
+  label/input association and error styling are wired; reject non-plain-decimal
+  onChange input so pasted/IME exponent (&#34;1e3&#34;) can&#39;t bypass the decimal-only rule.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(test-suites): preserve maxCostUsd through TestSuiteEvaluatorMapper transforms
+
+The two transforms that rebuild LlmAsJudgeCode (renameSchemaToAssertionKeys,
+applyTestSuitePrompt) used the positional constructor and dropped the new
+maxCostUsd field, so a test-suite LLM-judge evaluator configured with a spend
+budget was silently scored with BudgetGuard.UNLIMITED. Rebuild via toBuilder()
+so maxCostUsd — and any field added later — is carried through. Regression tests
+added (preserves maxCostUsd / leaves it null when unset).
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(online-scoring): address PR review on evaluation spend budget
+
+- Enforce @Positive max_cost_usd at the API boundary: cascade validation into
+  the polymorphic evaluator code record via @Valid (create + update paths), so
+  a non-positive value is rejected with 422 instead of silently coerced to
+  &#34;no limit&#34;. Teach PODAM to manufacture strictly-positive values for @Positive
+  BigDecimal fields so the newly-enforced constraint doesn&#39;t flake create tests.
+- Unify the budget signals off one authoritative event: add
+  BudgetGuard.wasBudgetEnforced(), set at the tool loop&#39;s budget gate alongside
+  the budget_exceeded trace tag, and drive the wrap-up instruction + user-facing
+  warn off it. A natural stop or inline single call that merely crosses spend is
+  no longer mislabelled as a budget cut-off.
+- Warn once per guard when a limited guard resolves an unpriced model (cost
+  stays zero, so the limit is silently ineffective).
+- MDC-wrap the budget-reached log line so it carries workspace_id / rule_id.
+- Reword the span scorer&#39;s UNLIMITED rationale (it does run the agentic loop;
+  the real reason is the span DTO has no max_cost_usd field).
+- Test hardening: derive expected cost from CostService instead of hardcoding,
+  drop dead mock stubbing in the unlimited paths, cover the charge() fail-open
+  branch, assert a distinct total-token pass-through, split the bundled cache
+  test, rename overBudgetGuard -&gt; tightBudgetGuard.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(online-scoring): address code-review findings on the spend budget
+
+Three real bugs surfaced by the code-aware review:
+
+1. Budget silently never enforced for Gemini/Vertex/OpenRouter judges. The
+   online-scoring provider is the LlmProvider value (&#34;gemini&#34;, &#34;vertex-ai&#34;),
+   but CostService keys prices by the canonical provider (&#34;google_ai&#34;,
+   &#34;google_vertexai&#34;/&#34;anthropic_vertexai&#34;), so the lookup missed and cost
+   resolved to zero. findModelPrice now canonicalizes the incoming provider and
+   tries candidate namespaces (Vertex hosts both Google and Anthropic models, so
+   both are tried and the model&#39;s own rows decide). Fixes it for every
+   cost-tracked provider and also fixes the monitoring trace&#39;s estimated cost;
+   backward compatible for callers already passing canonical names. OpenRouter
+   stays unpriced (no canonical namespace) and is surfaced by the unpriced warn.
+
+2. Decimal entry impossible in the &#34;Max cost per evaluation&#34; field. A controlled
+   type=number bound to the committed number erased an in-progress trailing &#34;.&#34;
+   (&#34;1.&#34; committed as 1 and re-rendered &#34;1&#34;). Extracted a MaxCostInput that keeps
+   the raw text as the display source of truth and commits the parsed number
+   separately, re-syncing only on external value changes.
+
+3. Global @Positive -&gt; BigDecimalStrategy PODAM registration would throw for any
+   manufactured @Positive int/long/Double field. Moved the positive-floor logic
+   into BigDecimalTypeManufacturer (scoped to BigDecimal fields), deriving the
+   floor from ValidationUtils.SCALE, and dropped the global attribute strategy.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(online-scoring): price judges by resolved provider only; fix manual-eval create test
+
+Drop the CostService provider-canonicalization added while addressing an earlier
+review round. The online evaluator now hands its resolved LlmProvider value
+straight to CostService: OpenAI/Anthropic/Bedrock judges price on an exact
+provider match, and any provider the price table doesn&#39;t cover (Gemini/Vertex/
+OpenRouter/custom-llm/...) resolves to no cost — surfaced by BudgetGuard&#39;s
+existing once-per-guard unpriced warn. No RUNTIME_PROVIDER_CANONICALS map, no
+Vertex dual-namespace guessing, no candidate-provider fallback loop; CostService
+is back to its main behavior, so all other cost callers are unchanged. Removes
+the two canonicalization tests tied to that logic.
+
+Fix ManualEvaluationResourceTest: the @Valid cascade on the evaluator code field
+now enforces @NotEmpty arguments on the hand-built span UserDefinedMetricPython
+code (previously only set metric), so createEvaluator returned 422. Supply valid
+arguments, matching the canonical AutomationRuleEvaluatorsResourceTest.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(cost): map online-eval provider names to canonical so every priced judge is cost-tracked
+
+Online evaluation resolves models to LlmProvider serialized values (&#34;gemini&#34;,
+&#34;vertex-ai&#34;) that differ from the canonical price-table vocabulary (&#34;google_ai&#34;,
+&#34;google_vertexai&#34;), so cost tracking and the spend budget silently priced those
+judges at zero. Add a small, single-valued RUNTIME_PROVIDER_MAPPING applied at
+lookup in CostService — a deterministic name normalization, no candidate-tries
+loop and no fallback. Vertex is unambiguous because only Gemini models are
+offered on Vertex for online evaluation. openai/anthropic/bedrock already equal
+their canonical names; self-hosted ollama/custom-llm have no public pricing to
+map to and stay at zero. Canonical names pass through unchanged, so all other
+cost callers are unaffected.
+
+Covered by CostServiceTest (gemini -&gt; google_ai, vertex_ai/gemini -&gt; google_vertexai
+both price &gt; 0) and BudgetGuardTest (a Gemini judge now accrues spend and can trip
+the budget).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(online-scoring): add @NonNull to budget/usage entry-point params
+
+Address review: annotate the non-nullable parameters flagged on the public
+entry points — BudgetGuard.create(modelName), BudgetGuard.track(call), and
+LlmUsageExtractor.toUsageMap(response). maxCostUsd stays nullable (null = no
+limit).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- [NA] [BE][FE] chore: sync provider model definitions (#7426)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [NA] [BE] Update model prices file (#7425)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [OPIK-7245] dev-runner: enable cost-api auth in platform mode (#7415)
+
+- [OPIK-6884] [BE] perf: project/trace-id scope dataset-item + optimization enrichment scans (#7412)
+
+* [OPIK-6884] [BE] perf: bound dataset-item filter-gate traces scans to the experiment trace-id set
+
+Bucket-1 R3 residual from the OPIK-6883 full-scan audit. The DatasetItemDAO
+experiment-item/feedback filter gates scanned the whole workspace&#39;s traces
+(workspace_id only, all projects) to resolve the experiment items&#39; trace ids.
+
+- Bound both gates (count and stats) by the referenced experiment trace-id set:
+  `AND id IN (SELECT trace_id FROM experiment_items WHERE workspace_id = :workspace_id
+  AND experiment_id IN :experimentIds)`. The set is implied by the existing
+  `ei.trace_id = tfs.id` join, so results are unchanged; it adds an `id`
+  primary-key condition. Prod EXPLAIN (large workspace): traces read drops
+  98,507 -&gt; 1,309 granules (~75x).
+- Use `traces FINAL` in both gates: `&lt;experiment_item_filters&gt;` can filter
+  mutable trace columns, which must be matched against the deduplicated latest
+  version, not stale ReplacingMergeTree versions. FINAL is now affordable
+  because it is scoped to the same ~1,309 bounded granules (same I/O as the
+  prior `LIMIT 1 BY`, only a small bounded merge added); the now-redundant
+  `LIMIT 1 BY id` on the count gate is dropped.
+
+OptimizationDAO.FIND (also flagged) was investigated and needs no change: it
+scans only the small workspace-scoped `optimizations` entity table (not
+traces/spans, so not a tiering concern), and project_id is not in its sorting
+key `(workspace_id, dataset_id, id)`, so a project predicate would not prune.
+
+Validated by DatasetsResourceTest$FindDatasetItemsWithExperimentItems (56 tests).
+
+* perf(optimizations): project-scope the FIND duration/cost trace+span scans
+
+OptimizationDAO.FIND&#39;s experiment_durations CTE enriches optimizations with
+per-experiment duration/cost by scanning traces and spans for the experiments&#39;
+trace ids. Both were scoped by workspace_id + (trace_)id IN only, with no
+project_id, so the (workspace_id, project_id, ...) sorting-key prefix couldn&#39;t
+prune - the flagged &#34;no target-project pruning&#34; (R3/row 12, OPIK-6883).
+
+Add `AND project_id IN (SELECT DISTINCT project_id FROM traces WHERE
+workspace_id = :workspace_id AND id IN (SELECT trace_id FROM
+experiment_items_final))` to both scans. A span/trace shares its trace&#39;s
+project, so the resolved project set is a superset filter - results unchanged -
+and it restores the PK-prefix prune. Prod EXPLAIN (large workspace): spans
+4,842 -&gt; 163 granules (~30x); traces also project-pruned.
+
+Validated by OptimizationsResourceTest GetOptimizerById + FindOptimizations
+(13 tests).
+
+* perf(dataset-items): project-scope the filter-gate traces scans
+
+Follow-up to the id-set bound: the DatasetItemDAO count/stats filter gates were
+bounded by `id IN (experiment trace-id set)` but not by project, so `id` (the
+3rd sort-key column) only did generic-exclusion pruning across all projects.
+Add `AND project_id IN (SELECT DISTINCT project_id FROM traces WHERE
+workspace_id = :workspace_id AND id IN (...))` to both gates, enabling the full
+(workspace_id, project_id, id) prefix (result-preserving: the traces are in the
+resolved projects; also makes FINAL cheaper). Prod EXPLAIN: the same id set
+drops from ~1,305 to ~54 granules (~24x further).
+
+Validated by DatasetsResourceTest$FindDatasetItemsWithExperimentItems (56 tests).
+
+- [NA] [DOCS] Add Diagnostics documentation page (#7417)
+
+* [NA] [DOCS] Add Diagnostics documentation page
+
+Document the Diagnostics feature (Ollie-powered automated trace
+analysis) under Observability, and point the two frontend &#34;view
+docs&#34;/&#34;learn more&#34; links at the new page instead of the docs homepage.
+
+* [NA] [DOCS] Polish Diagnostics page copy and screenshots
+
+Remove em dashes and AI-sounding phrasing, replace bullet dashes with
+the bold-label-plus-colon pattern used elsewhere in the docs, and swap
+in updated screenshots. Also trim the redundant &#34;and Opik Connect&#34;
+from the debug-agents page title for consistency.
+
+* [NA] [DOCS] Upgrade Fern CLI to 5.67.1 and stop hardcoding its version in CI
+
+Bump fern-api from 4.71.5 to 5.67.1 (package.json is now the single
+source of truth) and apply the resulting disable-disambiguate-request-names
+migration. The docs preview/publish workflows now run `npm install` +
+`npx fern` instead of a hardcoded `npm install -g fern-api@&lt;version&gt;`,
+so they always pick up whatever version package.json declares.
+
+* Optimised images with calibre/image-actions
+
+---------
+
+Co-authored-by: github-actions[bot] &lt;41898282+github-actions[bot]@users.noreply.github.com&gt;
+
+- [OPIK-7249] [BE][FE] fix: cheap existence probe for Logs empty state (#7378)
+
+* [OPIK-7249] [BE][FE] fix: cheap existence probe for Logs empty state
+
+The project Logs page decided whether to show the &#34;log your first trace&#34;
+onboarding by firing an auxiliary size=1 list probe (useTracesOrSpansList /
+useThreadList). Even for a single row the backend builds the full
+trace/span/cost/feedback aggregation across the entire project before
+LIMIT 1 -- a multi-GiB, multi-second ClickHouse scan on large projects,
+fired on every Logs page load (Traces, Spans and Threads tabs) and ignoring
+the selected time range. Same class as #6148 / #6949.
+
+Add a minimal existence endpoint per entity and use it for the probe:
+
+- BE: GET /v1/private/traces/exists (+thread_only) and /v1/private/spans/exists,
+  each a project-scoped SELECT 1 ... LIMIT 1. Deliberately minimal -- no
+  filters/search/time-range surface -- so the query is always a
+  primary-key-prunable LIMIT 1 with no full-project COUNT fallback.
+- FE: useTracesExist / useSpansExist / useTracesOrSpansExist hooks; the
+  Traces, Spans and Threads tabs derive hasProjectData from the existence
+  endpoint (threads via thread_only) instead of a size=1 list query.
+
+Turns a whole-project scan into a single-row LIMIT 1 lookup. Not done by
+forwarding from_time/to_time into the probe: that breaks the empty-state
+(data older than the window would show onboarding) and revives the
+id&lt;-&gt;event-time mismatch that got #6949 reverted in #7007.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(traces): address review on Logs existence probe
+
+- back the thread probe with trace_threads (PK-prunable) instead of
+  traces WHERE thread_id != &#39;&#39;, which the sort key + bloom index can&#39;t prune
+- define tracesExist/spansExist rate-limit buckets in config.yml so the
+  @RateLimited probes are actually throttled
+- restore the source=sdk scope on the probes (with the ENUM_LEGACY unknown
+  fallback) so the Logs empty state matches the sdk-scoped list again
+- add project_id-form and source-scoping tests for traces and spans
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs(traces): correct stale comment on the sdk-scoped existence probe
+
+The round-2 source=sdk restoration left the round-1 &#39;source-agnostic&#39; comment in TracesSpansTab, contradicting the code.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [FE] feat(diagnostics): copy for permission_denied run failure (#7407)
+
+Add a getRunFailureCopy case for the new `permission_denied` RunFailureCode
+emitted by ollie-assist when an Agent Insights run can&#39;t access the project&#39;s
+data. Instead of a generic &#34;something went wrong&#34;, the UI now explains it&#39;s a
+missing workspace permission and to contact the workspace admin.
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-6993] [BE] Capture Claude Agent SDK / Claude Code content in Opik OTEL traces (#7319)
+
+* [OPIK-6993] [BE] Map Claude Code span content into input/output
+
+Claude Code / Claude Agent SDK spans carry content on attributes and a
+tool.output event that no mapping rule routed to input/output, so it all
+fell into the input attribute-bag. Add ClaudeCodeMappingRules to surface
+user_prompt -&gt; input, tool_input -&gt; input, response.model_output -&gt; output,
+and map the tool.output span event to the tool span output.
+
+Docs: document the minimal env-var set (including the detailed-tracing beta
+required for assistant output) that captures full trace visibility in Opik.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6993] [BE] Fold duplicated tool.output tests into a parameterized test
+
+Addresses PR review: the output/content tool.output cases only differed by
+attribute key and value. Merge into one @ParameterizedTest/@CsvSource.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6993] [BE] Reorganize Claude Code span content mapping
+
+Scope the Claude Code rules to the com.anthropic.claude_code.tracing
+integration and flip the default bucket for its unmapped attributes from
+input to metadata, so input/output/usage carry only real content instead
+of a session/config attribute-bag.
+
+- session.id -&gt; thread_id (groups interaction turns into one thread)
+- input_tokens/output_tokens/cache_* -&gt; usage (was polluting input/output)
+- new_context dropped (verbatim duplicate of prompt / tool result)
+- user_prompt/tool_input -&gt; input, response.model_output -&gt; output kept
+- everything else -&gt; metadata by default
+
+extractUsageField now handles exact-match usage rules (not just prefixes).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6993] [BE] Promote hook and llm request content into span input
+
+The default-to-metadata rule left hook and llm_request spans with near-empty
+input. Promote the operation content to input: hook_event/hook_name/
+hook_definitions (hook), model/system_prompt_preview (llm; tools already map
+to input globally). Identity, timings, ids and counters stay in metadata.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6993] [BE] Map new_context to llm_request input (latest LLM message)
+
+On claude_code.llm_request spans, new_context is the latest message fed to
+the model - surface it as input. On interaction/tool spans it duplicates the
+prompt / tool result, so it stays dropped. Handled span-aware in the mapper.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6993] [BE] Keep new_context in metadata instead of dropping it
+
+Never discard span attributes: on non-llm_request spans new_context now goes
+to metadata rather than being dropped (still input on llm_request spans).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6993] [BE] Normalize Claude Code cache-token names for cost calc
+
+Claude Code emits cache_read_tokens / cache_creation_tokens, but the Anthropic
+cache-cost path in SpanCostCalculator only recognizes cache_read_input_tokens /
+cache_creation_input_tokens, so cache pricing was silently skipped. Normalize
+the short names to the long ones in USAGE_KEYS_MAPPING.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6993] [BE] Map llm response fields (stop_reason, has_tool_call) to output
+
+On claude_code.llm_request spans, stop_reason and response.has_tool_call
+describe the model&#39;s response, so put them in output alongside
+response.model_output. Call identifiers, latency and status stay in metadata.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6993] [BE] Address code review: docs, javadoc, test hardening
+
+- docs: clarify assistant output needs the beta (interactive claude is gated;
+  SDK / claude -p only) and that the beta exporter reuses OTEL_EXPORTER_OTLP_HEADERS
+- javadoc the new 5-arg enrichSpanWithAttributes overload; move usageKey helper
+  so extractUsageField&#39;s javadoc is attached to it
+- tests: use OpenTelemetryMappingRuleFactory.CLAUDE_CODE_INSTRUMENTATION instead
+  of a duplicated literal; tighten .contains to exact-value assertions
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-6993] [BE] Fix Claude Code cost/span-type mapping and per-span integration detection
+
+model/provider were routed to Outcome.INPUT/left unset so every Claude Code
+span priced at $0 and persisted as SpanType.general; fixed by mapping model
+to Outcome.MODEL and setting provider=anthropic directly. Also switched
+Claude Code detection from the batch-wide OTEL integration name to a
+per-span name check, since a single OTLP batch can mix scopes from more
+than one integration and misroute spans either way.
+
+Co-Authored-By: Claude Sonnet 5 &lt;noreply@anthropic.com&gt;
+
+* fix(otel): drop raw attribute value from unmapped-key debug log
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- [NA] [QA] test(e2e): retry model-picker click to fix Playground flake (#7401)
+
+setModelForVariant clicked the model picker once then waited for the listbox,
+but on higher-latency environments the first click sometimes registers as a
+hover (surfacing a tooltip instead of opening the popover), so the listbox
+never appears and the step times out. Wrap the click in an expect().toPass()
+loop that re-clicks until the popover actually opens.
+
+Observed as a repeated failure (initial + 2 retries) on the Bayer stsaas
+regression run; the test has a long clean streak everywhere else and is flagged
+flaky in TestOps. Change is strictly safer than the original (retries the click
+rather than firing once). Verified green locally 3x.
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- [OPIK-6884] [BE] perf: full-scan audit Slice-1 remediations (R4, R6, R7, R8) (#7404)
+
+* [OPIK-6884] [BE] perf: scope experiment project-mapping traces scan to workspace and drop dead span-cascade delete
+
+Closes Bucket-1 rows 17 (R6) and 19 (R8) of the OPIK-6883 full-scan audit:
+
+- ExperimentDAO.COMPUTE_EXPERIMENT_PROJECT_MAPPING: add an explicit
+  &#39;t.workspace_id = :workspace_id&#39; predicate. The traces side previously
+  carried tenancy only through the join key (ei.workspace_id = t.workspace_id),
+  which does not let ClickHouse prune the traces table by its sorting-key
+  prefix. The added predicate is provably equivalent given the join condition
+  but restores primary-key pruning ahead of traces hot/cold tiering.
+
+- FeedbackScoreDAO: remove the dead DELETE_SPANS_CASCADE_FEEDBACK_SCORE query
+  and its only user cascadeSpanDelete (zero callers). It also carried the
+  degraded &#39;project_id dropped when null&#39; filter, so removing it clears an
+  audit finding outright.
+
+* perf(traces): group deletes by project so the delete cascade prunes on (workspace_id, project_id)
+
+Closes Bucket-1 row 14 (R4) of the OPIK-6883 full-scan audit.
+
+The trace delete paths accept a nullable project_id (delete-by-id passes null; a
+batch may span projects), so the delete and its async span/feedback cascade
+dropped the project_id predicate and could no longer prune on the
+(workspace_id, project_id) sorting-key prefix - a workspace-wide scan once
+traces are tiered.
+
+TraceService.delete now, when no project is provided, resolves each trace&#39;s
+owning project and deletes per project group with a concrete project_id. The
+project flows through the existing TracesDeleted event to the span/feedback
+cascade unchanged, so no event-contract or downstream-service change is needed.
+Trace ids with no resolvable project (row already gone) fall back to a
+workspace-scoped delete to still clean up orphan child rows.
+
+The resolution itself is tiering-safe: getProjectIdsByTraceIdsBounded mirrors
+SELECT_PROJECT_ID_FROM_TRACE, bounding toMonday(id_at) by the id set&#39;s own
+min/max. id_at is MATERIALIZED as UUIDv7ToDateTime(toUUID(id)) (migration
+000091), so the bound is exact (never drops a valid id) yet keeps the lookup on
+the ids&#39; own weekly partitions instead of scanning all cold history.
+
+Adds a cross-project delete test covering the per-project grouping path.
+
+* perf(retention): bound the velocity-estimate scan below by the catch-up service-start date
+
+Closes Bucket-1 row 17 (R7) of the OPIK-6883 full-scan audit.
+
+ESTIMATE_VELOCITY_FOR_RETENTION was bounded above (trace_id &lt; cutoff) but had no
+lower bound, so it aggregated over all pre-cutoff history - an unbounded scan
+that pulls the whole cold tier once spans are tiered.
+
+The retention catch-up already treats the service-start date as its floor: the
+scouting fallback (scoutFirstDataCursor) scans month-by-month starting at the
+service-start cursor and never looks earlier. Only the primary estimate path was
+inconsistent, scanning back to the actual oldest span. Passing the service-start
+cursor as a lower bound (trace_id &gt;= :lower_bound, mirroring
+DELETE_FOR_RETENTION) makes the two paths consistent and keeps the scan within
+[service_start, cutoff) instead of all history.
+
+Validated against real ClickHouse via RetentionPolicyServiceTest$CatchUpJob
+(bounded query executes and small-workspace catch-up still deletes old data).
+
+* revert(experiments): drop no-op workspace_id predicate on project-mapping traces scan (R6)
+
+Verified on prod (ClickHouse 25.8.16 Altinity) with EXPLAIN indexes=1 on the full
+COMPUTE_EXPERIMENT_PROJECT_MAPPING for a large workspace: the analyzer already
+propagates the workspace_id constant across the join equality
+(ei.workspace_id = t.workspace_id AND ei.workspace_id = const) onto the traces
+primary key. The traces read prunes to the same 97,992 granules with or without
+an explicit t.workspace_id predicate; the added predicate only appears as a
+duplicated &#39;workspace_id in [...]&#39; condition and changes nothing.
+
+The audit&#39;s R6 premise predates the 25.8 upgrade. Reverting the redundant
+predicate; R8 (dead DELETE_SPANS_CASCADE_FEEDBACK_SCORE removal) stays.
+
+* perf(experiments): prune project-mapping traces scan by referenced trace ids
+
+COMPUTE_EXPERIMENT_PROJECT_MAPPING joined experiment_items to traces with only a
+workspace_id bound on traces, so the ConcurrentHashJoin read the entire workspace
+trace slice into the hash table. Adding
+&#39;AND t.id IN (SELECT trace_id FROM experiment_items WHERE workspace_id = :workspace_id)&#39;
+gives traces an &#39;id&#39; primary-key condition (the set is implied by the join
+ei.trace_id = t.id, so the result is unchanged) and bounds the read to the
+referenced trace ids.
+
+This is the effective replacement for the reverted R6 (row 16): the workspace_id
+predicate the audit suggested is already applied by the CH 25.8 analyzer, whereas
+this bounds the actual cost - the unpruned trace-id scan.
+
+Validated by ExperimentProjectMigrationJobTest (mapping unchanged).
+
+* fix(traces): align delete cascade with deletion-events bridge + address review
+
+Merged main brought the deletion-events bridge, whose tests exercise the same
+delete path R4 changed. Fixes after merge:
+
+- TraceDeletionEventTest: by-id / unscoped deletes now resolve the trace&#39;s owning
+  project (R4), so the bridge captures the resolved project_id instead of null;
+  update the two expectations accordingly.
+- TracesResourceTest (TraceComment cascade): the span was created with a random
+  project, distinct from its trace. A span always shares its trace&#39;s project, so
+  create it in the trace&#39;s project - otherwise the (now project-scoped) delete
+  cascade can&#39;t reach it. Fixes the two ConditionTimeout errors.
+
+Review feedback (baz-reviewer):
+- TraceDAO: extract collectTraceIdToProjectId() shared by getProjectIdsByTraceIds
+  and getProjectIdsByTraceIdsBounded (dedup the reactive pipeline).
+- TraceService: move the count to the end of the resolve-projects log message.
+
+* [OPIK-6884] address review nits: javadoc + drop redundant @NonNull
+
+- Convert the SELECT_PROJECT_IDS_BY_TRACE_IDS_BOUNDED explanatory comment to javadoc.
+- Drop @NonNull on getProjectIdsByTraceIdsBounded(Set) — emptiness/null is already
+  covered by the checkArgument(CollectionUtils.isNotEmpty(...)) guard.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Update versions to 2.1.21 and bump base version to 2.1.22
+
+- [OPIK-7042] [FE] feat: Optimization Studio new-run sidebar (#7291)
+
+* [OPIK-7042] [FE] feat: Optimization new-run sidebar + metric/schema cleanup
+
+First slice (verified, typecheck + lint clean):
+- Fix the Equals metric default to read reference_key from
+  DEFAULT_EQUALS_METRIC_CONFIGS (was wrongly pulling the JSON-schema
+  validator constant; harmless today since both are &#34;&#34;, but incorrect).
+- Widen StudioLlmModel.model off the legacy PROVIDER_MODEL_TYPE enum to
+  `string` (model ids come from the dynamic registry); drop the now-
+  redundant cast in the v2 studio-config converter.
+
+Sidebar conversion + god-hook split + dataset-picker pagination follow
+on this branch. Part of OPIK_6528.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(optimizations): new-run form as a sidebar over the runs list
+
+Convert the new-run wizard from the full-page /optimizations/new route into
+a right ResizableSidePanel opened over the runs list (Figma 548:27872):
+- NewRunSidebar hosts the form logic + 2-column body with a &#34;New optimization
+  run&#34; top bar and an Optimize/Cancel footer; mounted only while open.
+- The list opens it via `?new` (+ `?template`/`?rerun` to pre-fill); the
+  studio-templates row, empty state and the single-run header now set those
+  params instead of navigating to /new.
+- Remove the /optimizations/new route + its guard usage; delete the orphaned
+  OptimizationsNewPage / OptimizationsNewHeader.
+
+Routing/open-close behavior is not runtime-verified (no app run); typecheck,
+lint and the optimization test suites are green.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor(optimizations): on-demand dataset name lookup + clean schema arms
+
+- Replace the silent 1000-dataset list (used only to resolve the selected
+  dataset&#39;s name on submit) with a single useDatasetById; the picker itself
+  was already the searchable DatasetSelectBox.
+- Remove the dead commented-out Evolutionary optimizer params schema
+  (Evolutionary isn&#39;t offered in OPTIMIZER_OPTIONS).
+- Add the Code metric to OPTIMIZATION_METRIC_OPTIONS (it already has a full
+  schema arm, config component and submit handling, just wasn&#39;t selectable).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor(optimizations): split new-run god-hook into per-section hooks
+
+Break useOptimizationsNewFormHandlers (~305 lines) into cohesive hooks under
+formHandlers/: useOptimizerFormHandlers, useMetricFormHandlers,
+useModelFormHandlers and useSubmitOptimization. The main hook (~108 lines)
+now just composes them plus the watches, selected-dataset lookup, and the
+dataset/name handlers.
+
+Also drop the dead code the sidebar conversion left behind: the unused
+handleCancel and the breadcrumb wiring for the removed /optimizations/new
+route.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7042] [FE] feat: new-run sidebar — non-blocking dataset prep, input alignment &amp; variable validation
+
+- Render the form during demo-dataset prep instead of a full-panel spinner; the item-source field shows a local &#34;Preparing dataset...&#34; state and submit stays disabled until ready.
+- Align the Name input to 32px (dimension=&#34;sm&#34;) to match the right-rail controls and Figma.
+- Block submit when {{variables}} in the prompt or G-Eval metric aren&#39;t columns in the selected item source, with an inline reason (prevents runs that fail at evaluation time).
+- Metric settings / config-field cleanup (field cards, GEval &amp; reference-key fields, dataset-variable hints).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7042] [FE] fix: address Baz review on new-run sidebar
+
+- Variable check uses the dataset&#39;s server-side column schema (datasetItemsData.columns) instead of one sampled row, so optional columns absent from row 1 no longer falsely block submit (Baz: false missing-column block).
+- Submit is disabled while the selected-dataset lookup is loading and surfaces an error if it fails, closing the silent no-op window (Baz: silent no-op on unresolved dataset).
+- Spinner: wrap Loader2 in an animate-spin span so the SVG isn&#39;t animated in place (perf guideline).
+- Dataset icon uses the --chart-yellow theme token instead of a hard-coded hex.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7042] [FE] fix: address Baz re-review (round 2) on new-run sidebar
+
+- Flatten structured (array) message content via extractMessageContent before pulling {{vars}}, so prompts with multipart parts are still checked by the missing-variable gate.
+- Gate submit while the dataset&#39;s columns are still loading (areColumnsLoading), so the missing-variable check can&#39;t be bypassed in the window before columns arrive.
+- Restore legacy /optimizations/new -&gt; /optimizations?new=true redirect so old deep links open the new-run sidebar instead of hitting the /$optimizationId detail route.
+- Extract a shared ReferenceKeyField used by the Equals/JSON Schema/Levenshtein/Numerical Similarity metric configs (was duplicated 4x).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7042] [FE] refactor: move optimization icon accents to theme tokens
+
+Replaces hard-coded hex on the algorithm/metric icon maps with named --optimizer-icon-* / --metric-icon-* CSS variables in main.scss (matching the existing --template-icon-* / --chart-* convention), so the icons follow the theme system instead of bypassing it. Colors are unchanged. Addresses the last Baz review comment.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7042] [FE] fix: validate new-run form on submit + align reference-key field
+
+- Validation is now lazy (mode: onSubmit + reValidateMode: onChange): RHF field errors and the {{variable}} mismatch no longer appear while editing, switching metrics, or before a dataset is picked. The &#39;Optimize prompt&#39; button stays clickable and reveals what&#39;s missing on click (still won&#39;t submit with errors / missing variables).
+- Reference-key input aligned to 32px (dimension=&#34;sm&#34;) to match the Algorithm/Item source/Metric controls.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7042] [FE] fix(new-run): drive submit + lazy validation through RHF
+
+Address Baz round-2 findings on the new-run sidebar form:
+
+- #10 Lazy gate missed RHF field errors: change handlers still forced
+  `shouldValidate: true`, so field errors surfaced eagerly while editing
+  despite `mode: &#34;onSubmit&#34;`. Dropped it everywhere (dataset/metric/
+  optimizer/prompt/demo-dataset setValue) so field errors and the
+  variable-mismatch footer both surface only after a submit attempt.
+- #11 Submit + busy state now flow through `form.handleSubmit(onValid)`
+  and `form.formState.isSubmitting`/`isSubmitted`, instead of a manual
+  `trigger()` + local `isSubmitting` state and a `submitAttempted` flag.
+  `useSubmitOptimization` no longer re-validates or owns a busy flag.
+
+Enter-key submit is intentionally not wired: the form is a rich
+multi-field panel with nested untyped buttons (prompt library menu,
+metric-config popovers, model settings), so a `&lt;form&gt;` wrapper would
+make Enter/stray buttons submit. Submit stays an explicit button click.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7042] [FE] fix(new-run): swallow already-toasted submit rejection
+
+RHF&#39;s handleSubmit re-throws when the submit handler rejects, and the
+create mutation uses mutateAsync (rejects on error). The mutation already
+surfaces API errors via its onError toast, so the re-thrown rejection was
+only producing an unhandled promise rejection in the console. Catch it at
+the onClick call site; RHF has already reset isSubmitting before re-throwing.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7042] [FE] refactor(new-run): use idiomatic &lt;form onSubmit&gt; submit
+
+Adopt the shadcn/RHF form pattern from forms.md instead of calling
+form.handleSubmit from an onClick handler:
+
+- Wrap the new-run content in &lt;form onSubmit={form.handleSubmit(onValid)}&gt;,
+  submit button type=&#34;submit&#34;, cancel type=&#34;button&#34;. Enter now submits.
+- A &lt;button&gt; without an explicit type inside a &lt;form&gt; defaults to submit,
+  so add type=&#34;button&#34; to the non-submit buttons that render inside this
+  form&#39;s DOM: LoadedPromptDisplay (detach), LLMPromptMessageActions (save),
+  LLMPromptMessage (show more/less), AlgorithmConfigs (use prompt model),
+  DatasetVariablesHint (variable chips). Pure correctness fixes — these
+  should never submit any form. Buttons in portaled Dialog/Dropdown content
+  are outside the form DOM and were left as-is.
+
+RHF still owns validation and busy state (form.formState.isSubmitting /
+isSubmitted); the submit handler swallows the settled rejection since the
+create mutation already toasts API errors via its onError.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7042] [FE] chore(optimizations): drop untested custom-code metric from new-run options
+
+Removes the &#34;Custom code&#34; (METRIC_TYPE.CODE) entry from
+OPTIMIZATION_METRIC_OPTIONS so it is no longer selectable in the new-run
+sidebar. The backend exec path exists (OPIK-3932 / #4817) but was never
+exercised live here and has FE validation / error-surfacing gaps, so
+exposing it now risks silent &#34;Initialized&#34; hangs on bad code. OPIK-7042&#39;s
+scope also explicitly excludes the code metric from options.
+
+Re-exposing it (with pre-submit syntax validation, dataset-column checks,
+and surfaced run errors) is tracked in OPIK-7172. The CODE type, schema arm,
+and CodeMetricConfigs component are left in place for that follow-up.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7042] [FE] refactor(new-run): prune over-explanatory comments and simplify prompt helper
+
+Delete comments that restate the code, keeping only ticket/Figma refs and
+genuine gotchas; trim the rest to their essential rationale. Also rewrite
+safelyGetPromptVariables to reuse getPromptMustacheTags and drop its dead
+`!== &#34;.&#34;` filter.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7042] [FE] refactor(new-run): move optimizer/metric icon maps to constants
+
+Static ALGORITHM_ICON_MAP / METRIC_ICON_MAP lookup tables don&#39;t belong in a
+component file — move them (and the IconConfig type) into constants/optimizations
+next to the existing option lists so they&#39;re reusable. Also folds in the
+new-run sidebar shell/form split.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7042] [FE] fix(new-run): stop form buttons from submitting; metric title above box
+
+The new-run form wrapped its whole body in a &lt;form&gt;, so every native &lt;button&gt;
+inside (dropdowns, settings, prompt actions) defaulted to type=&#34;submit&#34; and
+submitted on click. Move the body outside a standalone &lt;form id&gt; and link only
+the &#34;Optimize prompt&#34; button via form={id}, so nothing else can submit it.
+
+Also move the &#34;Metric settings&#34; heading above its card (out of the box header)
+to match the Figma.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7042] [FE] fix(new-run): algorithm-model inheritance, metric defaults, compact selectors
+
+Address code-review findings on the new optimization run sidebar:
+
+- Algorithm model represents &#39;follow prompt model&#39; as unset (picker shows
+  &#39;Same as prompt · &lt;model&gt;&#39;). Stop force-seeding/syncing it to the prompt
+  model on change and on rerun, which discarded explicit choices and could
+  submit a stale/unavailable model behind an &#39;inherited&#39; label.
+- &#39;Use prompt model&#39; now clears the explicit algorithm model and works even
+  when no prompt model is selected.
+- Merge metric defaults on load so required params the saved config omitted
+  (e.g. EQUALS case_sensitive) are present — otherwise Zod rejects a field
+  with no inline error and Create silently no-ops.
+- Extract shared MetricParamErrors type (was copy-pasted across 7 files).
+- Compact model dropdown rows (h-8) + small search; align explainer icon
+  sizes; shorten G-Eval placeholders.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7042] [FE] revert(new-run): drop SelectItem size prop (to be done separately)
+
+Remove this branch&#39;s only ui/select.tsx change (the SelectItem &#39;size&#39; compact
+variant) and its two usages in the new-run sidebar. The select sizing work is
+being done separately, and this was the sole conflict with main&#39;s SelectItem
+refactor — reverting it lets select.tsx merge cleanly from main.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7042] [FE] fix(optimizations): per-field message errors + Algorithm model clear
+
+New-run sidebar:
+- Prompt messages: surface empty-content errors per message (red border +
+  inline &#34;Message is required&#34;) instead of one general banner — per-index
+  superRefine emits issues at [index, &#34;content&#34;] and validationErrors is
+  passed through to LLMPromptMessages.
+- Algorithm model: replace the &#34;Use prompt model&#34; link with an inline x clear
+  button on the field, and simplify the placeholder to &#34;Same as prompt&#34;.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-6809] [BE] test: cover trace-without-spans in experiment_items_bulk (#7409)
+
+The NPE (trace present, spans null) was already fixed via OPIK-6810
+(#7021). Add a regression test so the trace-without-spans bulk path
+stays covered.
+
+- [FE] fix(diagnostics): wire up &#34;View billing&#34; link in settings dialog (#7410)
+
+The &#34;View billing&#34; control in the Diagnostics settings dialog was a
+placeholder &lt;button&gt; with no onClick handler (left as a TODO), so
+clicking it did nothing.
+
+Wire it to the existing BillingLink plugin component (already used by
+the DailyBriefing settings dialog) so it links to the workspace&#39;s Ollie
+credits page. Renders nothing in contexts without an organization
+(OSS/local), matching the DailyBriefing behavior.
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- [OPIK-6686] [BE] fix: scope prompt name uniqueness to project (#7400)
+
+* Make prompt name unique within project not workspace
+
+* test(prompt): use podam project names and full round-trip assert; reorder migration constraint swap
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [NA] [BE][FE] chore: sync provider model definitions (#7408)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [NA] [SDK] [GHA] test: stabilize Gemini + agentic-judge integration tests (#7405)
+
+Three related changes to stop provider-driven flakiness in the real-model
+integration suites:
+
+- Agentic LLM-judge tests: run the Anthropic lanes against claude-sonnet-4-6
+  instead of claude-haiku-4-5. On the agentic path (tools in the request, so
+  response_format is best-effort) Haiku wrapped verdicts in prose/```json
+  fences; Sonnet follows the structured-output contract reliably (the one-shot
+  suite already used Sonnet).
+- GenAI + ADK test matrices: run only the oldest and newest supported Python
+  versions (3.10, 3.14). These suites make live Vertex AI calls against the
+  shared opik-sdk-tests GCP project; the full 3.10-3.14 matrix re-multiplied
+  those calls into 429 RESOURCE_EXHAUSTED. Endpoints cover version-specific
+  breakage at a fraction of the request volume; max-parallel cap kept.
+- Remove the broken GenAI rate-limit retry helpers: _is_rate_limit_error
+  checked exception.response.status_code, which raises AttributeError on
+  google-genai&#39;s ClientError (no such attribute), so the retry crashed instead
+  of retrying. With the matrix trim as the 429 mitigation, the dead helper and
+  its decorators are removed rather than repaired.
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7162] [SDK] fix: keep source dataset name until migrate succeeds (temp destination + rename-on-success) (#7354)
+
+* [OPIK-7162] [SDK] fix: keep source dataset name until migrate succeeds (temp destination + rename-on-success)
+
+Reverse the migrate-dataset ordering so the source keeps its name for the
+entire copy. The destination is built under a temp name (&lt;name&gt;__migrating);
+only after the copy is proven complete does the name handoff run: source -&gt;
+&lt;name&gt;_v1, then promote the temp destination -&gt; &lt;name&gt;. The two renames are
+ordered source-away-then-destination-in so UNIQUE(workspace_id, name) never
+trips.
+
+A failed run now leaves the source untouched and only a discardable temp
+behind, making re-runs safe and idempotent: a stale &lt;name&gt;__migrating from a
+prior failed run is discarded and the copy restarts from scratch. Resuming
+from the temp&#39;s partial progress (reuse instead of discard) is the follow-up
+tracked in OPIK_7168.
+
+Implements OPIK-7162.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(migrate): prove temp ownership before discard, tolerate delete race, guard same-project
+
+Address PR #7354 review findings:
+
+- DiscardStaleTemp could delete a real user dataset that merely shared the
+  &lt;name&gt;__migrating name. CreateDestination now stamps a TEMP_MIGRATION_MARKER_TAG
+  (&#34;opik-migrate-temp&#34;); the discard preflight only reclaims a dataset that
+  carries the marker (proof it&#39;s ours) and raises ConflictError otherwise.
+  PromoteDestination re-passes the source&#39;s original tags, stripping the marker
+  from the final dataset.
+- The best-effort DiscardStaleTemp delete now swallows a 404 (temp already gone)
+  and continues instead of aborting the run; other ApiErrors still propagate.
+- Guard against from_project == to_project: dataset names are unique
+  workspace-wide, so migrating into the same project is a self-colliding no-op;
+  reject it up-front with a clear ConflictError.
+
+Tests: marker-proven discard, unmarked name collision -&gt; ConflictError,
+same-project guard, and create-stamps / promote-strips the marker tag.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(migrate): guard same-project even when --from-project is omitted
+
+The same-project check only fired when --from-project was explicitly passed.
+But resolve_source populates the source&#39;s actual project (project_name) even
+when the flag is omitted, so a source that lives in the destination project
+slipped through. Add an authoritative post-resolve guard: if the resolved
+source project equals --to-project, abort with a clear ConflictError
+explaining the no-op (names are unique workspace-wide). A workspace-scoped
+source (project_name is None) has no single project to collide with, so
+workspace-scoped -&gt; project migrations still proceed.
+
+Tests: omitted-flag source-in-destination-project raises; workspace-scoped
+source into a project is allowed.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(migrate): validate resume-name fields loaded from checkpoint
+
+The v2 resume handles (source_dataset_id / source_name / temp_dest_name)
+were loaded from the on-disk checkpoint without type validation, so a
+hand-edited non-string would flow into client.get_dataset(name=...) and
+stream_dataset_items(dataset_name=...) and hit the API. Add _require_opt_str
+(mirrors the existing _require_str_list) so a malformed value raises and
+load_or_create falls back to a fresh checkpoint — same corrupt-recovery
+contract the id collections and dataset_phase_done already follow.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(migrate): strip temp marker on promote by passing explicit tag list
+
+Live E2E against a real backend surfaced that the migration marker
+(opik-migrate-temp) leaked onto the final promoted dataset when the source
+had no tags. The BE treats update_dataset(tags=None) as &#34;leave tags
+unchanged&#34;, so PromoteDestination re-passing the source&#39;s None tags never
+overwrote the marker stamped at create time. Pass tags as an explicit list
+(None -&gt; []) so the promote PUT actually clears it.
+
+Strengthened the unit test to assert the concrete promote tag list (== [] for
+a tagless source; == originals for a tagged source), not just marker absence —
+the old `(tags or [])` assertion masked the None-vs-[] distinction that the
+live BE is sensitive to.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* style(migrate): ruff-format the planner test (tagged-source case)
+
+Formatting-only: wrap the long _DatasetRow(...tags=...) line the new
+tagged-source promote test introduced. No behavior change.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [NA] [SDK] test: add streaming coverage for Groq integration (#7387)
+
+* [NA] [SDK] test: add streaming coverage for Groq integration, drop dead constant
+
+Adds sync/async tests exercising track_groq&#39;s stream=True path (chunk
+aggregation, x_groq usage parsing) which had no coverage after #7341
+merged, and removes RESPONSE_KEYS_TO_LOG_AS_OUTPUT, an unused constant
+in groq_chat_completions_decorator.py.
+
+Co-Authored-By: Claude Sonnet 5 &lt;noreply@anthropic.com&gt;
+
+* test(groq): assert exact x_groq.usage values in streaming tests
+
+usage=ANY_DICT didn&#39;t verify the x_groq.usage fallback in
+chat_completion_chunks_aggregator actually propagates the real token
+counts. Use ANY_DICT.containing() rather than an exact dict match,
+since try_build_opik_usage_or_log_error duplicates fields under
+original_usage.* — verified empirically that an exact-dict assertion
+would have failed against real output.
+
+* test(groq): drive streaming tests through http_client transport, not private _post
+
+Replaces monkeypatching client.chat.completions._post (private) and
+manually constructing groq.Stream/AsyncStream with the SDK&#39;s
+documented http_client override plus httpx.MockTransport. The mock
+now only fakes the wire response; _post, header/request construction,
+and Stream/AsyncStream construction all run for real.
+
+* test(groq): add real-API e2e streaming tests
+
+Adds sync/async tests that hit the actual Groq API (gated behind the
+existing ensure_groq_configured fixture, previously unused) to
+validate the streaming path against real response shapes rather than
+only our hand-built SSE fixtures — in particular whether x_groq.usage
+is really present on the terminal chunk as assumed.
+
+Mirrors the existing openai/anthropic real-API test pattern in this
+suite; local runs without GROQ_API_KEY fail loudly via the fixture,
+same as those providers. CI already injects the secret in
+lib-groq-tests.yml.
+
+* Revert &#34;test(groq): add real-API e2e streaming tests&#34;
+
+This reverts commit c2eaacf7bcfe4b3028fc9797fd01d9e951e58cfd.
+
+* Reapply &#34;test(groq): add real-API e2e streaming tests&#34;
+
+This reverts commit 8098856d2582a75f5b24cd8665521b5b91d4f0a4.
+
+* [NA] [SDK] test: un-skip langchain Groq usage-logging test
+
+The Groq credentials/billing issue blocking this test in CI since
+April is now resolved.
+
+* test(groq): replace mocked happy-path tests with real-API e2e coverage
+
+The mocked streaming and non-streaming happy-path tests exercised the
+same code paths as the real-API e2e tests added earlier, with less
+confidence (hand-built fixtures vs actual API responses). Removes:
+- test_groq_chat_completions_create__happyflow (+ project_name variant)
+- test_groq_chat_completions_create__async__happyflow
+- the two mocked stream_mode_is_on tests (already redundant with the
+  e2e stream tests)
+
+Adds real-API e2e coverage for the non-streaming path (sync + async)
+to fill the gap left by removing the non-streaming mocked tests.
+
+Keeps the error-path test mocked, since reliably forcing a real API
+failure isn&#39;t practical — this is the one case that genuinely needs
+mocking rather than duplicating what e2e now covers.
+
+---------
+
+Co-authored-by: Claude Sonnet 5 &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7247] [BE] Fix duplicate experiment items in test suite detail view (#7388)
+
+* [OPIK-7247] [BE] Fix duplicate experiment items in test suite detail view
+
+Add LIMIT 1 BY dedup to aggregated-branch lookup JOINs that resolve
+dataset_item_id to stable IDs via dataset_item_versions.
+
+The LEFT JOIN dataset_item_versions FINAL matches multiple rows per
+experiment item when the same physical id appears across multiple
+dataset versions (which happens whenever items are edited, since each
+version row keeps id == dataset_item_id). Without dedup, the
+groupArray that builds experiment_items_array captures N identical
+copies per item (N = number of dataset versions), causing the UI to
+render the same trial result multiple times.
+
+The raw branch was already protected by LIMIT 1 BY ei.id; this commit
+adds the same protection to the 3 aggregated-branch locations in
+DatasetItemVersionDAO and ExperimentAggregatesDAO.
+
+Includes a regression test that edits dataset items across multiple
+versions and verifies experiment items are not duplicated after
+aggregation.
+
+* Revision: Add parameterized regression test for OPIK-7247
+
+Parameterized test covering the full matrix of dataset vs test suite
+and single-trial vs multi-trial (runsPerItem=3) on multi-version
+datasets. Verifies experiment item count is preserved exactly after
+aggregation — no duplication from the lookup JOIN, and multi-trial
+experiments retain the correct number of trials per item.
+
+* Revision 2: Address review feedback
+
+- Add SQL comment above each LIMIT 1 BY eia.id explaining why arbitrary
+  pick is safe (all dupes resolve to the same stable_dataset_item_id)
+- Replace .collect(Collectors.toList()) with .toList() in test
+
+* Revision 3: Split tests into branch-free parameterized methods
+
+Replace single parameterized test with if-branching into two clean
+parameterized tests (dataset vs test suite), each parameterized by
+runsPerItem only. No conditional logic, no unused variables.
+
+- [DND-1328] [HELM] Add helm-unittest coverage to the opik Helm chart (#7261)
+
+- [BE] fix: apply above_128k and above_272k tier pricing in cost calculation (#7347)
+
+Follow-up to #7023, which introduced the whole-prompt above_200k_tokens
+tier for Gemini 2.5 Pro / Claude Sonnet 4.5. LiteLLM&#39;s model prices JSON
+also publishes above_128k_tokens rates (Gemini 1.5 Flash — 2x at 128k) and
+above_272k_tokens rates (OpenAI GPT-5.4/5.5 families and their Azure-hosted
+twins registered by #7262 — 2x input, 1.5x output at 272k). Opik silently
+ignored both tiers, undercharging every above-threshold request.
+
+Add plumbing symmetric to the 200k tier: parse each *_above_NNNk_tokens
+field into ModelPrice, and have effectiveInputPrice / effectiveOutputPrice
+walk the applicable thresholds descending (272k -&gt; 200k -&gt; 128k -&gt; base)
+so the highest matching tier wins. Cache-side tier rates for 128k / 272k
+are not published by LiteLLM at those thresholds, so cache handling stays
+200k-only.
+
+Two additional call sites also had to switch from inputPrice() / outputPrice()
+to the effective helpers: textGenerationCost and textGenerationWithCacheCostOpenAI
+both bypassed the tier logic before, which is why the 272k GPT-5.4/5.5
+rates never took effect even though ModelPrice knew about them. Cache-side
+tier for OpenAI now also routes through effectiveCacheReadInputTokenPrice.
+
+Reachable models today: gemini/gemini-1.5-flash at 128k; every OpenAI and
+Azure gpt-5.4 / gpt-5.5 (and *-pro) variant at 272k — 17 flagship models
+whose above-threshold bill just got closer to reality.
+
+Parameterized tests added mirroring the existing 200k Gemini test: at
+threshold uses base, above threshold uses tier, for both new thresholds.
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [OPIK-7168] [SDK] feat: resume interrupted opik migrate from a local checkpoint (#7358)
+
+* [OPIK-7168] [SDK] feat: resume interrupted opik migrate from a local checkpoint
+
+Add per-experiment checkpoint/resume to `opik migrate dataset` so an
+interrupted run (crash, network drop, OOM) resumes from the last completed
+experiment instead of restarting.
+
+- New MigrationCheckpoint store: keyed by workspace+project+dataset, written
+  adjacent to the audit log, atomically flushed after every completed
+  experiment so it survives an uncatchable OOM SIGKILL. Corrupt/foreign-schema
+  files start fresh; deleted on full success.
+- Cascade skips already-completed experiments and seeds the progress bar so a
+  resumed run renders at the right percentage, not 0.
+- An experiment interrupted mid-flight has its partial destination data
+  (traces -&gt; spans cascade on the BE, plus a possibly-orphaned experiment row)
+  deleted before it is re-migrated, so re-runs leave no duplicates. The
+  backend does not cascade-delete on re-migrate, so the SDK does it client-side.
+- Unit tests cover resume, skip-completed, re-migrate-incomplete, progress
+  seeding, lifecycle, and corrupt-file tolerance. Docs updated.
+
+Implements OPIK-7168.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(migrate): close resume-cleanup gaps from PR review
+
+Address Baz review findings on the checkpoint/resume path:
+
+- Record + flush destination trace ids to the checkpoint INSIDE
+  _copy_traces_and_spans, before the backend flush that persists them, so a
+  crash anywhere from the trace flush through the span-copy phase leaves the
+  ids recorded for the next run&#39;s cleanup (previously recorded only after the
+  copy returned, leaving that window uncovered → duplicates on resume).
+- Delete the interrupted experiment&#39;s destination row by a recorded
+  dest_experiment_id instead of matching by name. Experiment names aren&#39;t
+  unique in the destination dataset, so a name match could delete a peer. The
+  id is minted in the cascade and checkpointed before the row is created;
+  create_experiment/recreate_experiment gain an optional experiment_id.
+- Harden load_or_create against a malformed in_flight payload (falls back to
+  fresh instead of raising KeyError/TypeError), matching the existing
+  corrupt-JSON / foreign-schema recovery.
+
+Tests updated for delete-by-id, no-experiment-row-yet, before-backend-write
+ordering, malformed-in_flight, and dest_experiment_id round-trip.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(migrate): validate checkpoint id lists + document experiment_id
+
+Follow-up to PR review on the previous fix commit:
+
+- load_or_create now validates that completed_experiment_ids and the in-flight
+  dest_trace_ids are lists of strings. set()/list() silently split a bare
+  string into characters without raising, so a corrupt value would seed the
+  wrong completed set and make the cascade skip or re-run the wrong
+  experiments; such shapes now fall back to a fresh checkpoint.
+- Document the new experiment_id arg in recreate_experiment&#39;s Args block,
+  matching its fully-documented siblings.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* test(migrate): add E2E resume test with deterministic mid-cascade crash
+
+The unit tests cover the resume logic against a stand-in client; this adds
+the missing end-to-end coverage for the real crash→resume round-trip against
+a live backend — the scenario the feature exists for.
+
+- New test-only fault-injection hook in the cascade: when
+  OPIK_MIGRATE_CRASH_AFTER_EXPERIMENT=N is set, the process os._exit(137)s
+  (uncatchable, OOM-like) partway through experiment N, after its traces are
+  written + checkpointed but before the experiment row is created. No-op in
+  production (single os.environ.get when unset).
+- run_migrate_cli gains an extra_env param to inject that flag into the child.
+- test_migrate_dataset_resume_e2e: seed a multi-experiment source, crash
+  mid-cascade, assert the checkpoint survived with partial progress, then
+  re-run and assert the destination has exactly one experiment per source
+  (no duplicates — find_destination_experiment raises on &gt;1), the interrupted
+  experiment&#39;s partial traces were cleaned up, and the checkpoint is deleted.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* feat(migrate): resume dataset-phase-complete migrations without duplicating
+
+End-to-end resume was broken: on re-run the plan re-emitted RenameSource -&gt;
+CreateDestination -&gt; ReplayVersions, but the first run already did all three,
+so resume collided on the rename (&lt;name&gt; already renamed to _v1, destination
+already created) and never reached the resumable experiment cascade. Even past
+the collision, ReplayVersions&#39; version_remap/item_id_remap live only in memory
+and the cascade can&#39;t rewrite experiment FKs without them.
+
+Fix — resume from a completed dataset phase:
+- Checkpoint records dataset_phase_done + the source dataset id and its
+  post-rename name, set once the cascade first starts on a fresh run.
+- On resume, build_dataset_plan emits a cascade-only plan: it resolves the
+  source as &lt;name&gt;_v1 (the original name now points at the destination) and
+  rebuilds version_remap/item_id_remap/optimization_id_remap READ-ONLY from the
+  already-migrated destination (reconstruct_remaps) — versions pair by
+  chronological index, item ids are identity (backend copy_from preserves
+  dataset_item_id), optimizations match by name. Nothing is re-written, so no
+  versions are duplicated.
+- A version-count mismatch (e.g. crash mid-replay) fails loud with a
+  delete-and-restart message rather than mis-pairing.
+
+The user re-runs the exact same command; the tool detects the resume from the
+checkpoint. Verified end-to-end against an ad-hoc PR env: crash at experiment
+5/9, re-run -&gt; 9 destination experiments, no duplicates, interrupted
+experiment&#39;s partial traces cleaned up. Unit tests cover the reconstruction
+pairing/identity/fallback/mismatch paths; the E2E test asserts the full
+crash-&gt;resume round-trip.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(migrate): tolerate a non-integer crash-injection env value
+
+_maybe_crash_for_resume_test called int() on
+OPIK_MIGRATE_CRASH_AFTER_EXPERIMENT directly, so a non-integer value would
+raise ValueError and abort a real migration mid-cascade. Treat an unparseable
+value as unset (no-op), matching the hook&#39;s existing unset contract — a
+test-only knob must never crash a real run.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* chore: drop throwaway manual test seed script from PR
+
+manual_test_seed_opik_7168.py is a local manual-test helper (seeds the ad-hoc
+env for the crash/resume test); it was swept in by git add -A and doesn&#39;t
+belong in the SDK. Keep it untracked.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(migrate): close resume-flag gaps from PR review
+
+- Mark dataset_phase_done right after CascadeOptimizations completes (in
+  _apply_action), not at the start of _cascade_experiments. Closes the window
+  where a crash between the optimizations action and the cascade boundary left
+  the flag false, sending the next run down the full-plan branch and colliding
+  on the already-applied rename.
+- load_or_create now requires dataset_phase_done to be a real bool; a truthy
+  non-bool (e.g. the string &#34;false&#34;, a list) falls back to a fresh checkpoint
+  instead of forcing a resume plan that skips rename/create/replay. Matches the
+  strict validation on the id-list fields.
+- Rename the reconstruct tests to include the expected-result suffix per the
+  python-sdk testing convention.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* refactor(migrate): address human review — checkpoint location + test-only crash seam
+
+Two items from @alexkuzmik&#39;s review:
+
+- Checkpoint now lives at a fixed ~/.opik/migrate-checkpoints/ (keyed by
+  workspace+project+dataset), independent of cwd/--audit-log. Previously it sat
+  next to the audit log (cwd), so re-running from a different folder found no
+  checkpoint and silently restarted — resume was broken for that case.
+- The test-only crash-injection hook is gone from production experiments.py
+  (removed _maybe_crash_for_resume_test, its env var, the processed_index param,
+  and the os import). The E2E resume test now injects the deterministic crash
+  via a test-owned sitecustomize.py on the subprocess PYTHONPATH, which also
+  redirects the checkpoint dir into tmp_path — no test-only logic in the product.
+
+A globally-robust checkpoint location (CI ephemeral HOME, container-OOM needing
+a mounted volume, OPIK_MIGRATE_CHECKPOINT_DIR override) is tracked as a follow-up.
+
+397 unit tests pass; ruff + mypy clean.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* fix(migrate): checkpoint I/O is non-fatal + E2E test hardening
+
+Address PR review on the ~/.opik checkpoint move:
+
+- A checkpoint is only a resume aid, so it must never abort a healthy
+  migration. load_or_create now returns None when the location can&#39;t be
+  resolved (e.g. Path.home() raises on a homeless CI/container), and flush()
+  swallows OSError (read-only / full disk) with a warning — the run continues,
+  just not resumable from there. The CLI treats None as &#34;no resume support&#34;.
+- E2E: wrap the post-resume destination reads in synchronization.until so
+  eventual-consistency lag doesn&#39;t flake the assertion; derive seeded
+  experiment names from the dataset_name fixture instead of random_chars.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7262] [BE] observability: metrics for project last-updated flush + events consumed by listeners (#7384)
+
+* [OPIK-7246] fix: buffer projects.last_updated_trace_at in Redis, flush to MySQL periodically
+
+ProjectEventListener wrote projects.last_updated_trace_at synchronously on every
+TracesCreated/TracesUpdated event (via ProjectService.recordLastUpdatedTrace) on an
+unbounded virtual-thread AsyncEventBus, funneling concurrent WRITE transactions onto a
+single hot projects row and producing MySQLTransactionRollbackException (deadlock /
+lock-wait) and EOFException / ConnectException on the ingestion path.
+
+Buffer the per-project maximum timestamp in a Redis ZSET (addIfGreater, member
+&#34;workspaceId:projectId&#34;, score = epoch millis) and flush the accumulated maxima to MySQL
+under a best-effort distributed lock every 30s (ProjectLastUpdatedFlushJob). Many trace
+writes per project collapse into one batched UPDATE per flush from a single flusher,
+removing the hot-row contention and connection churn. Gated behind projectLastUpdatedFlush
+(default off); the synchronous MySQL path remains the fallback. Monotonic (forward-only
+guard preserved), idempotent, and fails open on Redis errors.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] fix: eliminate flush read-then-remove race via atomic rename-drain
+
+Addresses PR review: flushLastUpdatedTraces read entries then removeAll&#39;d them, so a
+concurrent recordLastUpdatedTrace (addIfGreater) between the read and the removal could be
+dropped, leaving the marker stale. Atomically renamenx the live buffer into a snapshot key
+(project:last-updated-trace:flushing); writers immediately continue on a fresh live key and
+the drain owns the snapshot exclusively, so its removeAll cannot race a new write. A snapshot
+left by an interrupted flush is drained on the next cycle (idempotent; the DB write only moves
+forward). Uses only Redisson APIs (isExists/renamenx/entryRange/removeAll) — no raw Redis/Lua.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] fix flush drain re-read, use builder for parsed record, Javadoc
+
+- Drain the flushing snapshot one page at a time, reading the next page only after the
+  current page&#39;s write + removeAll complete. The previous Flux.expand pre-fetched the next
+  entryRange(0, batchSize-1) before removal, so the same top entries could be read and
+  written to MySQL repeatedly until the iteration cap stopped the loop (idempotent but
+  wasteful). Removal now gates pagination, guaranteeing forward progress.
+- ParsedLastUpdatedTrace: @Builder(toBuilder = true) + @NonNull, built via builder.
+- Convert explanatory block comments to Javadoc.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] ProjectServiceImpl: explicit @Inject constructor for @Config param
+
+@Config is placed directly on the constructor parameter rather than relying on Lombok&#39;s
+generated constructor to carry it. Replaces @RequiredArgsConstructor(onConstructor_ = @Inject)
+with an explicit constructor (same pattern as ProjectLastUpdatedFlushJob).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] separate concerns: buffer-write service, MySQL-only ProjectService, drain in job
+
+Refactor per review:
+- ProjectServiceImpl now only does the MySQL project update (recordLastUpdatedTrace);
+  dropped the Redis/config dependencies, the buffering branch and the drain. Reverted to
+  the Lombok constructor (no @Config here anymore).
+- New ProjectLastUpdatedTraceBufferService (domain) owns the ingestion-path Redis buffer
+  write (addIfGreater) and the enabled/disabled decision; ProjectEventListener uses it.
+- ProjectLastUpdatedFlushJob owns ProjectLastUpdatedFlushConfig and the Redis read/drain
+  (renamenx snapshot + paged entryRange/removeAll + parse) and calls ProjectService for the
+  MySQL write.
+- Tests: add ProjectLastUpdatedTraceBufferServiceTest; move drain coverage into
+  ProjectLastUpdatedFlushJobTest; remove ProjectServiceLastUpdatedTraceTest.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] address review: flush logic in service, thin job, sync writes, validation
+
+Per andrescrz review:
+- Move all flush/Redis logic into ProjectLastUpdatedTraceBufferService (now owns record()
+  + flush() + the ZSET key constants). The job is thin: scheduling, distributed lock and
+  interruption only, delegating to bufferService.flush().
+- Use the synchronous StringRedisClient so record() no longer hides an async side-effect
+  behind a void signature; the drain becomes a simple sequential loop.
+- interrupt() now disposes the in-flight flush subscription, not just the schedule.
+- Null-safe argument handling on public methods via CollectionUtils.isEmpty.
+- Config: remove Java defaults (single source of truth is config.yml), add @Max bounds;
+  key constants moved out of config into the service.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] add projectLastUpdatedFlush block to config-test.yml
+
+Removing the Java defaults made the config fields @NotNull with no fallback, so every full
+config file must define the block. config-test.yml lacked it, failing config validation at
+resource-test bootstrap (TestHttpClientUtils static init). Add the block with test values.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] address review: interface validation, flush log wording, interrupt test
+
+- Remove @NonNull from the ProjectLastUpdatedTraceBufferService interface method (validation
+  is an impl detail); keep it on the implementation.
+- flush() count is markers processed, not rows updated (the MySQL write is a monotonic UPDATE
+  that skips already-ahead rows). Relabel the job log &#34;wrote&#34; -&gt; &#34;processed&#34; and document it.
+- Add a job test asserting interrupt() disposes the in-flight flush subscription.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [NA] [BE] observability: metrics for project last-updated flush + events consumed
+
+Adds OpenTelemetry metrics (meter opik.project_last_updated_flush):
+- buffer: opik.project_last_updated_flush.buffered (counter, tag result=ok|error) —
+  markers buffered to Redis on the ingestion path (surfaces the previously log-only,
+  fail-open Redis write failures).
+- flush: .markers (counter) processed per flush; .run (counter, tag
+  result=success|skipped_lock|error) and .duration (histogram, ms) for the job.
+
+Also adds opik.event.consumed (counter, tag listener) in EventInterceptor so every event
+consumed by a listener is counted, not just errors (opik.event.error).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] address review: propagate record() errors, decouple job scheduling, integration tests
+
+- record() lets Redis failures bubble to the caller instead of swallowing them,
+  so ProjectEventListener owns the handling like the synchronous fallback branch.
+- flush()&#39;s drain loop now conditions on the page-size check instead of an
+  internal while(true)/break, avoiding the appearance of a potential infinite loop.
+- Split &#34;buffering enabled&#34; from &#34;job scheduled&#34; via a new jobEnabled flag, so
+  tests can exercise the buffer/flush and job wiring deterministically without
+  racing the Quartz schedule.
+- Replaced the mock-heavy unit tests with black-box/integration coverage:
+  ProjectLastUpdatedTraceBufferServiceTest drives record()/flush() against real
+  Redis/MySQL and asserts through the project API; ProjectLastUpdatedFlushJobTest
+  is a single happy-path smoke test mirroring ExperimentProjectMigrationJobTest.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] move ProjectLastUpdatedFlushJobTest to its job&#39;s package
+
+The Job class lives in api.resources.v1.jobs, matching its sibling
+ExperimentDenormalizationJob/Test (same periodic-flush-job shape). The domain
+package is for migration jobs tightly coupled to a domain migration service,
+which this isn&#39;t.
+
+Dropped the dependency on PENDING_SET_KEY (package-private in the domain
+package) by polling via repeated doJob() invocations until the project API
+reflects the flush, instead of peeking at the buffer&#39;s internal Redis key.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* [NA] address review: rename opik.event.consumed to reflect actual semantics
+
+Several listeners (TraceThreadListener, TraceDeletedListener,
+EnvironmentAutoCreateListener) subscribe to a reactive chain internally and
+return before it completes, so the interceptor only observes dispatch of the
+synchronous portion, not end-to-end processing. Renamed to opik.event.invoked
+and clarified the description accordingly; safe since the metric is new and
+unmerged, no consumers depend on the old name.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* [NA] address review: count buffered markers per-item, not whole-batch on error
+
+A mid-batch addIfGreater failure previously counted the entire batch as
+result=error (and, on success, the whole batch as ok), overcounting the
+opik.project_last_updated_flush.buffered metric. Count each marker once by its
+actual outcome: succeeded markers stay ok, the failing one is error, and the
+un-attempted remainder isn&#39;t counted (we rethrow on first failure).
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* [NA] address review: reuse METER_NAME, drop overlapping run counter
+
+- Extract METER_NAME constant in ProjectLastUpdatedFlushJob and build metric
+  names from it; reuse it for the buffered/markers metric names in
+  ProjectLastUpdatedTraceBufferServiceImpl (no repeated literal prefix).
+- Drop runCounter in favor of the runDuration histogram tagged by result
+  (success|error|skipped_lock) — the histogram&#39;s per-attribute _count already
+  gives run counts, so the separate counter was redundant.
+- Clarify markers metric is a monotonic cumulative throughput counter (not a
+  gauge) in its description/comment.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-6673] [CI] feat: add hadolint Dockerfile linting to CI (#7352)
+
+* [OPIK-6673] [CI] feat: add hadolint Dockerfile linting to CI
+
+Add hadolint to the unified Code Quality pipeline so every Dockerfile is
+linted on each PR (changed-files-only) via the existing pre-commit-driven
+matrix in code_quality.yml. New violations on changed Dockerfiles fail the
+check with inline annotations.
+
+- .pre-commit-config.yaml: hadolint-docker hook (Docker image, no local
+  binary), explicit files: regex so the CI matrix detector routes changed
+  Dockerfiles to it.
+- .hadolint.yaml: default rule set, failure-threshold info, no global
+  ignores; the four version-pinning rules that would rot against
+  rolling-channel base-image repos are suppressed per-line with a reason.
+- Fix all pre-existing violations across the 4 non-clean Dockerfiles:
+  merge consecutive RUNs (DL3059), add pipefail SHELL (DL4006; /bin/ash
+  for the alpine python-backend), find -print0 | xargs -0 (SC2038).
+- CONTRIBUTING.md: how to run hadolint locally.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(ci): add hadolint CI summary description; pin pip floor instead of ignoring DL3013
+
+- scripts/precommit-hook-descriptions.tsv: add hadolint → &#34;Lint Dockerfiles&#34;
+  so the Code Quality timing/skipped tables render a description for it.
+- guardrails Dockerfile: replace the DL3013 ignore with a real fix — float pip
+  from a &gt;=24 floor (Ubuntu 22.04 ships pip ~22, too old for the pinned
+  torch/transformers/hf_xet wheels). A lower bound doesn&#39;t rot, and it satisfies
+  DL3013 honestly. Remaining suppressions are only the rolling-channel OS-package
+  pin rules (DL3008/DL3018/DL3033).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* chore(ci): drop .hadolint.yaml — default threshold already info, no overrides
+
+The config only restated hadolint&#39;s default failure-threshold (info) and held
+no global ignores (the deliberate exceptions are inline `# hadolint ignore=`
+comments in the Dockerfiles). With nothing repo-specific to configure, the file
+was pure overhead. Removing it keeps identical behavior — hadolint falls back to
+its info default — and drops a file reviewers would otherwise have to reason about.
+Docs updated to match.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [NA] [DEV] fix: point cost-api session auth at comet-backend in platform mode (#7399)
+
+In PLATFORM_ENABLED mode, export PLATFORM_BASE_URL=http://localhost:${EM_BACKEND_PORT} for cost-api so its session-delegation auth (require_workspace -&gt; POST {platform_base_url}/opik/auth-session) targets comet-backend (the React service), not the Opik backend (:8080 default, which doesn&#39;t serve /opik/auth-session -&gt; the AI-Spend endpoints 403). No-op in OSS mode. Exported rather than placed in the env prefix because an expanded ${..:+name=val} prefix word is parsed by bash as the command, not an assignment.
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7152] [SDK] fix: bound migrate cascade search page size + adaptive shrink (#7330)
+
+The dataset migrate cascade read full-fidelity traces/spans with the SDK
+default page size (2000), driving a heavy backend read that pushed the
+container&#39;s RSS past its limit via native/off-heap read buffers and got
+the pod OOM-killed mid-stream (surfacing to the SDK as RemoteProtocolError).
+The read path is the culprit (ClickHouse SELECT throughput, not the
+already-batched write path).
+
+- search_spans / search_traces gain a public max_batch_size param (default
+  unchanged at 2000) capping the per-request page size.
+- read_and_parse_full_stream halves the page and retries the same cursor on
+  size-correlated connection/timeout errors (RemoteProtocolError, ReadTimeout,
+  ConnectError), floored at 50 — a global resilience net for all searches.
+- The migrate cascade passes MIGRATION_SEARCH_PAGE_SIZE=500 to both bulk reads,
+  bounding the read firehose without ballooning the request count.
+
+Implements OPIK-7152: opik migrate dataset cascade fails on large datasets.
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Update versions to 2.1.20 and bump base version to 2.1.21
+
+- [OPIK-7231] [BE] feat: ingest cipx spend blocks into dedicated table with derived allocation (#7392)
+
+* [OPIK-7231] [BE] feat: ingest cipx spend blocks into dedicated table with derived allocation
+
+Retrieval used to ARRAY JOIN cipx_spends.blocks (~363 blocks/span) and re-derive
+per-span token allocation with window functions on every request. Ingestion now
+writes one row per block into the new cipx_spend_blocks table with the derived
+columns (tier, lane, bd_lane, label, is_definition, alloc) computed once in Java,
+plus residual rows for billed tiers no block absorbs, so retrieval becomes plain
+GROUP BYs. block_idx (raw array position; 65531 + tier ordinal for residuals)
+keeps the ReplacingMergeTree key unique and replay-deduplicable.
+
+- drop cipx_spends.blocks (000097); create cipx_spend_blocks (000098)
+- recreate cipx_trace_identities with user_uuid in the sorting key (000099)
+- new MySQL cipx_user_mappings (000088), populated from trace identity on
+  create and update, for email -&gt; user_uuid resolution at retrieval
+- span ingestion is create-only (cipx call data is immutable): drop
+  SpanCostIntelligenceChanged and the span-update resolve path; the trace
+  identity update path stays
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* refactor
+
+* increment migration version
+
+* refactor(cipx): add builder to UserMapping per review
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* refactor
+
+* address comments
+
+- [NA] Add opt-in Comet EM/Platform stack to dev-runner (#7389)
+
+- [OPIK-7258] [GHA] fix: regenerate Helm chart README in release version-bump commit (#7377)
+
+* [OPIK-7258] [INFRA] fix: regenerate Helm chart README in release version-bump commit
+
+The release workflow rewrites Chart.yaml version/appVersion and pushes to
+main, but never regenerated the helm-docs-derived README badges, so the
+README lagged one release. The next chart-touching PR then tripped the
+helm-docs / update_helm_readme.yaml gate over a stale badge.
+
+Regenerate the README with the same losisin/helm-docs-github-action used by
+update_helm_readme.yaml (git-push: false) right after the Chart.yaml bump and
+fold it into the existing version commit. Also clears the current drift
+already on main (README badge -&gt; 2.1.18).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs(helm): regenerate chart README badge to 2.1.19 after main merge
+
+Main released 2.1.19 while this branch was open, so the one-time badge
+committed here (2.1.18) had drifted one release behind Chart.yaml again.
+Regenerated with the same helm-docs image the pre-commit hook uses.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7246] fix: buffer projects.last_updated_trace_at in Redis, flush to MySQL periodically (#7361)
+
+* [OPIK-7246] fix: buffer projects.last_updated_trace_at in Redis, flush to MySQL periodically
+
+ProjectEventListener wrote projects.last_updated_trace_at synchronously on every
+TracesCreated/TracesUpdated event (via ProjectService.recordLastUpdatedTrace) on an
+unbounded virtual-thread AsyncEventBus, funneling concurrent WRITE transactions onto a
+single hot projects row and producing MySQLTransactionRollbackException (deadlock /
+lock-wait) and EOFException / ConnectException on the ingestion path.
+
+Buffer the per-project maximum timestamp in a Redis ZSET (addIfGreater, member
+&#34;workspaceId:projectId&#34;, score = epoch millis) and flush the accumulated maxima to MySQL
+under a best-effort distributed lock every 30s (ProjectLastUpdatedFlushJob). Many trace
+writes per project collapse into one batched UPDATE per flush from a single flusher,
+removing the hot-row contention and connection churn. Gated behind projectLastUpdatedFlush
+(default off); the synchronous MySQL path remains the fallback. Monotonic (forward-only
+guard preserved), idempotent, and fails open on Redis errors.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] fix: eliminate flush read-then-remove race via atomic rename-drain
+
+Addresses PR review: flushLastUpdatedTraces read entries then removeAll&#39;d them, so a
+concurrent recordLastUpdatedTrace (addIfGreater) between the read and the removal could be
+dropped, leaving the marker stale. Atomically renamenx the live buffer into a snapshot key
+(project:last-updated-trace:flushing); writers immediately continue on a fresh live key and
+the drain owns the snapshot exclusively, so its removeAll cannot race a new write. A snapshot
+left by an interrupted flush is drained on the next cycle (idempotent; the DB write only moves
+forward). Uses only Redisson APIs (isExists/renamenx/entryRange/removeAll) — no raw Redis/Lua.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] fix flush drain re-read, use builder for parsed record, Javadoc
+
+- Drain the flushing snapshot one page at a time, reading the next page only after the
+  current page&#39;s write + removeAll complete. The previous Flux.expand pre-fetched the next
+  entryRange(0, batchSize-1) before removal, so the same top entries could be read and
+  written to MySQL repeatedly until the iteration cap stopped the loop (idempotent but
+  wasteful). Removal now gates pagination, guaranteeing forward progress.
+- ParsedLastUpdatedTrace: @Builder(toBuilder = true) + @NonNull, built via builder.
+- Convert explanatory block comments to Javadoc.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] ProjectServiceImpl: explicit @Inject constructor for @Config param
+
+@Config is placed directly on the constructor parameter rather than relying on Lombok&#39;s
+generated constructor to carry it. Replaces @RequiredArgsConstructor(onConstructor_ = @Inject)
+with an explicit constructor (same pattern as ProjectLastUpdatedFlushJob).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] separate concerns: buffer-write service, MySQL-only ProjectService, drain in job
+
+Refactor per review:
+- ProjectServiceImpl now only does the MySQL project update (recordLastUpdatedTrace);
+  dropped the Redis/config dependencies, the buffering branch and the drain. Reverted to
+  the Lombok constructor (no @Config here anymore).
+- New ProjectLastUpdatedTraceBufferService (domain) owns the ingestion-path Redis buffer
+  write (addIfGreater) and the enabled/disabled decision; ProjectEventListener uses it.
+- ProjectLastUpdatedFlushJob owns ProjectLastUpdatedFlushConfig and the Redis read/drain
+  (renamenx snapshot + paged entryRange/removeAll + parse) and calls ProjectService for the
+  MySQL write.
+- Tests: add ProjectLastUpdatedTraceBufferServiceTest; move drain coverage into
+  ProjectLastUpdatedFlushJobTest; remove ProjectServiceLastUpdatedTraceTest.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] address review: flush logic in service, thin job, sync writes, validation
+
+Per andrescrz review:
+- Move all flush/Redis logic into ProjectLastUpdatedTraceBufferService (now owns record()
+  + flush() + the ZSET key constants). The job is thin: scheduling, distributed lock and
+  interruption only, delegating to bufferService.flush().
+- Use the synchronous StringRedisClient so record() no longer hides an async side-effect
+  behind a void signature; the drain becomes a simple sequential loop.
+- interrupt() now disposes the in-flight flush subscription, not just the schedule.
+- Null-safe argument handling on public methods via CollectionUtils.isEmpty.
+- Config: remove Java defaults (single source of truth is config.yml), add @Max bounds;
+  key constants moved out of config into the service.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] add projectLastUpdatedFlush block to config-test.yml
+
+Removing the Java defaults made the config fields @NotNull with no fallback, so every full
+config file must define the block. config-test.yml lacked it, failing config validation at
+resource-test bootstrap (TestHttpClientUtils static init). Add the block with test values.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] address review: interface validation, flush log wording, interrupt test
+
+- Remove @NonNull from the ProjectLastUpdatedTraceBufferService interface method (validation
+  is an impl detail); keep it on the implementation.
+- flush() count is markers processed, not rows updated (the MySQL write is a monotonic UPDATE
+  that skips already-ahead rows). Relabel the job log &#34;wrote&#34; -&gt; &#34;processed&#34; and document it.
+- Add a job test asserting interrupt() disposes the in-flight flush subscription.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] address review: propagate record() errors, decouple job scheduling, integration tests
+
+- record() lets Redis failures bubble to the caller instead of swallowing them,
+  so ProjectEventListener owns the handling like the synchronous fallback branch.
+- flush()&#39;s drain loop now conditions on the page-size check instead of an
+  internal while(true)/break, avoiding the appearance of a potential infinite loop.
+- Split &#34;buffering enabled&#34; from &#34;job scheduled&#34; via a new jobEnabled flag, so
+  tests can exercise the buffer/flush and job wiring deterministically without
+  racing the Quartz schedule.
+- Replaced the mock-heavy unit tests with black-box/integration coverage:
+  ProjectLastUpdatedTraceBufferServiceTest drives record()/flush() against real
+  Redis/MySQL and asserts through the project API; ProjectLastUpdatedFlushJobTest
+  is a single happy-path smoke test mirroring ExperimentProjectMigrationJobTest.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7246] move ProjectLastUpdatedFlushJobTest to its job&#39;s package
+
+The Job class lives in api.resources.v1.jobs, matching its sibling
+ExperimentDenormalizationJob/Test (same periodic-flush-job shape). The domain
+package is for migration jobs tightly coupled to a domain migration service,
+which this isn&#39;t.
+
+Dropped the dependency on PENDING_SET_KEY (package-private in the domain
+package) by polling via repeated doJob() invocations until the project API
+reflects the flush, instead of peeking at the buffer&#39;s internal Redis key.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7041] [FE] feat: Optimization runs list — columns, Item source, Discarded + refactors (#7227)
+
+* [OPIK-7041] [FE] feat: Optimization runs list redesign + column/refactor cleanup
+
+Align the v2 Optimization runs list to the Figma (562:37189):
+- Name is the first column; add Run ID / Algorithm / Metric and reuse the
+  Experiments &#34;Item source&#34; cell (renamed from &#34;Dataset name&#34;, with the
+  missing icon tooltip). New columns ship available-but-hidden, matching the
+  Figma default-visible set (Name, Start time, Status, Pass rate, Accuracy,
+  Latency, Cost, Opt. cost).
+- Rename trial status &#34;Pruned&#34; -&gt; &#34;Discarded&#34; (v2 label only; key unchanged).
+
+Fold-in refactors (v2 only):
+- Extract OptimizationsColumns + OptimizationsToolbar; slim OptimizationsPage.
+- Drop the ghost `deploy` column and bump column-prefs keys v1 -&gt; v2.
+- Gate the 30s list polling on in-progress runs via an additive, v1-safe
+  param on the shared useOptimizationsView hook.
+- Remove the orphaned v2 DatasetNameCell.
+
+Implements OPIK-7041 (part of OPIK_6528).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(optimizations): show Item source name when dataset id is absent
+
+ItemSourceCell rendered &#34;-&#34; when the row had no linkable id, so an
+optimization row with a dataset_name but no dataset_id (the REST type
+makes it optional) lost its source label. Fall back to the name (no link)
+instead of a bare dash. Addresses PR review.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7041] [FE] fix(optimizations): gate empty state on a size=1 existence probe
+
+The runs list derived `isEmpty` from the paginated fetch gated on
+`!isTableLoading`, so a cold load with no data flashed the studio templates +
+a populated-looking table skeleton before snapping to the empty state. Decide
+emptiness from a lightweight unfiltered size=1 query instead (mirrors
+ExperimentsPage), fold that probe into `isTableLoading` so the table shows its
+skeleton while it resolves, and keep the studio templates out of the loading
+state.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7041] [FE] fix(optimizations): address final review findings
+
+- empty state: treat only a *successful* size=1 probe with total 0 as empty,
+  so a transient probe failure no longer hides real runs behind onboarding
+- polling: detect RUNNING runs workspace-wide via an active-runs probe so
+  paginating away from page 1 no longer silently stops the auto-refresh
+  (cross-page INITIALIZED / cross-tab starts documented as edge cases)
+- Algorithm / Metric cells render &#34;-&#34; instead of a blank cell when absent
+- search placeholder now matches the relabeled &#34;Item source&#34; column
+- dedupe the local in-progress statuses to the shared
+  IN_PROGRESS_OPTIMIZATION_STATUSES constant
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7041] [FE] style(optimizations): match default column widths to Figma
+
+Set the default-visible column widths to the runs-list table header in Figma
+(686:35271 inside 562:37189): Name 191, Start time 145, and Status / Pass rate /
+Accuracy / Latency / Cost / Opt. cost all 120 (previously 220 / 140 / 200 / 200 /
+180 / 180). Hidden columns (Run ID, Item source, Algorithm, Metric) keep their
+defaults — they aren&#39;t in the Figma default-visible frame.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7041] [FE] feat(optimizations): 3 onboarding cards on the runs list (Figma 1:1)
+
+The with-data runs list showed only 2 onboarding cards (a demo template + a
+hardcoded &#34;Optimize your own prompt&#34;); the Figma frame (562:37189) specifies
+three: Run a demo example, Use the Optimization studio, and Optimize via SDK.
+Rebuild StudioTemplates as the 3-card layout matching Figma — coloured icon
+chip + title + description + action link per card — and wire the SDK card to the
+same dialog the empty state uses. Removes the now-unused OptimizationTemplateCard.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7041] [FE] style(optimizations): divider between onboarding cards and the list
+
+Figma 562:37189 has a full-width horizontal separator (686:35245) between the
+&#34;Run an optimization&#34; cards and the search/table; the implementation was missing
+it. Render a Separator after the cards (gated with them, so it only shows
+alongside the onboarding section).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7041] [FE] feat(optimizations): map Metric copy + align metric cells to Figma
+
+- Metric column now maps objective_name through OPTIMIZATION_METRIC_OPTIONS
+  (new getMetricLabel) so it shows human copy (&#34;Levenshtein&#34;) instead of the raw
+  metric key, mirroring how Algorithm uses getOptimizerLabel.
+- Metric comparison cell (compact, used by the runs list) aligned 1:1 to Figma
+  562:37189: 12px baseline (muted) and current (foreground, regular weight,
+  previously 14px/bold), and the up/good trend icon uses the vivid Figma green
+  (#00D14C) via a new PercentageTrend `brightPositive` flag — scoped to the
+  green direction so negative/neutral trends keep their colors, and only the
+  compact (optimization) cell opts in, leaving KPI cards untouched.
+
+Note: the Algorithm column was empty only for runs without studio_config; it
+already resolves studio_config.optimizer.type via getOptimizerLabel for real
+runs (no code change needed).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7041] [FE] fix(optimizations): align onboarding cards + status cell to Figma
+
+Cards (686:35206): rebuilt to the Figma layout — horizontal, a solid colored
+icon chip (sky/violet/fuchsia, white icon) + title/description + a primary-blue
+link (&#34;Try template&#34; / &#34;Create optimization&#34; / &#34;View SDK guide&#34;), on a tinted
+card with a small shadow. Previously a hand-rolled vertical card with tinted
+chips and per-color links.
+
+Status (686:35286): the run status is now a neutral pill with a colored status
+dot, not a colored-background badge — running = green (#00d14c), completed /
+initialized = slate, cancelled / error = red (#ef4444), per Figma. Extracted as
+a shared OptimizationStatusTag (no existing shared cell fit run statuses:
+StatusCell is boolean, PassedCell&#39;s StatusTag is test-suite assertions) so the
+list, run-detail header and trials can render it identically.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7041] [FE] style(optimizations): vivid trend icon colors in metric cells
+
+The Pass rate / Latency / Cost comparison cells now color the trend icon with the
+vivid Figma trend palette — good = green (#00D14C), bad = red (#EF4444) — via a
+`vivid` flag on PercentageTrend (renamed from brightPositive, now covers both
+directions; neutral unchanged). Scoped to the compact metric cell, so KPI cards
+and other PercentageTrend usages are unaffected.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7041] [FE] refactor(trend): one trend color style product-wide
+
+Drop the per-cell `vivid` flag on PercentageTrend (smelly: it made the
+optimization metric cells diverge from every other trend in the product).
+PercentageTrend now always uses the Figma trend palette — good = green
+(#00D14C), bad = red (#EF4444), neutral = gray — applied to the whole tag, so
+every trend indicator (optimization cells, KPI cards, traces metrics, etc.)
+renders identically. MetricComparisonCell no longer passes a flag.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7041] [FE] refactor: route trend + status colors through shared tokens
+
+Same smell as the trend flag: the run-status dots hardcoded #00d14c / #ef4444 —
+the exact green/red PercentageTrend also hardcoded, so the two could drift. Add
+a single --color-green-bright brand token (#00d14c) and route both through it,
+reuse the existing --color-red and --light-slate tokens. No magic hexes left in
+either component; one source of truth keeps trend and status colors in sync.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7041] [FE] style(optimizations): metric cells match Figma — trend % in neutral pill
+
+Redesign the runs-list Pass rate / Latency / Cost cells to Figma
+(689:34516, 496:41663, 496:41887): the change % now sits in a neutral pill
+(bg #f8fafc / border #f1f5f9 — the same surface as the status tag) with a
+colored trend icon and muted-slate text, followed by the current value in
+foreground. Drops the old baseline-value display in compact mode.
+
+Export getTrendConfig + TREND_COLOR_CLASS from PercentageTrend so the cell
+reuses the single trend-&gt;icon/color mapping instead of re-deriving it. Only
+the compact branch changes (runs list); PercentageTrend&#39;s other consumers and
+MetricComparisonCell&#39;s full/KPICard mode are untouched.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7041] [FE] refactor(optimizations): address review feedback
+
+- PercentageTrend: stop overriding the Tag text with the bright trend color so
+  the percentage + icon keep proper contrast on the tinted tag background (baz:
+  low-contrast trend tags). The bright green now lives only in the runs-list
+  metric pill, where the icon sits on a neutral surface.
+- Run-detail header reuses the shared OptimizationStatusTag instead of its own
+  STATUS_TO_VARIANT_MAP, so list and header render identical status colors.
+- Drop the duplicate getMetricLabel in lib/optimizations.ts; reuse the shared
+  helper from lib/optimization-config.ts.
+- Extract DEFAULT_METRIC_COLUMN_WIDTH for the metric columns (was 120 hardcoded
+  on each column def).
+- Extract getStudioCardConfigs so the populated runs-list cards and the empty
+  state share one card definition (copy/icon/routing); each view keeps its own
+  visual treatment.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7041] [FE] fix(optimizations): address review feedback (round 2)
+
+- Algorithm column falls back to metadata.optimizer for legacy/non-Studio runs
+  where studio_config is null (was rendering &#34;-&#34;).
+- Compact metric pill: keep the trend icon for zero-baseline (Infinity)
+  comparisons and drop only the numeric %, instead of hiding the trend entirely.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7041] [FE] refactor: address runs-list review feedback
+
+- Flatten refetchInterval in useOptimizationsView (extract hasInProgressRun)
+- Replace hardcoded #f8fafc/#f1f5f9 pill colors with --pill-neutral-* tokens
+  (adds the previously-missing dark-mode values)
+- Convert the raw card &lt;button&gt;s to the core Button component
+  (StudioTemplates, OptimizationsEmptyState)
+- Extract optimizer-type resolution into getOptimizationOptimizerType
+- Drop the reshape .map in OptimizationsEmptyState; render shared configs directly
+- Extract the list existence probe into a useOptimizationsExistence hook
+- Trim Figma/design-narration and essay comments across the PR
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7041] [FE] fix(optimization-runs): drop redundant title, align studio cards + spacing with Figma
+
+- Remove the redundant &#34;Run an optimization&#34; h2 above the studio cards
+- Fix header/cards/separator spacing to match the Figma runs-list layout
+- Align the studio card title with Figma (&#34;Use the Optimization studio&#34;)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7160] [BE] fix: fail loudly on unresolvable metric reference key (#7364)
+
+* [OPIK-7160] [BE] fix: fail loudly on unresolvable metric reference key
+
+A metric reference_key that matched no dataset field silently scored every
+item 0. No candidate could beat the baseline, so the optimizer returned the
+seed prompt while the run reported &#34;completed&#34; -- indistinguishable from a
+legitimate &#34;no improvement over baseline&#34; run (which gates OPIK-7038).
+
+- Add _validate_reference_key_resolves: raise InvalidMetricError at build time
+  when the reference key resolves against zero dataset items, listing the
+  available fields. Wired into equals, levenshtein_ratio, numerical_similarity.
+- Score missing-per-item references 0.0 with a &#34;Missing reference value&#34; reason
+  and a warning log, instead of silently defaulting to &#34;&#34; (which spuriously
+  matched empty output as a perfect 1.0). Matches the numerical_similarity
+  precedent already in this file.
+- Tests: build-time validation (total mismatch, sparse data, no provider, empty
+  dataset, JSONPath), per-item missing reference, and updated the JSONPath
+  no-match regression to assert the new loud behavior.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7160] [BE] fix: address code-review findings on reference-key validation
+
+Follow-up to the reference-key fix, resolving issues from a high-effort review:
+
+- Present-but-null reference field no longer hard-fails the run. Validation now
+  checks key *presence* via a _MISSING sentinel, not non-None value, so a field
+  that exists but holds null (a data issue) builds instead of aborting with a
+  self-contradictory &#34;did not resolve ... available fields: &lt;that field&gt;&#34;
+  message. Only a genuinely absent field/non-matching JSONPath raises.
+- numerical_similarity now fails loudly when the key resolves everywhere but to
+  non-numeric values (the silent flat-0 case its validation previously missed),
+  folded into the existing scale-inference pass so the dataset is fetched once,
+  not twice.
+- Non-dict dataset items yield a clean InvalidMetricError instead of an
+  AttributeError.
+- Extracted _missing_reference_result (shared by all three scoring functions),
+  _available_fields_hint, and _reference_key_error to remove duplication.
+- Updated MetricFactory.build docstring: reference-based metrics now invoke the
+  provider at build time to validate (the old &#34;only numerical_similarity&#34; note
+  no longer held).
+
+Tests: added present-null, non-numeric-reference, non-dict, sparse-numeric, and
+present-empty-string cases. Metric suite 86 passed.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7160] [BE] fix: address PR review comments on reference-key validation
+
+- Malformed JSONPath (Baz medium): a JSONPath-shaped reference_key whose
+  syntax is invalid and that matches no literal field now fails with a clear
+  &#34;not a valid JSONPath expression&#34; message instead of the misleading
+  &#34;did not resolve against any dataset item&#34;. The literal-key fallback is
+  preserved, so a real field named e.g. &#34;user@email&#34; still builds. Applied to
+  both _validate_reference_key_resolves and the numerical_similarity loop.
+- Duplicate reference-metric builders (Baz low): extracted
+  _build_reference_metric shared by equals and levenshtein_ratio.
+- Missing behavioral assertion (Baz low): the sparse-numeric test now invokes
+  the metric (exact match -&gt; 1.0, unit-off -&gt; 0.0, non-numeric sibling -&gt; 0.0).
+- Added tests for the malformed-JSONPath error on both metric paths.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7263] [SDK] feat: add Mistral AI Python integration (track_mistral) (#7385)
+
+* [OPIK-7263] [SDK] feat: add Mistral AI Python integration (track_mistral)
+
+Add a native Opik integration for the Mistral AI Python SDK (mistralai),
+exposed as track_mistral(client). Wraps chat.complete / complete_async and
+chat.stream / stream_async, aggregating streamed chunks into a single span.
+Structured-output calls (chat.parse and variants) delegate to these
+primitives, so they are tracked as a single span named chat_completion_parse
+via the response_format kwarg — no double-logging.
+
+Captures input messages, output choices, token usage, model, and provider
+(&#34;mistral&#34;), enabling automatic cost tracking. Adds MISTRALAI to the
+LLMProvider enum. Includes an offline test suite (fake_backend), a CI
+workflow wired into the library-integration runner, and a documentation page
+that leads with the native integration and demotes LiteLLM to an alternative.
+
+Implements OPIK-7263: Mistral AI Python SDK integration.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(mistral): name spans by wrapped method, not response_format
+
+Naming the span chat_completion_parse whenever response_format was present
+misclassified direct complete(response_format=...) / stream(response_format=...)
+calls as parse. Name spans after the wrapped primitive instead
+(complete -&gt; chat_completion_create, stream -&gt; chat_completion_stream); parse
+delegates to those and shares the name. Also rename the provider-enum test to
+the required test_&lt;what&gt;__&lt;case&gt;__&lt;expected&gt; convention and fix an &#34;opik&#34; -&gt;
+&#34;Opik&#34; doc typo. Addresses PR #7385 review feedback.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(mistral): pin mistralai to v1 in tests and docs
+
+CI installed mistralai unpinned and resolved to 2.x, which is a namespace
+package where `from mistralai import Mistral` no longer works (Mistral moved
+under mistralai.client), breaking test collection. The integration targets the
+mainstream v1 API, so pin the test requirement to mistralai&gt;=1.0.0,&lt;2.0.0 and
+update the docs install command to &#34;mistralai&lt;2&#34;.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* refactor(mistral): use only public mistralai API + guard min version
+
+- Stop importing internal modules (mistralai.utils.eventstreaming,
+  mistralai.models.chatcompletionresponse) that move between releases. Use the
+  public top-level ChatCompletionResponse, and detect streams by their iterator
+  protocol (__anext__/__next__) operating on type(stream) rather than the
+  private EventStream classes.
+- Add a runtime version guard in track_mistral: raise a clear error when the
+  installed mistralai is older than 1.3.0 (the release that introduced the
+  EventStream streaming API), read via importlib.metadata. Pin the test
+  requirement and docs install to mistralai&gt;=1.3.0,&lt;2.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* feat(llm_usage): add dedicated Mistral usage format
+
+Add MistralUsage to the llm_usage namespace (parses UsageInfo:
+prompt/completion/total tokens + prompt_tokens_details.cached_tokens) with an
+OpikUsage.from_mistral_dict builder registered under LLMProvider.MISTRALAI.
+The Mistral decorator now parses usage with LLMProvider.MISTRALAI instead of
+piggybacking on the OpenAI completions converter, so it&#39;s not coupled to
+OpenAI&#39;s format. Adds unit tests for the parser and factory path.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* docs(skills): add dedicated-usage-format guidance to opik-integrations
+
+Capture the lesson from the Mistral usage work: add a first-class
+llm_usage format per provider instead of reusing another provider&#39;s parser.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(mistral): address review nits (dead log arg, import order)
+
+- Drop the unused str(exception) positional passed to LOGGER.debug with no
+  format placeholder in the stream patchers; exc_info=True already captures the
+  full exception + traceback.
+- Reorder mistral_usage imports to stdlib-first (typing, then pydantic, then
+  local), matching the anthropic/bedrock usage modules.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* fix(mistral): accumulate streamed tool calls by index
+
+The stream aggregator overwrote message.tool_calls on every chunk that carried
+them, which would drop data if a tool call were split across chunks. Accumulate
+by tool-call index instead, concatenating streamed argument fragments and
+filling in id/name/type as they arrive. Mistral currently emits each tool call
+complete in a single chunk, so this is defensive, but it removes the
+overwrite-and-keep-last behavior. Adds a streaming tool-call test asserting the
+aggregated span output keeps the complete tool call (name + valid-JSON args).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [NA] [BE] Update model prices file (#7394)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [NA] [BE][FE] chore: sync provider model definitions (#7395)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [OPIK-6891] [BE] test: guard the trace deletion-events bridge with ArchUnit (#7390)
+
+Add an ArchUnit architectural test asserting that only TraceServiceImpl may call
+TraceDAO.delete, so a future refactor adding a new trace-delete path can&#39;t
+silently bypass the deletion-events bridge capture. Retention paths are separate
+methods and intentionally out of scope.
+
+Introduce ArchUnit (archunit-junit5 1.4.2 — bundles ASM with Java 25 support) as
+a test dependency.
+
+- [OPIK-7103] feat: {{trace}} + {{span}} agentic attachment evaluation for online LLM-as-judge (#7277)
+
+* [OPIK-7103] feat: {{trace}} + {{span}} agentic attachment evaluation for online LLM-as-judge
+
+Squashed feature + review fixes; see PR #7277. Reconciled with main: agentic eval
+is triggered ONLY by the {{trace}}/{{span}} sentinels (not by attachment presence),
+and main&#39;s OnlineEvaluationRecorder monitoring is threaded through the flow.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7103] perf: hop {{trace}} structure serialization onto parallel scheduler
+
+buildTraceStructure ran buildFullJson + compress(FULL) — the most
+CPU-/GC-expensive part of routing — inside a .map() on the Mono.zip of the
+attachment lookups, so it executed on the R2DBC/attachment scheduler thread.
+Wrap the body in Mono.fromCallable(...).subscribeOn(Schedulers.parallel()),
+mirroring evaluate()&#39;s existing prep hop, so large-trace serialization no
+longer taxes the DB scheduler.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7103] refactor: address PR review feedback on online-eval attachment scorers
+
+Addresses reviewer comments on #7277:
+- AttachmentSummaries: serialize EntityType via its @JsonValue getValue() instead of name().toLowerCase()
+- GetAttachmentTool: convert the tool/param description concatenations to text blocks (byte-identical strings via \ continuations)
+- AttachmentService.getAttachmentInfoByEntityIds: null-safe entityIds via CollectionUtils.isEmpty (drop @NonNull)
+- TraceCompressor: chain the 4-arg compress() through the attachments overload so the WITH_JQ_HINT default lives in one place
+- OnlineScoringLlmAsJudgeScorer: give TraceStructure @Builder(toBuilder=true) + @NonNull and build it via the builder
+- OnlineScoringBaseScorer: log the best-effort attachment re-read failures (previously swallowed silently) in both the single-entity and span upload-race helpers
+- OnlineScoringSpanLlmAsJudgeScorer: extract the request-building if-branches into small aux methods returning an LlmRequests carrier
+- OnlineScoringSpanLlmAsJudgeScorerTest: use imports over fully-qualified names, and Podam-manufacture span fixtures with toBuilder overrides
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7103] feat: make online-eval prompt cap + attachment upload-race retry configurable
+
+Addresses reviewer comments K/L on #7277 (precedent: PR 6871):
+- OnlineScoringConfig: add maxPromptFieldChars (@Min 500, default 4000), attachmentFetchMaxRetries
+  (@Min 0 @Max 20, default 5) and attachmentFetchRetryDelay (@MinDuration 50ms/@MaxDuration 5s, default 300ms)
+- OnlineScoringBaseScorer: read the retry count/delay from config; store config as a protected field
+- Trace/Span scorers: read the prompt cap from config (getMaxPromptFieldChars)
+- Remove the now-duplicate onlineScoringConfig field from the trace/span/thread scorers (use the base field)
+- config.yml + config-test.yml: document the three new keys with env overrides
+
+The attachment-fetch retry stays an interim guard; the pre-evaluation dispatch delay (OPIK-7224)
+is intended to replace it, but the values are now tunable per environment in the meantime.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7103] fix: keep body-referenced transient attachments in {{trace}}/{{span}} structures
+
+Addresses reviewer finding &#34;Drops unrelated transient attachments&#34; on #7277.
+
+preferPersistentAttachments used an entity-wide gate: if any persistent attachment
+existed, it dropped every auto-stripped attachment — so a legitimate transient-only
+attachment (e.g. a REST-ingested image whose only copy is auto-stripped) was dropped
+whenever an unrelated persistent attachment coexisted on the same entity.
+
+The reviewer&#39;s suggested &#34;-sdk name pairing&#34; is not implementable: the backend transient
+name (input-attachment-{seqN}-{backendTs}.ext) and the SDK persistent name
+(input-attachment-{random}-{clientTs}-sdk.ext) share no key. Use the body reference
+instead — the reliable per-attachment signal:
+- AttachmentUtils.collectAttachmentReferences: gather the filenames referenced in the
+  entity body (mirrors the recursive walk of hasAttachmentReferences).
+- preferPersistentAttachments(attachments, referencedNames): keep every persistent
+  attachment plus any auto-stripped copy still referenced in the body; drop only orphaned
+  auto-stripped copies when a persistent copy coexists (unchanged when none does).
+- Thread a per-span referenced-name map through listSpanAttachmentsToleratingUploadRace /
+  groupBySpanPreferringPersistent; gatherSpanAttachments builds it in its existing pass.
+
+A transient coexisting with its own -sdk twin is not a reachable state (backend-strip and
+SDK-extract paths are mutually exclusive per upload), so erring toward keeping a referenced
+attachment is safe. Updated the one test that encoded the old drop behavior; added retention
+tests for the span + batched-trace paths and CollectAttachmentReferences unit tests.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7103] refactor: extract agentic-tools capability into AgenticScoringService
+
+Addresses PR review feedback (comment on OnlineScoringBaseScorer#runToolCallLoop):
+the online scorers&#39; agentic-tools surface (tool-call loop orchestration,
+upload-race-tolerant attachment listing, media-failure surfacing, tool-spec
+attachment, provider capability check, size estimation) had grown too large to
+keep propagating via inheritance from OnlineScoringBaseScorer. Extract it into
+an injected AgenticScoringService; the trace/span/thread scorers are now users
+of it instead of subclassing it, and the two Python-metric scorers no longer
+inherit agentic-tools machinery they never use. Also collapses the thread
+scorer&#39;s hand-rolled duplicate of the tool loop onto the shared implementation.
+
+Co-Authored-By: Claude Opus &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7103] refactor: address review nits on AgenticScoringService
+
+- Drop @NonNull from AgenticScoringService interface method params (validation
+  belongs on the impl, not the interface contract).
+- surfaceInjectedMediaFailure: quote the attachments/detail log placeholders
+  and pass the throwable as the trailing SLF4J arg so the stack trace isn&#39;t
+  lost.
+- Extract resolveWithUploadRaceTolerance to de-duplicate the retry/best-effort
+  pipeline shared by listAttachmentsToleratingUploadRace and
+  listSpanAttachmentsToleratingUploadRace.
+
+Co-Authored-By: Claude Opus &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7103] refactor: address andrescrz review nits on agentic-tools PR
+
+Favours builders over constructors in the span scorer, narrows a swallowed
+exception in AttachmentUtils with logging, caps maxPromptFieldChars, uses
+lombok for the AgenticScoringServiceImpl constructor, avoids the exposed
+Jackson mapper in favor of JsonUtils, and drops fully-qualified class names
+in the newly added OnlineScoringEngineTest cases.
+
+Co-Authored-By: Claude Sonnet 5 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7256] chore(backend): address project_metadata cache review follow-ups (#7380)
+
+* [OPIK-7256] address cache review follow-ups: javadoc + black-box test flow
+
+- convert the not-private constraint comment to javadoc
+- rework the cache test to the codebase&#39;s black-box flow: produce the
+  cached value, alter the underlying value, assert the stale value is
+  served from cache, then assert the updated value after expiration —
+  no interception counters
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7256] test: document the cache key double-dash composition
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- feat: add Groq integration to the Python SDK (#7341)
+
+Add track_groq() to wrap Groq / AsyncGroq clients so calls to
+chat.completions.create() (including stream=True) are logged as Opik LLM
+spans, following the existing OpenAI/Anthropic integration pattern. Groq
+returns OpenAI-shaped payloads, so usage is parsed with the OpenAI converter
+while the span provider is recorded as &#39;groq&#39; (LLMProvider.GROQ). Adds
+mock-based unit tests and wires the groq test suite into the integration
+runner.
+
+- [OPIK-6890] [BE] feat: wire deletion-events bridge into traces delete paths (#7376)
+
+* [OPIK-6890] [BE] feat: wire deletion-events bridge into traces delete paths
+
+* fix(traces): inject whole OpikConfiguration to avoid @Config sub-config binding failure
+
+Injecting @Config DatabaseAnalyticsDataModelConfig directly fails at service
+startup with a Guice MissingConstructor error (guicey sub-config binding does not
+resolve the record; only reproduces on the real service, not integration tests).
+Inject @Config OpikConfiguration and read the flag via its getter, matching the
+proven pattern in DatasetItemService.
+
+* refactor(traces): model sourceTable as enum and chunk deletion-events insert
+
+Address PR review:
+- Introduce SourceTable enum (mirrors DeletionReason) instead of a String
+  source_table, for type safety and read-back validation.
+- Chunk DeletionEventDAO.insert into sub-batches so the per-row bind
+  count stays within the range the ClickHouse driver handles reliably;
+
+* fix(traces): validate deletionEventsInsertBatchSize bounds
+
+Constrain the config to @Min(1) @Max(2000) so a misconfigured zero/negative
+fails startup loudly instead of silently disabling capture (Lists.partition
+would throw and the best-effort path would swallow it), and cap it to keep the
+per-statement bind count in the safe range.
+
+- Update versions to 2.1.19 and bump base version to 2.1.20
+
+- [OPIK-6882] [BE] feat: align TestContainers CH config and CI migration check with distributed layer (#7381)
+
+- [OPIK-7255] perf(backend): bound the per-project pending-closure thread scan (#7370)
+
+* [NA] perf(backend): bound the per-project pending-closure thread scan
+
+Rewrite GET_RECENT_CLOSED_THREADS_PER_PROJECT from a FINAL scan to the
+same bounded aggregation form as FIND_PENDING_CLOSURE_THREADS_SQL, so
+each closure event stops merge-reading every version row of the project.
+
+- argMax/max aggregation replaces FINAL; a last_updated_at lookback
+  pre-filter lets the minmax skip index prune granules
+- the lookback bound reuses the enqueuing scan&#39;s computation, widened by
+  the cold-start lookback so it always covers the enqueuer&#39;s window
+- add a log_comment for query attribution
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7255] clamp pending-closure lookback to never start after the cutoff
+
+Guards the window shape against the cached global max timeout lagging a
+workspace timeout increase for up to its TTL.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7255] include workspace and user in stream_pending_closure_threads log_comment
+
+Render the template inside the context-aware lambda so the log_comment
+carries workspace_id, user_name, and project_id for query attribution.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7256] fix(backend): make project size-estimate cache actually engage (#7371)
+
+* [OPIK-7256] fix(backend): make project size-estimate cache actually engage
+
+The @Cacheable on getProjectMetadata never fired: Guice method
+interception cannot intercept private methods, and the cache name
+project_metadata was absent from cacheManager.caches (only an orphaned
+workspace_metadata entry existed), so even an intercepted call would
+have fallen back to the 1-second default TTL. The size-estimate query
+therefore ran on essentially every traces/spans find request.
+
+- make the method package-private so interception applies
+- rename the orphaned workspace_metadata config entry to
+  project_metadata (env CACHE_MANAGER_PROJECT_METADATA_DURATION, PT1H)
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7256] test: guard that the project_metadata cache engages
+
+Counting-stub DAO behind the real service in the app harness: a second
+call with the same key must not reach the DAO. Fails if the method
+becomes non-interceptable again (e.g. private) or the cache name is
+dropped from configuration.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7256] test: replace fixed sleep with deterministic wait on the cache entry
+
+The interceptor drops the putAsync completion signal, so poll
+CacheManager.contains with a bounded timeout instead of sleeping.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7256] make the cached overload public, matching codebase convention
+
+All other @Cacheable methods are public; the class stays package-private
+so this widens nothing, and the comment keeps the not-private constraint.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7257] perf(backend): drop unnecessary FINAL from spans lookup in experiment refs query (#7372)
+
+trace_id is immutable for a given span id and the subquery result feeds
+an IN set, so version duplicates cannot change the outcome. FINAL forced
+reading all sorting-key columns for the merge, several times the bytes
+of the plain id lookup.
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- [NA] [QA] fix: poll Threads count in thread-logging smoke to fix flake (#7363)
+
+The &#34;Threads view groups a multi-turn conversation&#34; t1 test read the
+Threads count card once (`countThreads()`) and asserted `=== 1`. That card
+is an eventually-consistent aggregation, so on a slow-propagating staging
+deploy it can still read 0 when the assertion runs — which is exactly what
+failed on staging launch 82061 (Expected 1, Received 0, all 3 retries),
+after 20 consecutive passes across prod/staging/local. A flake, not a
+regression.
+
+- Poll countThreads() until it reaches 1 (15s budget) instead of a one-shot
+  read.
+- waitForThreadsReady(threadId?) now waits for the seeded thread row when a
+  threadId is passed, so the readiness gate tolerates thread aggregation lag
+  rather than passing on any first row. Both tests pass their threadId.
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- Update versions to 2.1.18 and bump base version to 2.1.19
+
+- [OPIK-7240] [INFRA] docs: add add-code-quality-hook skill (#7375)
+
+Documents the end-to-end recipe for wiring a new linter into the unified
+🐙 Code Quality pre-commit/CI pipeline: the four wiring files
+(.pre-commit-config.yaml, precommit-hook-descriptions.tsv,
+precommit-detect-hooks.py, CONTRIBUTING.md) with rationale each, the
+mandatory-explicit-files: requirement, TOOLCHAIN_BY_ID/TYPED_IDS maps,
+the retroactive fix-vs-inline-suppress policy, and the pass/fail
+verification loop. Worked examples: actionlint (live) and hadolint
+(OPIK-6673).
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [NA] [BE][FE] chore: sync provider model definitions (#7374)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [OPIK-6881] Add ClickHouse server profile settings to query parameters (#7359)
+
+Append optimize_skip_unused_shards=1, do_not_merge_across_partitions_select_final=1,
+and distributed_product_mode=local to the databaseAnalytics custom_http_params chain.
+All three are no-ops on the current single-partition, single-shard schema; setting them
+now means they are already in place when partitioning/sharding lands.
+
+- config.yml: append to the ANALYTICS_DB_QUERY_PARAMETERS default chain
+- config-test.yml: mirror in the TestContainers config so tests pick up the settings
+- DatabaseAnalyticsFactoryTest: extend the full-chain parse assertion
+
+No Helm overlay, Docker Compose, or environment overrides ANALYTICS_DB_QUERY_PARAMETERS,
+so every deployment inherits this default.
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7253] fix: request identity encoding on all react-service auth calls (#7368)
+
+The auth calls to the react service (auth, auth-session, auth-by-username,
+workspace-id) fail with `java.util.zip.ZipException: Not in GZIP format`
+whenever the response is large enough for the upstream to gzip it. The
+upstream compression is valid; the failure is client-side double
+decompression: with the default `jerseyClient.gzipEnabled: true`, Dropwizard
+wires BOTH Apache HttpClient&#39;s automatic content decompression AND Jersey&#39;s
+GZipDecoder. Apache decompresses the body, the Content-Encoding: gzip header
+survives into Jersey, and GZipDecoder gunzips the already-plain stream.
+
+Since the exception is a ProcessingException (not a ClientErrorException),
+it escapes the auth filter and surfaces as a 500 to the caller. On the
+API-key path this also prevents the credentials from ever being cached, so
+affected keys (those with auth responses above the upstream&#39;s gzip minimum
+entity size) fail on every request.
+
+listEligibleWorkspaces already works around this with acceptEncoding(&#34;identity&#34;);
+apply the same workaround to the remaining five call sites, so the upstream
+never compresses and neither decompression layer engages.
+
+Includes a regression test that reproduces the failure with a production-like
+client (gzipEnabled: true — the shared test client disables gzip, which is why
+existing tests never surfaced this) against a WireMock server that auto-gzips
+large responses, exactly like a Dropwizard/Jetty upstream.
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- [NA] [QA] test(e2e): fall through to an offered provider when configuring models (#7324)
+
+* [NA] [QA] test(e2e): fall through to an offered provider when configuring models
+
+The ensureModelAvailable helpers picked an LLM provider by which API key the
+runner has, then committed to it — so a runner with ANTHROPIC_API_KEY always
+tried Anthropic even on deployments that don&#39;t offer it (restricted envs expose
+only a subset of providers). The add-provider dialog never renders that option,
+so the click hung for 15s and failed the playground / test-suites / online-eval
+t1 smokes.
+
+ensureProviderConfigured now probes whether the provider option is actually
+offered in the dialog and returns false (falling through) instead of hanging.
+The five duplicated ensureModelAvailable copies are consolidated into a single
+pom/model-availability.ts that tries Anthropic -&gt; OpenAI -&gt; OpenRouter (Custom
+Provider), skipping any candidate the deployment doesn&#39;t offer.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* test(e2e): address review — step-wrap POM methods, guard custom-provider fallback
+
+- ensureProviderConfigured / ensureCustomProviderConfigured now wrap their
+  bodies in test.step() and return through the callback (POM instrumentation
+  convention), so the trace/Allure timeline stays legible.
+- ensureCustomProviderConfigured probes whether the Custom option is offered
+  (bounded 2s wait) and returns boolean, mirroring ensureProviderConfigured —
+  so a deployment with the custom-llm toggle off falls through instead of
+  hanging on a missing option.
+- Dropped the unbounded &#34;first option visible&#34; wait in ensureProviderConfigured;
+  the per-provider bounded probe already handles an empty option grid (all
+  toggles off) without a 30s hang.
+- ensureModelAvailable consumes the custom method&#39;s boolean and skips cleanly
+  when no candidate provider is offered.
+- playground-providers.spec skips when the provider under test isn&#39;t offered
+  rather than proceeding to a model selection that can&#39;t resolve.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7243] [QA] docs: teach pom-discovery skill to handle the &#34;Leave site?&#34; dialog (#7356)
+
+Opik pages with a navigation guard (staged draft, dirty form) raise a native
+beforeunload dialog that isn&#39;t in the accessibility snapshot, so browser_navigate
+silently blocks during MCP discovery. Add guidance to arm a dialog auto-accept
+handler up front and clear unsaved state in-app before leaving, plus a matching
+anti-pattern row. The guidance is placed before the navigation example so a
+linear reader arms the handler before the first navigate call.
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7093] [QA] test: add direct E2E coverage for the Dataset Items page (#7355)
+
+Add a dataset-items spec covering three item-level flows not exercised by
+the existing CRUD smoke: editing an item field (commit as new version +
+SDK round-trip), bulk-selecting and deleting items (commit + round-trip),
+and search filtering the items table.
+
+Extend the dataset-items POM with edit/select/bulk-delete/search methods,
+and add a data-testid to the bulk-delete button (icon-only, no stable
+accessible name).
+
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- Update docs.yml (#7362)
+
+- [OPIK-7076] [BE] Enable prefilter CTE for feedback score filtered queries (#7360)
+
+The trace_id_prefilter / span_id_prefilter CTEs narrow downstream
+feedback score scans by first finding trace/span IDs that match
+trace-column filters (name, tags, etc.) using the primary key.
+
+Previously, the prefilter was disabled whenever feedback score filters
+were present — an overly cautious guard introduced for a guardrails-
+specific bug (guardrails filter SQL references a CTE alias that doesn&#39;t
+exist in the prefilter). Feedback score filters use separate template
+variables and never interfere with the prefilter.
+
+Changes:
+- TraceDAO: Remove feedback score exclusion from shouldUseTraceIdPrefilter,
+  keep guardrails guard. Add prefilter CTE to COUNT_BY_PROJECT_ID with IN
+  predicates for feedback_scores, guardrails, annotation_queues, target_spans.
+  Activate prefilter in countTotal().
+- SpanDAO: Same fix for shouldUseSpanIdPrefilter. Add prefilter CTE to
+  COUNT_BY_PROJECT_ID inside the feedback score WITH block. Activate
+  prefilter in countTotal().
+
+Measured on 50K traces / 240K feedback scores:
+- Trace count: 634-725ms → 57-167ms (4-12x faster)
+- Trace listing: 1.3-1.8s → 370-700ms (2-4x faster)
+- Span count: 52-257ms → 21-56ms (3-5x faster)
+- Span listing: 250-344ms → 88-120ms (~3x faster)
+
+- [NA] [SDK] fix: strip /api suffix in get_ui_url instead of char set (#7287)
+
+get_ui_url() used rstrip(&#34;/api&#34;), which strips any trailing run of the characters in {/, a, p, i} rather than the literal &#34;/api&#34; suffix. The two shipped defaults survive by coincidence, but custom/self-hosted url_override values are silently corrupted (e.g. https://foo.com/papi -&gt; https://foo.com/, https://team.io/instance-pi/api -&gt; https://team.io/instance-/).
+
+Use rstrip(&#34;/&#34;).removesuffix(&#34;/api&#34;) so only a trailing /api segment is dropped while the trailing-slash cloud default (https://www.comet.com/opik/api/) is preserved. Add parametrized get_ui_url tests covering both defaults and the previously corrupted cases.
+
+- docs: add weekly changelog entry for 2026-06-23 (#7269)
+
+Covers user-facing changes shipped in versions 2.0.77 through 2.1.5:
+- LLM-as-judge scorer now evaluates trace attachments
+- Project-scoped opik export / opik import CLI
+- MCP server auto-detection + opik mcp status command
+- Vercel AI SDK v7 + eve agent support
+- track_openai custom provider argument
+- Configurable runner poll interval (OPIK_RUNNER_POLL_INTERVAL)
+- Assertion scoring errors shown in UI
+- Test suite item loss fix, ChrF metric fix, audio token cost fix
+- ClickHouse 25.8 LTS upgrade (self-host)
+
+
+Claude-Session: https://claude.ai/code/session_01Shh7BMFqBum6XBPdMimp8Q
+
+Co-authored-by: Claude &lt;noreply@anthropic.com&gt;
+
+- docs: add weekly changelog entry for July 6, 2026 (#7353)
+
+Covers the past week&#39;s user-facing changes: Ollie Explain on trace
+cells, traced online-evaluation runs (now on by default), plus bug
+fixes and performance improvements across Diagnostics, Playground,
+cost calculation, permissions, and the Python SDK CLI.
+
+
+Claude-Session: https://claude.ai/code/session_01VnBZdymhAtNx5jQCecRAw6
+
+Co-authored-by: Claude &lt;noreply@anthropic.com&gt;
+
+- Update versions to 2.1.17 and bump base version to 2.1.18
+
+- [OPIK-7230] [BE] Optimize experiment-refs ClickHouse lookups + fix missing log_comment (#7337)
+
+* [OPIK-7230] [BE] Optimize experiment-refs ClickHouse lookups + fix missing log_comment
+
+- Route getExperimentRefsByIds through getSTWithLogComment so the three
+  GET_EXPERIMENT_REFS_BY_* queries emit a real log_comment breadcrumb
+  instead of the literal placeholder.
+- Add a conditional project_id filter to the trace- and span-refs queries;
+  thread projectId through the aggregation events and split per project in
+  ExperimentAggregateEventListener so each query targets a single project.
+- Add minmax skip indexes on experiment_items.trace_id and spans.id
+  (migration 000095) so these lookups prune granules instead of a
+  generic-exclusion scan.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7230] [BE] Cover per-project split + projectId threading in listener tests
+
+Add ExperimentAggregateEventListenerTest cases asserting the new behavior:
+- traces/spans created split trace_ids per project (one aggregation trigger per project)
+- traces updated split per project via the traceId-&gt;projectId mapping
+- traces/spans deleted pass the event projectId through
+- span feedback-score passes projectId to getExperimentRefsBySpanIds
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7230] [BE] Address review: error isolation, SpansDeleted projectId, @Nullable, migration EOL
+
+- triggerByTraceIdsPerProject: wrap each per-project trigger in onErrorResume so one
+  project&#39;s failure no longer short-circuits the remaining per-project aggregations.
+- SpanService: pass projectId into the SpansDeleted event (delete-by-traces flow) so
+  span-delete driven experiment-ref lookups keep project_id pruning.
+- Mark the optional projectId @Nullable on the trigger helpers and on the projectId
+  field/constructor param of the six entity/project events + SpansDeleted.
+- Migration 000095: end file with a trailing blank line per the Liquibase guideline.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7230] [BE] Extract EntityProjectEvent base + renumber migration to 000096
+
+- Extract EntityProjectEvent (entityIds, entityType, nullable projectId + the two
+  delegating constructors); FeedbackScoresCreated/Deleted, CommentsCreated/Updated/Deleted
+  and AssertionResultsCreated now just extend it, removing the duplicated fields/ctors.
+- Renumber the skip-index migration 000095 -&gt; 000096 (main added 000095_add_session_id_
+  to_cipx_trace_identity); changeset ids updated to match.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7230] [BE] Resolve project for single-entity score/comment events (review)
+
+Address the high-severity review findings about lost project pruning on
+single-entity paths:
+- FeedbackScoreService.deleteSpanScore/deleteTraceScore now resolve the entity&#39;s
+  project (getProjectIdFrom{Span,Trace}) and pass it into FeedbackScoresDeleted;
+  the delete still happens even if the project can&#39;t be resolved (best-effort).
+- CommentService.update resolves the comment entity&#39;s project (shared
+  resolveProjectId helper, also reused by create) and passes it into CommentsUpdated.
+
+Batch paths that can span projects (CommentsDeleted, assertion batches) intentionally
+keep projectId null and fall back to the trace_id/id skip index.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7230] [BE] Simplify per-project fallback + assert projectId in listener tests
+
+- Collapse the onTracesUpdated fallback (no traceId-&gt;projectId mapping) to a single
+  workspace-scoped trigger relying on the skip index, instead of re-running the trigger
+  once per project over the full trace-id set; remove the now-unused Set-based overload.
+- ExperimentAggregateEventListenerTest: assert the exact projectId threaded to the
+  service (eq(projectId), or isNull() for SpansUpdated which carries no project) instead
+  of any(), across the traces/spans and feedback/comment handlers.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7230] [BE] Renumber skip-index migration 000096 -&gt; 000097 (main took 000096_create_deletion_events_local)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7230] [BE] Best-effort project resolution on score delete + dedup helper (review)
+
+- Extract deleteScoreAndNotify(entityType, id, score): resolves the entity&#39;s project
+  lazily inside the deferred chain via a switch (no eager/Mono-as-param), then deletes
+  and emits FeedbackScoresDeleted. deleteSpanScore/deleteTraceScore delegate to it.
+- onErrorResume on the project lookup so a transient lookup failure no longer blocks
+  the delete; it proceeds with a null projectId (listener falls back to the skip index).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7230] [BE] Route trace ids not covered by the mapping through the fallback (review)
+
+onTracesUpdated: the traceId-&gt;projectId mapping (from getProjectIdsByTraceIds) may not
+cover every id in event.traceIds(); previously the uncovered ids were silently dropped.
+Now the mapped ids are split per project and any uncovered ids are triggered via the
+workspace-scoped fallback (null projectId) so their aggregation is not skipped.
+Covered by a new listener test.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7230] [BE] Quote entityType placeholder in score-delete warn log (review)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* Update apps/opik-backend/src/main/resources/liquibase/db-app-analytics/migrations/000097_add_minmax_indexes_experiment_refs_lookup.sql
+
+Co-authored-by: Daniel Dimenshtein &lt;danield@comet.com&gt;
+
+* [OPIK-7230] [BE] Address review: migration changeset author + redundant terminal error handler
+
+- Align migration 000097 changeset author to the repo convention (thiagoh -&gt; thiagohora).
+- triggerByTraceIdsPerProject: drop the redundant terminal error consumer; per-project
+  onErrorResume already logs and recovers, so no error reaches the subscriber. subscribe().
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7230] [BE] Review: javadoc on deleteScoreAndNotify + precise status matcher in tests
+
+- Convert the deleteScoreAndNotify explanatory comment to javadoc.
+- ExperimentAggregateEventListenerTest: replace the `any()` status matcher with
+  eq(FINISHED_STATUSES) so the assertions/verifications use real arguments.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+Co-authored-by: Daniel Dimenshtein &lt;danield@comet.com&gt;
+
+- [NA] [CI] docs: regenerate Helm chart README to match chart version (#7357)
+
+The Helm chart README badge drifted behind Chart.yaml (README showed
+2.1.8 while the chart is at 2.1.16), because version bumps land on main
+without going through the helm-docs regen. This made the `helm-docs` lint
+gate fail on every open PR, not just chart changes.
+
+Regenerate deployment/helm_chart/opik/README.md via the helm-docs
+pre-commit hook so the gate goes green again. README-only, no chart
+behavior change.
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- Update versions to 2.1.16 and bump base version to 2.1.17
+
+- fix: resolve Bedrock model pricing when model name carries a version-pin suffix (#7339)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [OPIK-7016] [FE] fix: align Cost Intelligence navigation with entitlements (#7329)
+
+* [OPIK-7016] [FE] fix: align Cost Intelligence navigation with entitlements
+
+- Adjust access gating by removing `isOrganizationAdmin` restriction in `useAiSpendManager`.
+- Propagate `isOrganizationAdmin` to AiSpendContext and LayoutProviders for better contextual awareness.
+- Update AI Spend workspace navigation path to remove unnecessary `/home` suffix.
+
+* feat(sidebar): allow rich (ReactElement) menu-item labels
+
+Widen MenuItem.label to string | ReactElement so sidebar items can render
+inline content (e.g. a &#34;Soon&#34; tag) next to the label text. Backward
+compatible: existing string labels are unaffected.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [BE] fix: discount audio output tokens in cost for OpenAI audio models (#7253)
+
+* [BE] fix: discount audio output tokens in cost for OpenAI audio models
+
+26 OpenAI models in model_prices_and_context_window.json publish
+output_cost_per_audio_token at a rate distinct from output_cost_per_token
+(gpt-4o-audio-preview is 8x: $8e-5 vs $1e-5 per token). The Java backend had
+no reference to the field, so audio completion tokens were silently billed at
+the standard output rate.
+
+Wires output_cost_per_audio_token through ModelCostData -&gt; ModelPrice -&gt;
+CostService, and extends SpanCostCalculator.textGenerationCost to read the
+audio output count from the OTel key logged by the Python SDK
+(original_usage.completion_tokens_details.audio_tokens with a bare-key
+fallback). When the configured audio rate is zero behaviour matches the
+previous path; otherwise (completion_tokens - audio_tokens) is billed at the
+standard output rate and audio tokens at the configured audio rate.
+
+This stacks on the input-audio fix in #7137 and mirrors its plumbing
+symmetrically. Mutation-tested: stashing the SpanCostCalculator change makes
+the new test fail with the previously buggy 0.0055 instead of 0.0195.
+
+* [BE] fix: split audio tokens in the OpenAI cache calculator too
+
+Addressing the Baz review on #7253: textGenerationWithCacheCostOpenAI was
+billing all completion_tokens at outputPrice and all (non-cached)
+prompt_tokens at inputPrice, so OpenAI realtime models that publish BOTH
+cache_read_input_token_cost and input_cost_per_audio_token /
+output_cost_per_audio_token were silently underbilling audio tokens at the
+standard text rate.
+
+Affected real models loaded by Opik today (litellm_provider: openai, cache
+rates configured):
+- gpt-4o-realtime-preview / -2024-12-17 / -2025-06-03 (out audio 8e-5 vs
+  text 2e-5; 4x underbill)
+- gpt-4o-mini-realtime-preview / -2024-12-17 (out audio 2e-5 vs text 2.4e-6
+  / 2.64e-6; 8x underbill)
+- gpt-realtime, gpt-realtime-1.5, gpt-realtime-2, -2025-08-28,
+  gpt-realtime-mini-2025-10-06 / -2025-12-15 (out audio 6.4e-5 vs text
+  1.6e-5; 4x underbill)
+
+Mirror the same audio-token split that textGenerationCost already does for
+non-cache OpenAI audio models, using the same usage keys
+(original_usage.prompt_tokens_details.audio_tokens with the bare OTel key
+as a fallback, symmetric for completion_tokens_details). When the model has
+no audio rates configured, audio token keys in usage are ignored — the
+existing non-realtime behavior is preserved.
+
+Added two parameterized unit-test cases in SpanCostCalculatorTest covering
+both branches of the gate.
+
+* [BE] fix: prefer prompt_tokens_details.text_tokens in OpenAI cache calc
+
+Two follow-up review notes on #7253:
+
+1) baz-reviewer flagged a theoretical double-charge on OpenAI Realtime models
+   where cached_tokens and audio_tokens buckets may overlap: cached-audio
+   tokens would be subtracted twice from the text bucket and then billed at
+   the audio rate instead of the cheaper cache-read rate. In practice this
+   only matters if the API reports an overlap, which the OpenAI Realtime
+   usage payload does via prompt_tokens_details.text_tokens (LiteLLM&#39;s
+   _calculate_input_cost consumes this field directly, so no subtraction is
+   needed).
+
+   Prefer prompt_tokens_details.text_tokens (with the original_usage.*
+   prefix taking precedence) when the payload carries it, falling back to
+   the existing cached/audio subtraction path when it doesn&#39;t. Same
+   treatment on the completion side via completion_tokens_details.text_tokens.
+   Behavior is unchanged for every fixture that doesn&#39;t include the new
+   key, so existing OpenAI cache-cost tests remain green.
+
+2) baz-reviewer flagged that the parameterized test only covered the bare
+   audio-token keys, not the SDK 1.6.0+ original_usage.prompt_tokens_details.*
+   / completion_tokens_details.* variants. Added a parameterized case that
+   uses the prefixed keys throughout so both branches of the audio-token
+   extraction are exercised in regressions.
+
+   Also added a parameterized case exercising the new text_tokens preference
+   path — with a 20-token cached-audio overlap reflected, the expected cost
+   drops from 37.00 (subtraction path) to 36.80 (text_tokens path),
+   demonstrating the fix.
+
+
+---------
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [OPIK-7196] [BE] Page-key enrichment aggregate CTEs in span search (#7325)
+
+* [OPIK-7196] [BE] Page-key enrichment aggregate CTEs in span search
+
+The span list query keyed its enrichment aggregate CTEs (feedback scores,
+comments) on the full filtered span-id set, then LEFT JOINed them to the
+single page of rows. For large projects this scanned the whole project&#39;s
+feedback scores / comments only to discard everything outside the page, and
+because ClickHouse inlines CTE references the id set was re-evaluated at each
+of its 3 reference sites.
+
+When no filter or sort reads those aggregates (the common enrichment-only
+case), key them on the page ids instead, consumed via
+`IN (SELECT arrayJoin((SELECT groupArray(id) FROM page_ids)))`: the inner
+scalar subquery is evaluated once and cached for the whole query, and the
+materialized constant array is primary-key-prunable. This turns the
+aggregate scans into page-sized index lookups. The existing prefilter path
+is kept for the filtered/sorted cases where aggregates drive page selection.
+
+Follows the same approach as OPIK-7193 for the trace list query.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7196] [BE] Extract shared aggregate-keying helper in SpanDAO
+
+Review feedback: find and findSpanStream duplicated the
+page_keyed_aggregates / span_id_prefilter decision tree; factor it into
+addAggregateKeyingFlags so the gating stays in sync.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7196] [BE] Make span_id_prefilter reachable for feedback-score-sorted queries
+
+Review feedback: after introducing page_keyed_aggregates, the
+span_id_prefilter else-branch was unreachable (its guard required
+!hasFeedbackScoreFilters &amp;&amp; !sortHasFeedbackScores, but the branch is only
+entered when one of those holds). Drop the redundant !sortHasFeedbackScores
+guard: page-keying stays disabled for feedback-score sorts (page selection
+reads feedback_scores_agg), while the prefilter — a superset of any page —
+now narrows the feedback-score and comment scans for sorted+filtered
+queries instead of falling back to whole-project scans.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7196] [BE] Plan-shape regression test for page-keyed aggregates
+
+Review feedback: functional tests cover result correctness, but the goal
+of page_keyed_aggregates is a plan property that degrades silently —
+results stay correct while aggregate CTEs regress to whole-project scans.
+Add a container test that renders the real SELECT_BY_PROJECT_ID template
+in page-keyed mode against the real migrated schema (small span set as
+pagination source, 300k feedback scores as the aggregate population) and
+asserts from system.query_log that reads stay page-sized (primary-key
+pruning applied) and the page-id scalar subquery is served from the cache
+at the remaining reference sites (evaluated once, not per reference).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7196] [BE] Harden plan-shape test + black-box coverage for prefilter branch
+
+Review feedback, two items:
+- Plan-shape test: assert the page-keyed predicate count (all 3 aggregate
+  CTE sites) instead of a bare contains(), and seed comments and
+  authored_feedback_scores alongside feedback_scores so every aggregate
+  path is exercised by the read_rows / scalar-cache assertions.
+- Black-box test for the newly reachable span_id_prefilter branch:
+  feedback-score sort combined with a narrowing filter returns a correctly
+  sorted, fully enriched page (FindSpansResourceTest, both directions).
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7196] [BE] Use untilAsserted for query_log wait in plan-shape test
+
+Review feedback: polling with a null-return predicate ends in a generic
+Awaitility timeout; untilAsserted reports the query-specific assertion
+context when the query_log row is missing.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7196] [BE] Assert page-keyed predicate per CTE block
+
+Mirrors the trace-side review feedback: a global countMatches passes if
+one CTE drops the predicate while another duplicates it. Assert the
+expected site count inside each aggregate CTE block, keeping the global
+total as a backstop.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7196] [BE] Remove plan-shape test per review
+
+Review agreement: the team standard is high-value black-box tests through
+public APIs; the low-level template-rendering test with synthetic data is
+not maintainable. The new prefilter branch keeps its black-box coverage
+(FindSpansResourceTest feedback-score sort + narrowing filter); the
+plan/cost property is validated operationally. Also reverts the
+@VisibleForTesting visibility widening of SELECT_BY_PROJECT_ID.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7193] [BE] Page-key enrichment aggregate CTEs in trace search (#7323)
+
+* [OPIK-7193] [BE] Page-key enrichment aggregate CTEs in trace search
+
+The trace list query keyed its enrichment aggregate CTEs (feedback scores,
+spans, comments, guardrails, annotation queues, experiments) on the full
+filtered trace-id set, then LEFT JOINed them to the single page of rows.
+For large projects this scanned whole tables (millions of spans/scores)
+only to discard everything outside the page, and because ClickHouse inlines
+CTE references the id set was re-evaluated at every reference site.
+
+When no filter or sort reads those aggregates (the common enrichment-only
+case), key them on the page ids instead, consumed via
+`IN (SELECT arrayJoin((SELECT groupArray(id) FROM page_ids)))`: the inner
+scalar subquery is evaluated once and cached for the whole query, and the
+materialized constant array is primary-key-prunable. This turns the
+aggregate scans into page-sized index lookups. The existing prefilter path
+is kept for the filtered/sorted cases where aggregates drive page selection.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7193] [BE] Structured experiment-sort detection + CH upgrade note
+
+Review feedback: sortHasExperiment now gates page-keyed aggregates, so
+detect the experiment sort from the requested sorting fields
+(SortableFields.EXPERIMENT_ID) instead of substring-matching the rendered
+ORDER BY SQL, which was coupled to EXPERIMENT_FIELD_MAPPING&#39;s output.
+Also document in the template javadoc that a ClickHouse upgrade must
+re-verify the three behaviors the page-keyed mode relies on (forward CTE
+resolution, scalar-subquery caching, PK pruning of the materialized
+IN-set) — all verified on 24.3, 24.8, 25.3, 25.8 (upstream + Altinity),
+and 26.5.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7193] [BE] Plan-shape regression test for page-keyed aggregates
+
+Review feedback: functional tests cover result correctness, but the goal
+of page_keyed_aggregates is a plan property that degrades silently —
+results stay correct while aggregate CTEs regress to whole-project scans.
+Add a container test that renders the real SELECT_BY_PROJECT_ID template
+in page-keyed mode against the real migrated schema (small trace set as
+pagination source, 300k spans as the aggregate population) and asserts
+from system.query_log that reads stay page-sized (primary-key pruning
+applied) and the page-id scalar subquery is served from the cache at the
+remaining reference sites (evaluated once, not per reference).
+
+Mirrors the SpanDAO plan-shape test on OPIK_7196.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7193] [BE] Harden trace plan-shape test per review
+
+- Assert the page-keyed predicate count at all 9 aggregate CTE sites
+  instead of a bare contains().
+- Seed trace-level feedback scores (legacy + authored) and comments so
+  those aggregate paths are exercised by the plan-shape assertions.
+- Switch the query_log wait to untilAsserted so a missing row reports the
+  query-specific assertion instead of a generic Awaitility timeout.
+
+Mirrors the SpanDAO test hardening on OPIK_7196.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7193] [BE] Assert page-keyed predicate per CTE block
+
+Review feedback: a global countMatches == 9 passes if one CTE drops the
+predicate while another duplicates it. Slice the rendered query into named
+CTE blocks and assert the expected site count inside each aggregate CTE,
+keeping the global total as a backstop.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7193] [BE] Extract shared aggregate-keying helper in TraceDAO
+
+Review feedback: getTracesByProjectId and findTraceStream duplicated the
+page_keyed_aggregates / trace_id_prefilter decision tree; factor it into
+addAggregateKeyingFlags so the gating stays in sync. The stream passes
+false for all sort flags, reproducing its previous unguarded branch.
+
+Mirrors the SpanDAO helper on OPIK_7196.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* [OPIK-7193] [BE] Remove plan-shape test per review
+
+Review agreement: the team standard is high-value black-box tests through
+public APIs; the low-level template-rendering test with synthetic data is
+not maintainable. Contract behavior is covered by the existing find
+suites; the plan/cost property is validated operationally. Also reverts
+the @VisibleForTesting visibility widening of SELECT_BY_PROJECT_ID.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7237] [CI] fix: drop eslint v9-only --no-warn-ignored flag from fe-eslint hook (#7346)
+
+* [OPIK-7237] [INFRA] fix: drop eslint v9-only --no-warn-ignored flag from fe-eslint hook
+
+The fe-eslint pre-commit hook (scripts/precommit-fe-lint.sh) passed
+--no-warn-ignored, a flag introduced in eslint v9. The frontend pins
+eslint 8.57.0, which rejects it with a hard parse error before linting
+any file, failing 100% of FE commits and the Code Quality CI eslint gate.
+
+The flag guarded a &#34;File ignored&#34; warning that cannot fire here: there is
+no .eslintignore, no ignorePatterns in .eslintrc, and the hook only feeds
+files under apps/opik-frontend/src/. Dropping it is a behavioral no-op on
+v8 and restores green commits and CI.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* test(precommit): assert fe-eslint omits v9-only --no-warn-ignored
+
+The wrapper smoke test pinned --no-warn-ignored for the FE hook, which
+locked in the OPIK-6980 bug. Flip it to assert the flag is absent (and
+--max-warnings=0 still present) so the test guards the fix. The TS SDK
+assertion is left as-is: that SDK pins eslint v9.39.2, where the flag is
+valid and genuinely suppresses the generated rest_api/** ignore warnings.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-7235] [INFRA] fix: make hooks uses pre-commit install -f to avoid migration mode (#7344)
+
+The pre-commit consolidation (OPIK 6980) left `make hooks` running plain
+`pre-commit install`. Contributors who still had the old `.git/hooks/pre-commit`
+get pre-commit&#39;s &#34;migration mode&#34;: the old hook is moved to `pre-commit.legacy`
+and chained on every commit — and it calls scripts 6980 deleted, so it errors.
+Re-running `make hooks` didn&#39;t help (no `-f`).
+
+Use `pre-commit install -f` (no-op overwrite on a clean clone) and `rm -f` any
+leftover `pre-commit.legacy`.
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- build(deps-dev): bump com.diffplug.spotless:spotless-maven-plugin (#7351)
+
+Bumps [com.diffplug.spotless:spotless-maven-plugin](https://github.com/diffplug/spotless) from 3.7.0 to 3.8.0.
+- [Release notes](https://github.com/diffplug/spotless/releases)
+- [Changelog](https://github.com/diffplug/spotless/blob/main/CHANGES.md)
+- [Commits](https://github.com/diffplug/spotless/compare/maven/3.7.0...maven/3.8.0)
+
+---
+updated-dependencies:
+- dependency-name: com.diffplug.spotless:spotless-maven-plugin
+  dependency-version: 3.8.0
+  dependency-type: direct:development
+  update-type: version-update:semver-minor
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- build(deps): bump org.jdbi:jdbi3-stringtemplate4 in /apps/opik-backend (#7350)
+
+Bumps [org.jdbi:jdbi3-stringtemplate4](https://github.com/jdbi/jdbi) from 3.53.0 to 3.54.0.
+- [Release notes](https://github.com/jdbi/jdbi/releases)
+- [Changelog](https://github.com/jdbi/jdbi/blob/master/RELEASE_NOTES.md)
+- [Commits](https://github.com/jdbi/jdbi/compare/v3.53.0...v3.54.0)
+
+---
+updated-dependencies:
+- dependency-name: org.jdbi:jdbi3-stringtemplate4
+  dependency-version: 3.54.0
+  dependency-type: direct:production
+  update-type: version-update:semver-minor
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [NA] [SDK] [DOCS] Update automatically OpenAPI spec and Fern code (#7348)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [NA] [BE] Update model prices file (#7349)
+
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;
+
+- [OPIK-7233] [BE] chore: skip Spotless in the opik-backend Docker build (#7343)
+
+The image build ran mvn clean package, which triggered spotless:apply and
+pulled the Eclipse JDT formatter from the Eclipse P2 update site
+(download.eclipse.org) at build time. A P2 outage on 2026-07-04 (HTTP 500)
+blocked the E2E image build. Pass -Dspotless.skip=true so the image build only
+compiles and packages; formatting stays enforced on PRs by the Code Quality
+workflow&#39;s pre-commit spotless hook. The compiled jar is unaffected.
+
+Implements OPIK-7233: remove Spotless from the opik-backend Docker build.
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- [OPIK-6980] [CI] refactor: consolidate pre-commit into one root config + unified Code Quality CI (#7165)
+
+* [OPIK-6980] [INFRA] refactor: consolidate pre-commit into root config and add uv-based lint CI
+
+Replace the custom .hooks/pre-commit bash script and three satellite
+.pre-commit-config.yaml files with a single root config (SSOT for which checks
+run on which paths). Add a unified uv-based lint.yml (changed-files-only: PR diff
+range, push range; --all-files on manual dispatch) and delete five per-language
+lint workflows. Java/FE/TS run as repo:local hooks on changed files via wrapper
+scripts; Python hooks stay pinned-remote. Per-hook timing surfaces as a sticky PR
+comment + run summary. tsc incremental for FE and TS SDK. Makefile drives the
+framework. actionlint hook stays commented until PR #7102 lands.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+* ci(code-quality): fan out lint into one job per linter via dynamic matrix
+
+Replace the single lint job with detect → per-hook matrix → summary so each
+linter is reported, retried, and made visible independently (addresses the
+reviewer concern about lost granularity), while the root .pre-commit-config.yaml
+stays the single source of truth.
+
+- detect: precommit-detect-hooks.py replays pre-commit&#39;s files:/exclude:
+  matching over the diff, emitting one matrix leg per hook with matching files
+  (no skip-spam legs for linters with no work).
+- lint: fail-fast:false matrix, each leg provisions only its toolchain and runs
+  its single hook via `pre-commit run &lt;id&gt; --files &lt;matched&gt;` (id+files isolates
+  one hook since ids recur across scopes), uploading a filtered timing fragment.
+- summary: if:always aggregates fragments into the one sticky comment and gates
+  red on any leg failure.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* ci(code-quality): make timing 1:1 with jobs + list skipped checks
+
+The first matrix run spawned 27 lint jobs but the timing comment showed only
+11 rows: detect modeled hooks&#39; files: but not their types:, so it over-emitted
+legs (e.g. ruff on a Makefile under sdks/opik_optimizer) that Skipped at runtime
+and produced empty fragments, silently dropping from the table.
+
+- detect: add TYPED_IDS so python-tool and check-* hooks gate to their content
+  type (.py / .yaml / .json / .toml) — no more do-nothing legs. Now jobs are
+  1:1 with real work.
+- detect: also emit a `skipped` list (hooks with no matching files, so no job).
+- summary: reconcile rendered rows against the spawned-job count and warn on any
+  shortfall, so the table can never silently under-report again.
+- summary: render skipped checks in a collapsible ⏭️ section (precommit-skipped-
+  table.sh) for coverage transparency.
+- smoke tests cover the types: gate, the skipped output, and the skipped table.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* ci(code-quality): exclude deleted files from detect (ACMR)
+
+The reconcile guard caught 3 phantom legs on the live run: detect matched paths
+from `git diff --name-only`, which includes deletions. A deleted file (e.g. the
+satellite .pre-commit-config.yaml this PR removes) spawned a leg whose hook then
+found &#34;no files to check&#34; at runtime — empty fragment, 11 of 14 jobs timed.
+
+Filter the diff to --diff-filter=ACMR (added/copied/modified/renamed), mirroring
+pre-commit, which only lints files present in the worktree. Legs now 1:1 with
+rendered rows; no reconcile warning.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* ci(code-quality): add Description to skipped table + shallow non-detect jobs
+
+- Both timing tables (ran + skipped) now show a Description column, sourced from
+  a single shared scripts/precommit-hook-descriptions.tsv (was duplicated awk;
+  now one SSOT both the awk and python renderers read).
+- Per-job checkout depth: detect keeps fetch-depth:0 (it computes the PR diff
+  base..head, which must reach a many-commit base); the lint legs and summary go
+  fetch-depth:1 — they lint explicit files from detect&#39;s list / only render, and
+  never git-diff, so they need worktree content at HEAD, not history. The
+  reconcile guard makes any accidental scope loss visible, not silent.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+* ci(code-quality): single shared hook-description resolver; drop dead skip branch
+
+Addresses two Baz dedup findings:
+- timing-table.sh and skipped-table.sh both reimplemented TSV-parse + substring
+  matching → extract one resolver (precommit-hook-desc.py) that owns the matching
+  logic; both tables pipe hook names through it. The TSV stays the data SSOT,
+  this is now the single matching SSOT.
+- timing-table.sh had a skipped-rendering &lt;details&gt; branch that&#39;s dead in the
+  matrix design (filter-leg-log.sh strips Skipped hooks before they reach it;
+  skipped-table.sh owns the skipped list). Removed it.
+
+Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+Co-authored-by: Andres Cruz &lt;andresc@comet.com&gt;</div>
+</div>
+
+<a href="../project/comet-ml_opik.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
