@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (23 commits) - firecracker-microvm/firecracker - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (23 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/firecracker-microvm_firecracker.html">firecracker-microvm/firecracker</a> /
+    Updates in main (23 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/firecracker-microvm_firecracker.html">firecracker-microvm/firecracker</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-14 17:30 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/firecracker-microvm/firecracker/commits/main" target="_blank">https://github.com/firecracker-microvm/firecracker/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление значительно повышает производительность и стабильность Firecracker, в частности, за счет исправления ошибки VSOCK, вызывавшей активное ожидание при нехватке RX-буфера гостевой ОС, и устранения паники при восстановлении ACPI-устройства. Также добавлена поддержка Transparent Huge Pages (THP) для гостевой памяти с выравниванием по 2 МиБ. Среди ключевых внутренних улучшений — масштабный рефакторинг менеджера устройств для virtio и PCI, а также общие обновления зависимостей и набора инструментов.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- feat(artifacts): build bzImage CI kernel image on x86_64
+
+Build a bzImage for each x86_64 CI guest kernel and publish it to the
+artifact output directory as bzImage-&lt;version&gt;&lt;flavour&gt;, alongside the
+existing uncompressed ELF vmlinux-&lt;version&gt;&lt;flavour&gt;. aarch64 is
+unaffected.
+
+This only adds the image to the CI artifact build; nothing consumes it
+yet.
+
+Signed-off-by: Riccardo Mancini &lt;mancio@amazon.com&gt;
+
+- test(vsock): add muxer-level RX-starvation regression test
+
+The connection-level test covers get_polled_evset(), but the behavior
+that actually resolves the busy-spin lives in the muxer: when a
+connection&#39;s polled event set collapses to empty because of a pending
+Rw, apply_conn_mutation must drop the connection&#39;s epoll listener, and
+re-add it once recv_pkt clears the Rw on RX-queue refill.
+
+Add an end-to-end muxer test that establishes a connection, makes the
+host stream readable (and, in a second variant, closes it), drives the
+muxer with no guest RX buffer, and asserts the connection&#39;s listener is
+removed from the nested epoll, then re-added once an RX buffer is
+posted. Verified to fail without the get_polled_evset fix.
+
+Signed-off-by: Riccardo Mancini &lt;mancio@amazon.com&gt;
+
+- docs(changelog): note the vsock EPOLLIN re-arm fix
+
+Add an Unreleased &#39;Fixed&#39; entry for the vsock event-thread busy-spin
+fix in the preceding commit.
+
+Signed-off-by: Riccardo Mancini &lt;mancio@amazon.com&gt;
+
+- fix(vsock): stop busy-spinning the event thread on guest RX starvation
+
+An Established vsock connection kept advertising level-triggered
+EPOLLIN in get_polled_evset() even when it already had an
+undeliverable PendingRx::Rw queued. Once a host-side application
+wrote data (or closed its end) and the guest stopped posting virtio
+RX buffers, the muxer&#39;s nested epoll fd stayed readable, so the
+single-threaded event manager woke up on every epoll_wait, made no
+progress, and busy-spun the event thread until the guest posted
+buffers. Being single-threaded, this also delayed servicing of the
+API socket, metrics, and all other device backends.
+
+Stop re-arming EPOLLIN while an undeliverable Rw indication is
+pending. This drops the connection fd&#39;s IN interest in the muxer&#39;s
+nested epoll so the fd goes quiet and the outer event loop sleeps.
+The pending RX is still tracked in the muxer rxq, so when the guest
+refills the RX queue, process_rx() drains the packet, recv_pkt()
+clears the Rw indication, and apply_conn_mutation() re-arms IN. Both
+the data-available and host-EOF variants are covered.
+
+This resolves the queue-deadlock scenario previously flagged by a
+TODO in device.rs, which is removed.
+
+Signed-off-by: Riccardo Mancini &lt;mancio@amazon.com&gt;
+
+- vmm: fix panic on ACPI device restore when EventFd creation fails
+
+ACPIDeviceManager::restore() called .unwrap() on VmGenId::restore()
+and VmClock::restore(), both annotated with a comment claiming they
+can never fail. This is incorrect: both call EventFd::new(), which
+can fail (e.g. EMFILE) when the process is near its file descriptor
+limit, a realistic condition during snapshot-restore when many
+devices are being reconstructed. A failure here would panic and
+crash Firecracker instead of returning a graceful error.
+
+ACPIDeviceError already has #[from] conversions for VmGenIdError and
+VmClockError, so this replaces the two unwrap() calls with ? and
+removes the incorrect comments.
+
+Tested with ./tools/devtool checkbuild -m aarch64 and
+./tools/devtool checkstyle (rustfmt, clippy for aarch64-musl/gnu,
+style/lint suite) — all passed. KVM-dependent unit/integration tests
+could not be run locally (no /dev/kvm available).
+
+Signed-off-by: RyanJHamby &lt;ryanhamby22@gmail.com&gt;
+
+- chore(deps): bump the firecracker group with 14 updates
+
+Bumps the firecracker group with 14 updates:
+
+| Package | From | To |
+| --- | --- | --- |
+| [zerocopy](https://github.com/google/zerocopy) | `0.8.53` | `0.8.54` |
+| [uuid](https://github.com/uuid-rs/uuid) | `1.23.4` | `1.23.5` |
+| [regex](https://github.com/rust-lang/regex) | `1.12.4` | `1.13.0` |
+| [bytemuck](https://github.com/Lokathor/bytemuck) | `1.25.0` | `1.25.1` |
+| [cc](https://github.com/rust-lang/cc-rs) | `1.2.66` | `1.2.67` |
+| [jiff](https://github.com/BurntSushi/jiff) | `0.2.31` | `0.2.32` |
+| [jiff-static](https://github.com/BurntSushi/jiff) | `0.2.31` | `0.2.32` |
+| [memchr](https://github.com/BurntSushi/memchr) | `2.8.2` | `2.8.3` |
+| [rand](https://github.com/rust-random/rand) | `0.9.4` | `0.9.5` |
+| [regex-automata](https://github.com/rust-lang/regex) | `0.4.14` | `0.4.15` |
+| [rustversion](https://github.com/dtolnay/rustversion) | `1.0.22` | `1.0.23` |
+| [winnow](https://github.com/winnow-rs/winnow) | `1.0.1` | `1.0.4` |
+| [zerocopy-derive](https://github.com/google/zerocopy) | `0.8.53` | `0.8.54` |
+| [zmij](https://github.com/dtolnay/zmij) | `1.0.21` | `1.0.23` |
+
+
+Updates `zerocopy` from 0.8.53 to 0.8.54
+- [Release notes](https://github.com/google/zerocopy/releases)
+- [Commits](https://github.com/google/zerocopy/compare/v0.8.53...v0.8.54)
+
+Updates `uuid` from 1.23.4 to 1.23.5
+- [Release notes](https://github.com/uuid-rs/uuid/releases)
+- [Commits](https://github.com/uuid-rs/uuid/compare/v1.23.4...v1.23.5)
+
+Updates `regex` from 1.12.4 to 1.13.0
+- [Release notes](https://github.com/rust-lang/regex/releases)
+- [Changelog](https://github.com/rust-lang/regex/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/rust-lang/regex/compare/1.12.4...1.13.0)
+
+Updates `bytemuck` from 1.25.0 to 1.25.1
+- [Changelog](https://github.com/Lokathor/bytemuck/blob/main/changelog.md)
+- [Commits](https://github.com/Lokathor/bytemuck/compare/v1.25.0...v1.25.1)
+
+Updates `cc` from 1.2.66 to 1.2.67
+- [Release notes](https://github.com/rust-lang/cc-rs/releases)
+- [Changelog](https://github.com/rust-lang/cc-rs/blob/main/CHANGELOG.md)
+- [Commits](https://github.com/rust-lang/cc-rs/compare/cc-v1.2.66...cc-v1.2.67)
+
+Updates `jiff` from 0.2.31 to 0.2.32
+- [Release notes](https://github.com/BurntSushi/jiff/releases)
+- [Changelog](https://github.com/BurntSushi/jiff/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/BurntSushi/jiff/compare/jiff-static-0.2.31...jiff-static-0.2.32)
+
+Updates `jiff-static` from 0.2.31 to 0.2.32
+- [Release notes](https://github.com/BurntSushi/jiff/releases)
+- [Changelog](https://github.com/BurntSushi/jiff/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/BurntSushi/jiff/compare/jiff-static-0.2.31...jiff-static-0.2.32)
+
+Updates `memchr` from 2.8.2 to 2.8.3
+- [Commits](https://github.com/BurntSushi/memchr/compare/2.8.2...2.8.3)
+
+Updates `rand` from 0.9.4 to 0.9.5
+- [Release notes](https://github.com/rust-random/rand/releases)
+- [Changelog](https://github.com/rust-random/rand/blob/0.9.5/CHANGELOG.md)
+- [Commits](https://github.com/rust-random/rand/compare/0.9.4...0.9.5)
+
+Updates `regex-automata` from 0.4.14 to 0.4.15
+- [Release notes](https://github.com/rust-lang/regex/releases)
+- [Changelog](https://github.com/rust-lang/regex/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/rust-lang/regex/compare/regex-automata-0.4.14...regex-automata-0.4.15)
+
+Updates `rustversion` from 1.0.22 to 1.0.23
+- [Release notes](https://github.com/dtolnay/rustversion/releases)
+- [Commits](https://github.com/dtolnay/rustversion/compare/1.0.22...1.0.23)
+
+Updates `winnow` from 1.0.1 to 1.0.4
+- [Changelog](https://github.com/winnow-rs/winnow/blob/main/CHANGELOG.md)
+- [Commits](https://github.com/winnow-rs/winnow/compare/v1.0.1...v1.0.4)
+
+Updates `zerocopy-derive` from 0.8.53 to 0.8.54
+- [Release notes](https://github.com/google/zerocopy/releases)
+- [Commits](https://github.com/google/zerocopy/compare/v0.8.53...v0.8.54)
+
+Updates `zmij` from 1.0.21 to 1.0.23
+- [Release notes](https://github.com/dtolnay/zmij/releases)
+- [Commits](https://github.com/dtolnay/zmij/compare/1.0.21...1.0.23)
+
+---
+updated-dependencies:
+- dependency-name: zerocopy
+  dependency-version: 0.8.54
+  dependency-type: direct:production
+  update-type: version-update:semver-patch
+  dependency-group: firecracker
+- dependency-name: uuid
+  dependency-version: 1.23.5
+  dependency-type: direct:production
+  update-type: version-update:semver-patch
+  dependency-group: firecracker
+- dependency-name: regex
+  dependency-version: 1.13.0
+  dependency-type: direct:production
+  update-type: version-update:semver-minor
+  dependency-group: firecracker
+- dependency-name: bytemuck
+  dependency-version: 1.25.1
+  dependency-type: indirect
+  update-type: version-update:semver-patch
+  dependency-group: firecracker
+- dependency-name: cc
+  dependency-version: 1.2.67
+  dependency-type: indirect
+  update-type: version-update:semver-patch
+  dependency-group: firecracker
+- dependency-name: jiff
+  dependency-version: 0.2.32
+  dependency-type: indirect
+  update-type: version-update:semver-patch
+  dependency-group: firecracker
+- dependency-name: jiff-static
+  dependency-version: 0.2.32
+  dependency-type: indirect
+  update-type: version-update:semver-patch
+  dependency-group: firecracker
+- dependency-name: memchr
+  dependency-version: 2.8.3
+  dependency-type: indirect
+  update-type: version-update:semver-patch
+  dependency-group: firecracker
+- dependency-name: rand
+  dependency-version: 0.9.5
+  dependency-type: indirect
+  update-type: version-update:semver-patch
+  dependency-group: firecracker
+- dependency-name: regex-automata
+  dependency-version: 0.4.15
+  dependency-type: indirect
+  update-type: version-update:semver-patch
+  dependency-group: firecracker
+- dependency-name: rustversion
+  dependency-version: 1.0.23
+  dependency-type: indirect
+  update-type: version-update:semver-patch
+  dependency-group: firecracker
+- dependency-name: winnow
+  dependency-version: 1.0.4
+  dependency-type: indirect
+  update-type: version-update:semver-patch
+  dependency-group: firecracker
+- dependency-name: zerocopy-derive
+  dependency-version: 0.8.54
+  dependency-type: indirect
+  update-type: version-update:semver-patch
+  dependency-group: firecracker
+- dependency-name: zmij
+  dependency-version: 1.0.23
+  dependency-type: indirect
+  update-type: version-update:semver-patch
+  dependency-group: firecracker
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+
+- pci: make pci_segment non-optional in PciDevices
+
+Since a PciDevices only ever exists when PCI is in use, drop the Option
+around its PCI segment and construct it in PciDevices::new, so
+pci_segment is always present rather than conditionally initialised.
+This removes attach_pci_segment and the Option handling at the
+segment&#39;s use sites: a pci_segment() accessor replaces the unwraps,
+and create_pci_nodes takes the segment directly instead of checking
+for its presence.
+
+Signed-off-by: James Curtis &lt;jxcurtis@amazon.co.uk&gt;
+
+- device_manager: serialize only the active virtio transport
+
+Replace the two per-transport slots in DevicesState (mmio_state,
+pci_state) with a single VirtioDevicesState enum mirroring the active
+VirtioDevices variant, so a snapshot carries only the transport actually
+in use and restore picks the transport from the variant rather than from
+the pci_enabled flag.
+
+The pci_enabled snapshot field is dropped with it: PCI-enablement is now
+carried by which variant the snapshot holds, so the field could only
+ever be true, and PciDevices::save/restore no longer need to handle a
+segment-less state.
+
+This changes the snapshot wire format. No snapshot version bump is
+needed, since it has already been bumped since the last release.
+
+Signed-off-by: James Curtis &lt;jxcurtis@amazon.co.uk&gt;
+
+- device_manager: introduce VirtioDevices enum
+
+Centralise virtio devices into a VirtioDevices enum, since the
+MMIO and PCI transports for virtio devices are mutually exclusive. The
+enum owns the transport-agnostic operations (get_device,
+for_each_device, kick, mark_dirty) and dispatches to the concrete
+MMIO/PCI managers, which are now held behind the enum rather than as
+separate DeviceManager fields.
+
+Boot-time attach and runtime hotplug match on the active transport at
+their DeviceManager call sites rather than through methods on the enum:
+each has a single caller, and hotplug/hot-unplug are only supported over
+PCI, so a method on the enum would only pair one real arm with reject
+arms.
+
+The ACPI builder emits virtio DSDT data through the enum&#39;s
+append_aml_bytes dispatch. For PCI VMs this moves the PCI segment AML
+ahead of the GED/VMGenID blocks in the DSDT; the reorder is benign
+since DSDT blocks are order-independent namespace declarations.
+Callers that need transport-specific state (the FDT builder&#39;s MMIO
+device info and PCI segment) go through the transport accessors
+(as_mmio, as_pci), since such callers are already implicitly
+transport-specific.
+
+The snapshot wire format is unchanged: save() fills both transport
+slots (the inactive one with its empty default) and restore() picks the
+transport from the pci_enabled flag. The next commit changes the format
+to hold only the active transport.
+
+Signed-off-by: James Curtis &lt;jxcurtis@amazon.co.uk&gt;
+
+- device_manager: create the PCI segment at boottime
+
+Whether PCI is enabled is known before DeviceManager is built, so pass
+pci_enabled into DeviceManager::new and attach the PCI segment there,
+removing the separate enable_pci step. PCI segment creation failures now
+surface as DeviceManagerCreateError::PciDeviceManager, replacing
+StartMicrovmError::EnablePciDevices, and occur before kernel load.
+
+Tests that previously called enable_pci use a new default_vmm_with_pci
+helper instead.
+
+Signed-off-by: James Curtis &lt;jxcurtis@amazon.co.uk&gt;
+
+- device_manager: rename attach_virtio_device to attach_boot_virtio_device
+
+Rename attach_virtio_device function to atttach_boot_virtio_device. This
+function is only used to attach devices at boot time, so rename it to
+make it more clear in the presence of runtime hotplugging functionality.
+
+Signed-off-by: James Curtis &lt;jxcurtis@amazon.co.uk&gt;
+
+- device_manager: rename MMIODeviceManager to MMIOVirtioDevices
+
+Now that the platform devices live in MMIOPlatformDevices,
+MMIODeviceManager only manages virtio-over-MMIO devices. Rename it (and
+the DeviceManager field holding it) to say so. No functional change.
+
+Signed-off-by: James Curtis &lt;jxcurtis@amazon.co.uk&gt;
+
+- device_manager: split MMIO platform devices from MMIODeviceManager
+
+Extract the non-virtio MMIO devices (serial, RTC, boot timer) out of
+MMIODeviceManager into a new MMIOPlatformDevices struct. The only
+similarity between them and the virtio devices is the transport used,
+they do not share any other functionality.
+
+Update the snapshot serialization format accordingly, splitting the
+platform device state out of DeviceStates into a new
+MMIOPlatformDevicesState.
+
+MMIODeviceManager now only manages virtio devices; it is renamed in the
+following commit.
+
+Signed-off-by: James Curtis &lt;jxcurtis@amazon.co.uk&gt;
+
+- test: add tests for Transparent huge page config
+
+This commit adds unit and end-to-end tests for THP.
+Where it makes sense, this commit also updates existing tests to also
+test the THP configuration.
+
+Signed-off-by: Marco Marangoni &lt;mamarang@amazon.com&gt;
+
+- feat: align guest memory to 2MiB
+
+This commit align guest memory to 2MiB.
+The main benefit is to enable further opportunities to use THP at the
+head and tail of guest memory.
+
+Alignment is enabled unconditionally (rather than only with THP) for a
+few reasons: reduce modalities, performance benefit when THP is enforced
+ by the system rather than Firecracker (e.g.
+ `/sys/kernel/mm/transparent_hugepage/enabled` = `always`), and because
+there&#39;s no downside of doing so.
+
+This implementation doesn&#39;t make assumptions on the guest memory size,
+so extra considerations had to be taken when it is not a multiple of
+page-size. This is required since several tests currently rely on
+guests of specific sizes.
+
+Signed-off-by: Marco Marangoni &lt;mamarang@amazon.com&gt;
+
+- feat: enable THP for guest memory
+
+This commit adds THP for the guest memory, with a new value for the
+huge_pages option.
+
+Signed-off-by: Marco Marangoni &lt;mamarang@amazon.com&gt;
+
+- feat: migrate align_up and align_down to a macro
+
+Having align_up and align_down as a macro allows to use if for more
+integer types, e.g. usize.
+
+This commit also adds unit tests for the two.
+
+Signed-off-by: Marco Marangoni &lt;mamarang@amazon.com&gt;
+
+- test: handle masked_eq in seccomp rules test
+
+By not using the mmap from vm-memory, the seccomp rule detection for
+mmap became more accurate. This highlighted a latent bug where seccomp
+rules with masked_eq were not properly evaluated by the Python test.
+
+Signed-off-by: Marco Marangoni &lt;mamarang@amazon.com&gt;
+
+- test: suppress rustup info in cargo deny A/B test
+
+When a Rust toolchain update is tested, the devctr contains the new
+toolchain but not the old toolchain required by the A (before) checkout.
+Running cargo in that checkout invokes the rustup proxy, which installs
+the old toolchain before starting Cargo and writes informational lines
+to cargo-deny&#39;s stderr, for example:
+
+    info: syncing channel updates for 1.96.0-x86_64-unknown-linux-gnu
+    info: downloading 5 components
+
+The audit test parses each stderr line as JSON, so these lines cause a
+JSONDecodeError before the A and B results can be compared.
+
+Set RUSTUP_LOG=warn only for cargo deny. This suppresses rustup info
+output while preserving warnings and errors, and keeps the JSON parser
+strict.
+
+Signed-off-by: Takahiro Itazuri &lt;zulinx86@gmail.com&gt;
+
+- chore: Update DEVCTR_IMAGE_TAG to v92
+
+The new devctr image contains Rust 1.97.0 and libseccomp v2.6.1.
+
+Signed-off-by: Takahiro Itazuri &lt;zulinx86@gmail.com&gt;
+
+- chore: fix Clippy warnings introduced in Rust 1.97.0
+
+Rust 1.97.0&#39;s Clippy reports redundant references passed to
+`format!` and direct map iteration when only the values are used.
+
+Remove the redundant formatting references in the cgroup and jailer
+code, and iterate over the MMIO device map with `HashMap::values`.
+These are lint-only changes and do not alter runtime behavior.
+
+Signed-off-by: Takahiro Itazuri &lt;zulinx86@gmail.com&gt;
+
+- chore: update Rust toolchain to 1.97.0
+
+Rust 1.97.0 [1] does not announce a CVE or security advisory. It
+does fix an unsound coercion in the `pin!` macro [2][3] that can
+let safe Rust code trigger undefined behavior.
+
+Firecracker&#39;s source does not use the affected `pin!` macro, so
+this issue does not affect Firecracker.
+
+Update the repository toolchain pin and development container to
+this release.
+
+[1]: https://github.com/rust-lang/rust/releases/tag/1.97.0
+[2]: https://github.com/rust-lang/rust/issues/153438
+[3]: https://github.com/rust-lang/rust/pull/153457
+
+Signed-off-by: Takahiro Itazuri &lt;zulinx86@gmail.com&gt;
+
+- chore: update libseccomp to v2.6.1
+
+libseccomp v2.6.1 [1] includes several security fixes. Firecracker&#39;s
+runtime and bundled default filters are not affected by any of the
+addressed issues because runtime loads precompiled BPF filters and the
+default policies do not meet their trigger conditions.
+
+Update the dev container dependency to incorporate the fixes and
+harden seccompiler-bin when compiling unusually large custom profiles.
+
+[1]: https://github.com/seccomp/libseccomp/releases/tag/v2.6.1
+
+Signed-off-by: Takahiro Itazuri &lt;zulinx86@gmail.com&gt;</div>
+</div>
+
+<a href="../project/firecracker-microvm_firecracker.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

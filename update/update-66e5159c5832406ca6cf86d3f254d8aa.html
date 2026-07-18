@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (38 commits) - jhlee0409/claude-code-history-viewer - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (38 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/jhlee0409_claude-code-history-viewer.html">jhlee0409/claude-code-history-viewer</a> /
+    Updates in main (38 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/jhlee0409_claude-code-history-viewer.html">jhlee0409/claude-code-history-viewer</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-12 12:34 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/jhlee0409/claude-code-history-viewer/commits/main" target="_blank">https://github.com/jhlee0409/claude-code-history-viewer/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Этот релиз значительно повышает производительность в нескольких областях, включая параллелизированное сканирование рабочих пространств и кэша поиска, подгрузку сообщений и сессий с пагинацией, а также оптимизированный рендеринг пользовательского интерфейса для большого объема контента. Среди ключевых новых функций представлены мультивыбор для управления сессиями с возможностью массового удаления, поддержка вложений изображений, а также улучшенная фильтрация и визуализация параллельных задач и рабочих процессов агентов. Обновление также расширяет поддержку провайдеров для Mistral Vibe, Pi и oh-my-pi, наряду с различными исправлениями ошибок и улучшениями доступности.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- chore: release v1.21.0
+
+- perf(providers): parallelize per-workspace scans with a bounded pool (#468)
+
+Cursor, VS Code Copilot, Trae, Cline-family, and Crush scanners iterated
+their workspaceStorage/* (or per-project DB) entries sequentially, each
+visit opening a SQLite DB with a 5s busy_timeout — so a user with dozens
+of workspaces, especially with the editor running and holding locks,
+stalled the whole startup scan on a single scanner. Provider-LEVEL
+concurrency was fixed in #434; this fixes the INTRA-scanner loop.
+
+- New utils::par_map_bounded: order-preserving parallel map on a
+  dedicated rayon pool capped at min(8, cores) — dedicated (not the
+  global pool) so parked busy_timeout waits can&#39;t starve other
+  scanners&#39; par_iter work; sequential fallback for &lt;=1 item or pool
+  build failure.
+- cursor/trae/crush: loop body extracted to a per-workspace fn
+  returning Option, skip-and-continue semantics unchanged, existing
+  sort (or input order) preserved via rayon&#39;s indexed collect.
+- vscode: per-workspace fn returns Result&lt;Option&lt;_&gt;, String&gt;, keeping
+  the sequential loop&#39;s semantics (unreadable chatSessions dir still
+  fails the scan with the first error in input order).
+- cline: parallelized over the &lt;=12 extension base paths (each may park
+  5s on its editor&#39;s locked global state.vscdb).
+
+busy_timeout intentionally stays 5s: the open helpers are shared with
+the interactive load paths, and 1s could silently drop projects during
+a legitimate write/WAL checkpoint or on a slow disk — bounded
+parallelism already collapses the worst case from a sum to
+ceil(N/8) x wait.
+
+Tests: corrupt state.vscdb mixed with valid workspaces returns the
+valid projects (cursor + trae, real SQLite fixtures in temp dirs), plus
+order-preservation tests for par_map_bounded.
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- perf(search): per-file signature validation for the search cache (#467)
+
+* perf(search): validate search cache per file instead of global generation
+
+The 64-entry search LRU was keyed to a single global generation counter
+that the file watcher bumped on ANY session-file change (debounced
+500ms). While Claude Code appends to one session, every cached search
+result was evicted, so the cache was effectively always cold and each
+keystroke re-scanned the entire corpus.
+
+Restructure the cache around per-file (size, mtime) signatures,
+mirroring the stats cache design (stats/cache.rs) without coupling
+the two:
+
+- Entries are keyed by (claude_path, query) and hold raw per-file
+  match sets validated at serve time; only changed/new files are
+  re-scanned and merged (in walk order, so warm results are identical
+  to a cold scan). Deleted files drop out on the next walk.
+- Filters and limit move to serve-time application over the cached
+  raw matches, so one entry answers every filter/limit combination.
+- Entries whose total raw matches exceed 10,000 are computed but not
+  stored, bounding worst-case memory.
+- invalidate_search_cache and its watcher/webui callsites are removed:
+  serve-time signature validation subsumes push invalidation.
+
+The search_messages command signature and frontend are unchanged.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* fix(search): evict rewritten session files from the search cache explicitly
+
+Session rename/reset rewrite a .jsonl via temp+rename — a rewrite can land
+with the same byte size within mtime resolution, which the (size, mtime)
+signature cannot distinguish. write_jsonl_lines now evicts that file from
+every cached query after the atomic rename. Content hashing was rejected:
+it costs a full read per file per search, defeating the cache.
+
+Addresses CodeRabbit review on #467.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- perf(search): resolve global-search result clicks without a serial project sweep (#466)
+
+Clicking a result whose session wasn&#39;t in the loaded list looped over
+EVERY project with one awaited load_provider_sessions each — many
+seconds of frozen modal with large project counts, no cancellation.
+
+- rank candidate projects by the result&#39;s projectName + provider so the
+  common case resolves in a single request
+- remaining candidates are tried in parallel batches of 4 with early
+  exit instead of one serial await per project
+- a resolve token cancels the sweep on modal close or a newer click
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- fix(webui): wire detect_claude_config_dir into the server router (#465)
+
+The frontend calls detect_claude_config_dir during initialization
+(projectSlice), but the Axum WebUI server never exposed it — every
+--serve session logged a 405 console error and CLAUDE_CONFIG_DIR
+auto-detection silently did nothing in web mode. Adds the route, the
+read-only allowlist entry, and a no-params handler (tauri-axum parity,
+#340 class drift found by the parity check during #458).
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- perf(stats): per-file daily-aggregate cache for stats commands (#464)
+
+The four stats commands re-read and re-parsed every session JSONL file on
+every call, making analytics-tab opens and date-filter changes a
+multi-second spinner on large histories.
+
+Add an in-memory, (size, mtime)-validated per-file cache of
+date-filter-independent daily aggregates (commands/stats/cache.rs).
+Repeat calls compose results from cached day buckets; only changed files
+re-parse. Filters that split a day&#39;s data, or dedup keys spanning days,
+fall back to the original full scan (kept as scan_* reference
+implementations), so results stay byte-identical. Two caches mirror the
+two parse pipelines (lightweight global vs RawLogEntry-&gt;ClaudeMessage);
+two mode slots per entry; capped at 16384 entries per cache. Public
+command signatures unchanged; provider (non-Claude) paths untouched.
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- perf(messages): real chat-style message pagination across all providers (#458)
+
+* perf(messages): add paginated provider message loading + uuid offset lookup
+
+- load_provider_messages_paginated: chat-style (offset 0 = newest) unified
+  entry point; claude uses the mmap fast path with in-window tool_result
+  merging (pre-merge offset space), other providers merge-then-slice so the
+  IPC payload and frontend memory stay bounded
+- get_provider_message_offset: uuid -&gt; offset-from-newest lookup (early-exit
+  reverse scan for claude) to power deep links into unloaded regions
+- extract load_non_claude_messages so full/paginated dispatch cannot drift
+- wire both commands in lib.rs and the WebUI server (routes + read-only
+  allowlist + handlers)
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* perf(messages): frontend chat-style message pagination
+
+- messageSlice: selectSession loads only the newest window (200/page),
+  loadMoreMessages prepends older pages (serialized, dedup on live-file
+  growth), in-place reloads preserve the paged-in span
+- ensureMessageLoaded extends the window to cover deep-linked uuids
+  (global search jump, navigator) via get_provider_message_offset
+- fetchFullSessionMessages: cached full fetch for consumers that need the
+  complete session — export and in-session search now cover the whole
+  conversation, not just the loaded window
+- MessageViewer: load-earlier button + near-top autoload with prepend
+  scroll anchoring; auto-scroll-to-bottom skips prepends (firstItemKey)
+- header shows loaded/total; AppLayout count gets a &#39;+&#39; when partial
+- display filter extracted to applyMessageDisplayFilter for export reuse
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* fix(messages): multi-pass anchor restore for load-earlier prepend
+
+A single-pass totalSize-delta compensation lands far off once the newly
+prepended rows measure their real heights (estimate drift). Pin the first
+visible message row by uuid + on-screen offset instead, and re-anchor over
+several render passes (same technique as the deep-link scroll, #269).
+Near-top autoload is suppressed while a restore converges so its scroll
+events cannot cascade extra page loads.
+
+Verified in a real WebUI run (2,076-message session): anchor shift 0px
+after prepend; near-top autoload and off-window search jump both work.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* fix(messages): harden async race guards from review
+
+- selectSession: per-call epoch so two overlapping in-place reloads of the
+  same file (e.g. rapid filter toggles) cannot let the stale one land last —
+  the path guard alone passes both
+- loadOlderPage: capture the target session at QUEUE time and abort when the
+  chain executes after navigation / a newer reload
+- ensureMessageLoaded: epoch check in the extension loop
+- session search: the staleness predicate now includes the session path and
+  is applied after every await and in the catch path
+
+Addresses CodeRabbit review on #458 (3 of 6 findings valid; the others are
+pre-existing behavior documented in the PR).
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- perf(renderers): size-guard syntax highlighting and large JSON blocks (#461)
+
+Prism tokenization emits a div per line and a span per token — a multi-MB
+Write/Read payload inside one virtualized message row froze the UI and
+wrecked row-height estimation (the CSS max-height only clipped visually).
+
+- new CodeHighlight wrapper: content above 50k chars skips tokenization
+  and renders as plain text with a notice
+- new TruncatedPre: plain blocks above 200k chars render a preview with an
+  explicit &#39;Show all&#39; opt-in
+- applied at the unbounded sites: ToolUseRenderer (file-create content +
+  tool-input JSON), FileContent (read results), ClaudeContentArrayRenderer
+  (unknown-type JSON dump), MCP/Server tool renderers, WebSearchRenderer
+- 3 new i18n keys in all 5 locales; unit tests for the guard + component
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- fix(sessions): make select-all scope explicit over paginated session lists (#459)
+
+&#39;Select all&#39; silently selected only the loaded page (250/page) while
+reading as if the whole project was selected — mass delete then acted on
+a subset. Now:
+
+- select-all button shows the exact count it will select
+- an amber notice appears when more sessions exist on disk than loaded
+- a &#39;Load &amp; select all N&#39; action pages in every remaining session (stall-
+  guarded loop, aborts on selection-mode exit) and then selects them
+
+New i18n keys added to all 5 locales.
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- perf(projects): defer search filtering and skip offscreen project row rendering (#460)
+
+- project search now filters via useDeferredValue: keystrokes echo
+  immediately while re-filtering the full project list runs as an
+  interruptible low-priority render
+- collapsed project rows get content-visibility:auto (+ intrinsic size)
+  so offscreen rows skip layout/paint; the expanded row is excluded to
+  keep the sticky selection bar and nested virtualized session list intact
+
+This intentionally avoids react-window for the outer project tree: the
+roving-tabindex keyboard navigation, typeahead, and per-project nested
+session virtualization all assume the full tree exists in the DOM.
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- perf(session): paginate project session loading (#381)
+
+* perf(session): paginate project session loading
+
+* fix(session): harden paginated loading
+
+* fix(i18n): add session.loadMore key for the paginated session list
+
+The Load more button in SessionList only had an inline English fallback;
+add the key to all 5 locales and regenerate types.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* fix(server): classify paginated session routes as read-only-allowed
+
+The read_only_classification_covers_every_post_route guard caught the
+two new pagination endpoints as unclassified; both are pure reads.
+
+---------
+
+Co-authored-by: jhlee0409 &lt;relee6203@gmail.com&gt;
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- fix(a11y): make the multi-select session checkbox keyboard-operable
+
+The role=checkbox indicator from #456 was announced to screen readers
+but had no tabIndex or key handling. Space/Enter now toggles with the
+same modifier semantics as the row click, with a visible focus ring.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- feat(vibe): render image attachments from session transcripts
+
+Upstream Vibe persists pasted/attached images on LLMMessage.images —
+inline base64 or a snapshot file inside the session directory (plus a
+legacy flat shape) — which the provider silently dropped (#438 review
+follow-up). They now become standard image content blocks; file
+sources are read only when they resolve inside the session directory
+(symlinks and escaping paths are skipped), capped at upstream&#39;s 10MB.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- feat(sessions): multi-select mode with mass delete (#456)
+
+* feat(sessions): multi-select mode with mass delete
+
+Add an explicit multi-select mode to the project session list so
+several sessions can be acted on at once.
+
+- Toggle &#34;select mode&#34; from the session-list controls (Esc to exit)
+- Per-row checkboxes; plain click toggles, Shift+click selects a range,
+  Cmd/Ctrl+click toggles individually
+- Sticky action bar: selected count, Select all / Clear, Copy IDs,
+  and Delete with a confirm dialog + partial-failure reporting
+- Mass delete reuses the hardened single `delete_session` command in a
+  concurrency-limited loop (no new backend surface); read-only WebUI
+  mode hides delete but still allows copy
+- Selection is scoped to the open project and resets on project switch
+
+State lives in a new `sessionSelectionSlice` mirroring the existing
+capture-mode multi-select. Adds i18n keys across all 5 locales and unit
+tests for the slice.
+
+* feat(sessions): Cmd/Shift+click to multi-select without toggling mode
+
+Cmd/Ctrl+click or Shift+click on a session now starts/extends a
+selection directly from normal mode (Finder-style), entering selection
+mode and seeding the anchor from the currently open session. The
+explicit select-mode toggle still works. Plain click still opens.
+
+* fix(sessions): prevent multi-delete dialog from overflowing on long session names
+
+The session-name list used `truncate` (white-space:nowrap); as a grid
+child with default min-width:auto it forced the dialog past its
+max-width. Add `min-w-0` so the list can shrink and the names truncate
+with an ellipsis instead.
+
+* fix(sessions): surface unexpected batch-delete errors instead of unhandled rejections
+
+Review follow-up on the multi-select feature: deleteSessions&#39; outer
+store mutations ran without a catch (only per-item delete failures were
+handled), and handleConfirmDelete awaited it bare — an unexpected error
+became an unhandled rejection with the confirm dialog stuck open.
+
+Both now catch, log, and toast via the existing session.deleteError key
+(present in all 5 locales), matching the single-delete flow in
+useSessionEditing.
+
+* test(store): stub exitSessionSelectionMode in projectSlice harness
+
+The multi-select feature makes selectProject/clearProjectSelection call
+exitSessionSelectionMode; the scanProjects test store stubs cross-slice
+deps explicitly, so the missing stub made refreshAllConversations abort
+mid-flow and fail three #439 regression tests.
+
+---------
+
+Co-authored-by: jhlee0409 &lt;relee6203@gmail.com&gt;
+
+- feat(codex): discover and parse zstd-compressed rollouts (.jsonl.zst)
+
+Codex now compresses old rollout files to rollout-*.jsonl.zst; the
+viewer&#39;s rollout-*.jsonl matcher never saw them, so aged sessions
+silently vanished from the project tree.
+
+- is_rollout_jsonl accepts the .jsonl.zst suffix (path validators and
+  loaders included), and readers go through read_rollout_bytes — an
+  mmap for plain files, a zstd::decode_all buffer for compressed ones,
+  behind one Deref&lt;[u8]&gt; so the line scanners are unchanged.
+- Session walkers use is_discoverable_rollout, which skips a compressed
+  rollout whose plain twin exists (Codex materializes the plain file
+  for appends, so the plain one is current — listing both would
+  duplicate the session).
+- Filename-derived session ids strip the .jsonl left in a .zst stem.
+
+Open Interpreter shares the reader and gains the same support.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- fix(codex): identify meta-less rollouts via turn_context cwd + filename id
+
+Follow-up to #451: newer Codex builds can produce rollout files with no
+session_meta line at all (reported with a forked session that still
+didn&#39;t show after the first-meta fix). Such files fell back to cwd=None
+and an empty session id, so the session landed in an &#39;unknown&#39; bucket
+or nowhere the reporter could see.
+
+Fallbacks, applied consistently across extract_session_cwd,
+extract_session_info, and parse_rollout_file so scan and session-list
+agree:
+- cwd: the LAST turn_context payload.cwd — a fork replays the source&#39;s
+  turn contexts first, so the last one is where the session actually
+  runs. session_meta, when present, still wins (first-meta rule kept).
+- session id: the trailing UUID of the rollout filename.
+
+Also benefits Open Interpreter, which shares these extractors.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- chore: release v1.20.0
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- docs(changelog): add 1.20.0 entry
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- fix(watcher): route Pi/oh-my-pi session file events to live refresh
+
+#445 added the pi/ompi store roots to collect_watch_paths but never
+taught to_file_watch_event how to map their files, so every change
+event under ~/.pi/agent/sessions and ~/.omp/agent/sessions was
+silently dropped and Pi sessions never live-refreshed.
+
+extract_pi_family_paths now maps &lt;store&gt;/&lt;project_dir&gt;/&lt;session&gt;.jsonl
+to (project_dir, session_file) — matching scan_store&#39;s scheme-less
+ClaudeProject.path — with the same canonicalize/symlink guards as the
+vibe/kimi extractors, and unit tests for depth and symlink rejection.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- docs(readme)+test(vibe): 28-provider README across 5 languages; vibe robustness tests
+
+Follow-ups promised in the #438 merge review:
+- README: Mistral Vibe row + count 27→28 in English; translated READMEs
+  also gain the Pi/oh-my-pi rows they missed (they were synced before
+  #445 landed) and move 25→28.
+- vibe.rs: two new tests — malformed-JSONL line is skipped without
+  failing the load, and a symlinked session dir pointing at a valid
+  foreign session is rejected by the path guard.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- feat(vibe): add Mistral Vibe CLI provider support (#438)
+
+Implement provider registration, session scanning, message parsing, file
+watcher integration, and frontend/i18n wiring for Mistral Vibe sessions
+stored under ~/.vibe/logs/session (overridable via VIBE_HOME).
+
+Fixes #427
+
+Co-authored-by: syf2211 &lt;syf2211@users.noreply.github.com&gt;
+Co-authored-by: jhlee0409 &lt;relee6203@gmail.com&gt;
+
+- Update model pricing to GPT/Anthropic&#39;s latest models (#457)
+
+* Update model pricing to GPT/Anthropic&#39;s latest models
+
+Add following models:
+[Anthropic]
+Fable-5
+Opus-4.8
+Sonnet-5
+[GPT]
+GPT-5.6-sol
+GPT-5.6-terra
+GPT-5.6-luna
+
+* fix(pricing): OpenAI models do not charge cache writes — zero out gpt-5.6 cacheWrite per file convention
+
+---------
+
+Co-authored-by: jhlee0409 &lt;relee6203@gmail.com&gt;
+
+- chore: release v1.19.0
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- Merge branch &#39;develop&#39;
+
+- docs(changelog): add 1.19.0 entry
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- feat: filter parallel tasks across providers (#446)
+
+* feat(messages): add parallel tasks filter
+
+* feat(navigator): add parallel tasks visibility toggle
+
+* refactor(messages): introduce provider-neutral categories
+
+* feat(filters): show parallel task controls contextually
+
+* feat(filters): classify Codex parallel agents
+
+* feat(filters): classify Gemini parallel subagents
+
+* chore(rust): satisfy latest clippy lints
+
+* feat(filters): classify Qwen parallel agents
+
+* feat(filters): classify OpenCode parallel tasks
+
+* test(codex): cover parallel agent history
+
+* fix(filters): detect pending Gemini agents
+
+* test(cli): make file URL fixture cross-platform
+
+* fix(filters): build content block categorization
+
+---------
+
+Co-authored-by: jhlee0409 &lt;relee6203@gmail.com&gt;
+
+- feat(pi): add Pi and oh-my-pi provider support (#445)
+
+* feat(pi): add Pi and oh-my-pi provider support
+
+Two providers over one shared parser (they write the same session format):
+
+- pi: badlogic&#39;s Pi coding agent (https://pi.dev), per-cwd JSONL
+  transcripts under ~/.pi/agent/sessions
+- ompi: oh-my-pi (omp), a pi fork with the identical format under
+  ~/.omp/agent/sessions
+
+Parser (providers/pi.rs, store-parameterized; ompi.rs is a thin
+registration):
+- header cwd is authoritative for the project path; the escaped store
+  directory name is never decoded
+- only type:&#34;message&#34; records count as messages; model_change /
+  thinking_level_change are metadata and excluded
+- toolResult is Pi&#39;s own top-level record for tool output; surfaced in
+  the user lane as a tool_result block
+- content items map to text / thinking(+signature) / tool_use blocks;
+  unknown item types skip instead of erroring; assistant errorMessage
+  becomes a synthetic is_error text block
+- timestamps prefer the nested epoch-ms message.timestamp, then the
+  envelope ISO timestamp, then file mtime
+- usage {input,output,cacheRead,cacheWrite} maps to TokenUsage
+- load_sessions/load_messages reject symlinks and any path that does
+  not canonicalize under the store&#39;s sessions root
+
+Plumbing: ProviderId variants + registry arms, multi_provider scan/load/
+search dispatch, live file-watcher roots, TS ProviderId union +
+capability/badge/label registries, common.provider.* keys in all five
+locales, README provider table (25 -&gt; 27), insta snapshots for
+message/project/session, unit tests incl. HOME-override fixtures.
+
+Closes #359
+Closes #279
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* fix(pi): address review — session_meta timestamp precedence + provider map order
+
+Two CodeRabbit findings on #445:
+
+- session_meta now derives first/last session times from the nested epoch-ms
+  message.timestamp (falling back to the envelope ISO timestamp), matching
+  convert_record. It previously read only the envelope timestamp, so
+  first_message_time/last_message_time — which drive session/project sort
+  order — could diverge from the times shown on individual messages. This
+  makes the code match what the feature commit already described. Unit test
+  updated (the fixture deliberately diverges envelope 2026 vs message 2025).
+
+- PROVIDER_BADGE_STYLES: place pi/ompi in alphabetical order, consistent with
+  PROVIDER_IDS and PROVIDER_TRANSLATIONS.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+Co-authored-by: jhlee0409 &lt;relee6203@gmail.com&gt;
+
+- fix(project): count only top-level jsonl as sessions in scan_projects (#450)
+
+* fix(project): count only top-level jsonl as sessions in scan_projects
+
+The project tree&#39;s session count was inflated because scan_projects used a
+recursive WalkDir and incremented session_count for every *.jsonl, including
+sidechain/subagent files stored under `&lt;project&gt;/&lt;session-uuid&gt;/subagents/`.
+
+This diverged from load_project_sessions, which (with the default
+exclude_sidechain=true) only returns top-level main sessions, so a project
+displaying e.g. 530 in the tree would show 73 when opened.
+
+Fix: only count top-level jsonl (relative path components == 1) as sessions.
+The recursive WalkDir is preserved so last_modified, message_count, and cwd
+fallback keep their existing behavior.
+
+Known follow-up: message_count still accumulates sidechain files and remains
+inconsistent with the opened-session view; left for a separate change.
+
+Tests: add tests/session_count_test.rs with a fixture that places top-level
+sessions alongside sidechain files in a `&lt;uuid&gt;/subagents/` subdirectory and
+asserts only the top-level files are counted.
+
+* feat(i18n): add common.provider.zcode key to all 5 locales
+
+* fix(test): update session_count assertions for top-level-only counting
+
+Two existing tests had session_count=2 expectations that are now
+incorrect after the is_direct_session filter was added:
+
+- test_scan_projects_prefers_top_level_cwd_over_subagent_cwd:
+  parent-session.jsonl (top) + agent-a.jsonl (subagents/) → 1
+- test_scan_projects_nested_sessions:
+  session1.jsonl (top) + session2.jsonl (subdir/) → 1
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+* chore(clippy): backtick doc items in session_count_test (rust 1.97 doc_markdown)
+
+---------
+
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+Co-authored-by: jack &lt;60695299+jhlee0409@users.noreply.github.com&gt;
+Co-authored-by: jhlee0409 &lt;relee6203@gmail.com&gt;
+
+- docs(readme): sync ko/ja/zh-CN/zh-TW translations to current v1.18.0 English README
+
+The four translated READMEs were last synced at v1.13.0 — five releases
+stale: no 25-provider table (9 rows), no GitHub Copilot, no CLI export,
+no v1.14.0–v1.18.0 release sections. Each file is now a full
+section-for-section mirror of README.md: 472 lines each, identical URL/
+badge/code-block content (verified by diff), prose-only translation
+with provider names, paths, and flags kept in English.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- docs(readme): sync ko/ja/zh-CN/zh-TW translations to current v1.18.0 English README
+
+The four translated READMEs were last synced at v1.13.0 — five releases
+stale: no 25-provider table (9 rows), no GitHub Copilot, no CLI export,
+no v1.14.0–v1.18.0 release sections. Each file is now a full
+section-for-section mirror of README.md: 472 lines each, identical URL/
+badge/code-block content (verified by diff), prose-only translation
+with provider names, paths, and flags kept in English.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- chore: remove accidentally committed playwright artifacts and gitignore them
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- feat(workflow): render Claude Code Workflow runs with navigable agent transcripts
+
+Claude Code dynamic Workflows store their sub-agent transcripts under
+{uuid}/subagents/workflows/wf_*/agent-*.jsonl — one level deeper than
+the flat subagents/*.jsonl layout — and their meta.json carries no
+toolUseId, so nothing surfaced in the viewer: the Workflow tool call
+fell through to the generic card and the run&#39;s conversations were
+undiscoverable (#449).
+
+Backend: find_subagent_files also collects agent-*.jsonl under
+subagents/workflows/&lt;run&gt;/ (journal.jsonl excluded; symlinks rejected
+at every level), and SubagentSession gains workflow_run_id derived
+from the run directory name.
+
+Frontend: a new WorkflowCard renders Workflow tool calls — workflow
+name parsed from the script meta, status, run id, collapsible script/
+result, and the run&#39;s agent transcripts anchored by parsing the
+tool_result&#39;s transcript dir (the only stable tool-call ↔ run link),
+each navigable via the existing subagent navigation.
+
+Verified end-to-end against a real 24-agent workflow session in the
+WebUI: card renders, agents list shows, click opens the agent
+conversation with back-to-parent navigation.
+
+Fixes #449
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- fix(codex): keep first session_meta so forked sessions list under the right project
+
+codex fork writes the new rollout with its own session_meta first, then
+replays the source rollout verbatim — including the source&#39;s
+session_meta line. extract_session_info and parse_rollout_file took the
+LAST meta (source id/cwd) while project scanning took the FIRST, so a
+forked session&#39;s project appeared in the tree but its session list came
+back empty, and replayed messages carried the source session id.
+
+First meta now wins everywhere, matching extract_session_cwd. Also
+covers Open Interpreter, which reuses these extractors.
+
+Fixes #451
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- chore(clippy): fix manual_filter and question_mark lints flagged by Rust 1.97
+
+CI&#39;s stable toolchain moved to Rust 1.97, whose clippy flags two
+pre-existing patterns on develop (stats.rs and_then-if-Some/None,
+kimi.rs if-let-else-return-None). Every fork PR&#39;s Rust CI was failing
+on these base-code lints regardless of the PR&#39;s own changes.
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- feat(web): add global conversation refresh (#439)
+
+- fix(ui): make tool/thinking box and markdown font sizes respect the app font-size setting (#443)
+
+* fix(ui): normalize AI tool/thinking box font size
+
+* fix(ui): make .prose font-size overrides reactive to app font scale
+
+The .prose block in index.css sets `!important` font-sizes for prose
+text and its headings/pre/code/table/kbd. Since !important always wins
+over a non-!important declaration regardless of cascade layer or source
+order, this silently overrode #412&#39;s reactive prose-xs fix everywhere
+markdown is rendered (assistant message bubbles, AgentCard prompt/result,
+etc.) -- the root cause of issue #441.
+
+Wrap each hardcoded rem value in calc(rem * var(--app-font-scale)),
+preserving !important so appearance at the default scale is unchanged.
+
+Co-Authored-By: Claude &lt;noreply@anthropic.com&gt;
+
+* fix(ui): make hardcoded inline fontSize styles reactive
+
+Several tool-result renderers pass a literal fontSize (via the shared
+codeTheme constant, or ad-hoc per-file values) into prism-react-renderer
+and react-diff-viewer-continued&#39;s inline style props. Inline styles
+always win over any CSS class, so no class-level fix could reach these --
+a contributor to issue #440&#39;s tool-box code/diff content not scaling.
+
+Wrap each value in calc(rem * var(--app-font-scale)) across
+codeTheme.fontSize, ClaudeToolUseDisplay, ClaudeToolResultItem,
+CommandOutputDisplay, FileContent, FileEditItem, FallbackRenderer, and
+EnhancedDiffViewer.
+
+Co-Authored-By: Claude &lt;noreply@anthropic.com&gt;
+
+* chore(ui): remove unused non-reactive text utility classes
+
+.text-label, .text-label-sm, .text-caption, .text-data, and
+.text-data-lg were unused anywhere in src/ and used hardcoded rem
+font-sizes that ignored --app-font-scale. Found during the font-size
+reactivity audit for issues #440/#441.
+
+Co-Authored-By: Claude &lt;noreply@anthropic.com&gt;
+
+* fix(ui): make legacy tool-use box title font-size reactive
+
+ClaudeToolUseDisplay (the legacy top-level message.toolUse render path,
+separate from ClaudeContentArrayRenderer) had no font-size class
+anywhere in its title span&#39;s ancestor chain, so it always fell back to
+the browser default instead of scaling with --app-font-scale.
+
+Give the title span layout.titleText to match the compact reactive
+sizing used by every other tool renderer.
+
+Co-Authored-By: Claude &lt;noreply@anthropic.com&gt;
+
+---------
+
+Co-authored-by: Claude &lt;noreply@anthropic.com&gt;
+
+- fix(dev): prevent Vite server from watching src-tauri/target/ directory (#442)
+
+- chore(harness): add harness-kit repo layer via /harness-kit:introspect
+
+- CLAUDE.md: marked Engineering-harness block (discipline spine, agent/critic routing)
+- .claude/agents/: rendered typescript-architect, rust-architect, ui-verify critic
+- .claude/harness-kit.json: verify command, protected branches, PR workflow config
+- docs/adr/0000: ADR practice starter; specs/ scaffold; gitignore scratch/
+
+Co-Authored-By: Claude Fable 5 &lt;noreply@anthropic.com&gt;</div>
+</div>
+
+<a href="../project/jhlee0409_claude-code-history-viewer.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

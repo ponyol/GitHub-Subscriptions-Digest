@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (10 commits) - microsoft/onnxruntime-genai - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (10 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/microsoft_onnxruntime-genai.html">microsoft/onnxruntime-genai</a> /
+    Updates in main (10 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/microsoft_onnxruntime-genai.html">microsoft/onnxruntime-genai</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-16 23:07 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/microsoft/onnxruntime-genai/commits/main" target="_blank">https://github.com/microsoft/onnxruntime-genai/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление в основном направлено на повышение стабильности, безопасности и производительности. Основные исправления касаются переполнения кучи и уязвимостей типа use-after-free в генерации токенов и управлении жизненным циклом адаптера, а также предотвращают произвольную загрузку DLL через инъекции JSON. Кроме того, улучшено разрешение путей для пакетов моделей, оптимизированы операции GPU для WebGPU и обеспечен надежный механизм отката при создании устройства D3D12.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Enable re-init after OgaShutdown (#2292)
+
+Enable re-init after OgaShutdown. State returns to &#39;just loaded&#39;
+post-OgaShutdown.
+Allows user to control lifetime of the OrtEnv instance that is pinned in
+OgaGlobals.
+
+See the plan document for details.
+
+Adds some additional library load validation/diagnostic info (copied
+from ORT) so we stay in a clean state if an EP can&#39;t be loaded.
+
+- hack(ci): temporarily disable GHCR cache (#2297)
+
+GHCR push is failing and blocking PRs. Disable for now.
+Re-enable once permissions get figured out.
+
+- Fix AppendNextTokensToSequences heap overflow (#2111)
+
+## Fix heap-buffer-overflow in `GenerateNextToken` when sequence is at
+`max_length`
+
+### Summary
+
+Adds a fast-fail guard at the entry of `Generator::GenerateNextToken()`
+that throws a clear `std::runtime_error` when the sequence has already
+reached `max_length`. This prevents a heap-buffer-overflow write into
+the preallocated sequences buffer that is otherwise reachable via the C
+API.
+
+### Reported bug (AddressSanitizer)
+
+A libFuzzer harness driving the `OgaGenerator_*` C API triggered the
+following crash:
+
+```
+==ERROR: AddressSanitizer: heap-buffer-overflow ... WRITE of size 4
+  #0 Generators::GreedySearch_Cpu::AppendNextTokensToSequences()  src/search.cpp:323
+  #1 Generators::GreedySearch_Cpu::SampleTopK(int, float)         src/search.cpp:192
+  #2 Generators::Generator::GenerateNextToken()                   src/generators.cpp:602
+  #3 OgaGenerator_GenerateNextToken                               src/ort_genai_c.cpp:473
+  #4 &lt;fuzzer harness&gt;
+
+0 bytes after 64-byte region  ← writes at index max_length
+allocated by Generators::Sequences::Sequences(...) at construction
+```
+
+### Root cause
+
+Inside `GreedySearch_Cpu::AppendTokens`, `ResetDone()` is called
+unconditionally at the end. If the previous call filled the sequences
+buffer up to exactly `max_length`, `done_` is cleared. A subsequent
+`GenerateNextToken()` then:
+
+1. Enters `SampleTopK()`.
+2. The `!done_` check falsely passes (buffer is actually full).
+3. `AppendNextTokensToSequences()` writes at index `max_length` → OOB
+write into the redzone immediately following the 64-byte sequences
+buffer.
+
+### Fix
+
+Add an early runtime error at the top of
+`Generator::GenerateNextToken()`:
+
+```cpp
+if (search_-&gt;GetSequenceLength() &gt;= state_-&gt;params_-&gt;search.max_length)
+  throw std::runtime_error(
+      &#34;GenerateNextToken called with sequence length already at max_length (&#34; +
+      std::to_string(state_-&gt;params_-&gt;search.max_length) + &#34;)&#34;);
+```
+
+This sits directly above frame #2 of the crash stack, so the OOB path in
+frames #0 and #1 is unreachable. The exception propagates through
+`OgaGenerator_GenerateNextToken` and is surfaced to the caller as a
+normal API error instead of memory corruption.
+
+- Fix UAF in adapter lifecycle: serialize Adapters ops with a mutex (#2274)
+
+The Adapter::ref_count_ field was a plain int32_t modified without
+
+synchronization, and Adapters::UnloadAdapter() performed a
+check-then-erase
+
+on the underlying std::unordered_map without a lock. Concurrent
+
+OgaSetActiveAdapter / OgaUnloadAdapter calls could therefore:
+
+* race on ref_count_ (data race, undefined behavior, lost updates), and
+
+  * pass the RefCount() &gt; 0 guard in UnloadAdapter while another thread
+
+    was mid-AcquireRef(), destroying the adapter while a reference was
+
+    still held (use-after-free).
+
+Add a mutex to Adapters and take it in
+Load/Unload/Acquire/ReleaseAdapter.
+
+Since AcquireRef/ReleaseRef/RefCount on Adapter are only reachable
+through
+
+these Adapters entry points, the single mutex now serializes both map
+
+mutation and per-adapter ref counting, closing the TOCTOU window and the
+
+data race in one place. ReleaseRef also restores the counter before
+
+throwing so a caught exception does not leave it in a negative state.
+
+- Support UpdatePositionIds in webgpu&#39;s interface (#1952)
+
+## Summary
+
+- Implement `UpdatePositionIds` override in the WebGPU device interface
+to
+  avoid an unnecessary GPU→CPU→GPU roundtrip on every decode step
+- Without this override, the fallback path copies position_ids from GPU
+to CPU,
+updates values, then copies back. The override generates values directly
+on
+  CPU and uploads once via `CopyTensors`
+- For the common single-token decode case, uses a stack variable to
+avoid
+  heap allocation
+
+## Motivation
+
+`UpdatePositionIds` is called on every decode token. The default
+fallback
+performs a GPU→CPU read, CPU update, then CPU→GPU write. Since we are
+writing all values (not reading and modifying), the GPU→CPU read is
+unnecessary. This eliminates one GPU↔CPU transfer per decode step.
+
+- Fall back to the system D3D12 runtime when the Agility SDK device factory cannot create a device (#2280)
+
+### Problem
+
+`CreateDmlObjects` (`src/dml/dml_helpers.cpp`) tries the Agility SDK
+device factory first and **throws on any `CreateDevice` failure**
+instead of reaching the existing system-runtime fallback branch:
+
+```cpp
+if (SUCCEEDED(D3D12GetInterface(...)) &amp;&amp; SUCCEEDED(sdk_config-&gt;CreateDeviceFactory(614, module_path, ...))) {
+  THROW_IF_FAILED(d3d12_factory-&gt;CreateDevice(...));   // throws — fallback below is unreachable
+} else {
+  ...
+  THROW_IF_FAILED(D3D12CreateDevice(...));
+}
+```
+
+A known failure is `DXGI_ERROR_ALREADY_EXISTS` (0x887A0036): the process
+already holds a D3D12 device created with the system runtime — e.g. the
+XAML/WinUI compositor in a packaged app creates one at
+`Window.Activate()` — and devices from different D3D12 runtimes cannot
+coexist in one process. The plain `D3D12CreateDevice` branch handles
+exactly this situation, but is unreachable.
+
+Whether this bites is **OS-dependent**: if the in-box D3D12 is older
+than the requested SDK version (614), `CreateDeviceFactory` itself fails
+and the fallback runs — an OS update silently flips the branch and
+breaks `OgaCreateModel` in XAML hosts.
+
+### Fix
+
+Treat a factory `CreateDevice` failure like a factory creation failure:
+log a warning with the HRESULT and fall back to `D3D12CreateDevice`.
+
+No regression for #612 (which introduced the Agility path): the new
+fallback only runs when the in-box runtime is &gt;= the requested SDK
+version — i.e. the system runtime already contains the fixes the Agility
+dependency was added for. Related: #1054 (the pre-existing fallback
+branch for factory-creation failure).
+
+### Validation (real hardware)
+
+Xbox Series S, Dev Mode UWP (OS 26100), ORT GenAI 0.13.2 DirectML + ORT
+1.24.4, SmolLM2-360M INT4 (DML model built with the model builder):
+
+| Scenario | vanilla DLL | patched DLL |
+|---|---|---|
+| XAML app + DML EP | `887A0036` at `OgaCreateModel` (reproduced 3x) |
+loads in 886 ms, weights resident on GPU (315 MB), full decode (739
+tokens) |
+| XAML app + CPU EP | works | works (67.2 tok/s, unchanged) |
+| Headless (no compositor) + DML EP | works via Agility path | works via
+Agility path |
+
+---------
+
+Co-authored-by: Claude &lt;noreply@anthropic.com&gt;
+
+- Resolve model package paths and path-valued session options through ONNX Runtime (#2255)
+
+## Summary
+
+Builds on model package loading (#2227) so onnxruntime-genai resolves
+every path reference in a variant&#39;s `genai_config.json` through ONNX
+Runtime&#39;s model package resolver. A variant can reference its weights,
+an EP context file, and shared assets (such as tokenizer or processor
+config) by `sha256:` shared-asset URI or relative path, and ONNX Runtime
+owns shared-asset resolution and path confinement.
+
+## What changed
+
+- Delegate `genai_config.json` path resolution to ORT&#39;s
+`ModelPackage_ResolveStringRef` when the model is loaded from a package,
+so `sha256:` shared-asset references and relative paths resolve
+consistently with the package rules. `Config::ResolvePath` now rejects a
+`sha256:` reference when the model is a plain directory, with a clear
+error, instead of producing a bogus path.
+- Resolve path-valued session options against the package. The external
+initializers folder
+(`session.model_external_initializers_file_folder_path`) and the EP
+context file path (`ep.context_file_path`) declared in a variant&#39;s
+`session_options` are resolved before being applied, so a variant can
+point at weights or a context file stored in a shared asset. For models
+loaded from memory, the external initializers folder defaults to the
+config directory only when the config did not already set it.
+- Resolve the `OrtModelPackageApi` experimental functions self-contained
+in `GetModelPackageApi()`, so genai does not vendor ONNX Runtime&#39;s
+experimental C++ header.
+- Author packages with `schema_version` `&#34;1.0&#34;`.
+
+---------
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+- Fix arbitrary dll load via json injection (#2269)
+
+This pull request enhances the security of JSON handling in
+`src/config.cpp` by introducing a robust JSON string escaping function.
+This prevents potential JSON injection vulnerabilities when
+user-supplied values are embedded in JSON documents. The most important
+changes are:
+
+**Security Improvements:**
+
+* Added a new `EscapeJsonString` function to safely escape all necessary
+characters in strings before embedding them in JSON, handling quotes,
+backslashes, control characters, and other non-printable characters.
+* Updated the `SetProviderOption` function to use `EscapeJsonString` on
+`provider_name`, `option_name`, and `option_value` before inserting them
+into the JSON document, preventing malicious input from altering the
+JSON structure.
+
+**Dependency Updates:**
+
+* Included the `&lt;cstdio&gt;` header to support the use of `std::snprintf`
+in the new escaping function.
+
+- Fix use-after-free by making GeneratorParams co-own its Model (#2270)
+
+## Summary
+
+Fixes a use-after-free (CWE-416) reachable through the public C ABI.
+
+`GeneratorParams` stored only a bare `const Config&amp;` aliasing the
+model-owned `Config` (`src/generators.h`), relying on the
+documented-but-unenforced assumption that &#34;the model outlives the
+GeneratorParams&#34;. It did **not** take co-ownership of the model. The
+following ordinary C API sequence therefore triggers a UAF:
+
+1. `OgaCreateModel` — allocates the `Model` and its
+`std::unique_ptr&lt;Config&gt; config_`.
+2. `OgaCreateGeneratorParams` — binds `config{*model.config_.get()}`, a
+bare reference; the model&#39;s refcount is unchanged.
+3. `OgaDestroyModel` — `ExternalRelease` drops the last owner and frees
+the `Model` and its `Config`.
+4. `OgaCreateGenerator(model, params)` — `Generator::Generator` runs
+`model_{model.shared_from_this()}` on the **freed** model →
+heap-use-after-free read.
+
+`Generator` already co-owns the model via `std::shared_ptr&lt;const Model&gt;
+model_`; `GeneratorParams` did not follow the same discipline, leaving
+the window open.
+
+## Fix
+
+- **`src/generators.h`**: add `std::shared_ptr&lt;const Model&gt;
+model_owner_` to `GeneratorParams`, declared **before** the `config`
+reference so it is initialized first.
+- **`src/generators.cpp`**: initialize
+`model_owner_{model.shared_from_this()}` and bind
+`config{*model_owner_-&gt;config_.get()}`. Now the model (and its `Config`)
+cannot be freed while a params handle is live, and a generator can never
+be constructed from a freed model. The benchmark-only
+`GeneratorParams(const Config&amp;)` path leaves `model_owner_` null by
+design.
+- **`test/c_api_tests.cpp`**: add `CreateGeneratorAfterDestroyModel`,
+reproducing the PoC ordering (destroy model handle, then create
+generator) and asserting success without a UAF.
+
+## Testing
+
+Local build isn&#39;t available in my environment (root-owned build dir /
+needs the jiafa-dev container); relying on CI to build and run the C++
+unit tests, ideally under ASan.
+
+---------
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;
+
+- Validate eos_token_id against vocab_size to prevent OOB write in ApplyMinLength (#2266)
+
+## Summary
+
+Fixes an out-of-bounds write (CWE-787 / CWE-129) reachable from a
+malicious `genai_config.json`.
+
+`Search_Cpu::ApplyMinLength` suppresses EOS tokens while the sequence is
+shorter than `min_length` by writing
+`std::numeric_limits&lt;float&gt;::lowest()` into the per-beam score row at
+each configured `eos_token_id`:
+
+```cpp
+std::span&lt;float&gt; const beam_token_scores = GetScores(i);       // vocab_size elements
+for (auto token_id : params_-&gt;config.model.eos_token_id)
+  beam_token_scores[token_id] = std::numeric_limits&lt;float&gt;::lowest();  // unchecked index
+```
+
+`eos_token_id` comes straight from config (`src/config.cpp`) with only a
+`static_cast&lt;int&gt;` and is never bounded against `vocab_size`. A model
+whose `eos_token_id &gt;= vocab_size` (or `&lt; 0`) drives the store past the
+end of the `vocab_size`-sized `GetScores()` subspan — a
+heap-buffer-overflow write on the first decode step (reached via
+`Generator::GenerateNextToken` -&gt; `ApplyMinLength`). The same pattern
+exists in the CUDA backend (`Search_Cuda::ApplyMinLength`).
+
+## Changes
+
+- **`src/generators.cpp`**: reject any `eos_token_id` outside `[0,
+vocab_size)` in the `Generator::Generator` validator, mirroring the
+existing `top_k &lt;= vocab_size` check (added in #2224).
+- **`src/search.cpp`** and **`src/cuda/search_cuda.cpp`**:
+defense-in-depth — skip out-of-range ids at the sink in both backends.
+- **`test/sampling_tests.cpp`**: add
+`EosTokenIdExceedsVocabSizeThrowsCpu`, which overlays an out-of-range
+`eos_token_id` and asserts `OgaGenerator::Create` throws instead of
+proceeding to the OOB write.
+
+## Testing
+
+New regression test follows the existing `SamplingTests` overlay pattern
+(`tiny-random-gpt2-fp32` + `vocab_size`/`eos_token_id` overlay). Local
+build isn&#39;t available in my environment; relying on CI to build and run
+the C++ unit tests.
+
+---------
+
+Co-authored-by: Copilot &lt;223556219+Copilot@users.noreply.github.com&gt;</div>
+</div>
+
+<a href="../project/microsoft_onnxruntime-genai.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

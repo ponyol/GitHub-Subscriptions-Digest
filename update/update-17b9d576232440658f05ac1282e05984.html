@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (13 commits) - OpenPipe/ART - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (13 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/OpenPipe_ART.html">OpenPipe/ART</a> /
+    Updates in main (13 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/OpenPipe_ART.html">OpenPipe/ART</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-17 16:19 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/OpenPipe/ART/commits/main" target="_blank">https://github.com/OpenPipe/ART/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Этот PR значительно повышает пропускную способность и эффективность ART Pipeline RL за счет внедрения онлайн-автотюнера для адаптивного планирования, обеспечения обновлений политик LoRA &#34;на лету&#34; и оптимизации упаковки траекторий с помощью обобщенной упаковки по префиксным деревьям и компактных бинарных маршрутов MoE. Он также радикально улучшает скорость выполнения Megatron благодаря оптимизации ядер и замене DeepEP на более быстрый HybridEP, что приводит к значительному увеличению общей производительности и новой комплексной системе оценки.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Stabilize pipeline RL throughput controls (#767)
+
+* Omit MoE routes from trajectory parquet
+
+* Prioritize stale backlog in pipeline autotuning
+
+* Stabilize stale-backlog autotuning
+
+* Make pipeline min-batch tuning conservative
+
+* Report CP-compacted Megatron token throughput
+
+* Preserve vLLM pressure gate for min-batch raises
+
+* Make pipeline shutdown event driven
+
+---------
+
+Co-authored-by: FurtherAI &lt;FurtherAI@users.noreply.github.com&gt;
+
+- Separate pipeline freshness from runtime tuning (#766)
+
+- fix: complete TrainerRank model runtime integration (#763)
+
+* fix: complete TrainerRank model runtime integration
+
+* fix: harden TrainerRank retained graph state
+
+* test: cover unequal HybridEP slot graphs
+
+* perf: preserve per-group HybridEP extents
+
+* fix: validate dynamic slot state layouts
+
+* test: bound retained-slot GPU setup
+
+* test: trace unequal-slot GPU phases
+
+* fix: reject unsafe TrainerRank DP EP topology
+
+* test: cover TrainerRank DP EP guard entrypoint
+
+* fix: avoid release REST outage in CI
+
+- Lazy-load exchange tokenization dependencies (#765)
+
+* fix lazy exchange tokenization dependencies
+
+* handle exact empty exchange completions
+
+* preserve renderer fallback semantics
+
+- fix: preserve legacy trajectory serialization state (#764)
+
+- fix: Preserve complete trajectories in parquet (#762)
+
+- Optimize end-to-end Pipeline RL throughput (#758)
+
+## Summary
+
+This PR improves ART Pipeline RL throughput across rollout scheduling, policy freshness, trajectory packing, MoE communication, Megatron execution, and observability.
+
+It adds online runtime tuning, in-flight LoRA updates with token-level policy provenance, generalized prefix-tree packing, binary MoE route transport, and a substantially faster Megatron critical path.
+
+During development, we optimized around a compact throughput score:
+
+`score = accepted_train_tok_per_s * freshness_discount * batch_factor`
+
+ART reports the score and its components to W&amp;B. It is intended as an interpretable systems benchmark that rewards useful throughput without ignoring policy staleness or scenario efficiency. It is not a training objective or a substitute for measuring real learning progress.
+
+## Benchmark Score
+
+The score was inspired by [PipelineRL&#39;s score framing](https://arxiv.org/abs/2509.19128) and is recorded in wandb. It combines three terms:
+
+- **Accepted train throughput** measures trainable assistant tokens accepted by the pipeline per wall-clock second. Work discarded as stale or zero-variance does not count.
+- **Freshness discount** reduces the value of tokens generated by older policies. It uses token-level policy provenance and penalizes old tails more strongly than simply using mean policy age.
+- **Batch factor** accounts for the diminishing statistical benefit of increasing optimizer batch size relative to the additional scenarios consumed. Increasing rollouts for the same scenario can improve the factor because it strengthens the grouped learning signal without consuming more scenarios.
+
+The batch factor follows critical-batch-size models in which increasing batch size reduces steps to target with diminishing returns. Its current critical rollout scale of 300 is grounded in early GRPO/RLVR measurements, but remains a heuristic rather than a universal constant.
+
+The freshness term is motivated by importance-sampling effective sample size: the second moment of behavior-to-learner importance ratios determines effective sample size and is related to order-2 Rényi divergence. ART uses policy age with a decay scale of eight training steps as a practical divergence proxy. This is likewise a grounded benchmark approximation, not an empirical learning law.
+
+## Adaptive Pipeline Scheduling
+
+- Add an optional online autotuner for rollout workers, batch bounds, and queue capacity.
+
+This is really cool, this removes the need to configure batch size, queue size, number of rollout workers, etc. from the user. These are things you&#39;d have to tune per run and understanding the impact on efficiency is difficult. The autotuner performs really well and also can adapt to changing workloads over time. 
+
+- Infer packed-sequence capacity, data-parallel requirements, and inference scale from the active runtime.
+- Estimate counterfactual packing outcomes from real trajectory shapes and target a configurable spill probability.
+- Bound queued work using the configured policy-age limit.
+- Use strict metric contracts: missing or excessively delayed serving metrics fail instead of silently degrading.
+- Persist tuner profiles at each decision window and support resuming them.
+- Record pipeline settings and tuner decisions as canonical metrics.
+
+## In-Flight Policy Updates
+
+- Add an ART vLLM endpoint for atomically updating a stable LoRA slot in place.
+- Allow active requests to use updated weights on subsequent decode tokens.
+- Return compact token spans describing which policy generated each completion region.
+- Use these spans for token-weighted policy age, filtering, metrics, and scoring.
+- Salt new-request prefix-cache entries by policy version while preserving the KV state of already-running requests.
+- Preserve versioned public model aliases and exact adapter leases for evaluation and checkpoint use.
+
+## Prefix-Tree Packing and MoE Routes
+
+- Generalize the prefix-tree packing algorithm past greedy to a FFD-bin-packing inspired form with a cleaner design, though both perform similarly in packing efficiency. Prefix-tree packing happens across arbitrary common regions of trajectory groups in the batch, so a close to optimal packed representation of a batch is expected. Pretty cool. 
+- Replace JSON/base64 route metadata with a compact binary route bundle.
+- Remove redundant route-conflict computation and validation from the production critical path.
+- Expose the same packing model to the autotuner when estimating how many groups fit.
+
+The complete path from trajectory groups to packed tensors, including MoE routing replay data, typically takes approximately 0.5-1 second on single-turn-shaped batches. This removes a major preprocessing bottleneck present when routing replay is enabled (current version is very slow, wasn&#39;t measured properly and is poorly optimized).
+
+## Megatron Throughput
+
+- Keep compatible optimizer and LoRA state resident across training jobs.
+- Save optimizer state every five steps by default and unconditionally on the final step.
+- Signal adapter readiness as soon as LoRA saving completes so serving reload can overlap worker cleanup.
+- Require the CUTLASS grouped-GEMM path, avoiding the routed-shape cache churn encountered in the cuBLAS implementation.
+- Replace DeepEP with vendored HybridEP for MoE dispatch and combine.
+- Cache HybridEP builds by source, environment, and GPU architecture, with hard architecture validation.
+- Add configurable streaming weight offload to the Megatron runtime configuration.
+
+Compile specialization and kernel JIT behavior were significant barriers to reaching isolated Megatron throughput before this PR. Changing sequence and routing shapes could repeatedly trigger TorchDynamo, Triton, Transformer Engine, or model-specific specialization work rather than settling into steady execution.
+
+This PR removes the recurring specialization paths found across every currently supported handler while retaining compilation around the operations that benefit from it. It includes fixes for GDN mutable state, dynamic normalization, sparse attention dimensions, MoE dispatch, grouped linear operations, and model-specific postprocessing.
+
+HybridEP was finite and correct across 90 measured model, EP, and token-count combinations. Forward-plus-backward geometric speedups over DeepEP ranged from 1.21x to 1.38x by model, with individual points between 1.10x and 1.56x.
+
+## Metrics and Model Support
+
+- Add a canonical metric taxonomy and builder shared by PipelineTrainer components.
+- Add a low-overhead ART vLLM metrics endpoint.
+- Report Megatron packed throughput, padding, accepted throughput, policy age, discard rates, pipeline settings, and the score components.
+- Add distributed importance-ratio and clipping diagnostics (these are likely better to watch than number of steps off policy to determine how much you want to accept and how it affects your run).
+- Improve support for Qwen3 MoE, Qwen3.5 MoE, Gemma4 MoE, GPT-OSS, and DSV4.
+- Add internal expert-dimension padding where required by CUTLASS while preserving logical weights, gradients, and exported adapters.
+- Standardize DSV4 LoRA tensors on the fused 3D representation, including down projection.
+
+## Results
+
+Online autotuning improved the last-10-step score over the same fixed reasonable defaults on all six synthetic workloads:
+
+| Workload | Fixed | Autotuned | Improvement |
+| --- | ---: | ---: | ---: |
+| Single-turn tool/history | 271.2 | 326.7 | 1.20x |
+| Long generation | 1285.5 | 2126.8 | 1.65x |
+| Shared-prefix packing | 581.9 | 594.2 | 1.02x |
+| Multi-turn agent | 789.5 | 901.7 | 1.14x |
+| Short single-turn | 506.7 | 813.5 | 1.61x |
+| Weight-update-bound | 51.0 | 118.5 | 2.32x |
+
+Final 20-step single-turn-shaped profiles produced these last-10-step means:
+
+| Model | Packed train tok/s | Accepted tok/s | Score |
+| --- | ---: | ---: | ---: |
+| Qwen3 30B-A3B | 18,610 | 380.8 | 281.0 |
+| Qwen3.5 35B-A3B | 19,472 | 435.1 | 319.4 |
+| Gemma4 26B-A4B | 8,210 | 306.8 | 222.7 |
+| GPT-OSS 20B | 18,629 | 527.7 | 390.8 |
+| DSV4 Flash | 3,212 | 92.6 | 72.7 |
+
+The Qwen, Gemma, and GPT-OSS profiles used two training and two inference H200s with 122,880-token packed sequences. DSV4 used an eight-GPU TP2/EP8 trainer and a separate four-GPU EP4 inference deployment.
+
+Evaluation was disabled in these profiles to isolate Pipeline RL throughput.
+
+## Validation
+
+- Full formatting, lint, type, and lockfile checks.
+- ART wheel and source-distribution builds, including bundled runtime and HybridEP source checks.
+- HybridEP BF16 and FP8 dispatch/combine validation on H200s.
+- Packing invariance and length-trainability coverage across the supported MoE handlers.
+- Targeted oracle and train/inference parity checks for changed model paths.
+- Twenty-step end-to-end profiles for all five model families.
+- Production profiles accounted for effectively all PipelineTrainer wall time.
+
+## Scope
+
+The autotuner intentionally requires ART vLLM capabilities, including fast metrics and in-flight LoRA updates. Required capabilities do not silently fall back to weaker behavior.
+
+This PR bundles HybridEP source and supports deterministic local Megatron setup. Broader release-environment automation and prebuilt distribution are deferred to a follow-up.
+
+- ci: select TrainerRank GPU validation by branch (#761)
+
+- ci: allow manual TrainerRank GPU validation (#760)
+
+- feat: Add protocol-aware trajectory capture and tokenization (#756)
+
+- chore: Upgrade ty to 0.0.59 (#757)
+
+- chore: Support W&amp;B 0.28 and vLLM 0.24 DSV4 LoRA (#754)
+
+- ci: add manual TrainerRank GPU validation</div>
+</div>
+
+<a href="../project/OpenPipe_ART.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

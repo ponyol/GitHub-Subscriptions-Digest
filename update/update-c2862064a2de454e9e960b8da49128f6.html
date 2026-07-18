@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in master (10 commits) - FalkorDB/FalkorDB - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in master (10 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/FalkorDB_FalkorDB.html">FalkorDB/FalkorDB</a> /
+    Updates in master (10 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/FalkorDB_FalkorDB.html">FalkorDB/FalkorDB</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-15 06:11 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/FalkorDB/FalkorDB/commits/master" target="_blank">https://github.com/FalkorDB/FalkorDB/commits/master</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>This release introduces key stability and security enhancements. It addresses critical bugs, including fixing vector-indexed nodes disappearing from KNN results after updates and preventing defragmentation from stalling write operations. Additionally, it improves Docker image security by installing `su-exec` and corrects version parsing in release workflows.
+
+---
+
+Этот выпуск представляет собой ключевые улучшения стабильности и безопасности. Устранены критические ошибки, такие как исчезновение индексированных вектором узлов из результатов KNN после обновлений и зависания операций записи во время дефрагментации. Кроме того, повышена безопасность образов Docker за счет установки `su-exec` и исправлен парсинг версий в процессах выпуска.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Install `su-exec` in Alpine and Debian runtime Docker images (#2205)
+
+* Initial plan
+
+* docker: install su-exec in Alpine runtime images
+
+* docker: add su-exec compatibility to Debian runtime images
+
+* docker: install su-exec and create nextjs user in Dockerfiles
+
+* docker: add sanity tests for base and server images in build workflow
+
+---------
+
+Co-authored-by: copilot-swe-agent[bot] &lt;198982749+Copilot@users.noreply.github.com&gt;
+Co-authored-by: Cargo Audit &lt;zimber.dudi@gmail.com&gt;
+
+- Fix version.h parsing in release workflows (#2199)
+
+The grep pattern for FALKOR_VERSION_* also matched the FALKOR_MODULE_VERSION
+line that references the macros, breaking version parsing. Anchor the grep to
+the &#39;#define FALKOR_VERSION_* &#39; lines.
+
+Co-authored-by: copilot-swe-agent[bot] &lt;198982749+Copilot@users.noreply.github.com&gt;
+Co-authored-by: Roi Lipman &lt;swilly22@users.noreply.github.com&gt;
+
+- Fix vector-indexed nodes disappearing from KNN after update/delete (#2197)
+
+Bump vendored RediSearch to the VecSim-cleanup fix for LLAPI-created vector
+indexes and add regression coverage.
+
+Any write to a vector-indexed node re-indexes it as a RediSearch REPLACE,
+which mints a new docId and appends a new vector; the previous vector must
+be removed from the HNSW graph but never was, because the Index_HasVecSim
+spec flag was never set for indexes created through the low-level C API.
+Node deletion leaked the vector too, since the LLAPI delete
+(RediSearch_DeleteDocument) only dropped the doc-table entry. The orphaned
+vectors (docIds that no longer resolve) shadow live entries in KNN, so a
+node &#34;disappears&#34; from results at small k - e.g. k=1 returns nothing after
+any update, and a node inserted where a deleted one used to be is
+unfindable.
+
+The fix lives in the vendored RediSearch (FalkorDB/RediSearch#23): set
+Index_HasVecSim on vector-field creation, remove vectors in
+RediSearch_DeleteDocument, and cache the VecSim index pointer on the field
+to avoid a per-operation key allocation and keysDict lookup.
+
+tests/flow/test_vecsim.py:
+- test08: re-SET (same value / different value / unrelated property) keeps
+  the node findable at k=1.
+- test09: deleting a node removes its vector, so a new node at the same
+  coordinates is not shadowed.
+
+Both tests fail against the pre-fix submodule and pass with the bump.
+
+- fix(defrag): don&#39;t stall or orphan writes under active defrag (#2191)
+
+* fix(defrag): don&#39;t stall or orphan writes under active defrag
+
+Active defrag (#2175) runs on the Redis main thread and takes the graph
+write election before scanning. Under write load this caused two problems,
+reported as unusable writes on the edge docker image:
+
+1. Main-thread freeze. Defrag waited up to 50ms PER lock (write election +
+   rwlock = up to 100ms), blocking the event loop. Replace the per-lock
+   timeouts with a single DEFRAG_BUDGET_MS (50ms) budget shared across the
+   election wait, the rwlock wait and the scan, so a defrag step never blocks
+   the main thread longer than the budget while still making progress (a
+   non-blocking timeout=0 was rejected: it starves defrag under read load).
+   Also poll a monotonic deadline in the election wait instead of decrementing
+   an assumed sleep, so the timeout stays honest if nanosleep wakes on a signal.
+
+2. Orphaned write / permanent hang. A write delegated to the write queue while
+   defrag transiently owned the election was never drained (defrag runs on the
+   main thread and does not drain the queue), so the blocked client hung forever
+   while the server stayed responsive. Defrag now hands the queue back to a
+   writer thread via Graph_DrainWriteQueue after releasing the election; the
+   writer path is unchanged.
+
+Add testDefragWriteHang: streams a CREATE load while aggressive defrag churns
+the same graph, asserting the load finishes (no hang) with every write landed
+exactly once. Requires jemalloc.
+
+* test(defrag): skip write-hang test up-front on non-jemalloc
+
+The jemalloc guard ran after the fragmentation setup, so on the sanitizer
+build (libc malloc) the heavy setup hit the per-test timeout before the test
+could skip. Move the skip to the top, before any expensive work.
+
+* address review: drain refcount leak, defrag budget check, test cleanup
+
+- Graph_DrainWriteQueue: ThreadPool_AddWork(force=true) never returns
+  THPOOL_QUEUE_FULL, so check != 0 — a -1 (allocation) failure now releases
+  the GraphContext ref instead of leaking it.
+- defrag_entities: evaluate the main-thread budget every entity (one entity
+  can carry a large attribute-set); keep DefragShouldStop amortized per 64.
+- testDefragWriteHang: single outer try/finally so config is always restored
+  (even on a partial config_set failure); drop empty except handlers.
+- clarify the drain-task comment.
+
+* migrated write query drain logic to graphcontext
+
+* let redis decide when to stop
+
+---------
+
+Co-authored-by: Roi Lipman &lt;roilipman@gmail.com&gt;
+Co-authored-by: Roi Lipman &lt;swilly22@users.noreply.github.com&gt;
+
+- fix: package_managers.dependabot.dependabot-missing-cooldown.dependabot-missing-cooldown security vulnerability (#2177)
+
+Automated security fix generated by OrbisAI Security
+
+Co-authored-by: Roi Lipman &lt;swilly22@users.noreply.github.com&gt;
+
+- chore(deps): bump actions/cache/restore from 5.0.5 to 6.1.0 (#2183)
+
+Bumps [actions/cache/restore](https://github.com/actions/cache) from 5.0.5 to 6.1.0.
+- [Release notes](https://github.com/actions/cache/releases)
+- [Changelog](https://github.com/actions/cache/blob/main/RELEASES.md)
+- [Commits](https://github.com/actions/cache/compare/27d5ce7f107fe9357f9df03efb73ab90386fccae...55cc8345863c7cc4c66a329aec7e433d2d1c52a9)
+
+---
+updated-dependencies:
+- dependency-name: actions/cache/restore
+  dependency-version: 6.1.0
+  dependency-type: direct:production
+  update-type: version-update:semver-major
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+Co-authored-by: Roi Lipman &lt;swilly22@users.noreply.github.com&gt;
+
+- chore(deps): bump rojopolis/spellcheck-github-actions (#2184)
+
+Bumps [rojopolis/spellcheck-github-actions](https://github.com/rojopolis/spellcheck-github-actions) from 0.62.0 to 0.63.0.
+- [Release notes](https://github.com/rojopolis/spellcheck-github-actions/releases)
+- [Changelog](https://github.com/rojopolis/spellcheck-github-actions/blob/master/CHANGELOG.md)
+- [Commits](https://github.com/rojopolis/spellcheck-github-actions/compare/390a08ee9c46943112f21d2ff671649a2bacd33f...e619e00ca22f01ade9d73048dcd6518bedc552f2)
+
+---
+updated-dependencies:
+- dependency-name: rojopolis/spellcheck-github-actions
+  dependency-version: 0.63.0
+  dependency-type: direct:production
+  update-type: version-update:semver-minor
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+Co-authored-by: Roi Lipman &lt;swilly22@users.noreply.github.com&gt;
+
+- chore(deps): bump docker/build-push-action from 7.2.0 to 7.3.0 (#2185)
+
+Bumps [docker/build-push-action](https://github.com/docker/build-push-action) from 7.2.0 to 7.3.0.
+- [Release notes](https://github.com/docker/build-push-action/releases)
+- [Commits](https://github.com/docker/build-push-action/compare/f9f3042f7e2789586610d6e8b85c8f03e5195baf...53b7df96c91f9c12dcc8a07bcb9ccacbed38856a)
+
+---
+updated-dependencies:
+- dependency-name: docker/build-push-action
+  dependency-version: 7.3.0
+  dependency-type: direct:production
+  update-type: version-update:semver-minor
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+Co-authored-by: Roi Lipman &lt;swilly22@users.noreply.github.com&gt;
+
+- chore(deps): bump github/codeql-action/analyze from 4.35.5 to 4.37.0 (#2187)
+
+* chore(deps): bump github/codeql-action/analyze from 4.35.5 to 4.37.0
+
+Bumps [github/codeql-action/analyze](https://github.com/github/codeql-action) from 4.35.5 to 4.37.0.
+- [Release notes](https://github.com/github/codeql-action/releases)
+- [Changelog](https://github.com/github/codeql-action/blob/main/CHANGELOG.md)
+- [Commits](https://github.com/github/codeql-action/compare/9e0d7b8d25671d64c341c19c0152d693099fb5ba...99df26d4f13ea111d4ec1a7dddef6063f76b97e9)
+
+---
+updated-dependencies:
+- dependency-name: github/codeql-action/analyze
+  dependency-version: 4.37.0
+  dependency-type: direct:production
+  update-type: version-update:semver-minor
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+
+* Fix CodeQL action version mismatch in codeql-analysis workflow
+
+---------
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;
+Co-authored-by: copilot-swe-agent[bot] &lt;198982749+Copilot@users.noreply.github.com&gt;
+Co-authored-by: Roi Lipman &lt;swilly22@users.noreply.github.com&gt;
+
+- chore(deps): bump docker/setup-buildx-action from 4.0.0 to 4.2.0 (#2186)
+
+Bumps [docker/setup-buildx-action](https://github.com/docker/setup-buildx-action) from 4.0.0 to 4.2.0.
+- [Release notes](https://github.com/docker/setup-buildx-action/releases)
+- [Commits](https://github.com/docker/setup-buildx-action/compare/v4...bb05f3f5519dd87d3ba754cc423b652a5edd6d2c)
+
+---
+updated-dependencies:
+- dependency-name: docker/setup-buildx-action
+  dependency-version: 4.2.0
+  dependency-type: direct:production
+  update-type: version-update:semver-minor
+...
+
+Signed-off-by: dependabot[bot] &lt;support@github.com&gt;
+Co-authored-by: dependabot[bot] &lt;49699333+dependabot[bot]@users.noreply.github.com&gt;</div>
+</div>
+
+<a href="../project/FalkorDB_FalkorDB.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

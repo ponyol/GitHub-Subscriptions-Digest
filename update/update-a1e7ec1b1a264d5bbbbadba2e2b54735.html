@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (35 commits) - facebookresearch/faiss - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (35 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a> /
+    Updates in main (35 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/facebookresearch_faiss.html">facebookresearch/faiss</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-18 04:15 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/facebookresearch/faiss/commits/main" target="_blank">https://github.com/facebookresearch/faiss/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление Faiss обеспечивает заметное повышение производительности, особенно для поиска RaBitQ FastScan и ProductQuantizer, за счет алгоритмических оптимизаций и векторизации AVX-512. Ключевым моментом является повышенная надежность библиотеки, достигнутая благодаря многочисленным проверкам во время десериализации индексов для предотвращения сбоев, вызванных некорректными данными. Выпуск также включает общие улучшения качества кода, рефакторинг и исправления ошибок в различных компонентах Faiss.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Extract super_kmeans_assign_iteration as a shared public SuperKMeans kernel (#5443)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5443
+
+Extracts SuperKMeans&#39;s iter-1+ pruned-assignment step into a public, self-contained free function `super_kmeans_assign_iteration` in `SuperKMeans.{h,cpp}`: a partial GEMM over the front `d_prime` dims followed by ADSampling progressive pruning over the PDX-laid-out trailing block, on randomly-rotated inputs with caller-managed `tau` and `assignments`.
+
+`SuperKMeans::train()` now calls this function (tau refresh, then the shared assignment pass, then objective) instead of an inlined copy. Exposing it as a public function lets callers that drive their own iteration loop, such as a distributed k-means implementation where centroid updates happen out-of-band between passes, share the exact same kernel instead of maintaining a separate copy that could drift.
+
+Implementation:
+- New `super_kmeans_assign_iteration` in `SuperKMeans.{h,cpp}`, SWIG-exposed with a numpy wrapper in `python/__init__.py`. `swigfaiss.swig` now also includes `faiss/impl/AdSampling.h` so `precompute_ad_thresholds` is callable from Python.
+- New `SuperKMeansAssignScratch` struct holds the per-call working buffers (`Y_trail`, `Y_pdx`, partial norms, GEMM tile). Callers looping over iterations pass one persistent instance so steady-state iterations allocate nothing; one-shot callers omit it and the function uses a local instance.
+- `train()` refactored to share the step. Working buffers the shared function now owns and recomputes per call (`x_norms_partial`, the PDX block layout, the partial norms, and the GEMM tile) were moved out of the training-loop state into `SuperKMeansAssignScratch`. As a result `x_norms_partial` is recomputed once per call rather than only when `d_prime` changes, a negligible O(n*d_prime) cost against the O(n*k*d_prime) GEMM.
+- `assignments` widened from `std::vector&lt;int&gt;` to `std::vector&lt;int32_t&gt;` to match the public function&#39;s `int32_t*` contract.
+
+Tests:
+- New C++ tests in `tests/test_super_kmeans_foundations.cpp`: GEMM-boundary prunes-all under tight tau, progressive pruning refines survivors versus brute force, run-to-run determinism, max-`d_prime` versus brute force, persistent-scratch reuse versus a fresh scratch, and multi-tile (small `x_batch`/`y_batch`) versus brute force.
+- New Python smoke test in `tests/test_super_kmeans.py` exercising the numpy wrapper end to end.
+
+The refactor is behavior-preserving for `SuperKMeans::train()`: the tau refresh is mathematically equivalent to the previous per-x-batch refresh because no centroid moves within a pass, so assignments and objective are unchanged.
+
+Reviewed By: mnorris11
+
+Differential Revision: D104734528
+
+fbshipit-source-id: 90993b65d88fb29a0c4515106d70c2e1a7a71619
+
+- Port test_rabitq_utils from C++ to Python (#5442)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5442
+
+The RaBitQ utility tests landed as C++ (`test_rabitq_utils.cpp`) in D112153740, but faiss tests are primarily written in Python because they exercise the full SWIG binding stack. This diff ports them to Python with identical cases and no behavior change.
+
+The tested helpers (`round_nonnegative_to_uint8`, `round_nonnegative_to_uint16`, `round_clamped_to_uint8` in `faiss::rabitq_utils`, and `LinearTransform::apply_noalloc`) are all reachable from Python via the existing SWIG bindings, so no bindings changes are needed. The C++ test was registered only in `tests/CMakeLists.txt` and was never built by Buck; the Python port is added to `py_tests` in `tests/BUCK`, so it now runs under Buck as well.
+
+Changes:
+- Delete `tests/test_rabitq_utils.cpp` and remove it from `tests/CMakeLists.txt`.
+- Add `tests/test_rabitq_utils.py` with the same cases: the fixed-value assertions for all three round helpers, the 10000-sample +/-1 property tests, and the `LinearTransform` single-vector vs batch check for both bias settings.
+- Register `test_rabitq_utils` in `py_tests` in `tests/BUCK`.
+
+The random property tests use numpy RNG rather than std::mt19937 (the two RNG engines cannot be made bit-identical across languages), but the ranges, sample counts, and +/-1 tolerance are unchanged.
+
+Reviewed By: mnorris11
+
+Differential Revision: D112559549
+
+fbshipit-source-id: 9be93dc33e94477c6c5919582d3a8b4774e476c1
+
+- Guard exhaustive_{inner_product,L2sqr}_seq against empty query batches (nx=0) (#5445)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5445
+
+Found while self-reviewing the sibling IndexFlatPanorama fix in this
+stack: `exhaustive_inner_product_seq` and `exhaustive_L2sqr_seq` in
+`utils/distances.cpp` compute
+`int nt = std::min(int(nx), omp_get_max_threads())` and then open
+`#pragma omp parallel num_threads(nt)`, with no `nx &gt; 0` guard -- the
+identical bug class just fixed for `IndexFlatPanorama`, but here backing
+plain `IndexFlat::search`/`IndexFlat::range_search` (`IndexFlatL2`,
+`IndexFlatIP`, and anything composing them: `IndexIDMap`,
+`IndexPreTransform`, `IndexRefineFlat`, etc.) -- the single most widely
+used search path in FAISS.
+
+`IndexFlat::search` has no `n &gt; 0` guard before dispatching to
+`knn_inner_product`/`knn_L2sqr` (`IndexFlat.cpp:29-59`). Those route to
+`Run_search_inner_product::f`/`Run_search_L2sqr::f`
+(`utils/distances.cpp:545-580`), which call the `_seq` (non-BLAS) path
+whenever `res.sel` is set (any ID selector) OR `nx * d` is below
+`distance_compute_blas_threshold` (default 128000) -- always true when
+`nx == 0`. So `IndexFlat::search(0, x, k, ...)` reaches `nt =
+std::min(0, omp_get_max_threads()) == 0` and
+`#pragma omp parallel num_threads(0)` unconditionally, every time.
+
+Per the OpenMP specification, `num_threads` &#34;must evaluate to a positive
+integer&#34; -- 0 is unspecified behavior. This devserver&#39;s runtime tolerates
+it (see below), but is not guaranteed to on every OpenMP implementation
+FAISS&#39;s production toolchain may link.
+
+Fix: add `if (nx == 0) { return; }` before `nt` is computed, in both
+functions -- mirroring the exact guard style already used two functions
+below in the same file, in the BLAS counterparts
+`exhaustive_inner_product_blas`/`exhaustive_L2sqr_blas_default_impl`
+(&#34;BLAS does not like empty matrices&#34;, `nx == 0 || ny == 0`). Deliberately
+NOT copying the `ny == 0` half of that guard here: the BLAS path&#39;s
+`ny == 0` early return is itself a separate, already-tracked bug (see
+finding #6 in the improver findings log -- it skips `begin_multiple`/
+`end_multiple` entirely, leaving `distances`/`labels` uninitialized for
+`nx &gt; 0, ny == 0`). The `_seq` path does not have that problem: each
+query&#39;s `resi.begin(i)` already heap-heapifies (or reservoir/range-inits)
+to neutral/-1 values per query regardless of `ny`, so `ny == 0` with
+`nx &gt; 0` already produces correct &#34;no results&#34; output today. Only the
+`nx == 0` case needed a guard, and it needed one specifically to avoid
+`num_threads(0)`, not to fix an output-correctness gap.
+
+Verified empirically (temporarily reverted both guards, rebuilt, reran
+the new test): on this devserver&#39;s OpenMP runtime, `num_threads(0)` does
+not crash and the test passes either way -- consistent with the sibling
+Panorama diff in this stack. Recording this explicitly rather than
+claiming a crash we did not observe; the fix closes real, spec-defined
+undefined behavior on FAISS&#39;s single most-used search entry point
+regardless of whether it reproduces on this specific box.
+
+Swept the rest of the tree for the same `std::min(int(n...),
+omp_get_max_threads())` -&gt; `num_threads(nt)` pattern: only two other
+sites exist in all of fbcode/faiss/, both in `IndexFlat.cpp`, both
+already fixed by the previous diff in this stack. Two adjacent
+`num_threads(nt)` sites with different `nt` derivations
+(`impl/PolysemousTraining.cpp`, `utils/sorting.cpp`&#39;s
+`fvec_argsort_parallel`/`parallel_merge`) were also inspected; both
+derive `nt` from internal, not directly user-controlled, values (`pq.M`,
+recursive thread-count splitting) and are lower-confidence/harder to
+reach -- logged in the findings log for future investigation rather than
+folded into this diff.
+
+Reviewed By: trang-nm-nguyen
+
+Differential Revision: D112314349
+
+fbshipit-source-id: 17663f626b27886e43d71f3dd660f706f76c6bd2
+
+- Reuse faiss.ResultHeap in benchs instead of duplicating it (#5363)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5363
+
+`ResultHeap` is now part of the faiss Python package: it is defined in `faiss/python/extra_wrappers.py` and re-exported into the top-level namespace from `faiss/python/__init__.py`, so it is importable as `faiss.ResultHeap`. The `faiss.contrib` modules (`big_batch_search.py`, `exhaustive_search.py`, `client_server.py`) already consume the packaged class.
+
+Two benchmark scripts still carried their own older, byte-for-byte-duplicated copy of the class:
+- `benchs/bench_for_interrupt.py`
+- `benchs/distributed_ondisk/search_server.py`
+
+This removes both local copies and uses `faiss.ResultHeap` instead.
+
+The packaged class exposes a slightly different (and richer) API than the old copies: it has `add_result(D, I)` rather than `add_batch_result(D, I, i0)`. The old `add_batch_result` simply applied an id offset (`I += i0`) before pushing the batch onto the heaps, so the call sites are translated as:
+- `rh.add_batch_result(Di, Ii, i)` -&gt; `Ii += i; rh.add_result(Di, Ii)`
+- `rh.add_batch_result(Di, Ii, 0)` -&gt; `rh.add_result(Di, Ii)` (offset was 0)
+
+This is the code half of task T276876996. The other half is the broken wiki link on the &#34;Brute force search without an index&#34; page, which points at `benchs/bench_all_ivf/datasets.py#L75` on `master`. Now that `ResultHeap` lives in the package, the link is best repointed at the canonical implementation: `faiss/python/extra_wrappers.py`. That edit is on the GitHub wiki (a separate repo) and is not part of this diff.
+
+Reviewed By: mnorris11
+
+Differential Revision: D110118635
+
+fbshipit-source-id: b9e0ba5ecbec3e2c22bdf6d26da931be976ed944
+
+- Harden FastScan deserialization: enforce ksub==16 and bound reconstruct() (#5436)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5436
+
+Fast-scan indexes are a 4-bit layout by construction (`init_fastscan`
+enforces `nbits == 4` -&gt; `ksub == 16`, `code_size == (M*4+7)/8`), and the
+`pq4_*` kernels hardcode a 16-entry / 16-byte sub-LUT stride. The
+deserializer, however, reconstructs these fields from the stream without
+re-establishing that invariant, allowing three OOB accesses:
+
+1. `validate_fastscan_fields` checks `M`/`M2`/`bbs` but not `ksub`. An
+   index with `nbits != 4` (`ksub != 16`) makes `IndexFastScan::search`
+   size the LUT buffers as `n*ksub*M2` while `pq4_pack_LUT` copies at a
+   hardcoded 16-byte stride -&gt; heap OOB read/write. Now rejects `ksub != 16`.
+
+2. `IndexFastScan::reconstruct` unpacks a block for `key` from `codes`
+   with no bounds check; a crafted index declaring `ntotal &gt; 0` with an
+   empty/undersized `codes` blob reads OOB in `pq4_get_packed_element`.
+
+3. The reconstruct staging buffer is sized from the deserialized
+   `code_size`, while `CodePackerPQ4::unpack_1` writes `packer-&gt;code_size`
+   bytes; a smaller `code_size` (e.g. `nbits==0`) yields an OOB write.
+
+`reconstruct` now bounds `key` against `ntotal`, verifies the packed block
+lies within `codes`, and sizes the staging buffer to `max(code_size,
+packer-&gt;code_size)`. Valid indexes are unaffected (`ksub==16`,
+`code_size==packer-&gt;code_size`, full blocks). Found by agentic fuzzing.
+
+Reviewed By: alibeklfc
+
+Differential Revision: D112368331
+
+fbshipit-source-id: dad61c2614612c70c3b2c683756ae3a1b3049641
+
+- Validate codes/ntotal consistency in Ix2L and IxLa deserialization (#5439)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5439
+
+Two faiss deserialization branches accept an index whose `ntotal` is
+inconsistent with its stored `codes`, so the first `reconstruct()` reads
+through a null (or out-of-bounds) `codes.data()`:
+
+- `Ix2L` (Index2Layer): reads `ntotal` (header), `code_size_1`,
+  `code_size_2`, `code_size`, and `codes` independently. Unlike every
+  sibling `IndexFlatCodes` reader it never checked
+  `codes.size() == ntotal * code_size`. It also never checked that the
+  coarse-code width `code_size_1` matches `q1.nlist` -- and because a PQ
+  with `nbits == 0` yields `code_size_2 == 0`, a forged
+  `code_size_1 == code_size == 0` made the size check vacuous
+  (`0 == ntotal * 0`) while `Level1Quantizer::decode_listno` still reads
+  `coarse_code_size(nlist)` bytes from an empty `codes` buffer
+  (near-null read at IndexIVF.cpp:148).
+
+- `IxLa` (IndexLattice): the writer persists the header (including
+  `ntotal`) but never writes the `codes` vector, so a well-formed IxLa
+  index is always empty. A forged `ntotal &gt; 0` leaves `codes` empty and
+  `IndexLattice::sa_decode` hands `codes.data() == nullptr` to
+  `BitstringReader::read`.
+
+Adds to Ix2L both the standard `mul_no_overflow` codes-size check and a
+`code_size_1 == q1.coarse_code_size()` check (so the coarse width matches
+nlist and the size check can no longer be made vacuous). For IxLa enforces
+`ntotal == 0` plus header/encoded `d` consistency. All convert a SIGSEGV
+into a clean FaissException, matching the existing hardening on this
+surface. Found by agentic fuzzing.
+
+Reviewed By: trang-nm-nguyen
+
+Differential Revision: D112368337
+
+fbshipit-source-id: 883256965daff9302c505d80e0ac42cf730747ef
+
+- Finish E501 line-length lint sweep across faiss (183 violations, 52 files) (#5444)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5444
+
+We fix every remaining flake8 E501 (line &gt; 80 chars) violation in
+fbcode/faiss/ (excluding gpu/), closing out a lint-cleanup initiative that a
+June 29, 2026 diff stack (9a05463576 -&gt; d304e29b9a -&gt; 7d140d86ca) explicitly
+promised but left 41% incomplete. The middle diff in that stack aligned
+.flake8&#39;s max-line-length to black&#39;s 80-char width and stated the remaining
+277 violations after the config change were &#34;genuine lint (E501 long
+strings/URLs, F401/F841/B011, etc.), addressed in later commits in this
+stack.&#34; The follow-up commit fixed only the F401/F403/F841/B011 categories
+(45 issues) and never touched E501, leaving 192 violations across 53 files
+live in trunk. A direct re-scan today found 201 violations across 54 files
+(two files gained lines since the original count).
+
+We fixed 183 violations across 52 files. Two of the originally-flagged
+files, benchs/bench_rabitq.py and
+demos/index_pq_flat_separate_codes_from_codebook.py, already carry a
+file-level `# flake8: noqa` directive (the second is a Bento/Grimaldi
+notebook export that also fails standalone py_compile due to embedded shell
+magic) -- flake8 ignores both files entirely, so no changes were needed
+there and they are excluded from this diff.
+
+Fix approach, by category:
+- The large majority of violations are prose: docstrings and comments
+  rewrapped at word boundaries, preserving each file&#39;s existing indentation
+  and docstring conventions. No wording was changed.
+- Code lines (function calls, f-strings, assert messages, long argument
+  lists) were reflowed in black-compatible style: parenthesization, comma
+  breaks, or implicit adjacent string-literal concatenation. Every touched
+  file is confirmed unchanged by `black --line-length 80 --diff` after the
+  edit.
+- A small number of genuinely unwrappable long URLs (no reasonable break
+  point) were suppressed with `# noqa: E501` rather than force-wrapped,
+  matching the precedent set by the original black-format diff stack.
+- demos/offline_ivf/offline_ivf.py: a repeated, non-trivial ratio expression
+  used in both an assert condition and its (lazily-evaluated) failure
+  message was hoisted into a single local variable, eliminating the
+  duplicate computation. The expression is pure and deterministic (built
+  from already-computed arrays), so this is behaviorally identical to the
+  original -- not a functional change.
+- `arc lint -a` additionally auto-fixed a real bug it detected while
+  processing these files: `raise NotImplemented` -&gt; `raise
+  NotImplementedError` in contrib/evaluation.py (the sentinel object
+  NotImplemented is not an exception type; raising it produces a TypeError
+  masking the intended NotImplementedError). It also added a missing
+  trailing newline in benchs/fb/bench_index_binary_from_float.py and, in
+  the same file, rewrote the `#!/usr/bin/env python2` shebang to
+  `#!/usr/bin/env fbpython` -- that rewrite was reverted by hand, since the
+  file still does `import cPickle` (a Python 2-only module), so the
+  auto-fix would have made the shebang describe an interpreter the script
+  cannot actually run under. Fixing the underlying py2-to-py3 migration is
+  out of scope for this line-length-only sweep.
+- Rebasing onto master (this diff&#39;s base commit had drifted) surfaced two
+  concurrent upstream fixes to `check_ref_knn_with_draws(...)` calls in
+  tests/test_ivf_flat_panorama.py and tests/test_refine_panorama.py (an
+  unrelated in-flight correctness fix passing `D_panorama`/`atol` instead
+  of a stale `D_regular` arg with no `atol`). The rebase took upstream&#39;s
+  corrected arguments and re-applied only this diff&#39;s line-wrap on top.
+
+We verified zero functional change with an AST-level check: every string
+and f-string literal in every touched file was extracted before and after
+the edit and compared with whitespace normalized, confirming no wording,
+value, or expression was altered beyond the intended `# noqa: E501`
+suffixes and the one documented ratio-hoisting simplification above.
+
+Reviewed By: mnorris11
+
+Differential Revision: D112525458
+
+fbshipit-source-id: e4b85d73dafcaac779f3522a383a66e490fa942a
+
+- Validate Panorama batch_size and codes/cum_sums on deserialization (#5438)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5438
+
+The `IndexFlatPanorama` (`IxFP`/`IxFp`) and `IndexIVFFlatPanorama`
+(`IwP2`) deserialization branches read fields that are trusted as
+invariants at reconstruct time but are never validated:
+
+- `batch_size` is read straight from the stream and used as a divisor in
+  `Panorama::reconstruct` (`key / batch_size`, `key % batch_size`). A
+  crafted index with `batch_size == 0` raises SIGFPE. The sibling `ilp2`
+  branch already guards this exact field; the IxFP/IxFp and IwP2 branches
+  did not.
+
+- `codes`/`cum_sums` are read independently of `ntotal`, so a forged
+  `ntotal &gt; 0` with an empty (or undersized) `codes`/`cum_sums` vector
+  passes deserialization and then reads through a null/out-of-bounds
+  pointer in `Panorama::reconstruct`&#39;s `memcpy`. Every non-Panorama flat
+  reader already enforces the analogous size invariant.
+
+Adds a `batch_size &gt; 0` guard (both branches) and a codes/cum_sums size
+check that mirrors the whole-batch padding layout in
+`IndexFlatPanorama::add`. Converts the crashes into clean FaissExceptions.
+Found by agentic fuzzing.
+
+Reviewed By: trang-nm-nguyen
+
+Differential Revision: D112368332
+
+fbshipit-source-id: 76bb667bc69a5ac048234fa0b4f51a924f1ae1c2
+
+- Validate SVS-Vamana stored_vectors size on deserialization (ISV2) (#5434)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5434
+
+The `ISV2` (IndexSVSVamana) deserialization branch reads `ntotal`, `d`
+(header), and the raw `stored_vectors` payload as independent fields and
+never re-establishes the invariant `stored_vectors.size() == ntotal * d`
+that the programmatic `add()` path maintains.
+`IndexSVSVamana::reconstruct` guards only `key &lt; ntotal` and
+`stored_vectors` non-empty, then `memcpy`s `sizeof(float) * d` bytes from
+`stored_vectors.data() + key * d`. A crafted index declaring e.g.
+`ntotal=1, d=256` with a 1-element payload reads ~1 KiB past the heap
+allocation (heap-buffer-overflow read).
+
+Adds the `stored_vectors.size() == ntotal * d` check at deserialization,
+matching the sibling flat-codes readers, converting the OOB read into a
+clean FaissException. The SVS family is compile-gated (FAISS_ENABLE_SVS,
+x86_64). Found by agentic fuzzing.
+
+Reviewed By: trang-nm-nguyen
+
+Differential Revision: D112368334
+
+fbshipit-source-id: ba4ba275dd0444216139921c8d15628ccbb29fc0
+
+- Reject degenerate code_size==0 IndexPQ with ntotal&gt;0 on deserialization (#5437)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5437
+
+`read_ProductQuantizer` accepts `nbits == 0` (only `nbits &lt;= 24` is
+enforced), which derives `code_size == 0`. The `IxPq` codes-consistency
+check `codes.size() == ntotal * code_size` then degenerates to
+`0 == ntotal * 0`, satisfied by an empty `codes` vector for any `ntotal`.
+A crafted index with `ntotal &gt;= 1`, `nbits == 0`, and empty codes passes
+deserialization, and the first `reconstruct()` hands
+`codes.data() == nullptr` to `PQDecoderGeneric::decode` (`reg = *code`) —
+a null read that kills the process.
+
+Guards the degenerate `code_size == 0 &amp;&amp; ntotal &gt; 0` combination in the
+`IxPq` branch (before the existing size check), converting the SIGSEGV
+into a clean FaissException. A default-constructed, untrained PQ
+(`nbits == 0`, `ntotal == 0`) still deserializes, so no legitimate index
+is rejected. Found by agentic fuzzing.
+
+___
+
+Differential Revision: D112368333
+
+fbshipit-source-id: ca16505fa03c85337eff5f9bfc7684a9fd2400a3
+
+- Harden reconstruct()/reset() against null storage in composite indexes (#5440)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5440
+
+`IndexNSG`, `IndexNNDescent`, and `IndexPreTransform` dereference a
+sub-index (`storage` / `index`) in `reconstruct()` (and `reset()` /
+`reconstruct_n()`) with no null check. Every sibling method on these
+classes (`search`/`add`/`build`/`train`) already guards the same pointer
+with `FAISS_THROW_IF_NOT_MSG(...)`, but the reconstruct/reset paths were
+missed.
+
+A serialized index whose sub-index slot carries the `fourcc(&#34;null&#34;)`
+marker deserializes with the pointer left null (a legal deserialization
+outcome — the reader returns `nullptr` for that marker, and the
+cross-checks are skipped when the pointer is null). The first
+`reconstruct()` call then makes a virtual call through the null pointer
+and SIGSEGVs the process instead of raising a catchable `FaissException`.
+
+This adds the same guard the sibling methods already use, so a missing
+storage sub-index fails with a clean `FaissException` on this widely
+hardened deserialization surface. Found by agentic fuzzing.
+
+___
+
+Differential Revision: D112368330
+
+fbshipit-source-id: 332a36cefcc3901a14cf6fad5317f238047174f4
+
+- Bounds-check decoded direct_map entry in IndexIVF::reconstruct (#5435)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5435
+
+`IndexIVF::reconstruct` decodes a packed `(list_no, offset)` from
+`direct_map.get(key)` and passes it straight to `reconstruct_from_offset`.
+`DirectMap::get` validates the map key and rejects a negative `lo`, but
+never checks that the decoded `list_no`/`offset` are consistent with the
+inverted lists. A deserialized index whose `direct_map` is inconsistent
+with its `invlists` (e.g. `list_no &gt;= nlist`, or an empty `codes`) makes
+`ArrayInvertedLists::get_codes(list_no)` index out of bounds — the
+`assert(list_no &lt; nlist)` guard is compiled out in opt builds — and
+`reconstruct_from_offset`&#39;s `memcpy` faults on a near-null read.
+
+Adds the `list_no &lt; nlist` and `offset &lt; list_size(list_no)` checks that
+the sibling `IndexIVFPQR::reconstruct_from_offset` (and the Metal backend)
+already perform, at the shared `IndexIVF::reconstruct` entry so every IVF
+subtype is covered. Indexes built via `add()` always satisfy these, so no
+valid index is rejected. Found by agentic fuzzing.
+
+Reviewed By: bshethmeta
+
+Differential Revision: D112368335
+
+fbshipit-source-id: ffedbd4c87ba808ff6e4c46648c1f85b3d2a5a04
+
+- Optimize RaBitQ fastscan query setup + 80% qps (#5396)
+
+Summary:
+## What
+
+Two hot-path fixes for RaBitQ FastScan search, from profiling Cohere 1M (d=1024, nprobe=64):
+
+1. **LUT/query quantization**: `compute_LUT_uint8` and `compute_query_factors` call
+   `std::roundf` per element (~330k libm calls per query, 16.9% of cycles in
+   `__roundf`+PLT alone — half-away-from-zero rounding has no x86 instruction, so it
+   never inlines). Replaced with an inline `x + 0.5f` + truncate helper, valid since
+   these inputs are non-negative and range-bounded by construction. (recall impact was small enough to be unnoticed)
+
+2. **Single-query pretransform**: `LinearTransform::apply_noalloc` always calls `sgemm`,
+   so for n=1 OpenBLAS repacks the whole rotation matrix every query
+   (`sgemm_incopy` was 12.2% of cycles vs 2.7% for the actual kernel). Added an
+   `sgemv` path for n=1.
+
+Note: rounding is not bit-exact with `roundf` for inputs within 1-2 ulp of a
+`k + 0.5` boundary (±1 quantization code); ties agree. gemv also differs from gemm
+in accumulation order. Neither affects recall (below), 4/10000 result ids changed.
+
+&lt;img width=&#34;1714&#34; height=&#34;1884&#34; alt=&#34;image&#34; src=&#34;https://github.com/user-attachments/assets/9f391480-721d-4ab1-98a8-597c189c6142&#34; /&gt;
+
+## Results
+
+Cohere 1M, IVF_RABITQ_FASTSCAN, k=100, nprobe=64, single thread:
+
+- QPS 299.5 → 546.4 (median of 5)
+- perf stat: cycles -36.7%, instructions -36.4%, L1D misses -62.2%, IPC unchanged
+
+Recall vs exact ground truth (recomputed by brute force; the HDF5-provided
+neighbors are invalid for IP/COSINE): recall@1/10/100 = 0.95 / 0.924 / 0.6554,
+identical before and after.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5396
+
+Reviewed By: mnorris11
+
+Differential Revision: D112153740
+
+Pulled By: alibeklfc
+
+fbshipit-source-id: d4eae49d7dd751b542a12c4c1de94c12dc5cbf6f
+
+- fix IDMap add_sa_codes returning -1 labels with ivf subindex Issue #5333 (#5345)
+
+Summary:
+IndexIDMap.add_sa_codes was passing the user ids straight through to the sub-index instead of keeping them in id_map. For sub-indexes that don&#39;t store ids themselves (Flat/PQ) this happened to work, but an IVF sub-index keeps the ids in its inverted lists, so after add_sa_codes a search returned the raw external ids. Those don&#39;t index into id_map, so the IDMap layer mapped them all to -1 (see https://github.com/facebookresearch/faiss/issues/5333).
+
+The fix is to pass nullptr for the ids when forwarding to the sub-index, the same way add_with_ids already does, so the sub-index uses sequential numbering and the external ids stay in id_map.
+
+While here I also added the add_sa_codes override on IndexIDMap2 that was missing. Without it rev_map was never updated for codes added this way, so reconstruct on an id added via add_sa_codes would fail.
+
+Test
+
+Added test_idmap_ivf in tests/test_standalone_codec.py. It builds an IDMap2,IVF20,Flat, adds the same data both ways (add_with_ids and add_sa_codes) and checks the search results match, plus a reconstruct check to cover the rev_map fix.
+
+Fixes https://github.com/facebookresearch/faiss/issues/5333
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5345
+
+Reviewed By: mnorris11
+
+Differential Revision: D110075991
+
+Pulled By: limqiying
+
+fbshipit-source-id: 0db0c4ccce748e3b9ff0525c2f67388c6c984525
+
+- Fix panorama tests: pass D_panorama (not D_regular) to check_ref_knn_with_draws (#5430)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5430
+
+`assert_search_results_equal` in the panorama tests called `check_ref_knn_with_draws(D_regular, I_regular, D_regular, I_panorama, rtol=rtol)`, passing `D_regular` as the 3rd positional argument. That parameter is `Dnew` (the distances compared against the reference `Dref`), so `D_panorama` was intended — the regular/panorama pairing is broken for that argument.
+
+Effect: inside `check_ref_knn_with_draws`, `np.testing.assert_allclose(Dref, Dnew)` degenerated to `assert_allclose(D_regular, D_regular)`, a vacuous self-comparison, and the distance-tie bucketing used only `D_regular` instead of the joint regular/panorama distances. The test still passed overall because the helper already asserts `assert_allclose(D_regular, D_panorama, rtol, atol)` on the preceding line (stricter) and the id comparison (`I_regular` vs `I_panorama`) was correct — so this is a low-severity fix that restores the intended internal check.
+
+Fix: change the 3rd argument from `D_regular` to `D_panorama` at both call sites: `tests/test_refine_panorama.py` and `tests/test_ivf_flat_panorama.py`.
+
+Surfaced by an adversarial verification pass over the faiss `black -l 80` reformat; the bug is pre-existing and unrelated to formatting, so it is a separate diff.
+
+___
+
+Reviewed By: mnorris11
+
+Differential Revision: D112191720
+
+fbshipit-source-id: a49f18eb350f8fe51e77facc5c2b67e1bb2a696e
+
+- Optimize exhaustive_L2sqr_blas_cmax with AVX-512 intrinsics. (#4569)
+
+Summary:
+Add a template specialization of `exhaustive_L2sqr_blas_cmax` for `SIMDLevel::AVX512` in `distances_avx512.cpp`, alongside the existing `AVX2` and `ARM_SVE` specializations. The new kernel doubles the SIMD width of the post-`sgemm` fixup pass from 8 to 16 lanes, processing 32 elements per inner-loop iteration instead of 16.
+
+**Benchmark**
+
+`benchs/bench_index_flat.py` delivers up to a **1.16x** speedup compared to the AVX2 implementation.
+
+```
++---------+----------+------------+---------+
+|    d    | AVX2 k=1 | AVX512 k=1 | Speedup |
++---------+----------+------------+---------+
+|   128   | 0.181814 |   0.156076 |  1.16x  |
+|   256   | 0.309386 |   0.288921 |  1.07x  |
+|   768   | 0.836036 |   0.814894 |  1.03x  |
++---------+----------+------------+---------+
+```
+
+**K-means** on `SIFT1M`, using `benchs/bench_all_ivf/bench_kmeans.py`, achieves up to a **1.06x** speedup relative to the existing `AVX2` implementation.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/4569
+
+Reviewed By: alibeklfc
+
+Differential Revision: D111268006
+
+Pulled By: mnorris11
+
+fbshipit-source-id: 4eab5077525be3ffbdff270c7c9981410a6bd0ab
+
+- missing auto vectorization for AVX512-SPR (#5433)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5433
+
+Fixes https://github.com/facebookresearch/faiss/issues/4511
+
+Reviewed By: alibeklfc
+
+Differential Revision: D112352949
+
+fbshipit-source-id: c13745e4b5e074fa4bd96f6f4133e8551c9a842d
+
+- black -l 80: python/__init__.pyi formatting (4/4) (#5429)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5429
+
+# this is a no-op change
+
+Part 4 of the faiss `black -l 80` reformat, split out on its own because `python/__init__.pyi` is a single generated type-stub whose formatting delta is ~374 lines — it cannot be split under the 100-line-per-diff budget without splitting a single file, so it is isolated here. Follow-up to D109736099 (landed).
+
+Ran `black -l 80` (line length 80, matching faiss&#39;s `CONTRIBUTING.md`: &#34;80 character line length (both for C++ and Python)&#34;) over `python/__init__.pyi`.
+
+Pure-formatting only. `black`&#39;s AST-equivalence safety check guarantees no identifier, string/numeric value, operator, or type-annotation change — only whitespace, wrapping, trailing commas, and quote normalization. Independently verified: `ast.dump` equality (docstrings normalized) and comment-content preservation. `fbcode/faiss/` is excluded from Meta&#39;s standard Python autoformatter (it mirrors to public GitHub), so `black -l 80` is the correct tool.
+
+___
+
+Reviewed By: trang-nm-nguyen
+
+Differential Revision: D112191718
+
+fbshipit-source-id: 9fee82006fb13aafbc47a1042307f709f952a848
+
+- black -l 80: benchs + python + refine test formatting (3/3) (#5428)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5428
+
+# this is a no-op change
+
+Part 3 of a 3-diff split of the faiss `black -l 80` reformat into small, reviewable diffs (each 3-4 files, &lt;100 changed lines). Follow-up to D109736099 (landed), which formatted the faiss Python tree; these files drifted or are new.
+
+Ran `black -l 80` (line length 80, matching faiss&#39;s `CONTRIBUTING.md`: &#34;80 character line length (both for C++ and Python)&#34;) over: `benchs/bench_eden.py`, `python/__init__.py`, `tests/test_refine_panorama.py`.
+
+Pure-formatting only. `black`&#39;s AST-equivalence safety check guarantees no identifier, string/numeric value, operator, or control-flow change — only whitespace, wrapping, trailing commas, and quote normalization. Independently verified: `ast.dump` equality (docstrings normalized) and comment-content preservation. `fbcode/faiss/` is excluded from Meta&#39;s standard Python autoformatter (it mirrors to public GitHub), so `black -l 80` is the correct tool.
+
+___
+
+Reviewed By: trang-nm-nguyen
+
+Differential Revision: D112191716
+
+fbshipit-source-id: b4e0e737bc734888c7777b0ee3b8b26495669747
+
+- Prune cuVS brute-force flat index on aarch64 (FAISS_CUVS_NO_FLAT) (#5431)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5431
+
+Fix link error
+
+Reviewed By: weidbd2025
+
+Differential Revision: D112244794
+
+fbshipit-source-id: 19373ee4e81d6dfbadb4b9d1e52d750ceb63e157
+
+- black -l 80: tests/ formatting (2/3) (#5427)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5427
+
+# this is a no-op change
+
+Part 2 of a 3-diff split of the faiss `black -l 80` reformat into small, reviewable diffs (each 3-4 files, &lt;100 changed lines). Follow-up to D109736099 (landed), which formatted the faiss Python tree; these files drifted or are new.
+
+Ran `black -l 80` (line length 80, matching faiss&#39;s `CONTRIBUTING.md`: &#34;80 character line length (both for C++ and Python)&#34;) over the test files: `tests/test_build_blocks.py`, `tests/test_contrib.py`, `tests/test_eden.py`, `tests/test_ivf_flat_panorama.py`.
+
+Pure-formatting only. `black`&#39;s AST-equivalence safety check guarantees no identifier, string/numeric value, operator, or control-flow change — only whitespace, wrapping, trailing commas, and quote normalization. Independently verified: `ast.dump` equality (docstrings normalized) and comment-content preservation. `fbcode/faiss/` is excluded from Meta&#39;s standard Python autoformatter (it mirrors to public GitHub), so `black -l 80` is the correct tool.
+
+___
+
+Reviewed By: trang-nm-nguyen
+
+Differential Revision: D112191719
+
+fbshipit-source-id: 20fc89768077a16fb6abd6c2fe58981c3febf0ea
+
+- black -l 80: gpu/test formatting (1/3) (#5426)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5426
+
+# this is a no-op change
+
+Part 1 of a 3-diff split of the faiss `black -l 80` reformat into small, reviewable diffs (each 3-4 files, &lt;100 changed lines). Follow-up to D109736099 (landed), which formatted the faiss Python tree; these files drifted or are new.
+
+Ran `black -l 80` (line length 80, matching faiss&#39;s `CONTRIBUTING.md`: &#34;80 character line length (both for C++ and Python)&#34;) over the GPU test files: `gpu/test/bench_approaches.py`, `gpu/test/test_cagra.py`, `gpu/test/test_gpu_index_ivfsq.py`.
+
+Pure-formatting only. `black`&#39;s AST-equivalence safety check guarantees no identifier, string/numeric value, operator, or control-flow change — only whitespace, wrapping, trailing commas, and quote normalization. Independently verified: `ast.dump` equality (docstrings normalized) and comment-content preservation. `fbcode/faiss/` is excluded from Meta&#39;s standard Python autoformatter (it mirrors to public GitHub), so `black -l 80` is the correct tool.
+
+___
+
+Reviewed By: trang-nm-nguyen
+
+Differential Revision: D112191715
+
+fbshipit-source-id: 7bc36a1a4a954a266a916717c810c433db12ccc3
+
+- Reuse RaBitQ IVF scanner distance computer (#5390)
+
+Summary:
+Reuse the RaBitQ IVF distance computer across probed lists and inline the multi-bit scan loop to avoid per-list allocation and per-candidate virtual dispatch.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5390
+
+Reviewed By: alibeklfc
+
+Differential Revision: D111752861
+
+Pulled By: bshethmeta
+
+fbshipit-source-id: b127f6a06c4d174846b97751e8c74d63ca0b4703
+
+- Guard ScalarQuantizer compute_codes/decode OMP region for small n (#5423)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5423
+
+`ScalarQuantizer::compute_codes` and `ScalarQuantizer::decode` unconditionally
+open an `#pragma omp parallel for` region regardless of `n`, unlike every
+sibling quantizer in the same family: `ProductQuantizer::decode` guards with
+`if (n &gt; 100)`, `AdditiveQuantizer::decode`/`decode_unpacked` guard with
+`if (n &gt; 100)`/`if (n &gt; 1000)`, and `RaBitQuantizer::compute_codes_core`/
+`decode_core` guard with `if (n &gt; 1000)`.
+
+`IndexIVFScalarQuantizer::reconstruct_from_offset` calls `sq.decode(sc.get(),
+recons, 1)` once per vector, so this hot reconstruction path (used by
+`reconstruct()`, `reconstruct_n()`, and reranking/`IndexRefine` flows on top
+of IVF+SQ indexes) pays full OMP thread-team fork/join overhead for a single
+scalar-encode/decode of one vector. `IndexScalarQuantizer::sa_encode`/
+`sa_decode` (the public codec API, also reachable from Python) hit the same
+cost for any single-vector call.
+
+Fix: add `if (n &gt; 100)` to both pragmas, matching the threshold already used
+by `ProductQuantizer::decode` and `AdditiveQuantizer::decode`. No behavior
+change for n &gt; 100 (parallel region still opens); for small n the loop now
+runs on the calling thread directly instead of forking an OMP team.
+
+Benchmarked on this devserver (56 OMP threads available), calling
+`ScalarQuantizer::compute_codes`/`decode` with n=1, 20000 reps, best-of-run
+median:
+
+| qtype   | d   | compute_codes(n=1) before | after   | decode(n=1) before | after  |
+|---------|-----|---------------------------|---------|---------------------|--------|
+| QT_8bit | 128 | 105.7us                   | 2.7us   | 104.5us             | 2.4us  |
+| QT_8bit | 768 | 112.7us                   | 4.1us   | 114.8us             | 2.6us  |
+| QT_fp16 | 128 | 117.3us                   | 2.3us   | 113.0us             | 2.4us  |
+| QT_fp16 | 768 | 108.3us                   | 2.9us   | 109.9us             | 2.6us  |
+
+~40-50x reduction in per-call latency for the n=1 case across both qtypes
+and dimensions tested. n &gt; 100 behavior is unaffected (same code path).
+
+Reviewed By: mnorris11
+
+Differential Revision: D111693838
+
+fbshipit-source-id: 1e64147ecaea258b72048fea74319074a65fe000
+
+- Fix division-by-zero in quantize_lut when all LUT entries are identical (#5424)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5424
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/TODO
+
+FastScan LUT quantization functions compute a scale factor `a = 255 / max_span`
+before calling `round_tab`, which writes `floorf((entry - min) * a + 0.5)` into
+the quantized table.  When all entries in a column are identical, `max_span == 0`
+and `255 / 0.0f = +Inf` (IEEE 754).  The subsequent `0.0f * Inf = NaN` in
+`round_tab` corrupts every byte of the quantized LUT with no error or warning.
+
+We fix all six affected sites:
+
+* `round_uint8_per_column` (line 78): single-divisor `255 / max_span`
+* `round_uint8_per_column_multi` (line 114): same
+* `quantize_LUT_and_bias` -- !bias branch (line 157): `min(255/max_span_LUT, 65535/max_span_dis)`
+* `quantize_LUT_and_bias` -- !lut_is_3d branch (line 177): same pattern
+* `quantize_LUT_and_bias` -- biasq branch (line 221): same pattern
+* `quantize_LUT_and_bias` -- !biasq branch (line 274): single-divisor `255 / max_span`
+* `aq_quantize_LUT_and_bias` (line 323): same min() pattern
+
+For the single-divisor sites, we replace `255 / max_span` with
+`max_span &gt; 0 ? 255.0f / max_span : 0.0f`.
+
+For the `std::min(255/X, 65535/Y)` sites, we replace each term with a
+HUGE_VALF sentinel when its denominator is zero, then clamp the final result
+to 0.0f if both denominators were zero (all entries and biases identical):
+`!std::isfinite(a) → a = 0.0f`.
+
+In all cases, `a = 0.0f` is the correct output: when all distances are
+identical, every relative distance is zero, so `floorf(0 * 0 + 0.5) = 0` gives
+an all-zero quantized table, which faithfully represents a degenerate
+(constant) quantizer.
+
+We also add `test_quantize_lut.cpp` — the first dedicated C++ unit test for
+these functions.  The quantize_lut API is a critical step in the FastScan LUT
+pipeline (called by IndexFastScan, IndexIVFFastScan, IndexIVFAdditiveQuantizerFastScan,
+and IndexIVFRaBitQFastScan) but had no standalone C++ coverage beyond indirect
+exercise through slow Python integration tests.  The new tests include a
+zero-span case that would have caught this bug at authorship time.
+
+Reviewed By: mnorris11
+
+Differential Revision: D110311057
+
+fbshipit-source-id: 2ee4d9d981807d7acaf3e5546a9e0a98ec2de559
+
+- Stand up parallel cuVS 26.02 IVF-PQ targets (rmm/raft/cuvs) at CUDA 12.8 (#5414)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5414
+
+TLDR: go back to cuVS 26.02 for Quark, until deps upgrade (may take some time)
+--
+
+The RAPIDS 26.06 lockstep upgrade (D108210849) moved cuvs/raft/rmm to CCCL 3.3, which forces the cuVS-consuming binaries (quark `torch_retrieval_publisher` / `cuvs_ivfpq_module` and their serving predictor) onto CUDA 13.3. Almost nothing else at Meta is on 13.3 yet, so that upgrade also forces a bleeding-edge 13.3 migration of the serving predictor fleet.
+
+Before D108210849 this customer ran fine on cuVS 26.02 at CUDA 12.8 (12.8 toolkit + a CCCL 3.2 header override from 13.2, since 26.02 needs CCCL &gt;= 3.1 but 12.8 ships 2.7). This diff reconstructs that 26.02 stack as parallel, version-suffixed targets so the customer can build at 12.8 while the default cuvs/raft/rmm stack stays on 26.06/13.3 for all other consumers (faiss IVF-SQ, multi-GPU CAGRA, etc.). The 26.06 code is untouched; when the ecosystem is ready for 13.3 we drop these `-2602` targets and rebase onto the 26.06 path.
+
+Reconstructed verbatim from the pre-D108210849 (26.02) BUCK definitions, which reference the still-present `v26.02.00` source trees:
+- `third-party/rmm/BUCK`: adds `rmm-2602` + `CCCL_2602_*` (13.2 CCCL header override).
+- `third-party/rapidsai-raft/raft/BUCK`: adds `raft-2602` (deps `rmm:rmm-2602`).
+- `third-party/cuvs/cuvs_2602.bzl`: parallel 26.02 `cuvs_cxx_library` macro + CCCL vars (self-contained; the current `cuvs.bzl` is 26.06/JIT-LTO).
+- `third-party/cuvs/BUCK`: adds `header_map_2602` and `cuvs-ivfpq-2602` (deps `raft-2602`/`rmm-2602`, via `cuvs_2602.bzl`).
+
+Not in this diff (follow-up): the faiss bridge and the quark rewire. `admarket/.../ann:cuvs_ivfpq_index` reaches cuVS through faiss GPU (`faiss::gpu::GpuIndexIVFPQ` + `GpuCloner`), and faiss `GpuCloner.cpp` unconditionally constructs `GpuIndexCagra`, so a faiss_cuvs build must include CAGRA — but the `v26.02.00` cuVS `cagra` source `.cu` files are pruned from the repo (headers remain). Standing up `faiss_cuvs_2602` therefore needs either (a) restoring the 26.02 cuVS `cagra` (and `ivf_sq`) sources from history, or (b) `#ifdef`-ing CAGRA out of faiss `GpuCloner` — neither is a BUCK-only change. This diff lands the RAPIDS-layer scaffolding these depend on.
+
+Differential Revision: D111582507
+
+fbshipit-source-id: c2255fa93bd6b6b4d77f9cec2adaed92b83f661f
+
+- Fix reverse_index_factory for multi-bit RaBitQ indexes (#5419)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5419
+
+### THIS DIFF
+
+Fix two bugs in `reverse_index_factory` for multi-bit RaBitQ indexes, in
+both the C++ and Python implementations.
+
+**C++ (`factory_tools.cpp`):**
+- `IndexIVFRaBitQ` case returned `prefix + &#34;,RaBitQ&#34;` unconditionally,
+  regardless of `rabitq.nb_bits`. For a 2-bit index built from
+  `&#34;IVF_nlist,RaBitQ2&#34;`, the function returned `&#34;IVF_nlist,RaBitQ&#34;` (1-bit
+  factory string). This means `TelemetryWrapper` logs the wrong index type
+  for every production multi-bit RaBitQ IVF index.
+- `IndexRaBitQ` (standalone) had the same flaw — always returned
+  `&#34;RaBitQ&#34;` regardless of `nb_bits`.
+
+**Python (`contrib/factory_tools.py`):**
+- Neither `IndexIVFRaBitQ` nor `IndexRaBitQ` had a case in
+  `reverse_index_factory`, so any Python caller using this API on a RaBitQ
+  index raised `NotImplementedError`.
+
+**Fix:** Read `rabitq.nb_bits` from the typed cast result and append the
+bit count when `nb_bits &gt; 1` (e.g., `&#34;RaBitQ2&#34;`). For `nb_bits == 1`
+the output is still `&#34;RaBitQ&#34;`, preserving backward compatibility with
+existing logs and round-trip tests.
+
+### CONTEXT
+
+Multi-bit RaBitQ (`nb_bits=2..9`) was added alongside standard 1-bit
+RaBitQ. `index_factory` has parsed `&#34;RaBitQ2&#34;`, `&#34;RaBitQ4&#34;`, etc., since
+the feature landed, but `reverse_index_factory` was never updated to emit
+these strings. Every production `IndexIVFRaBitQ` with `nb_bits &gt; 1`
+(including the RaBitQ2 deployment) logs `&#34;,RaBitQ&#34;` (1-bit) in telemetry.
+The Python API has silently been broken for all RaBitQ index types.
+
+The fix pattern matches how other parameterized types (`PQMxN`, `HNSWNM`,
+etc.) embed their parameters in the factory string.
+
+Reviewed By: mnorris11
+
+Differential Revision: D110042828
+
+fbshipit-source-id: d4e976bd9fc99691a20fb33d893af2d36deeb1e1
+
+- Fix flaky IVF/Refine Panorama kNN tests under AVX512_SPR dispatch (#5420)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5420
+
+D110092203 fixed the same flakiness in test_flat_panorama.py (36% flake rate
+on AVX512_SPR dispatch). The root cause — brittle overlap_rate ID comparison
+that breaks when SIMD dispatch changes float reduction order and reorders
+near-tied neighbors — is identical in test_ivf_flat_panorama.py and
+test_refine_panorama.py, which both use for_all_simd_levels.
+
+Replace assert_search_results_equal in both files:
+  - Remove overlap_rate = np.mean(I_regular == I_panorama) and assertGreater
+  - Add check_ref_knn_with_draws for tie-aware set comparison
+  - Relax atol 1e-7 -&gt; 1e-4 (consistent with the flat_panorama fix)
+  - Pass D_regular as both distance arrays to check_ref_knn_with_draws;
+    distances already verified by assert_allclose(atol=atol), and using
+    D_regular for tie-grouping avoids atol=0 failures on near-zero L2
+    distances (e.g., test_ratio_dims_scanned exact-match scenario)
+
+assert_range_results_equal in test_ivf_flat_panorama.py is left unchanged;
+IVF range search has inherently approximate recall (nprobe), so the
+intersection-based overlap check there is intentionally looser.
+
+___
+
+Differential Revision: D111028010
+
+fbshipit-source-id: cdaa6daed5f45aaec8dff08f7333489531e8b3f0
+
+- ProductQuantizer::search_sdc: hoist per-subquantizer row pointers out of database-vector loop (#5338)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5338
+
+### THIS DIFF
+
+We precompute M row pointers into the SDC (symmetric distance computation) table before the per-database-vector j-loop in `ProductQuantizer::search_sdc`. The original inner loop computed `sdc_table.data() + m * ksub^2 + qcode[m] * ksub` on every j iteration, introducing M multiplications and M pointer advances per database vector. The new code computes `q_row[m]` once per query, reducing the j-loop body to M direct indexed loads: `dis += q_row[m][bcode[m]]`.
+
+The `q_row` buffer is declared inside a `#pragma omp parallel` block and reused across the inner `#pragma omp for`, so it is allocated once per OMP thread rather than once per query.
+
+### CONTEXT
+
+`search_sdc` is the symmetric distance computation path for `ProductQuantizer`-based search (used by `IndexPQ::search` with `search_type == ST_SDC`). It scans all `nb` database codes per query, accumulating M sub-table lookups per vector. With `nbits == 8` (enforced by assertion), `ksub = 256` and the SDC table has M × 256 × 256 entries. The per-j pointer arithmetic — resetting `tab` to `sdc_table.data()` and advancing by `ksub * ksub = 65536` M times — ran on every one of the `nb` database vectors, despite `qcode[m]` being constant across the entire j-loop.
+
+### BENCHMARK
+
+Dataset: SyntheticDataset, d=128, M=8, nb=200K, nq=500, k=10, OMP_NUM_THREADS=1, 10 runs median.
+
+| | Before | After | Speedup |
+|---|---|---|---|
+| search_sdc | 42.0 ms | 27.8 ms | 33.8% |
+
+Note: D107233641 (prior draft from 2026-06-02) contained this same optimization but was stale (based on a June 1 parent) and additionally included a benchmark script that should not land. This diff supersedes it cleanly on the current HEAD, addresses the Devmate review comment by hoisting the buffer allocation outside the OMP for, and omits the benchmark file.
+
+Reviewed By: limqiying
+
+Differential Revision: D109426404
+
+fbshipit-source-id: 14dc5a44a25d0d29ba2bfc00f54a0f3ce063e4ba
+
+- Add ClusteringInitMethod enum constants to __init__.pyi stub (#5324)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5324
+
+Add the three ClusteringInitMethod enum constants
+(ClusteringInitMethod_RANDOM, ClusteringInitMethod_KMEANS_PLUS_PLUS,
+ClusteringInitMethod_AFK_MC2) and the ClusteringInitMethod type alias to
+the authoritative __init__.pyi Pyre stub.
+
+These constants were introduced in commit bc5fe3d75e85 (Dec 2025) when
+k-means++ and AFK-MC² centroid initialization were added to Clustering.h.
+They are accessible at runtime via the SWIG-generated module but were never
+added to __init__.pyi. When D107274305 (Jun 2026) wired __init__.pyi as
+the authoritative Pyre source, all code using these constants acquired
+[missing-attribute] errors. test_clustering_initialization.py already
+references them 14 times.
+
+Fix: add ClusteringInitMethod = int type alias and three int constants
+near the MetricType block at the top of the stub (matching the established
+pattern for SWIG-wrapped scoped enums). Update ClusteringParameters.init_method
+from &#39;int  # comment&#39; to &#39;ClusteringInitMethod&#39; to match how MetricType
+is used throughout the file.
+
+Test: buck test fbcode//faiss/tests:test_swig_wrapper — 25 pass, 0 fail
+(24 pre-existing + 1 new: test_clustering_init_method_enum_values).
+Test session: https://www.internalfb.com/intern/testinfra/testrun/32369622335973550
+
+Reviewed By: limqiying
+
+Differential Revision: D109007472
+
+fbshipit-source-id: a87cb5669aca2342e69e19ac3af41dd0da39f3a5
+
+- Fix C++ reverse_index_factory: missing qtypes crash telemetry, IDMap2 misidentified (#5417)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5417
+
+`reverse_index_factory` in `factory_tools.cpp` has four correctness bugs that
+affect production telemetry. `TelemetryWrapper::TelemetryWrapper()` calls
+`reverse_index_factory(this)` with no try/catch; any exception propagates
+out of the constructor.
+
+**Bug 1 — `sq_types.at()` throws for QT_0bit, QT_8bit_uniform, QT_4bit_uniform**
+
+`IndexIVFScalarQuantizer` and `IndexScalarQuantizer` constructed with these
+qtypes pass a key absent from `sq_types` to `std::map::at()`, which throws
+`std::out_of_range`. Any `TelemetryWrapper&lt;IndexIVFScalarQuantizer&gt;` with one
+of these qtypes aborts the process.
+
+Fix: add all three missing entries.
+- `QT_0bit → &#34;SQ0&#34;`: accepted by `index_factory` (listed in its name map).
+- `QT_8bit_uniform → &#34;SQ8u&#34;`, `QT_4bit_uniform → &#34;SQ4u&#34;`: synthetic names,
+  not round-trippable through `index_factory`, but match `contrib/
+  factory_tools.py` and uniquely identify the type in telemetry.
+
+**Bug 2 — IndexIDMap2 returns &#34;IDMap,...&#34; instead of &#34;IDMap2,...&#34;**
+
+`IndexIDMap2` inherits `IndexIDMap`. The existing
+`dynamic_cast&lt;const faiss::IndexIDMap*&gt;` check catches both. Every
+`TelemetryWrapper&lt;IndexIDMap2&gt;` is logged as `&#34;IDMap,...&#34;` — wrong type.
+
+Fix: add `dynamic_cast&lt;const faiss::IndexIDMap2*&gt;` check before the
+`IndexIDMap` branch, matching the ordering in `contrib/factory_tools.py`.
+
+Reviewed By: mnorris11
+
+Differential Revision: D109830472
+
+fbshipit-source-id: 58659b8d54810df89800ad46ef57ffb51c5eaca6
+
+- Fix get_code_size to handle HNSW coarse quantizers with any M value (#5416)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5416
+
+We fix two bugs in `get_code_size` (`contrib/factory_tools.py`) that raise
+`RuntimeError` for any valid HNSW factory string with M≠32.
+
+**Bug 1 — IVF+HNSW regex hardcodes M=32 (line 20):**
+`re.match(&#34;IVF\\d+(_HNSW32)?,(.*)&#34;)` — `_HNSW8`, `_HNSW16`, `_HNSW64` do
+not match. Execution falls through all branches to
+`raise RuntimeError(&#34;cannot parse IVF64_HNSW16,Flat&#34;)`.
+Fix: change `_HNSW32` to `_HNSW\\d+`.
+
+**Bug 2 — Standalone HNSW string comparison hardcodes M=32 (lines 48–49):**
+`if indexkey == &#34;HNSW32&#34; or indexkey == &#34;HNSW32,Flat&#34;` — any other M falls
+through to `RuntimeError`. Fix: replace with
+`re.match(&#34;HNSW(\\d+)(,Flat)?$&#34;)` and generalized formula
+`d * 4 + M * 2 * 4` (equivalent to the original `d * 4 + 64 * 4` for M=32;
+the `# roughly` comment is preserved since HNSW graph overhead depends on
+ntotal and level distribution).
+
+**Root cause:** `reverse_index_factory` already correctly handles any M via
+`get_hnsw_M()` — line 96 produces `&#34;IVF{n}_HNSW{M},...&#34;`, line 125 produces
+`&#34;HNSW{M}&#34;`. The standard roundtrip
+`get_code_size(d, reverse_index_factory(index))` crashes for every
+IVF+HNSW or standalone HNSW index with M≠32. HNSW M=16 and M=64 are common
+production configurations.
+
+Reviewed By: limqiying
+
+Differential Revision: D109142320
+
+fbshipit-source-id: 7ddcfd83211b7e95e1bab20a3dee017c4d08e450
+
+- Fix OperatingPoints::add prune loop leaving dominated points at equal time (#5415)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5415
+
+The post-admission prune loop in `OperatingPoints::add` used a strict
+`&lt;` comparison on time to detect dominated points:
+
+    if (a[i].t &lt; a[i - 1].t)
+
+When a new point B has strictly better performance than an existing point
+A at exactly the same search time, B is admitted (perf &gt; a.back().perf),
+pushed to the back, and the prune loop runs. The condition evaluates
+`B.t &lt; A.t` — false when times are equal — so A is left on the frontier.
+The optimal set then contains A which B strictly dominates (B.perf &gt;
+A.perf, B.t == A.t), breaking the Pareto invariant.
+
+Fix: change `&lt;` to `&lt;=`. This is safe: the admission branches prevent
+duplicate (perf, t) pairs from being stored, so the prune loop never
+encounters equal time AND equal perf simultaneously. The `&lt;=` condition
+only activates for the genuinely dominated case: higher-perf point at
+lower-or-equal time.
+
+D110116217 (2026-06-30) fixed the identical bug in the Python port of
+this function (`contrib/evaluation.py::add_operating_point`), changing
+`t &lt; t2` to `t &lt;= t2` in its prune loop. This diff fixes the C++ source
+that the Python version was documented to port.
+
+Reviewed By: mdouze
+
+Differential Revision: D110586087
+
+fbshipit-source-id: 3bd48e6ce254ceef81478c966620741ed9faa089
+
+- feat(riscv): Add RISC-V RVV rabitq kernels (#5369)
+
+Summary:
+This PR adds RISC-V RVV implementations for the rabitq under `COMPILE_SIMD_RISCV_RVV`.
+
+## Testing
+
+Tested on SG2044 with:
+
+* GCC 15.1
+* openEuler
+* RISC-V RVV enabled build
+
+The RVV results were validated against the scalar implementation, and numerical accuracy is aligned with the scalar path.
+
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5369
+
+Reviewed By: mnorris11
+
+Differential Revision: D111465081
+
+Pulled By: alibeklfc
+
+fbshipit-source-id: fd2b0c79ea59afb969567e9c44f609a83a86b7ef
+
+- Faiss OSS CI: skip GPU jobs on PRs that touch no GPU-relevant code (#5402)
+
+Summary:
+Pull Request resolved: https://github.com/facebookresearch/faiss/pull/5402
+
+TLDR:
+- GPU only changes: run just linux-x86_64-cmake --&gt; GPU jobs
+- CPU only changes: run just CPU jobs
+- both: run everything
+
+Most PRs touch only CPU or only GPU code, but CI ran the full matrix every time. This adds a lightweight `changes` job (`dorny/paths-filter`) that detects whether a PR touches GPU-relevant or non-GPU paths, then gates each job with `needs: changes` and an `if:` guard: GPU jobs run only on GPU changes, and the CPU variant matrix (AVX/SVE/DD/SVS/conda/etc.) runs only on non-GPU changes. Non-PR events (push to `main`, tags) always run everything, so post-merge and release coverage is unchanged.
+
+Globs fail safe: shared build files (`cmake/**`, `CMakeLists.txt`, pyproject, the workflows) count as both GPU and CPU changes, so any build-system change re-runs the full matrix. The same gating is applied across `build-pull-request.yml`, `build-pip.yml`, and `build-pip-gpu.yml`.
+
+Reviewed By: mdouze
+
+Differential Revision: D111494465
+
+fbshipit-source-id: 1e47780e2b6209417beecf6bf1a8021f1ec11030</div>
+</div>
+
+<a href="../project/facebookresearch_faiss.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

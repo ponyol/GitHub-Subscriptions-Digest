@@ -1,0 +1,2325 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in master (66 commits) - milvus-io/milvus - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in master (66 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/milvus-io_milvus.html">milvus-io/milvus</a> /
+    Updates in master (66 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/milvus-io_milvus.html">milvus-io/milvus</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-18 05:48 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/milvus-io/milvus/commits/master" target="_blank">https://github.com/milvus-io/milvus/commits/master</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление Milvus приносит значительные улучшения в стабильность и производительность. Ключевые изменения включают внедрение строгого принципа связывания функций с полями для операций DDL, оптимизацию производительности поиска узлов запросов и снижение использования памяти сегментами за счет миграции состояний индексов в ресурсы времени выполнения. Множество исправлений направлены на обеспечение согласованности данных, предотвращение сбоев, улучшение точности метрик и усиление операций хранения, таких как импорт L0 и транзакции записи TiKV.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix: force L0 import to use storage v2 (#51158)
+
+## Summary
+
+Fix L0 import storage version selection when `UseLoonFFI` is enabled:
+
+- Force DataCoord to assign StorageV2 for L0 import segments.
+- Force L0 import requests to disable Loon FFI.
+- Defensively keep DataNode L0 sync tasks on StorageV2 even if the
+request carries StorageV3.
+- Add regression coverage for L0 import with `UseLoonFFI=true`.
+
+Fixes #51148
+
+## Known mixed-version window (documented, not fixed here)
+
+The `AssignSegments` metadata fix only applies to jobs created on the
+new version. A job created by a **pre-upgrade** DataCoord with
+`common.storage.useLoonFFI=true` has already persisted its L0 segments
+with `StorageVersion=3` in etcd, and segment IDs are reused (not
+reallocated) when the task is recovered. If such an in-flight job
+completes **after** the upgrade — either the upgraded DataCoord recovers
+the task and reassembles the request as V2, or an upgraded DataNode
+serves the old coordinator&#39;s V3 request (`syncDelete` now hard-codes V2)
+— the deltalogs are written as V2 but the segment stays tagged
+`StorageVersion=3` with an empty `ManifestPath`: the import completion
+path does not reconcile `StorageVersion`, and L0 segments are excluded
+from the storage-version compaction policy, so nothing self-heals the
+tag.
+
+Impact: harmless for delta load and L0 compaction (both branch on the
+manifest, not the tag), but snapshot restore trusts the tag —
+`collectSegmentFiles` fails on `storage_version&gt;=3` with an empty
+manifest.
+
+Scope: requires a deployment running the experimental `useLoonFFI=true`
+with an L0 import job in flight at the moment of the upgrade, later
+restored via snapshot. Since the pre-upgrade V3 L0 write path always
+fails (#51148), no successfully-written V3 L0 data exists — only the
+metadata tag can be stale. If this window ever materializes in practice,
+the backfill is a one-operator change in the completion path
+(`UpdateStorageVersionOperator(segID, StorageV2)` for L0).
+
+## Test Plan
+
+- [x] `make static-check`
+- [x] `go test -tags dynamic,test -gcflags=&#34;all=-N -l&#34; -count=1
+./internal/datacoord -run
+TestImportUtil_L0ImportUsesStorageV2WhenLoonFFIEnabled`
+- [x] `go test -tags dynamic,test -gcflags=&#34;all=-N -l&#34; -count=1
+./internal/datanode/importv2 -run
+&#39;TestL0Import/TestL0ImportForcesStorageV2ForSyncTask&#39;`
+
+Note: after rebasing to latest master, the focused local tests could not
+be rerun with the reused local C++ output because the local
+`libmilvus_core` is older than current headers and misses
+`_SegcoreSetPrefetchThreadPoolNum`. The same focused tests passed before
+the rebase; CI should build with matching artifacts.
+
+Signed-off-by: Yihao Dai &lt;yihao.dai@zilliz.com&gt;
+
+- fix: make release manual flush local only (#51559)
+
+issue: #51332
+
+- streaming local WAL: expose release manual flush through
+Local().PrepareReleaseManualFlushIfLocal and remove the remote handler
+retry path
+- QueryNode unsubscribe: treat local-only prepare errors as unavailable
+so channel release can continue
+
+---------
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+
+- enhance: adapt segcore to knowhere iterator error-code interface (#51017)
+
+- enhance: enforce function-field binding principle for function DDL (#51360)
+
+## What
+
+Enforce a function–field binding principle for function DDL (add / drop
+/ alter function on an existing collection), so a function and its
+output field stay coupled and already-stored vectors can never be
+silently invalidated by DDL.
+
+BM25 and MinHash follow the strict binding: add/drop only via the
+unified `add_function_field` / `drop_function_field`, output field
+always coupled. **TextEmbedding is a temporary carve-out** — its legacy
+`AddCollectionFunction` / `DropCollectionFunction` paths are retained,
+so attach-over-existing-field and detach are still possible for it,
+because `add_function_field` embedding backfill is not yet implemented.
+It will be folded into the unified path in a follow-up. So the &#34;always
+coupled&#34; invariant currently holds for BM25/MinHash, not TextEmbedding.
+
+## Changes
+
+- **AlterCollectionSchema invariant**: reject standalone add-function (a
+function must be added together with its new output field), reject
+detaching a function without dropping its output field, and reject
+function cascade (a new function&#39;s input being another function&#39;s
+output).
+- **Legacy RPCs**: `AddCollectionFunction` / `DropCollectionFunction`
+are rejected for BM25/MinHash (must use `add_function_field` /
+`drop_function_field`) and retained only for TextEmbedding (see
+carve-out). `AlterCollectionFunction` is kept and gains the whitelist
+below. In the alter and legacy-add paths, function field IDs are always
+re-derived from field names (never trusted from the request), so a
+request cannot inject an unrelated field ID that a later
+`drop_function_field` would delete.
+- **alter_function whitelist**: only connection/runtime params may
+change (TextEmbedding: `url`, `credential`, `timeout_ms`,
+`max_client_batch_size`, `region`, `location`, `projectid`, `user`);
+BM25/MinHash have no alterable params. Function identity (type, name,
+input/output fields) and output-shaping params (`dim`, `model_name`,
+`endpoint` — the TEI model identity, `normalize`, `truncate*`, prompts,
+...) are immutable. Params are normalized (keys lowercased, duplicate
+keys rejected) so a crafted duplicate key cannot bypass the diff.
+- **drop_function_field**: allow any output-producing function (dropping
+needs no backfill), removing the previous BM25/MinHash-only restriction.
+
+## Not in scope / follow-up
+
+- Extending `add_function_field` to TextEmbedding (post-creation add
+would require backfilling every existing row through the external
+embedding model) — deferred; folding the TextEmbedding legacy paths into
+the unified binding follows this.
+- MinHash input-field analyzer immutability lives on a different DDL
+path (`AlterCollectionField`); tracked as a separate follow-up.
+
+## Breaking changes
+
+- `DropCollectionFunction` on a **MinHash** function (detach — remove
+the function but keep its output field) is no longer supported; use
+`drop_function_field` instead (drops the function together with its
+output field). If a released version supported MinHash detach, migrate
+any such call to `drop_function_field`.
+
+issue: #51348
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+Co-authored-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix: avoid growing source panic on stale channel (#51464)
+
+issue: #51418
+
+- flushcommon syncmgr: skip the write-buffer panic callback for stale
+growing-source meta errors while preserving failure metrics
+- growing-source tests: cover stale channel and missing segment errors
+without invoking the failure callback
+
+---------
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+
+- enhance: improve query node search reduce performance (#51316)
+
+Optimize the k-way merge by advancing the heap root in place instead of
+popping and pushing it for every candidate. Use typed deduplication keys
+for INT64 and VARCHAR primary keys, including element-level and group-by
+search paths.
+
+Skip late materialization when the search plan has no non-primary target
+fields, while preserving the primary field for mixed output fields
+required by proxy reranking.
+
+Ensure submitted segcore output-field tasks are joined on exceptional
+paths and add correctness and benchmark coverage for the optimized merge
+implementations.
+
+https://github.com/milvus-io/milvus/issues/51315
+
+Signed-off-by: junjie.jiang &lt;junjie.jiang@zilliz.com&gt;
+
+- fix: revert target sync readiness change (#51547)
+
+issue: #48903
+
+- QueryCoord target observer: revert the stricter all-delegator
+readiness gate introduced by #50686
+- target observer tests: restore the previous partial-ready delegator
+sync coverage
+- release job tests: remove the target-version mock added for the
+reverted target observer path
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+
+- enhance: [GoSDK] migrate Go client module path to v3 (#51539)
+
+Related to #51419
+
+Update the Go client module path, imports, dependencies, tests,
+examples, and documentation from client/v2 to client/v3.
+
+Set the SDK version to 3.0.0 in preparation for the Milvus 3.0 release.
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- fix: use correct MinIO root path in text LOB layout test (#51535)
+
+## What this PR does
+
+- Change the default `MILVUS_MINIO_ROOT_PATH` from `files` to `file` in
+the Text LOB inline/object layout test.
+- Keep the environment-variable override available for deployments using
+a custom root path.
+
+issue: #51257
+
+## Verification
+
+- `python3 -m py_compile
+tests/python_client/milvus_client/test_milvus_client_text_lob.py`
+- Targeted pytest node collection completed successfully.
+- Verified the committed diff contains only the requested one-line
+default change.
+
+Signed-off-by: Eric Hou &lt;eric.hou@zilliz.com&gt;
+Co-authored-by: Eric Hou &lt;eric.hou@zilliz.com&gt;
+
+- fix: bind template values in Struct MATCH and element_filter (#51521)
+
+issue: https://github.com/milvus-io/milvus/issues/51416
+
+Signed-off-by: SpadeA &lt;tangchenjie1210@gmail.com&gt;
+
+- fix: correct nullable vector array row IDs in sealed bf search (#51508)
+
+issue: https://github.com/milvus-io/milvus/issues/51414
+
+Signed-off-by: SpadeA &lt;tangchenjie1210@gmail.com&gt;
+
+- enhance: record and expose DataNode task cost_time / cost_cpu_num via QueryTask (#51443)
+
+issue: #49156
+
+## Summary
+
+- Record `cost_time` / `cost_cpu_num` on DataNode index build tasks and
+surface them through `QueryTask` response `Properties`.
+- Reserve the unified `cost_time` / `cost_cpu_num` keys under
+`pkg/taskcommon` so future PRs can wire up the other
+`CreateTask`-dispatched task types.
+- Introduce small `internal/datanode/taskcost` helper (`NowMs`,
+`ElapsedMs`, `EstimateIndexBuildCPUNum`) for index build task cost
+accounting.
+- Final state/failReason and execution-end cost are written in a single
+`TaskManager` critical section, and `QueryTask` reads them from a single
+snapshot, so state and cost in one response are always consistent.
+
+## Notes
+
+This PR is producer-side only. DataCoord / proxy / metrics exporter do
+not consume these properties yet; downstream consumption should land in
+a follow-up linked from #49156.
+
+`cost_cpu_num` is a coarse, statistics-only estimate for observability
+(vector index ≈ knowhere build pool size = NumCPU in cluster mode;
+scalar index = 1). It is not used for coordinator-side scheduling, so
+the standalone pool-ratio deviation (NumCPU × buildIndexThreadPoolRatio)
+and pool sharing across concurrent builds are intentionally not modeled.
+
+Supersedes #49157 (that PR&#39;s head branch was rebased onto latest master
+and force-pushed, so GitHub no longer allows reopening it). Content is
+identical, rebased to a single commit on top of current master.
+
+## Test plan
+
+- [x] `go test ./taskcommon/...` from `pkg/`
+- [x] `go test -tags dynamic,test -gcflags=&#34;all=-N -l&#34; -count=1
+./internal/datanode/taskcost`
+- [ ] `go test -tags dynamic,test -gcflags=&#34;all=-N -l&#34; -count=1
+./internal/datanode/index -run
+&#39;TestIndexTaskSchedulerRecordsIndexTaskCost|Test_statsTaskInfoSuite/Test_IndexTaskCostMethods&#39;`
+- [ ] Manual sanity: `QueryTask` returns `cost_time` / `cost_cpu_num`
+for DataNode index build task success and failure paths.
+
+---------
+
+Signed-off-by: cai.zhang &lt;cai.zhang@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.7 &lt;noreply@anthropic.com&gt;
+
+- fix: prevent schema updates from racing insert payload conversion (#51483)
+
+## Problem
+
+During schema evolution, SQN can convert an insert payload with the old
+schema and then race with a schema update before ProcessInsert creates
+and writes the growing segment. If the old payload still contains a
+dropped field, the native collection may already use the new schema and
+segcore rejects the write with unexpected new field.
+
+## Solution
+
+- Add a collection-local schema-transition RW lock.
+- Insert holds the reader lock from schema snapshot use through payload
+conversion and delegator.ProcessInsert, so a growing segment is created
+and written in the same schema epoch as its payload.
+- Schema update and existing-collection load refresh paths take the
+writer lock around native schema mutation and Go schema snapshot
+publication.
+- Acquire a temporary collection lease before releasing
+collectionManager.mut. This keeps the collection alive while the writer
+waits, without serializing unrelated collection-manager operations
+behind a schema transition.
+- Preserve dropped-field replay handling: when DDL has already
+completed, payload conversion filters fields absent from the current
+schema before inserting into a new-schema growing segment.
+
+## Tests
+
+- Add a deterministic native regression: pause after a v950 payload
+containing field 580 is converted, queue the v951 drop-field update,
+then resume a real NewSegment plus growing.Insert and verify both insert
+and DDL succeed.
+- Assert the transition reader covers both payload conversion and
+ProcessInsert.
+- Cover the DDL-first replay path, where field 580 is filtered before
+native insertion.
+- Cover both schema writer entry points: UpdateSchema and
+existing-collection PutOrRef.
+
+## Validation
+
+- make static-check
+- make build-go
+- Native pipeline regression tests repeated 20 times with dynamic,test
+- Collection schema-transition and lease tests repeated 20 times
+- internal/querynodev2/pipeline and internal/querynodev2/segments
+package tests
+- gofumpt -l and git diff --check
+
+Fixes #51436
+
+Signed-off-by: sijie-ni-0214 &lt;sijie.ni@zilliz.com&gt;
+
+- fix: keep proxy metric status label stable, split cause into its own label (#51495)
+
+issue: #51493
+
+### What
+
+#50221 split the `status` label values of `milvus_proxy_req_count` /
+`milvus_proxy_grpc_latency` in place. Released in **v2.6.19**, that
+silently zeroes every existing dashboard panel and alert rule matching
+`status=&#34;fail&#34;` / `status=&#34;rejected&#34;` — an alert that stops firing
+rather than erroring.
+
+This keeps the classification but moves it onto its own dimension,
+restoring the status domain to what &lt;= v2.6.18 emitted:
+
+```
+status: success | fail | rejected | retry | total | abandon    (as before v2.6.19)
+cause:  user | system | cancel | na                            (new)
+```
+
+| v2.6.19 / v2.6.20 | this PR |
+|---|---|
+| `status=&#34;fail_input&#34;` | `status=&#34;fail&#34;, cause=&#34;user&#34;` |
+| `status=&#34;fail_system&#34;` | `status=&#34;fail&#34;, cause=&#34;system&#34;` |
+| `status=&#34;rejected_user&#34;` | `status=&#34;rejected&#34;, cause=&#34;user&#34;` |
+| `status=&#34;rejected_system&#34;` | `status=&#34;rejected&#34;, cause=&#34;system&#34;` |
+| `status=&#34;cancel&#34;` | `status=&#34;fail&#34;` or `&#34;rejected&#34;`, `cause=&#34;cancel&#34;`
+|
+| `success` / `retry` / `total` / `abandon` | unchanged, `cause=&#34;na&#34;` |
+
+### Why a label instead of new status values
+
+- **Old queries work unchanged and count each request once.**
+`status=&#34;fail&#34;` is again every hard failure; Prometheus aggregates over
+`cause` for free. That rollup is what a label dimension *is* — the split
+forces every consumer who just wants &#34;how many failures&#34; to hand-write
+`status=~&#34;fail_.*&#34;`.
+- **Cardinality is unchanged.** `cause` is functionally dependent on the
+outcome, so the realized `(status, cause)` pairs are exactly the series
+the split already produces. Additive, not multiplicative.
+- **New consumers lose nothing**: alert on `status=&#34;fail&#34;,
+cause=&#34;system&#34;`; route `cause=&#34;user&#34;` to the owning application team.
+
+The alternative — emitting old and new `status` values side by side
+during a transition — was rejected: it defers the break rather than
+removing it (the old values must still be dropped eventually, forcing
+the same migration later), and meanwhile double-counts every request in
+unfiltered aggregations.
+
+`cancel` is folded into `cause` for the same reason: before v2.6.19
+client cancellations were counted as `fail` (cancel in the response
+status) or `rejected` (cancel at the interceptor), so promoting it to a
+`status` value quietly makes `status=&#34;fail&#34;` under-count versus older
+releases. As a cause it stays excludable via `cause!=&#34;cancel&#34;` without
+redefining `status`.
+
+### Also in this PR
+
+- The 7 `snapshot_impl` sites that emitted a bare `fail` with no
+classification now report their real cause via `failMetricLabel(err)`
+(e.g. `snapshot_metadata_uri is required` is `cause=&#34;user&#34;`, not a
+system fault). Their `status` is unchanged.
+- `deployments/monitor/grafana/milvus-dashboard.json`: the &#34;Faild
+Request Rate&#34; panel goes back to `status=&#34;fail&#34;` — a verbatim revert of
+what #50221 changed, which is the compatibility claim demonstrated.
+- Dev docs and stale comments that named the old label values.
+
+### Verification
+
+- `TestParseMetricLabelStatusDomainIsStable` pins the status domain, so
+re-splitting it fails CI rather than shipping.
+- Adding a label makes every `WithLabelValues` site arity-sensitive **at
+runtime, not compile time** — a missed site panics in production. Unit
+tests do not reach all of them (coverage shows
+`GetRestoreSnapshotState`, `ListRestoreSnapshotJobs`, `PinSnapshotData`,
+`UnpinSnapshotData` at 0%), so all **58 emit sites were verified
+statically via AST**, not only the ones tests happen to hit.
+- Passing: `pkg/metrics`, `pkg/util/requestutil`, `pkg/util/merr`,
+`internal/distributed/proxy` (incl. `httpserver`, which covers the REST
+emit path), and the `internal/proxy` snapshot / metric-label tests.
+`golangci-lint` clean on every touched package.
+- Pre-existing and unrelated: `service_test.go` bind failures (`listen
+tcp :19529: address already in use`) reproduce identically on unmodified
+master — a local process holds the port.
+
+### Rollout
+
+Should be cherry-picked to 2.6 so the window in which the fine-grained
+`status` values exist stays confined to v2.6.19–v2.6.20. Users who
+already adopted the new values on those two releases need a one-time
+query change (`status=&#34;fail_system&#34;` -&gt; `status=&#34;fail&#34;,
+cause=&#34;system&#34;`); that is a known, bounded set, and preferable to
+leaving every pre-2.6.19 dashboard silently broken.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: zhenshan.cao &lt;zhenshan.cao@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- enhance: use raw scan for inverted LIKE match (#51477)
+
+pr: https://github.com/milvus-io/milvus/pull/49922
+
+## Summary
+Route generic LIKE Match operations to raw-data scan when a varchar
+inverted index is present, while keeping PrefixMatch on the
+inverted-index path. Update planner policy and sealed-segment coverage
+for a complex LIKE pattern.
+
+Signed-off-by: aoiasd &lt;zhicheng.yue@zilliz.com&gt;
+
+- fix: CAS the schema-bump in-place manifest commit to stop dropping a concurrent index (#51376) (#51377)
+
+issue: #51376
+
+## What this fixes
+
+The in-place partial-materialization path of
+`bump_schema_version_compaction` commits onto a live segment&#39;s manifest,
+and DataCoord adopted the result on a version-newer check only — it
+never verified the result was built on the segment&#39;s *current* manifest.
+A bump built on a plan-pinned base could therefore be adopted after a
+concurrent stats/index task advanced the manifest pointer, silently
+dropping that index (correct version number, wrong content lineage). The
+loss is permanent and non-self-healing, because the segment meta stats
+placeholder stops the stats inspector from re-triggering.
+
+## Fix — application-layer adoption CAS (mirrors the stats path)
+
+- The schema-bump result carries the plan-pinned base manifest
+(`CompactionSegment.base_manifest`, like `StatsResult.base_manifest`);
+the DataNode fills it with the manifest it materialized on.
+- DataCoord adopts the in-place result only if `result.base_manifest ==
+segment.ManifestPath` (the current pointer); a missing or stale base is
+rejected (`ErrIllegalCompactionPlan`) so the task re-triggers and
+rebuilds on the current manifest instead of overwriting the concurrent
+commit. This mirrors the stats path&#39;s `errStatsResultStale`.
+- The storage commit stays on `OverwriteResolver` (unchanged). Because
+the CAS is at the adoption layer (against the meta pointer, not
+storage-latest), a result lost after a DataNode crash self-heals on
+retry: the pointer stays put, so the retry re-pins the same base and is
+adopted — no wedge.
+- The bump policy is restricted to internal collections (matching every
+sibling compaction policy), so a rejected attempt&#39;s orphan is reclaimed
+by internal dropped-segment GC and bump never churns on external
+collections.
+
+## Verification
+Both interleavings converge with no data loss: stats-first → bump&#39;s base
+no longer matches the advanced pointer → reject + retrigger on the
+current manifest; bump-first → stats&#39; existing base-check rejects and
+retries. Added meta-level adoption tests (matching/stale base) and
+updated the in-place adoption tests to carry the base.
+
+Signed-off-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+Co-authored-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix: cover boost score in L0 rerank latency metric (#51347)
+
+1. Move the function-chain latency metric to the shared L0 rerank
+dispatcher so it covers both public L0 function chains and boost score
+execution. Avoid recording metrics for no-op searches and add success
+and failure path coverage.
+2. search iter v2 reject chain.
+
+https://github.com/milvus-io/milvus/issues/51310
+https://github.com/milvus-io/milvus/issues/51306
+
+Signed-off-by: junjie.jiang &lt;junjie.jiang@zilliz.com&gt;
+
+- enhance: [GoSDK] decouple Go client from milvus pkg module (#51420)
+
+Related to #51419
+
+- migrate required error and utility helpers into the client module
+- preserve RPC error codes, retry metadata, and errors.Is semantics
+- expose client-local RPC errors and common error sentinels
+- remove github.com/milvus-io/milvus/pkg/v3 and server-only dependencies
+- lower the client Go version to 1.24.9
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- fix: validate collection schema mutations in rootcoord (#51368)
+
+## Problem
+
+Milvus supports online collection-schema mutations — add/drop field,
+add/drop function, alter field, enable dynamic field — through several
+RootCoord DDL paths. Existing segments are written under the committed
+schema, so a mutation that reinterprets an existing field (its data
+type, nullability, or structural role) or relabels existing data as a
+function output makes already-written binlogs read incorrectly. Before
+this change there was no single authoritative check that a proposed
+schema is a **safe structural successor** of the committed one;
+validation was scattered and incomplete across DDL paths, so an unsafe
+mutation could reach the WAL and silently corrupt or misinterpret
+existing data.
+
+## What this PR does
+
+Adds an authoritative, validation-only, fail-closed gate
+`ValidateSchemaEvolution(oldSchema, newSchema)`, invoked in every
+RootCoord schema-mutating callback **before** any side effect (analyzer
+reservation, bound-index allocation, WAL broadcast). It rejects:
+
+- in-place field reinterpretation — name, data type, element type,
+nullability, or structural role (primary / partition / clustering key,
+autoID, dynamic);
+- relabeling an existing field as a function output — function outputs
+must use brand-new fields, never existing data;
+- unsafe field additions — a newly added field may not arrive already
+marked primary / partition / clustering key, function output, or
+dynamic;
+- unsafe drops of protected fields;
+- more than one clustering key;
+- a dynamic field that is also a function output;
+- corruption of the reserved `max_field_id` watermark.
+
+Property-only / TTL updates, analyzer rollback, BM25 / MinHash
+`add_function_field`, and legacy function Drop / detach paths are
+preserved unchanged.
+
+## Scope
+
+Non-function structural invariants only. Function-graph validation
+(single producer, output binding, alter-time immutability, cascade) is
+intentionally **out of scope here and owned by #51360**. This PR does
+not include schema propagation, Proxy barriers, DML draining, backfill /
+readiness, index promotion, TextEmbedding enablement, protobuf,
+configuration, or C++ changes.
+
+## Validation
+
+- `go test -tags dynamic,test -gcflags=&#39;all=-N -l&#39;
+./internal/util/schemautil -count=1` — PASS (the gate&#39;s own unit tests)
+- `git diff --check origin/master...HEAD` — PASS
+
+issue: #51340
+
+---------
+
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix: honor scalar index policy for JSON string predicates (#51467)
+
+issue: https://github.com/milvus-io/milvus/issues/51466
+
+## What changed
+
+`PhyUnaryRangeFilterExpr::DetermineExecPath()` previously used a
+JSON-specific hard-coded denylist for string predicates:
+
+- `Match`
+- `PostfixMatch`
+- `InnerMatch`
+
+This bypassed the concrete scalar index&#39;s `ShouldUseOp()` policy. As a
+result:
+
+- indexes capable of evaluating these predicates, such as `STL_SORT`,
+were
+  forced to scan and parse raw JSON;
+- JSON string predicates could use a different execution policy from
+ordinary
+  VARCHAR predicates;
+- `RegexMatch` remained on the index path even for indexes whose planner
+policy
+  explicitly preferred raw-data execution.
+
+---------
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- fix: [Storage] retry transient TiKV write transaction failures (#51426)
+
+- Rebuild TiKV write transactions on retriable begin, build-stage IO,
+and classified-transient commit failures while aborting deterministic
+build failures and unsafe commit outcomes.
+- Preserve original errors for TiKV undetermined commit results and
+caller cancellation before string-wrapping; keep private
+`retry.Unrecoverable` markers inside the retry helper so they never leak
+to callers.
+- Stop `ReliableWriteMetaKv` from replaying undetermined TiKV write
+results, correct the TiKV begin/requestTimeout comment, and add
+regression tests for commit aborts, retry exhaustion, deadline stopping,
+and outer reliable-write behavior.
+
+related: #51425
+
+---------
+
+Signed-off-by: shaoting-huang &lt;shaoting.huang@zilliz.com&gt;
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- fix: keep round_decimal from changing search order (#50440)
+
+## Summary
+
+Keep raw search distances through segment search, iterator output, index
+query, and chunk merging so ranking/reduce order is not affected by
+`round_decimal`.
+
+Apply `round_decimal` only when producing the final search response,
+after reduce/rerank/order-by has already determined result order.
+Returned scores keep the requested precision without changing TopK
+selection.
+
+issue: #50347
+
+---------
+
+Signed-off-by: xianliang.li &lt;xianliang.li@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- test: use container kill for CDC failover scenarios (#51479)
+
+## What changed
+
+- Replace Pod deletion with Chaos Mesh `container-kill` in CDC
+force-promote and source-down failover tests.
+- Kill every regular container in matching Pods while preserving the Pod
+objects.
+- Verify that Pod UIDs remain unchanged and each container&#39;s restart
+count increases.
+- Clean up the generated `PodChaos` resources after fault injection.
+
+## Why
+
+Deleting Pods changes their identity and tests Pod recreation rather
+than container-level recovery. These scenarios need to verify CDC
+failover behavior when containers restart inside the existing Pods.
+
+## Impact
+
+CDC failover tests now exercise container failures while explicitly
+validating that Kubernetes does not recreate the affected Pods.
+
+## Validation
+
+- `ruff check` passed for all modified files.
+- `ruff format --check` passed for all modified files.
+- Python compilation passed for all modified files.
+- Full CDC E2E was not run locally because it requires a Kubernetes
+environment with Chaos Mesh.
+
+---------
+
+Signed-off-by: zhuwenxing &lt;wenxing.zhu@zilliz.com&gt;
+
+- enhance: pass external segment row target from DataCoord (#51352)
+
+issue: #45881
+
+## What this PR does
+
+External refresh previously read the segment row target directly from
+each DataNode configuration during execution. That made the worker input
+implicit and allowed task behavior to depend on the selected node.
+
+This change:
+
+- keeps `dataNode.externalCollection.targetRowsPerSegment` as the
+existing configuration source;
+- has DataCoord snapshot the configured value into the refresh task
+request;
+- adds `target_rows_per_segment` to the DataCoord-to-DataNode request;
+- validates the transmitted value in DataNode;
+- uses the request value for fragment splitting and segment balancing;
+- preserves the MilvusTable one-fragment-per-segment behavior.
+
+## Validation
+
+- `make generated-proto-without-cpp`
+- `make lint-fix`
+- `make build-go`
+- `go test -gcflags=&#34;all=-N -l&#34; -race -tags dynamic,test
+github.com/milvus-io/milvus/pkg/v3/util/paramtable -failfast -count=1
+-ldflags=&#34;-r ${RPATH}&#34; -run &#34;^TestCachedParam$&#34; -v`
+- `go test -gcflags=&#34;all=-N -l&#34; -race
+-coverprofile=/tmp/refine-rowcount-config-dc.out -tags dynamic,test
+github.com/milvus-io/milvus/internal/datacoord -failfast -count=1
+-ldflags=&#34;-r ${RPATH}&#34; -run
+&#34;^TestRefreshExternalCollectionTask_CreateTaskOnWorker$&#34; -v`
+- `go test -gcflags=&#34;all=-N -l&#34; -race
+-coverprofile=/tmp/refine-rowcount-config-dn.out -tags dynamic,test
+github.com/milvus-io/milvus/internal/datanode/external -failfast
+-count=1 -ldflags=&#34;-r ${RPATH}&#34; -run
+&#34;^TestRefreshExternalCollectionTaskSuite$&#34; -v`
+- `git diff --check`
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- fix: gate growing-source flush on StorageV3 (#51410)
+
+issue: #51250
+Keep TEXT segments on StorageV3 while making growing-source flush an
+explicit allowed mode instead of a mandatory TEXT path.
+
+Propagate create-segment storage versions through WAL flusher and write
+buffer, reject storage-version mismatches in DataCoord, and keep raw
+segcore chunks sticky for segments that may be flushed from growing
+source.
+
+Signed-off-by: luzhang &lt;luzhang@zilliz.com&gt;
+Co-authored-by: luzhang &lt;luzhang@zilliz.com&gt;
+
+- feat: add local format metadata and split policy (#51204)
+
+relate: #50304
+
+## Summary
+Add the local format design doc, use the storage writer format constant,
+and introduce local_format metadata propagation with column-group split
+policy support.
+
+---------
+
+Signed-off-by: aoiasd &lt;zhicheng.yue@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix: stop flusher setup when collection observation fails (#51458)
+
+issue: #51436
+
+### What this PR does
+
+- Propagates a CreateCollection RecoveryStorage observation failure from
+the flusher component to WAL dispatch.
+- Stops before creating a DataSyncService when the recovery state was
+not recorded.
+- Adds coverage for the canceled observation path, including the absence
+of schema lookup.
+
+### Verification
+
+- `go test -v -tags dynamic,test -gcflags=&#34;all=-N -l&#34; -count=1
+./internal/streamingnode/server/flusher/flusherimpl -run
+&#34;TestWALFlusher.*CreateCollection&#34;`
+- `make static-check`
+- `gofumpt -l` on changed Go files
+- `git diff --check`
+
+Signed-off-by: sijie-ni-0214 &lt;sijie.ni@zilliz.com&gt;
+
+- enhance: optimize RPC protobuf decoding with fastpb codec (#50743)
+
+issue: #50742
+
+## What this PR does
+
+Optimizes protobuf decoding on Milvus RPC read/write hot paths with a
+hand-written decoder in `pkg/util/fastpb`. The final change contains no
+gRPC connection-pool or connection-count changes.
+
+## Fast decoder coverage
+
+The gRPC `releaseCodec.Unmarshal` path dispatches these top-level
+messages to fastpb:
+
+- `internalpb.RetrieveResults`
+- `milvuspb.InsertRequest`
+- `milvuspb.UpsertRequest`
+
+`schemapb.SearchResultData` is not a top-level codec-dispatched message.
+It is decoded directly from `SlicedBlob` at the search/reduce hot paths
+in:
+
+- `internal/proxy/search_reduce_util.go`
+- `internal/querynodev2/segments/result.go`
+- `internal/querynodev2/local_worker.go`
+- `internal/querynodev2/tasks/search_task_go_reduce.go`
+
+Nested hot messages such as `FieldData`, scalar/vector arrays, and IDs
+are decoded by the same package.
+
+Main optimizations:
+
+- varchar string arrays use one backing byte arena, reducing per-string
+allocations
+- packed float vectors use a single memcpy into self-owned memory
+- cold, complex, unknown, and mismatched fields delegate or merge
+through the official protobuf codec
+- no new external dependency or source-buffer aliasing
+
+## Compatibility boundary
+
+The compatibility contract depends on the data path:
+
+- **Untrusted client ingress (`InsertRequest` and `UpsertRequest`)**
+validates proto3 strings as UTF-8 and is tested differentially against
+`proto.Unmarshal`, including malformed input behavior.
+- **Trusted internal result paths (`SearchResultData`,
+`RetrieveResults`, and direct `FieldData` decoding)** assume canonical
+Milvus/segcore protobuf output and intentionally skip UTF-8 validation
+for performance. Therefore these paths do not claim equivalence for
+arbitrary adversarial wire containing invalid UTF-8.
+
+Within that boundary, the decoder preserves the protobuf behaviors
+exercised by the differential tests:
+
+- proto2 groups fall back to the official codec
+- known fields with mismatched wire types fall back to the official
+codec
+- unknown and future fields are preserved through an official merge pass
+- repeated singular messages merge from the raw wire, including
+explicitly encoded proto3 default values
+- repeated message-valued oneof members merge correctly, while different
+variants remain last-wins
+- mixed packed and unpacked scalar encodings preserve wire order
+- descriptor field-set tripwires force decoder review when the protobuf
+schema changes
+
+The unsafe packed-float copy assumes the currently supported
+little-endian Milvus targets such as x86-64 and arm64.
+
+## Benchmarks
+
+fastpb vs official `proto.Unmarshal`, using 1000-row payloads:
+
+| path | payload | speedup | allocations/op |
+|---|---|---:|---:|
+| search / query | varchar | about 2x | about 1000-2035 to about 10-17 |
+| search / query | float vector, dim 768 | about 6x | unchanged |
+| insert | varchar with UTF-8 validation | about 1.8x | 1019 to about 10
+|
+
+## Verification
+
+- unit and differential tests cover field descriptors, UTF-8 contracts,
+wire-type mismatches, proto2 groups, unknown fields, packed/unpacked
+ordering, oneof behavior, and repeated-message merge semantics
+- randomized canonical-message equivalence tests cover search, retrieve,
+insert, and upsert payloads
+- `go test ./util/fastpb ./util/resource` passes
+- `go vet ./util/fastpb ./util/resource` passes
+- current full CI and end-to-end status is tracked by the PR checks
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: xiaofanluan &lt;xiaofan.luan@zilliz.com&gt;
+Signed-off-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+Co-authored-by: xiaofanluan &lt;xf@hjjaq.com&gt;
+
+- fix: skip unreplicable replicated ddl (#51454)
+
+issue: #51446
+
+- message properties: add an explicit `Unreplicable` marker for concrete
+WAL messages and expose builder opt-in through `WithUnreplicable`
+- replication: skip unreplicable messages in the CDC sender and
+secondary replicate interceptor before callback replay
+- DDL producers: mark unsupported snapshot, manifest backfill, and
+external collection refresh broadcasts as unreplicable
+- streaming docs: document the message-level skip marker and current
+unsupported DDL replication behavior
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+
+- fix: avoid repeated grantee scans in ListPolicy (#51404)
+
+Related: #50236
+
+- Reuse the initially loaded grantee keys/values when ListPolicy checks
+legacy grantee ID ownership.
+- Avoid reloading the full grantee-privileges tree once per legacy
+grant.
+- Add a regression test that verifies ListPolicy performs only one full
+grantee-prefix load for legacy grants.
+
+Signed-off-by: shaoting-huang &lt;shaoting.huang@zilliz.com&gt;
+
+- test: improve force merge target size coverage (#51350)
+
+issue: #51248
+
+## What changed
+
+- correct the omitted-`target_size` case to assert ordinary manual
+compaction semantics
+- add a physical Force Merge target-size case using persistent segment
+IDs and MinIO insert-log sizes
+- add deterministic Go boundary coverage for grouping selection at the
+configured threshold and threshold + 1
+- add target-size memory clamp coverage for cluster and standalone
+co-location modes
+- extend Optimize format, signed-int64 boundary, loaded-segment refresh,
+and live async lifecycle coverage
+- add the async Optimize wrapper and update the PyMilvus test dependency
+to 3.1.0rc64
+
+## Why
+
+The previous cases did not prove that an explicit Force Merge target
+affected physical output, assumed the wrong grouping threshold, and
+depended on manual log inspection for algorithm selection. Loaded
+refresh and the public async Optimize workflow also lacked live
+end-to-end coverage.
+
+The async case exposed milvus-io/pymilvus#3680 on PyMilvus 3.1.0rc62.
+Version 3.1.0rc64 contains the tuple-unpacking fix and passes the
+unmodified test.
+
+## Validation
+
+- all 10 planned case IDs pass; 0 failed and 0 blocked
+- `milvus-dev-cli` Go UT job
+`go-ut-local-zhuwenxi-zhuwenxing-i-4082040-30413568` succeeded; both
+test functions and all five subtests passed
+- physical target-size L3 case passed against a real cluster and MinIO
+in 200.68s
+- loaded refresh, target format/boundary, and manual compaction cases
+passed against the same server version
+- async Optimize L3 passed unmodified with PyMilvus 3.1.0rc64 in 56.91s
+- 56 Python nodes collect successfully; Python compilation, Ruff, and
+`git diff --check` pass
+
+---------
+
+Signed-off-by: zhuwenxing &lt;wenxing.zhu@zilliz.com&gt;
+
+- enhance: move sealed segment PK state into runtime snapshot (#51395)
+
+Related to #51068
+
+Store PK index slots and virtual PK offset maps in RuntimeResourceState.
+Build Storage V1 and V2 PK indexes through the unified translator and
+stage PK replacements until the final state publication.
+
+Make PK lookup, range search, bulk subscript, and delete filtering use a
+single published snapshot. Remove the sealed InsertRecord fallback and
+clear stale PK resources when external segments become empty.
+
+Add regression coverage for atomic PK replacement and zero-row external
+segment cleanup.
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- fix: avoid aws-chunked uploads for compatible object stores (#51349)
+
+issue: #50567
+
+use `minio.disableAWSChunkedEncoding` to disable the aws chunked
+Encoding.
+
+Signed-off-by: jiaqizho &lt;jiaqi.zhou@zilliz.com&gt;
+
+- fix: avoid DataNode panic when a binlog is missing during sort compaction (#51121)
+
+## What this fixes
+
+When sort compaction reads a segment whose binlog references an object
+that is missing in object storage, the DataNode panics with a
+nil-pointer dereference and enters `CrashLoopBackOff`, instead of
+failing the compaction task cleanly.
+
+## Root cause
+
+`IterativeRecordReader.Next()` assigned `ir.cur` **before** checking the
+error returned by `iterate()`. When opening the next binlog chunk fails,
+`newPackedRecordReader` returns a nil `*packedRecordReader` boxed into a
+non-nil `RecordReader` interface (a typed-nil). The deferred
+`rr.Close()` in `sortSegment` then called `Close()` on a nil receiver
+and panicked — the existing `if pr.reader != nil` / `if ir.cur != nil`
+guards don&#39;t help because the receiver itself is nil.
+
+## Fix
+
+- Only publish the reader once `iterate()` succeeds (assign to a temp,
+check the error, then set `ir.cur`).
+- Make `packedRecordReader.Close` / `ffiPackedRecordReader.Close`
+nil-receiver safe as defense-in-depth.
+- The missing-object error is still surfaced from `Next()` (it is
+**not** converted to `io.EOF`), so the sort task fails cleanly and is
+retried rather than silently dropping data.
+
+## Test
+
+Added `TestIterativeRecordReader_MissingChunkDoesNotPanic`, which
+reproduces the missing-object chunk: it asserts the error is surfaced
+from `Next()` and that the deferred `Close()` does not panic.
+
+issue: #50927
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: bigsheeper &lt;yihao.dai@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix: correct the CDC replication lag metric (#51049)
+
+## Summary
+
+The documented CDC lag PromQL subtracted two independently scraped
+time-tick gauges, which caused idle oscillation and misleading restart
+behavior. This PR fixes the query and hardens the lag metric lifecycle
+without introducing a new metric.
+
+### #50633 — idle oscillation
+
+Subtract each gauge timestamp before calculating the difference,
+canceling the cross-target scrape-phase offset:
+
+```promql
+clamp_min(
+  max by (channel_name) (milvus_wal_last_confirmed_time_tick - timestamp(milvus_wal_last_confirmed_time_tick))
+  - min by (channel_name) (milvus_cdc_last_replicated_time_tick - timestamp(milvus_cdc_last_replicated_time_tick)),
+  0)
+```
+
+### #51048 — restart and switchover lag lifecycle
+
+- Seed `milvus_cdc_last_replicated_time_tick` from
+`InitializedCheckpoint` before target-client initialization, so
+target-unavailable startup exposes a conservative lag instead of an
+absent series.
+- Overwrite the seed with the target-confirmed checkpoint after
+`GetReplicateInfo` succeeds.
+- Ignore nil and zero checkpoints to avoid creating an epoch-valued
+series.
+- Remove lag-series deletion from generic stream `OnClose`.
+- Delete the lag series only from `ReplicateManager.RemoveReplicator`,
+the genuine etcd DELETE path. Outdated revision cleanup therefore cannot
+delete the live revisions shared label pair.
+
+issue: #50633
+issue: #51048
+
+### Test Plan
+
+- [x] Added unit-test coverage for initialized-checkpoint seeding and
+nil/zero guards.
+- [x] Added regression coverage for genuine removal versus outdated
+revision cleanup.
+- [ ] Local Go tests and static check.
+- [ ] Confirm the lag lifecycle on a live switchover environment.
+
+---------
+
+Signed-off-by: Yihao Dai &lt;yihao.dai@zilliz.com&gt;
+Signed-off-by: bigsheeper &lt;yihao.dai@zilliz.com&gt;
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- fix: update getFailMap to include status for failed get operations (#51099)
+
+issue: #51100
+
+## Summary
+The C++ persistent-storage `get` failure counter was registered without
+the `status=&#34;fail&#34;` label, unlike the other operation failure counters.
+The counter was still incremented only on failed `get` operations, but
+Prometheus exported it as a no-status `get` series, so status-based
+dashboards and queries could not identify it as a failure series.
+
+This PR adds `status=&#34;fail&#34;` to `getFailMap`, making
+`internal_storage_op_count{persistent_data_op_type=&#34;get&#34;,
+status=&#34;fail&#34;}` consistent with `put`, `stat`, `list`, and `remove`
+failures.
+
+## Note
+This changes the Prometheus time series shape: the old no-status `get`
+failure series will stop, and the new `status=&#34;fail&#34;` series will start
+from zero.
+
+Signed-off-by: xaxys &lt;tpnnghd@163.com&gt;
+
+- enhance: bump milvus-storage to e658197 (#51406)
+
+issue: #50915 
+
+for errorcode and lance upgrade to 7.0.0
+
+Signed-off-by: jiaqizho &lt;jiaqi.zhou@zilliz.com&gt;
+
+- build(deps): upgrade go toolchain to 1.26.5 (#51271)
+
+## What
+- Upgrade the root, pkg, client, test, and telemetry example modules
+from Go 1.26.4 to Go 1.26.5.
+- Upgrade CPU/GPU builder Dockerfiles, macOS CI Go setup, KRTE build
+arg, rpm setup, meta-migration builder, and go-client test image to Go
+1.26.5.
+- Point CPU and GPU builder consumption in `.env` to the successful
+build-env tag `20260714-c135601`.
+
+## Why
+- Latest direct Trivy scan of
+`milvusdb/milvus:master-20260711-1993feae-amd64` reports CVE-2026-39822
+in Go stdlib 1.26.4, fixed in 1.26.5.
+- The normal daily image scan is currently blocked through Jenkins
+`milvus_scan_image_daily` #540 with `exec format error`; last successful
+scan is #508 from 2026-06-10, so this was verified by direct image scan.
+
+## Image coverage
+- Go toolchain fixes are shared by all Milvus runtime images; no per-OS
+runtime Dockerfile package change is required.
+- Builder definitions are updated for CPU ubuntu22.04, ubuntu20.04,
+ubuntu24.04, amazonlinux2023, rockylinux9 and GPU ubuntu22.04,
+ubuntu20.04.
+- No runtime image variant is deliberately skipped; this is not an
+OS-package CVE.
+
+## Verification
+- `go.dev/dl/?mode=json&amp;include=all` confirms go1.26.5 is stable and
+linux amd64/arm64 tarballs exist.
+- `go env GOTOOLCHAIN GOVERSION` selects `auto` / `go1.26.5` after the
+module update.
+- `go list -m` succeeds for root, pkg, client, tests/go_client, and both
+telemetry examples.
+- `cd pkg &amp;&amp; go test -tags dynamic,test -gcflags=&#34;all=-N -l&#34; -count=1
+./util/typeutil` passes after rebasing onto the latest upstream master.
+- Jenkins build-env #40 succeeded and published builder tag
+`20260714-c135601`; `.env` now selects that tag for CPU and GPU CI
+builds.
+- A repo-wide audit found no remaining Go 1.26.4 toolchain pins.
+
+Note: full root `go mod tidy` is not included because this checkout has
+a root-owned `deployments/docker/dev/volumes/etcd/member` directory that
+makes `go mod tidy` fail with permission errors; `go mod tidy -e`
+subsequently OOMed locally. No go.sum changes were produced by the
+successful module tidies.
+
+Generated by autonomous CVE maintenance.
+
+---------
+
+Signed-off-by: Li Liu &lt;li.liu@zilliz.com&gt;
+
+- enhance: Load JsonStats shredding through manifest translator (#51116)
+
+issue: #51114
+
+JsonStats shredding now loads through
+`ManifestGroupTranslator`/`ChunkReader`, but JsonStats files do not have
+the normal sealed-segment manifest metadata. The load path reconstructs
+the needed column-group view from the existing parquet footer/schema:
+column names, Arrow field ids, row counts, and file ordering. This keeps
+the current `meta.json` contract unchanged; parquet key-value metadata
+is only a fallback for old files that do not have the separate meta
+file.
+
+The main follow-up after switching to the manifest translator was
+projection behavior. Lazy loading now builds one projected reader per
+shredding column, so a predicate on one JSON path does not pull the
+whole group; when warmup is enabled it still uses the full column group
+so warmup can preload everything together. The added tests cover parquet
+files without packed field-list metadata, multi-file ordering, lazy
+single-column projection, and warmup full-group projection.
+
+---------
+
+Signed-off-by: Shawn Wang &lt;shawn.wang@zilliz.com&gt;
+
+- fix: type the zero-hit chunk&#39;s $id array after the other chunks in MergeOp (#51374)
+
+issue: #51372
+
+### Problem
+
+`MergeOp.buildResultArrays` builds a zero-hit chunk&#39;s `$id` array with a
+hardcoded Int64 builder
+(`operator_merge.go:713-721` before this change), while chunks that do
+have hits are typed from the
+first actual ID (`buildInt64Results` / `buildStringResults`). All
+per-query chunks then go into
+`AddColumnFromChunks`, which builds one `arrow.NewChunked` column out of
+them.
+
+For a **VarChar-PK collection** where **one query of an nq &gt;= 2 batch
+returns zero hits** while
+another returns hits, those chunks mix `utf8` and `int64` and arrow
+panics:
+
+```
+panic: invalid: arrow/array: mismatch data type int64 vs utf8
+```
+
+`MergeOp` sits at chain index 0, so every request that goes through a
+function rerank chain — plain
+search with a rerank function as well as hybrid search — can hit it. The
+proxy has no recovery
+interceptor on its gRPC chains
+(`internal/distributed/proxy/service.go:295-307`, `416-424`) and no
+`recover()` in `internal/proxy/`, so the panic takes the proxy process
+down.
+
+The input side was never affected: `collectRRFScores` /
+`collectWeightedScores` read IDs row by row,
+so an empty chunk is simply iterated zero times. Only the output side
+was broken.
+
+### Fix
+
+Resolve the `$id` arrow type once per merge, from the first input that
+actually carries IDs
+(`resolveIDType`), and build the zero-hit chunk with that type.
+
+Zero-row inputs are deliberately skipped when resolving: an empty result
+carries no ID type of its
+own and is materialized as an empty Int64 column regardless of the
+collection&#39;s PK type
+(`importEmptyIDs`, converter.go). When *every* input is empty, Int64 is
+kept — every chunk is then
+empty as well, so the column is self-consistent and the rerank
+operator&#39;s `allEmpty` early-return
+short-circuits before it anyway.
+
+An unexpected arrow ID type now returns a `merr` error instead of
+silently producing an Int64 array.
+
+### Testing
+
+- `TestMergeWithEmptyChunkVarCharIDs` — single input, VarChar IDs,
+`topks=[2,0]`; asserts the merged
+`$id` column stays `utf8` with an empty second chunk. Written first and
+observed panicking with
+  `mismatch data type int64 vs utf8` on unmodified master.
+- `TestMergeMultiInputEmptyLegVarCharIDs` — hybrid-search shape: one leg
+entirely empty, the other
+  with a zero-hit query.
+- The existing `TestMergeWithEmptyChunk` (Int64) still passes, pinning
+the unchanged Int64 path.
+- `./internal/util/function/...` green, including `-race`; `gofmt`
+clean.
+
+### Note
+
+Found while reviewing #51156 (fix for #50969). This panic is **not**
+introduced by that PR —
+`operator_merge.go` is byte-identical between master and its head, and
+the repro above does not touch
+the lines it changes. #51156 does widen the reachable surface, though:
+before it, a single-shard
+zero-hit result failed earlier in the converter with `unsupported ID
+type` and never reached
+`MergeOp`; after it, that input builds a DataFrame and walks into this
+panic.
+
+Signed-off-by: zhenshan.cao &lt;zhenshan.cao@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- test: run heavy snapshot / external-table go-sdk cases serially (#51370)
+
+## What
+
+Drop `t.Parallel()` from the heavy go_client cases in `snapshot_test.go`
+(10 cases) and `external_table_refresh_test.go` (12 cases), and mark
+each with a comment explaining why it must stay serial.
+
+## Why
+
+`t.Parallel()` was blanket-added to every go_client testcase in #49138.
+That is fine for the light cases, but the snapshot/restore and
+external-table refresh cases are heavy: they insert tens of thousands of
+vectors and then wait minutes for index build / snapshot / restore.
+Running them alongside the large parallel test swarm starves the shared
+standalone cluster, and they flake on their own index-build / restore
+timeouts, e.g.:
+
+- `TestSnapshotRestoreWithMultiSegment` — timeout waiting for indexes to
+be built
+- `TestSnapshotRestoreWithMultiFields` — timeout waiting for restore to
+complete
+
+Go runs the non-parallel tests first (sequentially, each with the
+cluster to itself), then the parallel suite. Keeping these heavy cases
+serial gives them the resources they need while leaving the light
+parallel tests untouched. The trade is a little extra wall-clock for
+stability.
+
+## Changes
+
+- `tests/go_client/testcases/snapshot_test.go` — remove `t.Parallel()`
+from 10 heavy cases; add marker comment.
+- `tests/go_client/testcases/external_table_refresh_test.go` — remove
+`t.Parallel()` from 12 heavy cases; add marker comment.
+
+No test logic changed; `gofmt` clean, `go vet ./testcases/` passes.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: xiaofanluan &lt;xiaofan.luan@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- test: cover woodpecker WAL truncate/retention read semantics (#50880)
+
+## What this PR does
+
+Adds an integration test (`TestWpRetentionTruncateRead`) for the
+Woodpecker (wp)
+WAL implementation pinning the read semantics around truncation that
+Milvus
+relies on but had no explicit coverage for.
+
+Milvus truncates the wp WAL aggressively right after a flush, but
+truncation
+only moves a metadata watermark — it does **not** delete data. Data
+at/under the
+watermark stays readable until the retention-TTL GC physically removes
+it. The
+test pins this with three sub-cases:
+
+1. **TruncatedDataStillReadable** — after truncating to the latest id,
+an
+explicit `StartFrom` at any position in `(earliest, latest]` (spanning
+segment boundaries) still returns every message, including the watermark
+id
+itself. As a contrast, a fresh `DeliverPolicy_All` reader is parked past
+the
+watermark and returns nothing — proving the watermark really moved while
+the
+   data underneath is intact.
+2. **SeekForwardWithinSegment** / **SeekForwardCrossSegment** — a reader
+asking
+for data older than the earliest deliverable position
+(`DeliverPolicy_All`
+after truncation) is moved forward to the first available position
+instead of
+   erroring or stalling. The two sub-cases exercise both branches of
+`adjustPendingReadPointIfTruncated`: a truncation point inside segment 0
+   (within-segment) vs. in a later segment (cross-segment id jump).
+
+## Notes
+
+- **Deterministic by design**: large retention (`72h`) so GC never
+fires, a
+  small `segmentRollingPolicy.maxSize` so writes span several segments,
+  single-threaded writes so ids are monotonic, and all assertions are
+message-id based. Run logs confirm each sub-case hits its intended
+adjustment
+  branch (`truncatedSegmentId` 0 vs &gt;0).
+- **Scope**: covers the open-time read-position adjustment after
+truncation. It
+does NOT exercise the physical retention-TTL GC + runtime skip-forward
+path —
+that needs waiting for the async GC sweep and is intentionally left out
+to
+  keep the test deterministic.
+- Runs against local fs storage; the truncate/read logic under test
+lives in the
+  woodpecker log handle/reader and is storage-backend agnostic.
+
+issue: #43638
+
+---------
+
+Signed-off-by: tinswzy &lt;zhenyuan.wei@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.8 (1M context) &lt;noreply@anthropic.com&gt;
+
+- enhance: add WAL trace propagation (#50796)
+
+issue: #47404
+
+- message trace context: add trace context serialization and
+restore/inject helpers for WAL messages and msgstream conversion
+- WAL append trace: normalize WAL spans for autocommit, txn, broadcast,
+append, appendimpl, and broadcast callback paths
+- trace propagation: restore message trace context in producer,
+broadcast retry, replicate primary/secondary, recovery, flusher, and
+query/data flowgraph consumers
+
+---------
+
+Signed-off-by: chyezh &lt;chyezh@outlook.com&gt;
+Co-authored-by: Claude Opus 4.6 (1M context) &lt;noreply@anthropic.com&gt;
+
+- fix: Return actual db name and db id in cached DescribeCollection queried by collection id (#51254)
+
+issue: #51253
+
+### What this PR does
+
+When `proxy.enableCachedServiceProvider` is on and `DescribeCollection`
+is called with only a collection id (e.g. the HTTP management API on
+port 9091), the cached provider echoed the request db name — empty or
+default — instead of the database the collection actually belongs to,
+and never filled `db_id`. The remote path does not have this problem
+because the coordinator resolves the database by DBID and returns it in
+the top-level `DbName`/`DbId` fields.
+
+The proxy meta cache already stores the actual db name of each
+collection; this PR also stores the db id, and prefers the cached
+`dbName`/`dbID` when assembling the cached DescribeCollection response.
+
+### Verification
+
+- New unit test
+`TestCachedProxyServiceProvider_DescribeCollection_ByIDReturnsActualDbName`
+(request carries only `collectionID`, asserts real `db_name`/`db_id` are
+returned); existing tests in the file still pass.
+- Verified end-to-end on a standalone build of this branch: created
+`db1`/`coll1`, queried `GET :9091/api/v1/collection` with only
+`collectionID` — response now returns `&#34;db_name&#34;: &#34;db1&#34;` and the `db_id`
+matching `databases/describe`, where it previously returned neither.
+- The same logic was also verified on a 2.5-based deployment (real
+cluster) before porting to master.
+
+Happy to backport to 2.5/2.6 if needed.
+
+Signed-off-by: fudongying &lt;fudongying@bytedance.com&gt;
+
+- fix: Avoid external collection DML catchup on cold load (#51089)
+
+issue: #45881
+
+## What changed
+
+- Mark read-only external collection delegators as not catching up DML
+  streaming data during cold load.
+- Skip WAL tSafe waits for external Search, Query, QueryStream, and
+  GetStatistics reads.
+- Always use `MaxTimestamp` as the MVCC timestamp for external reads,
+  including partial searches and requests carrying an explicit finite
+  `MvccTimestamp`, so loaded deltalog deletes remain visible.
+- Prevent external reads from updating or exposing a required WAL MVCC
+  timetick.
+- Preserve the existing streaming catch-up and MVCC behavior for normal
+  collections.
+
+## Why
+
+External collections are read-only and query-visible data comes from the
+loaded external snapshot, not DML WAL replay. Starting from an old
+channel
+checkpoint can otherwise keep QueryNode unavailable while it catches up
+WAL
+history that cannot change the external snapshot.
+
+Using the full MVCC range also prevents low guarantee placeholders or
+explicit finite MVCC timestamps from hiding rows or deltalog deletes
+already
+loaded as part of that snapshot.
+
+This PR does not change external channel checkpoints or broadcast
+refresh
+messages to collection vchannels.
+
+## Validation
+
+- `make clean &amp;&amp; make milvus`
+- `git diff --check`
+- Targeted QueryNode delegator tests:
+
+```bash
+go test -tags dynamic,test -gcflags=&#34;all=-N -l&#34; \
+  github.com/milvus-io/milvus/internal/querynodev2/delegator \
+  -run &#39;Test(ExternalCollectionDelegatorDoesNotCatchUpStreamingData|&#39;\
+&#39;ExternalCollectionWaitTSafeUsesFullSnapshotTimestamp|&#39;\
+&#39;ExternalCollectionPartialSearchUsesFullSnapshotTimestamp|&#39;\
+&#39;ExternalCollectionQueryUsesFullSnapshotTimestamp|&#39;\
+&#39;ExternalCollectionQueryStreamUsesFullSnapshotTimestamp|&#39;\
+&#39;ExternalCollectionStrongConsistencyDoesNotRequestWALMVCC|&#39;\
+&#39;NormalCollectionDelegatorCatchesUpStreamingData)$&#39; -count=1
+```
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- fix: prepare release handoff before manual flush (#51267)
+
+issue: #50425
+
+Signed-off-by: luzhang &lt;luzhang@zilliz.com&gt;
+Co-authored-by: luzhang &lt;luzhang@zilliz.com&gt;
+
+- enhance: move JSON indexes into sealed segment runtime state (#51323)
+
+Related to #51068
+
+- manage JSON index load, replace, and drop through reopen COW snapshots
+- remove LoadScope_Index and the legacy QueryCoord-to-segcore update
+path
+- drop JSON indexes by field and nested path to preserve sibling indexes
+- regenerate query proto and QueryNode mocks
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- Update maintainers in OWNERS_ALIASES (#51356)
+
+Signed-off-by: Li Liu &lt;li.liu@zilliz.com&gt;
+
+- enhance: reduce coordinator metadata lock contention (#51255)
+
+issue: #51333
+
+## Summary
+
+- serialize DataCoord checkpoint mutations per channel so unrelated
+channel catalog writes can proceed concurrently
+- keep overlapping single, batch, mark, and drop operations serialized
+with deterministic multi-channel lock ordering
+- use a read lock for the read-only RootCoord `DescribeAlias` path
+- exclude all newly added metrics and profiling instrumentation
+
+---------
+
+Signed-off-by: sunby &lt;sunbingyi1992@gmail.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix: fix ngram index UTF-8 literal length checks (#51238)
+
+issue: https://github.com/milvus-io/milvus/issues/42053
+
+This PR fixes ngram index eligibility checks for UTF-8 literals by using
+character count instead of byte length in the C++ gate and phase1
+validation. It also adds regression coverage for short multibyte
+literals to ensure they correctly fall back instead of being sent to
+Tantivy ngram queries.
+
+Signed-off-by: SpadeA &lt;tangchenjie1210@gmail.com&gt;
+
+- fix: link milvus_conan_deps to gcp-native-storage (#51326)
+
+issue: #36214
+issue: #51324
+
+## Summary
+
+gcp-native-storage transitively depends on
+`boost/align/aligned_allocator.hpp` and
+`google/cloud/storage/retry_policy.h` headers but did not declare
+milvus_conan_deps. As a result, building with ENABLE_GCP_NATIVE=ON
+failed because the required Conan include directories were not
+propagated to the object target during compilation.
+
+## Changes
+
+Link milvus_conan_deps directly to gcp-native-storage in
+`internal/core/src/storage/gcp-native-storage/CMakeLists.txt` so its
+usage requirements are available when compiling the target.
+
+## Verification
+
+Verified locally.
+
+### Reproduce
+
+```bash
+ENABLE_GCP_NATIVE=ON make build-cpp
+```
+
+Before this change, compilation failed with:
+
+```text
+fatal error: boost/align/aligned_allocator.hpp: No such file or directory
+fatal error: google/cloud/storage/retry_policy.h: No such file or directory
+```
+
+After this change:
+
+- `ENABLE_GCP_NATIVE=ON make build-cpp` succeeds.
+- `make verifiers` passes, including:
+  - build-cpp
+  - getdeps
+  - cppcheck
+  - rustcheck
+  - fmt
+  - static-check
+
+Signed-off-by: Jeremiah Xing &lt;dev.jrmh@gmail.com&gt;
+
+- enhance: Reduce QueryNode segment memory usage (#51053)
+
+## Summary
+
+issue: #51052
+
+This PR reduces QueryNode memory pressure by avoiding duplicated or
+long-lived segment metadata after sealed segment load/reopen and by
+caching frequently reused schema conversion state.
+
+## Storage Mode Scope
+
+- For manifest-backed Storage V3 segments, both Go-side runtime load
+info and segcore-side runtime load info are compacted after load/reopen.
+- For Storage V2 binlog-mode segments, Go-side sealed runtime load info
+is compacted, while segcore keeps the full load info because binlog diff
+still depends on binlog/index metadata.
+- The optimization primarily targets Storage V3, which is the forward
+path.
+
+## Commit Breakdown
+
+1. `9d4dbdf065 enhance: cache text LOB loon arrow schema`
+- Cache the Loon Arrow schema generated for the TEXT LOB binary
+projection used by Storage V3 load paths.
+- Invalidate the cache when schema fields change and clear mutable cache
+state on schema assignment.
+
+2. `4f0bb58ef6 enhance: avoid duplicate segment index load info`
+   - Remove duplicated converted index load info storage.
+- Reuse the existing field-index cache for current index identity and
+diff/drop decisions.
+
+3. `89e8a15b42 enhance: compact runtime segment load info`
+   - Compact Go QueryNode sealed segment load info after load/reopen.
+- Keep runtime-required lightweight fields and cache related data size
+before dropping large metadata.
+
+4. `8a38b2fdbf enhance: skip real count scan without deletes`
+   - Return row count directly when a segment has no deleted rows.
+   - Avoid scanning the deleted bitmap on the real-count fast path.
+
+5. `d041837d33 enhance: compact segcore runtime load info`
+- Compact manifest-backed segcore runtime load info after load/reopen.
+- Preserve lightweight diff identity and local runtime state needed by
+schema-only reopen and later diffs.
+
+## Test Plan
+
+- [x] `git diff --check upstream/master...HEAD`
+- [x] `gofumpt -l internal/querynodev2/segments/segment.go
+internal/querynodev2/segments/segment_loader.go
+internal/querynodev2/segments/segment_test.go
+internal/querynodev2/segments/utils.go
+internal/querynodev2/segments/utils_test.go`
+- [x] `/opt/homebrew/opt/llvm@18/bin/clang-format --dry-run --Werror
+--style=file &lt;changed C++ files&gt;`
+- [x] `ninja -C cmake_build all_tests`
+- [x] `./cmake_build/unittest/all_tests
+--gtest_filter=&#39;SchemaTest.ConvertToLoonArrowSchemaCachesTextLobBinarySchema:SegmentLoadInfoTest.CompactRuntimeInfoForManifest:SegmentLoadInfoTest.CompactRuntimeInfoForManifestKeepsIndexDiffIdentity:SegmentLoadInfoTest.CompactRuntimeInfoForManifestSchemaCopyKeepsIndexIdentity:SegmentLoadInfoTest.ReplaceSchemaForReopenPrunesDroppedFieldRuntimeState:SealedSegmentLoad.LoadPublishesDefaultFilledStateAfterCompact:SealedSegmentReopen.SchemaOnlyReopenPublishesDefaultFilledState:SealedSegmentReopen.SchemaAwareReopenDiscardsOlderSchema:SealedSegmentReopen.SchemaOnlyReopenPreservesCreatedTextIndexState:SealedSegmentReopen.TextIndexCreatedWipedByReopen&#39;`
+- [x] `go test -v -count=1 -tags dynamic,test -gcflags=&#34;all=-N -l&#34;
+-ldflags=&#34;-extldflags \&#34;-Wl,-rpath,${MILVUS_WORK_DIR}/cmake_build/lib
+-Wl,-rpath,${MILVUS_WORK_DIR}/internal/core/output/lib
+-Wl,-rpath,${MILVUS_WORK_DIR}/cmake_build/thirdparty/boost_ext\&#34;&#34;
+./internal/querynodev2/segments -run
+&#34;Test(CompactSegmentLoadInfoForRuntime|GetSegmentRelatedDataSize)$&#34;
+-timeout 300s`
+- [x] `go test -v -count=1 -tags dynamic,test -gcflags=&#34;all=-N -l&#34;
+-ldflags=&#34;-extldflags \&#34;-Wl,-rpath,${MILVUS_WORK_DIR}/cmake_build/lib
+-Wl,-rpath,${MILVUS_WORK_DIR}/internal/core/output/lib
+-Wl,-rpath,${MILVUS_WORK_DIR}/cmake_build/thirdparty/boost_ext\&#34;&#34;
+./internal/querynodev2/segments -timeout 300s` timed out locally after
+303.862s while still running MinIO-backed retrieve tests
+(`TestRetrieveWithFilter`).
+
+---------
+
+Signed-off-by: sijie-ni-0214 &lt;sijie.ni@zilliz.com&gt;
+
+- fix: skip dropped-field column groups when loading StorageV3 segments (#51275) (#51277)
+
+issue: #51275
+
+### Problem
+
+Under StorageV3 growing-source flush, a manifest legally keeps column
+groups whose fields were later dropped: drop does not rewrite flushed
+data, and compaction removes the leftover lazily. Loaders however
+projected such groups against the **current** schema and treated the
+mismatch as an error:
+
+- **Growing recovery** (`SegmentGrowingImpl::LoadColumnsGroups`)
+submitted every manifest group with a full-schema projection; a group
+whose fields were all dropped has an empty projection, which
+milvus-storage rejects by contract (`ChunkReaderImpl::open`: &#34;No needed
+columns found in column group&#34;). The channel-recovery level retried the
+deterministic failure every second — observed locally: **4140 identical
+failures over ~3 minutes**, the channel unavailable (`no available shard
+leaders`) the whole time, until a compaction rewrite happened to remove
+the group.
+- **Sealed load** (`ChunkedSegmentSealedImpl::LoadColumnGroups`)
+resolved every manifest column to a field id without a membership check
+and tripped the schema-lookup assert on any group still carrying a
+dropped column — mixed groups included.
+
+### Fix
+
+Treat a dropped-field column as a legal leftover at the loaders:
+
+- Growing: skip a column group before submitting its load task when none
+of its columns exist in the segment schema (logged).
+- Sealed: filter resolved field ids absent from the schema snapshot
+while building `cg_field_ids` (logged); a group filtered to empty
+produces no load task. Mixed groups keep loading their live columns via
+projection, unchanged.
+
+### Verification
+
+- Local A/B with a schema-evolution chaos workload (concurrent add/drop
+ordinary + BM25 function field, DML/query/search, `useLoonFFI` +
+growing-source flush enabled, StreamingNode SIGKILL/restart injections):
+before the fix, recovery wedged in the retry loop (4140 errors / ~3 min
+/ final query 503); after the fix the same scenario logs 2 group skips,
+the channel recovers in seconds, and the full serial consistency
+validation passes.
+- New UT `LoadGrowingSegmentSkipsDroppedFieldColumnGroup`: flushes a
+manifest with a field-exclusive column group (writer pattern
+`&#34;0|1|100,101&#34;`), reloads the segment under a schema without that field,
+and asserts the load succeeds with the group skipped (plus a guard
+assertion that the manifest really contains the exclusive group).
+- The sealed-path filter is exercised by code inspection and mirrors the
+growing-side semantics; on current master the external-table load path
+derives its projection from schema-owned column names and is not exposed
+to this class.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+Co-authored-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- enhance: upgrade knowhere to remove num_build_thread upper-bound validation (#51259)
+
+## Summary
+
+- Upgrade Knowhere dependency to 49507ef3 to pick up the fix that
+removes the num_build_thread upper-bound validation.
+
+issue: #42937
+
+Signed-off-by: xianliang.li &lt;xianliang.li@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- test: cover add-field default values on growing segments (#51303)
+
+## What this PR does
+
+- Remove the `xfail` marker from the existing drop-and-readd
+analyzer-field regression for #50484.
+- Add L1 E2E coverage for the live QueryNode growing-segment reopen path
+when an `enable_match` VARCHAR field with `default_value` is added to
+loaded growing data.
+- Verify the default value is immediately searchable on pre-existing
+unflushed rows, eventually searchable on a subsequent defaulted insert
+after the growing text index catches up, and remains searchable after
+flush/reload.
+
+Related fix: #51201
+
+issue: #50484
+
+## Scope note
+
+This PR validates the live reopen path:
+
+```text
+loaded collection
+-&gt; insert rows that stay in a QueryNode growing segment
+-&gt; add an `enable_match` VARCHAR field with `default_value`
+-&gt; query triggers LazyCheckSchema/Reopen
+-&gt; default values for pre-existing growing rows are indexed and searchable immediately
+```
+
+It does not cover the QueryNode recovery / LoadGrowing path. That path
+requires forcing a QueryNode restart, replacement, or channel rewatch
+while the data is still growing: the new QueryNode can create the
+segment with the latest schema and then load old binlogs written before
+AddField. Since the segment schema is already current in that path,
+LazyCheckSchema/Reopen is not the mechanism being tested here. Recovery
+coverage should be handled by a focused stability test.
+
+## Test results
+
+-
+`test_milvus_client_add_match_field_with_default_value_on_growing_data`:
+3/3 passed
+- `test_drop_then_add_same_name_analyzer_field`: passed
+- Ruff lint and format checks: passed
+- `git diff --check`: passed
+
+Signed-off-by: lyyyuna &lt;yiyang.li@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- fix: Load StorageV3 child deletes during compaction fallback (#51208)
+
+issue: #49706
+issue: #50663
+
+## What
+
+This PR fixes StorageV3 compaction fallback loading when delete records
+are stored in compact-to child manifests instead of legacy deltalogs.
+
+Changes:
+- Add `child_manifest_paths` to DataCoord `SegmentInfo` and QueryCoord
+  `SegmentLoadInfo` as a load-time delete overlay.
+- Make DataCoord recursively collect compact-to descendant delete
+  sources for cloned unhealthy segment responses.
+- Keep legacy child delete logs in `Deltalogs`, and keep StorageV3 child
+  delete logs as `ChildManifestPaths`.
+- Pass `ChildManifestPaths` through QueryCoord to QueryNode.
+- Make QueryNode load parent delete data and child manifest delete data
+  into one `DeltaData` before calling `LoadDeltaData`.
+
+## Why
+
+Fallback loading keeps the parent segment identity, but StorageV3
+compact-to children may keep newer delete records only in their
+manifests. The old fallback path only appended legacy child deltalogs,
+so it could miss V3 child deletes and expose rows that should be
+filtered.
+
+The V2 path is kept for compatibility. Mixed chains such as parent V2 to
+child V3, and parent V3 to child V2, are handled by keeping each child
+delete source in its native representation.
+
+## Validation
+
+- `gofmt -w internal/datacoord/services.go
+internal/querycoordv2/utils/types.go
+internal/querynodev2/segments/segment_loader.go`
+- `git diff --check`
+- `source ~/.profile &amp;&amp; source scripts/setenv.sh &amp;&amp; make
+generated-proto-without-cpp`
+- `git diff --exit-code -- pkg/proto/data_coord.proto
+pkg/proto/query_coord.proto pkg/proto/datapb/data_coord.pb.go
+pkg/proto/querypb/query_coord.pb.go`
+
+Blocked:
+- `make check-proto-product`: conan could not resolve
+  `milvus01.jfrog.io`.
+- Go tests were not rerun after review cleanup because `reset-milvus` is
+  blocked by missing `bin/milvus`; an earlier attempt was blocked by
+  missing `milvus_core` pkg-config.
+
+Signed-off-by: Wei Liu &lt;wei.liu@zilliz.com&gt;
+
+- test: enable FileResource regression cases for closed issues (#51239)
+
+## What changed
+
+- Remove the stale `xfail` marker from `test_file_with_bom_and_crlf`,
+which covers the UTF-8 BOM regression tracked by
+[#49684](https://github.com/milvus-io/milvus/issues/49684) and fixed by
+[#49691](https://github.com/milvus-io/milvus/pull/49691).
+- Remove the stale `skip` marker from
+`test_drop_collection_then_remove_remote_resources_no_panic`, which
+covers the FileResource lifecycle panic tracked by
+[#49279](https://github.com/milvus-io/milvus/issues/49279) and fixed by
+[#49412](https://github.com/milvus-io/milvus/pull/49412).
+
+Both issues are closed. This change makes the existing cases active CI
+regressions; it does not change their fixtures, test bodies, assertions,
+or server behavior.
+
+## User impact
+
+CI will now detect regressions where stop-word files with a UTF-8 BOM
+are parsed incorrectly, or where dropping a collection and removing its
+remote analyzer resources can panic the server.
+
+## Validation
+
+The existing cases were previously run against the latest
+`upstream/master` commit `03762320e8537f855c18c28133834bf292b45361`
+using image `harbor.milvus.io/manta/milvus:master-20260710-0376232`. The
+`-p no:skipping` option only bypassed pytest&#39;s skip/xfail marker
+handling; no case code, fixture, or assertion was changed:
+
+```bash
+python -W ignore -m pytest -v -p no:skipping \
+  milvus_client/test_milvus_client_file_resource.py::TestMilvusClientFileResourceContent::test_file_with_bom_and_crlf \
+  milvus_client/test_milvus_client_file_resource.py::TestMilvusClientFileResourceLifecycleAdvanced::test_drop_collection_then_remove_remote_resources_no_panic \
+  --host &lt;temporary-milvus-host&gt; --port 19530 --token &#39;root:Milvus&#39; \
+  --minio_host &lt;temporary-minio-host&gt; --minio_bucket fr-closed-issues-master \
+  --tb=short
+```
+
+Result: `2 passed in 2.16s`.
+
+The #49279 case was then repeated ten times with the same marker bypass:
+
+```bash
+python -W ignore -m pytest -q -p no:skipping \
+  milvus_client/test_milvus_client_file_resource.py::TestMilvusClientFileResourceLifecycleAdvanced::test_drop_collection_then_remove_remote_resources_no_panic \
+  --count=10 \
+  --host &lt;temporary-milvus-host&gt; --port 19530 --token &#39;root:Milvus&#39; \
+  --minio_host &lt;temporary-minio-host&gt; --minio_bucket fr-closed-issues-master \
+  --tb=short
+```
+
+Result: `10 passed in 14.59s`. Milvus remained healthy, pod restart
+count was zero, and logs contained no panic, `tokenizer.h:31`, fatal
+error, or segmentation fault. The temporary validation instance has been
+cleaned up.
+
+The two node IDs also collect successfully after removing the markers:
+
+```bash
+python -W ignore -m pytest --collect-only -q \
+  milvus_client/test_milvus_client_file_resource.py::TestMilvusClientFileResourceContent::test_file_with_bom_and_crlf \
+  milvus_client/test_milvus_client_file_resource.py::TestMilvusClientFileResourceLifecycleAdvanced::test_drop_collection_then_remove_remote_resources_no_panic
+```
+
+Result: `2 tests collected in 0.09s`.
+
+Signed-off-by: zhuwenxing &lt;wenxing.zhu@zilliz.com&gt;
+
+- test: add struct array partial update coverage (#51166)
+
+## What
+
+- Enable StructArray coverage in `PartialUpdateChecker` and verify
+StructArray-only partial update rows.
+- Add MilvusClient E2E coverage for StructArray partial update over
+sealed and growing data, including HNSW and DISKANN embedding-list
+search validation.
+- Bump Python client test dependency to `pymilvus==3.1.0rc62`.
+
+## Verification
+
+- `python3 -m py_compile tests/python_client/chaos/checker.py
+tests/python_client/milvus_client/test_milvus_client_partial_update.py`
+- `ruff check tests/python_client/chaos/checker.py`
+- `ruff check --select E9,F63,F7,F82
+tests/python_client/milvus_client/test_milvus_client_partial_update.py`
+- `git diff --check`
+- Targeted live run against 2.6-latest:
+`test_milvus_client_partial_update_struct_array_sealed_growing` passed
+for HNSW and DISKANN.
+
+---------
+
+Signed-off-by: zhuwenxing &lt;wenxing.zhu@zilliz.com&gt;
+
+- enhance: allow updating inactive field analyzer params (#50492)
+
+issue: #50961
+
+## Summary
+Allow AlterCollectionField to set or delete analyzer configuration on
+string fields before they are used by text match or BM25. Keep analyzer
+params immutable once text match is enabled or a BM25 function depends
+on the field.
+
+When analyzer params change, RootCoord revalidates the new analyzer
+config, reserves newly referenced file resources before broadcasting,
+and lets MetaTable.AlterCollection reconcile file resource refCnt for
+request, replay, replicated, and recovery paths.
+
+## Verification
+- `git diff --check`
+- `go test -tags dynamic,test -gcflags=&#34;all=-N -l&#34; -count=1
+./util/typeutil -run TestIsBm25FunctionInputField` from `pkg/`
+- `go test -tags dynamic,test -gcflags=&#34;all=-N -l&#34; -count=1
+./internal/rootcoord -run
+&#39;TestMetaTableAlterCollectionFileResourceRefCnt|TestDDLCallbacksAlterCollectionFieldAnalyzerValidation&#39;`
+blocked locally: missing `milvus_core.pc`
+- `go test -tags dynamic,test -gcflags=&#34;all=-N -l&#34; -count=1
+./internal/proxy -run TestAlterCollectionField` blocked locally: missing
+`milvus_core.pc` and `milvus-storage.pc`
+
+Signed-off-by: aoiasd &lt;zhicheng.yue@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.6 &lt;noreply@anthropic.com&gt;
+
+- enhance: cache JSON flat validity bitmaps (#51291)
+
+## Summary
+
+- Reuse the existing `ExprResCacheManager/ExprCacheHelper` from the
+expression layer.
+- Cache JSON-flat exact-path validity bitmaps by segment + field/full
+JSON pointer + `Any|Numeric|String|Bool` canonical key.
+- Exclude literal/operator from the key so validity can be reused across
+predicates.
+- Do not add a `JsonFlatIndex`-owned LRU or change the index format.
+
+This is based on the latest `master`, including merged PR #51235.
+
+## Verification
+
+Verification is pending and will continue after the PR is created.
+
+issue: #51234
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- enhance: pick least-loaded DataNode in globalScheduler instead of first-fit (#50912)
+
+## What
+
+The datacoord `globalScheduler.pickNode` used **first-fit**: it returned
+the first node in map-iteration order whose available slots could
+satisfy the task. Because Go map iteration order is non-deterministic
+and the search stops at the first fit, scheduled tasks (import /
+compaction / index / stats) were not spread evenly across DataNodes — a
+cluster could land most tasks on one pod while others stayed idle.
+
+This PR maintains a per-round **max-heap** of nodes keyed by available
+slots and always assigns each task to the **most-available
+(least-loaded)** node (water-filling on available slots). The heap is
+built once per `schedule()` round and reused across all picks, so later
+picks observe the decremented slots.
+
+The previous fallback (drain the most-available node when no node can
+fully satisfy `taskSlot`) and the empty-cluster / no-slot behaviors are
+**preserved**.
+
+## Why
+
+Related discussion:
+https://github.com/milvus-io/milvus/discussions/50872 — bulk import on a
+multi-DataNode cluster spent ~90% of wall-clock on a single pod. One
+root cause is on the **scheduling layer**: first-fit selection did not
+balance tasks across nodes. This PR addresses that layer.
+
+&gt; Note: the import-specific regrouping in `RegroupImportFiles` (which
+can merge multiple files into a single task) is a separate,
+complementary issue and is **not** addressed here.
+
+## Test
+
+- Reworked `TestGlobalScheduler_pickNode` (tie / least-loaded / fallback
+/ single-node decrement / all-empty / empty-cluster).
+- Added `TestGlobalScheduler_pickNode_Balancing`: 3 nodes × 100 slots,
+30 tasks × 10 slots → each node receives exactly 10 and is drained to 0.
+- `go vet` clean; full `internal/datacoord/task` package passes.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+issue: #50914
+
+---------
+
+Signed-off-by: cai.zhang &lt;cai.zhang@zilliz.com&gt;
+Co-authored-by: Claude Opus 4.8 &lt;noreply@anthropic.com&gt;
+
+- doc: add design document for online shard split of namespace collections (#50465)
+
+Add the design document for online shard split of namespace
+(multi-tenant) collections.
+
+The design covers:
+- Range routing over `big_endian(hash(namespace)) || namespace` with a
+versioned routing table derived from the collection meta.
+- Write switching via a `SplitShard` WAL fence message (`T_switch`) with
+reject-and-refetch on the proxy; target vchannels are initialized with a
+`BarrierTimeTick` so every message of the new WALs is strictly greater
+than `T_switch`.
+- In-place child delegators fronted by the source delegator during the
+transition window (sealed segments stay single-loaded, deletes and
+timeticks are forwarded back).
+- Multi-round metadata-only relabel redistribution by DataCoord, with
+the release-safety analysis (frozen targets, merged recovery view,
+register-then-release).
+- One-shot QueryCoord adoption with in-place delegator handoff,
+consistency guarantees, engineering constraints, configuration, and
+failure handling.
+
+issue: #50463
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Signed-off-by: cai.zhang &lt;cai.zhang@zilliz.com&gt;
+Signed-off-by: Cai Zhang &lt;cai.zhang@zilliz.com&gt;
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- enhance: migrate sealed text indexes into runtime state (#51280)
+
+Related to #51068
+
+Store sealed-segment text index holders and cache slots in the published
+runtime resource snapshot. Stage create, load, and reopen updates
+against cloned state before publishing them atomically.
+
+Keep text index resources alive through captured snapshots, prune
+indexes removed by schema reopen, and preserve created-index markers
+only for fields present in the target schema.
+
+Remove the obsolete direct LoadTextIndex path, legacy batch overloads,
+and marker wrappers. Add coverage for staged visibility and old snapshot
+resource lifetime.
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;
+
+- fix: skip non-materialized function output field on growing segment flush (#51117) (#51266)
+
+issue: #51117
+
+Supersedes #51207 per team decision to ship the skipped-field tolerance
+for 3.0.0; the era-consistent replay consume path (#51146) remains a
+follow-up.
+
+### Problem
+
+A growing segment created while a field was absent from the schema never
+materializes that column: the InsertRecord ctor only allocates fields
+present at creation, Reopen fills later-added ordinary fields but skips
+function outputs by design, and a field dropped before segment creation
+is skipped at consume. Flushing such a segment with a schema snapshot
+that still carries the field hit `Assert &#34;data_.find(field_id) !=
+data_.end()&#34;` in the growing-source flush path and crash-looped the
+StreamingNode (exit 134 / CrashLoopBackOff in the schema-evolution L3
+runs).
+
+### Design
+
+Principle: the flush writes exactly `flushSchema ∩ materialized`. A
+non-materialized column is legally absent — a field dropped from the
+segment&#39;s own schema, or a function output recomputed by bump-schema
+compaction backfill. Real schema/data inconsistency is segcore&#39;s own
+concern and is verified inside the flush.
+
+- **Go (layout source of truth)**: trim the column groups to the source
+segment&#39;s materialized field ids (plus system fields) right after layout
+derivation — `Fields` and the parallel `Columns` array in lockstep — so
+the writer pattern, binlog meta and metacache current split all describe
+the same layout. An empty materialized report is refused. On a
+committed-flush ack retry the layout is trimmed to the committed binlogs
+(`ChildFields` union), the persisted truth.
+- **C++ (segment-internal judgement)**: a column missing from the insert
+record (`HasFieldData` semantics: allocated-but-empty counts as missing)
+is skipped when the field is gone from the segment&#39;s own schema
+(dropped) or is a function output; a regular field still present in the
+segment schema is materialized by ctor/Reopen by construction, so that
+case hard-errors instead of asserting.
+- Skipped columns are backfilled by bump-schema compaction via
+`RecordMaterializer`.
+
+### Review responses (@liliu-z)
+
+- stale `Columns` / phantom column in writer pattern →
+`filterColumnGroupFields` trims `Fields`+`Columns` in lockstep at all
+three trim sites
+- committed ack-retry currentSplit divergence → layout trimmed to
+committed binlogs&#39; `ChildFields` union
+- allocated-but-empty function-output column wedging the flush →
+materialized report and the flush skip both gate on `HasFieldData`
+semantics (empty = not materialized)
+- silent skip of a missing regular field → three-way judgement: dropped
+from segment schema → skip; function output → skip;
+present-in-segment-schema regular field → hard error (`has no field data
+in growing segment ... but is present in the segment schema`)
+- retryability routing of the missing-field error: the legally-absent
+cases no longer produce an error at all; the remaining hard error
+indicates real data loss and is construction-unreachable via public APIs
+(the consume path asserts regular fields carry data)
+
+### Verification
+
+- Go UT (`growing_source_test.go`): trim semantics — dropped ordinary
+field trimmed, `Columns` kept in lockstep, empty materialized report
+refused, committed-retry trim by `ChildFields`
+- C++ UT (`test_storage.cpp`): flush skips a non-materialized function
+output; skips a dropped field carried by a staler flush schema; skips an
+allocated-but-empty function-output column
+- Local schema-evolution chaos runs (concurrent add/drop field + BM25
+function field + DML/query/search with `useLoonFFI` + growing-source
+flush enabled, incl. StreamingNode force-kill/restart injections): no
+panic, no crash loop, final serial consistency validation passes. The
+exact original assert requires an era-mismatch replay not reproduced
+locally; that path is covered by the unit tests above.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Signed-off-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+Co-authored-by: MrPresent-Han &lt;chun.han@gmail.com&gt;
+Co-authored-by: Claude Fable 5 &lt;noreply@anthropic.com&gt;
+
+- fix: preserve JSON flat contains three-valued validity (#51235)
+
+## Summary
+
+- add `json_subpaths` support to Tantivy `json_exist_query`
+- expose exact-path existence through `ExistsQuery(..., false)`
+- use a contains-specific `JsonExactPath` validity mode for actual
+JSON-flat executors
+- keep contains hit lookup through `In()` while using exact-path
+non-null-leaf validity
+
+## Semantics
+
+- NULL, missing paths, JSON null, and object-only paths remain UNKNOWN
+- `NOT UNKNOWN` remains UNKNOWN
+- scalar values and non-empty arrays preserve current flattened contains
+behavior
+- empty arrays remain the documented limitation
+
+## Verification
+
+- `JsonFlatIndex*`: 25/25 passed
+- `*JsonContains*`: 597/597 passed
+- `cargo fmt --check`
+- clang-format dry-run on changed non-generated C++ files
+- `git diff --check`
+
+## Benchmark
+
+For scalar-benchmark
+`json_array_operations/base/A01_contains_flat_array/json_flat` with 1M
+rows and 2 matches:
+
+- first query: 24.945 ms
+- average: 24.625 ms
+- P50/P99: 24.525/24.607 ms
+- current local master: approximately 1114/1119 ms P50/P99
+
+issue: #51234
+
+---------
+
+Signed-off-by: Buqian Zheng &lt;zhengbuqian@gmail.com&gt;
+
+- enhance: move sealed vector index state into runtime resource (#51224)
+
+Related to #51068
+
+Migrate sealed segment vector index runtime state from live members into
+RuntimeResourceState, including vector index entries and binlog vector
+index configs. Update vector search, vector retrieval, raw-data checks,
+refine, prefetch, load/drop/clear, and staged reopen paths to read and
+publish through runtime snapshots.
+
+Also update SearchOnSealedIndex to consume a pinned vector index entry
+directly, and make vector index config accessors const-compatible for
+snapshot usage.
+
+---------
+
+Signed-off-by: Congqi Xia &lt;congqi.xia@zilliz.com&gt;</div>
+</div>
+
+<a href="../project/milvus-io_milvus.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
