@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (3 commits) - quasi/inquisitio - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (3 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/quasi_inquisitio.html">quasi/inquisitio</a> /
+    Updates in main (3 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/quasi_inquisitio.html">quasi/inquisitio</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-24 21:06 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/quasi/inquisitio/commits/main" target="_blank">https://github.com/quasi/inquisitio/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>The project updated its SQLite integration, primarily by enhancing `sqlite-vec` extension handling and implementing robust thread-safety. Improvements for `sqlite-vec` include providing clear installation guides, fixing macOS-specific extension loading issues by preferring Homebrew&#39;s SQLite, and correcting the extension&#39;s binary loading path. Concurrently, significant thread-safety changes were introduced for `sqlite-handle` through per-handle recursive locks, `FULLMUTEX` connections, and new concurrency primitives, ensuring safe shared access across threads.
+
+***
+
+Проект обновил свою интеграцию с SQLite, в первую очередь, за счет улучшения обработки расширения `sqlite-vec` и внедрения надежной потокобезопасности. Усовершенствования для `sqlite-vec` включают предоставление четких руководств по установке, исправление специфических для macOS проблем с загрузкой расширений путем предпочтения сборки Homebrew и корректировку пути загрузки бинарного файла расширения. Одновременно были внесены значительные изменения в потокобезопасность `sqlite-handle` посредством рекурсивных блокировок на каждый дескриптор, соединений с `FULLMUTEX` и новых примитивов параллелизма, что обеспечивает безопасный общий доступ в многопоточной среде.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Document installing the optional sqlite-vec extension
+
+The vector tests skip without it, so say plainly how to get it: which asset
+to download for each platform, where it must land (libs/, resolved relative
+to the system rather than the process working directory), and that it also
+needs a libsqlite3 that can load extensions at all.
+
+Commands verified verbatim in a clean directory against sqlite-vec v0.1.9,
+and the four platform names listed are the assets actually published for
+that tag.
+
+- Link a SQLite that can load extensions; stop the vec tests lying
+
+The three failing vec tests were not a test problem. Apple&#39;s system
+libsqlite3 is built with SQLITE_OMIT_LOAD_EXTENSION: dlsym over the ~60 C
+functions ffi.lisp binds shows exactly two absent from it,
+sqlite3_enable_load_extension and sqlite3_load_extension. Everything in
+src/vec.lisp is therefore unusable on macOS against the system library --
+a capability gap in shipped functionality, of which the tests were only the
+messenger. Core, simplified and transactions are unaffected.
+
+  libsqlite3.dylib (Apple)   3.51.0  threadsafe=2  enable_load_extension ABSENT
+  Homebrew sqlite            3.53.0  threadsafe=1  enable_load_extension ok
+
+So on darwin, prefer Homebrew&#39;s build and fall back to Apple&#39;s, which stays
+fully functional for everything except extensions.
+INQUISITIO_SQLITE3_LIBRARY overrides the search with an absolute path and
+fails loudly if that path cannot be loaded, rather than silently falling
+back to a library the caller did not ask for. sqlite3_libversion is bound
+and exported as sqlite-library-version so callers can check which build they
+got instead of assuming.
+
+The concurrency tests were re-run against the newly preferred Homebrew
+build, since the earlier runs proved the locking against Apple&#39;s
+threadsafe=2 and Homebrew reports threadsafe=1. Four consecutive clean runs.
+
+Second, independent blocker in the vec tests: they loaded &#34;libs/vec0.so&#34;
+relative to the process working directory. libs/ is gitignored, so the
+binary is never present on a fresh checkout; the name is wrong on macOS,
+where sqlite-vec ships vec0.dylib; and getcwd made the path depend on how
+the suite was started. They now locate it via asdf:system-relative-pathname,
+accept either extension, and skip with an actionable message when it is
+absent -- a missing optional third-party binary should not read as a broken
+library.
+
+Verified with sqlite-vec v0.1.9 actually installed in libs/, so the loading
+path is exercised rather than merely skipped. Suite: 91 checks, 0 failures,
+0 skipped -- green for the first time.
+
+- Make a sqlite-handle safe to share between threads
+
+Addresses the thread-safety defect report of 2026-07-25 (D1-D6). The library
+had no synchronization anywhere in src/, which was a defensible position but
+an undocumented one -- and one defect (transactions) callers could not work
+around with a lock of their own.
+
+One recursive lock per handle now covers both the MRU statement cache and the
+statements list. The cache takes the handle&#39;s lock via its new :lock initarg
+rather than owning one, so eviction -- which finalizes a statement and thus
+touches the statements list -- involves no second lock and no lock ordering.
+
+- D1 with-transaction holds the handle lock for its whole body, since
+  BEGIN/COMMIT/ROLLBACK are connection-global and per-call locking cannot fix
+  the interleaving. Nesting now uses SAVEPOINT/RELEASE/ROLLBACK TO with a
+  per-handle depth counter, so an inner failure discards only the inner scope.
+- D2 every mru-cache operation runs under the lock. purge-cache now empties
+  the cache as well, making it idempotent.
+- D3 push/delete on the statements list run under the lock.
+- D4 connect uses sqlite3_open_v2 with READWRITE|CREATE|FULLMUTEX. This is
+  load-bearing, not decorative: the system libsqlite3 here reports
+  sqlite3_threadsafe() = 2 (multi-thread), and the same workload run with
+  NOMUTEX segfaults inside libsqlite3 with every Lisp-side lock still in
+  place. sqlite3_threadsafe is now bound and exported as sqlite-threadsafe so
+  callers can check rather than assume.
+- D5 connect defaults to *default-busy-timeout* (5000 ms). Passing
+  :busy-timeout nil keeps the old fail-fast behaviour. with-open-database no
+  longer forces nil by passing the key unconditionally.
+- D6 the contract is stated on connect, on sqlite-handle, in the telos
+  feature constraints, and in a README Threading section.
+
+New exports: with-database-lock, handle-lock, sqlite-threadsafe,
+*default-busy-timeout*. bordeaux-threads becomes a runtime dependency.
+
+Tests: tests/thread-safety-tests.lisp exercises a single handle shared across
+threads, which the pre-existing test-concurrent-inserts does not (it gives
+each thread its own connection). Before this change the shared-handle test
+killed the SBCL process outright. Suite: 82 checks, 3 failures, all three
+pre-existing vec tests failing on a libsqlite3 built without
+sqlite3_enable_load_extension.</div>
+</div>
+
+<a href="../project/quasi_inquisitio.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

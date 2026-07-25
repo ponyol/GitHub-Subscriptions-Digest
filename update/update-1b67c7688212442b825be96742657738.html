@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (12 commits) - pixeltable/pixeltable - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (12 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/pixeltable_pixeltable.html">pixeltable/pixeltable</a> /
+    Updates in main (12 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/pixeltable_pixeltable.html">pixeltable/pixeltable</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-25 05:33 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/pixeltable/pixeltable/commits/main" target="_blank">https://github.com/pixeltable/pixeltable/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление объявляет устаревшими модели `deepseek-reasoner` и `deepseek-chat`, предлагая `deepseek-v4-flash` в качестве замены, и вводит методы `TableModel.diff_all()` и `TableModel.update_all()` для синхронизации каталога, а также поддержку изменения необнуляемых столбцов на обнуляемые. Были значительно улучшены стабильность и производительность системы за счет повышения потокобезопасности, переработки кеширования версий таблиц, исправлений в обработке транзакций PostgreSQL и сегментации SAM3. Релиз также запрещает &#34;анонимные&#34; составные выражения в моделях представлений, включает различные улучшения CI/тестирования и исправления для миграции базы данных.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- Update models used by deepseek test (#1489)
+
+`deepseek-reasoner` and `deepseek-chat` are both deprecated today, the
+suggested replacement is `deepseek-v4-flash`.
+
+- Handling pg server termination in xact retry logic. (#1473)
+
+- TableModel.diff_all() and TableModel.update_all() (#1479)
+
+Introduces:
+- `TableModel.diff_all()` that prints a list of differences between a
+`model_base` instance and the catalog
+- `TableModel.update_all()` that synchronizes a `model_base` instance
+with the catalog
+
+Calling `update_all()` by itself will only add columns/indices and
+generate an error if any are dropped.
+`update_all(allow_destructive=True)` will also delete columns/indices.
+Any alterations of existing column/table properties are currently
+treated as &#34;FATAL&#34; (must be synchronized manually); this will be
+improved as we add alter_table()/alter_column() functionality.
+
+Also prohibits &#34;anonymous&#34; compound expressions in base queries in a
+view model.
+- `base=MyTable.select(MyTable.col)` is ALLOWED
+- `base=MyTable.select(named_col=(MyTable.col + 1))` is ALLOWED
+- `base=MyTable.select(MyTable.col + 1)` is DISALLOWED
+
+- [PXT-960] alter column to change non-nullable type to nullable (#1450)
+
+Adds first-class support for widening a non-nullable column to nullable
+via `Table.alter_column()`
+
+Includes random ops changes:
+* Some columns start off as required
+* New operation that makes a random required column optional
+
+- update ci lint coverage (#1482)
+
+Increase the coverage of the lint job to match that of Makefile
+
+- nightly github action uploads test reports as github artifacts (#1477)
+
+I want to build some kind of agentic ci monitoring, for which this will
+be useful.
+
+- Fix test_db_migration + more (#1484)
+
+`base_table` in the db dump now has an iterator view with document
+splitter. Avoid inserting XML documents to `base_table` because document
+splitter does not yet support XML
+(https://pixeltable.atlassian.net/browse/PXT-1249), and doing so causes
+an `AssertionError`.
+
+The nature of `test_db_migration` failing on some platforms but not
+others may have to do with the order in which `glob.glob` returns
+matching files.
+
+- [PXT-1236] get rid of caching in TableVersionHandle (#1464)
+
+Motivation: to fix
+[PXT-1236](https://pixeltable.atlassian.net/browse/PXT-1236), we want to
+start evicting older (LRU) cached TV entries from
+`Catalog._tbl_versions`. The thread-local cache in `TableVersionHandle`
+gets in the way of that: if a table is evicted from Catalog&#39;s cache but
+is still in `TableVersionHandle._local`, we can end up mixing two
+different `sql.Table` instances in a query, which results in errors.
+Besides, a thread-local cache in `TableVersionHandle` is confusing and
+difficult to reason about.
+
+Here&#39;s why the new code is semantically and performance-wise equivalent
+to the old one.
+
+When in transaction, the new code simply relies on Catalog to obtain
+table version. Catalog maintains its own cache, so the new code has a
+similar performance (i.e. TV will only be loaded if it isn&#39;t already
+cached and validated).
+
+When not in a transaction and effective version is `None` (i.e. live
+table): the old code would always go down the `cat.get_tbl_version()`
+path, same as the new code. To understand why the `return cached` branch
+would never be hit, observe that Catalog resets `is_validated` to
+`False` on all live tables at the end of each transaction. A live table
+is never &#34;valid&#34; unless it was validated in the current transaction, but
+in this case there&#39;s no current transaction.
+
+When not in a transaction and effective version is not `None` (i.e.
+snapshot): if there is a cached instance, both the old and the new code
+return it without starting a new transaction. If not, in both cases a
+transaction is started to load the snapshot, which is then cached.
+
+Also in this pr: `Catalog.get_tbl_version()` and
+`Catalog._get_tbl_version`: `validate_initialized` param defaults to
+True.
+
+[PXT-1236]:
+https://pixeltable.atlassian.net/browse/PXT-1236?atlOrigin=eyJpIjoiNWRkNTljNzYxNjVmNDY3MDlhMDU5Y2ZhYzA5YTRkZjUiLCJwIjoiZ2l0aHViLWNvbS1KU1cifQ
+
+- [PXT-1247] Fix SAM3 segmentation with no detections (#1478)
+
+sam3_for_segmentation() returned masks at the model&#39;s internal
+resolution instead of the image resolution when there were no
+detections, which broke downstream consumers like
+overlay_segmentation(). Empty mask arrays are now reshaped to match the
+image dimensions, so overlaying an empty segmentation returns the
+original image unchanged.
+
+Also adds the promptable segmentation notebook to the docs navigation;
+it was missing from docs.json.
+
+- mark more network-dependent tests for retry (#1476)
+
+- [PXT-1246] exclude ollama nb test from merge queue (#1471)
+
+- PXT-1225/1229: Thread safety (#1439)
+
+Thread- and multi-process-concurrency fixes for FileCache.
+
+Thread-safety for model caches and Env.</div>
+</div>
+
+<a href="../project/pixeltable_pixeltable.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

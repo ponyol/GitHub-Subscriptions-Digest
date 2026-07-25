@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (9 commits) - FluidInference/FluidAudio - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (9 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a> /
+    Updates in main (9 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/FluidInference_FluidAudio.html">FluidInference/FluidAudio</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-25 00:40 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/FluidInference/FluidAudio/commits/main" target="_blank">https://github.com/FluidInference/FluidAudio/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Это обновление включает несколько ключевых улучшений в компонентах TTS, ASR и диаризации FluidAudio. Оно исправляет критические ошибки, такие как предотвращение сбоев приложений из-за неконечных выходных данных TTS и коррекция дрейфа временных меток в потоковой диаризации. Новые функции расширяют пользовательский контроль и доступ к данным, включая предоставление временных меток токенов для офлайн ASR, добавление выбора вычислительных блоков для CLI диаризации и раскрытие подробных данных оценки кандидатов из словаря. Кроме того, повышена надежность загрузки моделей благодаря новому механизму контроля зависаний.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix(tts/kokoro-ane): warn on BNNS-crash-prone OS builds (26.4–26.5.x) + document both Apple bug classes (#818)
+
+Addresses the library-side portion of #817 (follow-up to
+#328/#587/#667).
+
+## Context
+
+The Kokoro ANE `libBNNS` `EXC_BAD_ACCESS` (`BNNSGraphContextExecute_v2`
+→ `BnnsCpuInferenceOperation::ExecuteSync`) is an **Apple bug in the
+26.4–26.5.x OS line**:
+
+- Strikes on **any** compute-unit routing — even `cpuOnly` (#587), so no
+placement change can avoid it.
+- Time/environment-gated: the same binary flips 40/40 PASS → 0/15 CRASH
+within a day (#817&#39;s controlled evidence).
+- **Verified fixed in the 26.6 line** — on M5 Pro / macOS 26.6 (25G70),
+the #667 repro (same phrase ×5, one process) passes 5/5 under `cpu-only`
+and `all-ane`, both of which segfaulted deterministically on macOS 26.5:
+
+| Config | macOS 26.5 (#667) | macOS 26.6 |
+|---|---|---|
+| `default` (aneTailGpu) | pass | pass 5/5 |
+| `cpu-only` | SIGSEGV libBNNS | **pass 5/5** |
+| `all-ane` | SIGSEGV libBNNS | **pass 5/5** |
+| `cpu-and-gpu` | GPURNNOps abort | still aborts (`JIT not supported`) |
+
+## Changes
+
+Since no library-side mitigation exists, the honest fix is diagnosis:
+
+- **`KokoroAneManager.initialize()`** logs a warning on affected OS
+builds (26.4–26.5.x) pointing at #817, so users hitting the segfault
+learn it&#39;s OS-gated instead of chasing inputs, models, or FluidAudio
+versions. Predicate extracted as `isBnnsCrashProneOS(_:)` for
+testability.
+- **`KokoroAneOsAdvisoryTests`** — boundary coverage (26.3.1 ✗ / 26.4 ✓
+/ 26.5.2 ✓ / 26.6 ✗ / 27.0 ✗).
+- **`Documentation/TTS/KokoroAne.md`** — new &#34;Known OS issues&#34; section
+separating the two distinct Apple bugs: the BNNS segfault (fixed in
+26.6) and the still-live GPU RNN `JIT not supported` assert, which the
+#671/#677 default routing avoids (do not route RNN stages to GPU,
+including on 26.6).
+
+## Verification
+
+- `swift build` green, `swift format lint` clean.
+- Repro matrix above run with `tts-benchmark --corpus-path` on M5 Pro /
+macOS 26.6.
+
+Closes nothing on its own — #817 stays open pending the reporter&#39;s iOS
+26.6 re-test and their Apple Feedback number.
+
+- fix(tts/kokoro-ane): throw instead of trapping on non-finite PostAlbert durations (#816)
+
+## Summary
+
+Fixes the hard crash reported in #738
+([comment](https://github.com/FluidInference/FluidAudio/issues/738#issuecomment-5063569059)):
+on iOS 27 public beta, Kokoro synthesis kills the host app with
+
+```
+Fatal error: Float value cannot be converted to Int32 because it is either infinite or NaN
+```
+
+at `KokoroAneSynthesizer.swift:74` (`d=NaN`).
+
+## Root cause
+
+iOS 27&#39;s new E5 CoreML runtime flags the dynamic-shape Kokoro stages at
+load time (`MIL program has non-constant (dynamic) shapes for external
+input but FlexibleShapeInformation attribute is missing`) and then
+mis-executes them — PostAlbert returns NaN for its `duration` output.
+The `pred_dur` conversion did `Int32(Float(d).rounded())`, which is a
+Swift runtime trap on NaN, so the whole host app crashed instead of
+receiving an error. Same class of on-device dynamic-shape misbehavior as
+#739 (there the symptom was zeros; here NaNs).
+
+## Change
+
+- Extract the rounding into
+`KokoroAneSynthesizer.predictedDurations(from:)`:
+- throws new `KokoroAneError.nonFiniteModelOutput(stage:output:)` on
+NaN/±inf, with a message pointing at the iOS 27 runtime and #738
+- clamps finite values to `[1, maxAcousticFrames]` so huge garbage
+values can&#39;t trap `Int32()` either; absurd totals still surface through
+the existing `acousticFramesExceedCap` check
+- Output for well-formed durations is byte-identical (small positive
+floats, far below the cap).
+- Unit tests for rounding/clamping/NaN/inf paths — pure function, no
+models needed.
+
+This makes the failure catchable; it does **not** make Kokoro work on
+iOS 27 betas. The model-side fix (attaching flexible-shape info so E5
+compiles the dynamic stages correctly) is separate follow-up work.
+Affected users can try `KokoroAneComputeUnits.cpuAndGpu` as a possible
+workaround.
+
+## Testing
+
+- `swift build` clean, `swift format lint` clean
+- New `KokoroAnePredictedDurationTests` (run on CI; no model downloads
+required)
+
+- Add Logue to Showcase (#815)
+
+Adds **[Logue](https://github.com/bitwize-ai/Logue)** to the Showcase
+table (appended at the end, per the chronological-order note).
+
+Logue is a privacy-first AI meeting-notes and writing assistant for
+macOS that runs entirely on-device on Apple Silicon. It uses
+**FluidAudio for streaming Sortformer speaker diarization**. Thanks for
+building and open-sourcing FluidAudio! 🙏
+
+Co-authored-by: shanforge &lt;299346208+shanforge@users.noreply.github.com&gt;
+
+- Expose token timings from the Unified offline batch path (#814)
+
+### Problem
+
+`UnifiedAsrManager.transcribe(_:)` returns only a `String`, so there is
+no way to align a batch transcript back to its audio. The information is
+already there and is thrown away one line before the return:
+
+```swift
+merged.sort { $0.timestamp &lt; $1.timestamp }
+merged = merger.collapseSeamWordDuplicates(merged, vocabulary: tokenizer.vocabulary)
+return tokenizer.decode(ids: merged.map(\.token))   // timestamps dropped here
+```
+
+`ChunkProcessor.TokenWindow.timestamp` is the global encoder frame the
+greedy RNNT decoder records per emission (`transcribeWindow` passes
+`globalFrameOffset: chunkStart / config.frameSamples`), and the overlap
+merge preserves it.
+
+The streaming sibling already publishes exactly this, via
+`StreamingUnifiedAsrManager.consumeTokenTimings()` —
+`buildWordTimings(from:)` even cites it in its doc comment. So the
+offline path is the odd one out. Applications that want Unified&#39;s WER
+and punctuation for batch transcription currently have to fall back to a
+TDT checkpoint purely to keep seek and playback highlighting, which
+means shipping a second English model.
+
+### Change
+
+Adds `UnifiedAsrManager.transcribeWithTimings(_:) -&gt;
+TranscriptionWithTimings`, returning the text plus `[TokenTiming]`, so
+it drops straight into `buildWordTimings(from:)`.
+
+The conversion mirrors `StreamingUnifiedAsrManager` rather than
+inventing anything: `frame x frameSamples / sampleRate` (80 ms), `▁`
+normalized to a leading space, and each token&#39;s `endTime` clamped back
+only when it would overrun its successor, so genuine pauses survive as
+gaps between spans.
+
+Both batch entry points now go through one `decodedTokens` helper, so
+the text from `transcribe` and `transcribeWithTimings` cannot drift
+apart. `transcribe(_:)`&#39;s behavior and signature are unchanged.
+
+### Tests
+
+The conversion is factored out as a pure function, so
+`UnifiedTokenTimingTests` covers it without loading the model:
+frame→seconds, pause preservation, no span overrunning its successor,
+tokens sharing a frame, the frontier token&#39;s provisional one-frame end,
+unknown ids, and end-to-end regrouping through `buildWordTimings`. 7
+tests, and `swift build` / the existing suite are unaffected.
+
+### Caveat
+
+These are emission times, not forced-alignment boundaries: RNNT emits
+once the decoder has heard enough context, so a token&#39;s start can sit
+slightly after the word&#39;s true onset. That is already true of
+`consumeTokenTimings()` and is documented on the new method.
+
+- feat(cli/process): add --compute-units flag for offline diarization (#812)
+
+## Summary
+
+Fixes #808. The offline diarization `process` command had no
+`--compute-units` flag, so it always ran with CoreML `computeUnits =
+.all` — with no way to constrain it from the CLI, unlike sibling
+commands (`vad-benchmark`, `vad-analyze`, `sortformer`). `.all` leaves
+the GPU-vs-ANE choice to CoreML, which is a real contention risk when a
+resident GPU consumer (e.g. an MLX model) is coordinated on the same
+machine.
+
+## Changes
+
+- **`ProcessCommand.swift`**: parse `--compute-units
+&lt;all|cpu-only|ane&gt;`, store it on `ParsedArgs`, build an
+`MLModelConfiguration` via
+`MLModelConfigurationUtils.defaultConfiguration(computeUnits:)`, and
+thread it through to `OfflineDiarizerModels.load(from:configuration:)`.
+Added usage docs.
+- **`OfflineDiarizerModels.swift`**: dropped the now-unused private
+`defaultConfiguration()` and documented that the fbank model
+deliberately stays `.cpuOnly` while segmentation/embedding/PLDA follow
+the requested units. (`load()` already honored
+`configuration?.computeUnits` on `main`.)
+
+## Mapping
+
+`all → .all`, `cpu-only → .cpuOnly`, `ane → .cpuAndNeuralEngine`.
+Default remains `.all` (no behavior change). Choosing `cpu-only` or
+`ane` gives a hard off-GPU guarantee.
+
+Note: unlike `VadAnalyzeCommand` (which maps `all →
+.cpuAndNeuralEngine`), this maps `all → .all` so the flag is truthful
+about GPU eligibility.
+
+## Verification
+
+- `swift build` succeeds
+- swift-format lint passes
+- `process --mode offline --help` now lists `--compute-units`
+
+- feat(download): stall watchdog + DownloadConfig plumbing (#810) (#811)
+
+Closes #810.
+
+## Problem
+When an HF model download stalls mid-transfer (bytes stop flowing but
+the connection stays open), the download hangs for up to the 30-minute
+request idle timeout before failing. `URLRequest.timeoutInterval` resets
+on every received byte, so it only fires after *complete* silence — a
+transfer frozen at 80% still hangs the provisioning flow for half an
+hour. `DownloadConfig` carried the timeout but was not reachable from
+the public download API, so integrators could not tune it.
+
+Byte-range resume (#757) already landed on `main`; this PR adds the two
+remaining fixes the issue asked for.
+
+## Changes
+- **Stall watchdog** (`StreamingDownloadDelegate`): a
+`DispatchSourceTimer` wakes every `DownloadConfig.stallWindow` (default
+120 s) and cancels the task when fewer than
+`DownloadConfig.minStallBytes` (default 1 MiB) arrived since the last
+wake. The cancellation surfaces as the retryable
+`DownloadError.stalled`, and byte-range resume continues from the bytes
+already on disk — so the retry does not restart from zero. Set
+`minStallBytes = 0` to disable.
+- **`DownloadConfig` plumbing**: threaded a `config: DownloadConfig =
+.default` parameter through `ModelHub.loadModels` / `download` /
+`download(subdirectory:)` down to `FileDownloader`, wiring
+`config.timeout` into the request and the watchdog thresholds into the
+transport. The default enables the watchdog for all callers; integrators
+can now override.
+- `DownloadConfig` gains `minStallBytes` / `stallWindow` (defaults 1 MiB
+/ 120 s, matching the reporter&#39;s validated workaround).
+
+## Tests
+- `testStalledTransferIsCancelledAndRetried` — a frozen connection is
+cancelled sub-second and the retry resumes to a complete, unspliced
+file.
+- `testDisabledWatchdogDoesNotCancelHealthyDownload` — `minStallBytes ==
+0` leaves a healthy download untouched.
+- `testStalledErrorIsClassifiedRetryable` — `.stalled` is retryable and
+not classified as a cancellation.
+
+All new public parameters are defaulted, so existing call sites are
+source-compatible. `swift build` and format lint pass locally; XCTest
+runs in CI (unavailable locally).
+
+- fix(sortformer): streaming mel emits phantom frames, drifting all timestamps late (#807)
+
+## Problem
+
+The streaming preprocessor (`addAudio` / `process`) center-pads the
+buffered audio on every `computeFlatTransposed` call, but the
+`samplesConsumed` inversion only accounts for one pad. Each preprocess
+call therefore emits frames covering `nFFT - (nFFT - melWindow)/2` = 272
+samples (17 ms) more timeline than the audio it consumes.
+
+With real-time feeding that is roughly one call per 6-frame chunk, so
+the finalized frame stream runs ~3.5% faster than the audio, and every
+frame-derived timestamp (speaker turns, segment boundaries) lags further
+behind the audio as the session runs. Feeding the whole file in a single
+`addAudio` call only pads once, which is why batch-fed tests and
+`processComplete` (which uses `SortformerFeatureLoader`) never hit this.
+It is the same padding-accounting family as #441 / #422 / #444, but
+silent: there is no static shape to trip a CoreML error, the feature
+buffer just absorbs the extra frames. The closest acknowledgment was the
+&#34;known architectural limitation&#34; note in `SortformerTests`.
+
+I hit this in a real app: on a 2.5 minute two-speaker recording, the
+finalized speaker turns were stamped 2.7 s late at the first turn and
+4.5 s late a minute later, so each turn&#39;s opening seconds were
+attributed to the previous speaker, while the tentative (real-time)
+predictions looked fine.
+
+Same demo script, same audio, against current `main` and this branch:
+
+![frame count vs feeding granularity, before and
+after](https://raw.githubusercontent.com/predict-woo/FluidAudio/assets/mel-drift-demo.png)
+
+## Fix
+
+Emit the session-global, batch-equivalent mel stream incrementally
+instead of re-padding per call:
+
+- `audioBuffer` always keeps `nFFT/2` samples of left context, seeded
+with the batch left pad at reset. Mid-stream frames are computed from
+real samples only (`.prePadded` + `expectedFrameCount`), consuming
+exactly `count * melStride` samples, so feeding granularity cannot
+change frame count or values.
+- A frame is emitted once its window `[k*hop - win/2, k*hop + win/2)` is
+covered by received samples.
+- `finalizeSession` (and speaker enrollment, which feeds a complete
+clip) appends the batch right pad and emits the trailing frames,
+reaching the exact `.center`-mode frame count. The pad is a
+preemphasis-cancelling decay so the in-place preemphasis filter
+reproduces the batch pad&#39;s exact zeros.
+
+Streaming output now matches `computeFlatTransposed(paddingMode:
+.center)` of the whole session frame-for-frame at any feeding
+granularity, so the limitation note is gone too. No public API changes.
+
+## Test plan
+
+- New `SortformerStreamingMelTests`: identical chunk sequences and frame
+counts across feeding granularities (160 / 1600 / 4093 / 16000 /
+one-shot), finalized frame count matches the batch formula, streamed
+values match batch center-padded mel including the padded tail, and
+clean restart after `reset()`.
+- Existing Sortformer, enrollment, timeline, and streaming-integration
+suites pass unchanged.
+- Verified on the real 154 s recording above: finalized speaker turns
+now land within one frame of the tentative detections.
+
+---------
+
+Co-authored-by: andyye &lt;63383967+0ev@users.noreply.github.com&gt;
+
+- fix(tts): make LuxTTS resources signable on iOS (#806)
+
+### Why is this change needed?
+
+The LuxTTS G2P resources are currently copied as a top-level directory
+named `Resources`. In iOS resource bundles, Apple code signing
+interprets that reserved layout as a malformed legacy bundle and fails
+with `bundle format unrecognized, invalid, or unsuitable`. This prevents
+any signed iOS consumer build from using current FluidAudio `main`.
+
+This change lets SwiftPM process the production and test resources into
+their bundle roots and updates the corresponding lookups. The resource
+contents and LuxTTS behavior are unchanged. A manifest comment and
+regression test protect the signing-sensitive layout from being reverted
+to `.copy`.
+
+### Validation
+
+- Changed-file `swift format lint`: clean; repository-wide lint exits 0
+with existing warnings
+- Clean `swift test --filter LuxTts`: 33 tests executed, 1 model-gated
+test skipped, 0 failures
+- Full `swift test --parallel --num-workers 8`: exited 0 across 2,111
+XCTest cases and 45 Swift Testing cases
+- Signed generic iOS `FluidAudio` scheme build: passed
+- Generated iOS production and test resource bundles contain their files
+at the bundle root and no nested `Resources` directory
+- `codesign --verify --strict` passed for both generated iOS resource
+bundles
+
+- feat(asr): expose non-mutating vocabulary candidate evidence (#805)
+
+### Why is this change needed?
+
+VocabularyRescorer currently exposes only RescoreOutput after legacy
+vocabulary replacements have already been applied. Applications that
+need a different precision and recall policy cannot preserve the decoder
+transcript while inspecting the accepted and rejected CTC comparisons
+that produced those replacements.
+
+PR #722 added useful opt-in safety controls, but a global threshold
+still cannot express context-aware arbitration for collision-prone
+technical terms without sacrificing accented and domain-term recall.
+This additive API lets callers retain the untouched transcript and make
+their own final selection from FluidAudio evidence without changing
+existing scoring defaults or legacy output.
+
+This is an additive follow-up to #702 and #722; it does not claim to
+change the default false-positive behavior.
+
+### Summary
+
+- Add public Sendable candidate-evidence and output types.
+- Add ctcTokenEvaluateCandidates, which returns the untouched base
+transcript plus every candidate that reaches CTC evaluation, including
+legacy rejections.
+- Report canonical term, exact matched alias, string similarity, raw
+vocabulary and original CTC scores, effective boost, half-open word and
+token ranges, timestamps, legacy decision, and reason.
+- Preserve canonical-versus-alias provenance and contiguous token
+provenance across word-centric, term-centric, and spotter-rescue paths.
+- Keep ctcTokenRescore source-compatible and avoid allocating an
+evidence buffer on the legacy path.
+- Document the non-mutating API and add focused unit coverage for score
+mapping, alias identity, unavailable values, decisions, and span
+semantics.
+
+### Compatibility
+
+- No existing public API is removed or renamed.
+- No scoring threshold, model, configuration default, or legacy
+replacement rule changes.
+- Existing ctcTokenRescore callers continue to receive the same
+rewritten output contract.
+
+### Test Plan
+
+- [x] swift format lint on every changed Swift file
+- [x] swift build
+- [x] swift test --parallel --num-workers 8: 2,116 XCTest cases and 45
+Swift Testing cases passed
+- [x] VocabularyCandidateEvidenceTests: 6 of 6 passed
+- [x] xcodebuild -scheme FluidAudio -destination generic/platform=iOS
+build
+- [x] Full branch diff reviewed against current canonical main with no
+blocking findings</div>
+</div>
+
+<a href="../project/FluidInference_FluidAudio.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,2386 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (86 commits) - ruvnet/RuView - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (86 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/ruvnet_RuView.html">ruvnet/RuView</a> /
+    Updates in main (86 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/ruvnet_RuView.html">ruvnet/RuView</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-24 16:10 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/ruvnet/RuView/commits/main" target="_blank">https://github.com/ruvnet/RuView/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>Этот выпуск обеспечивает комплексную интеграцию Cognitum OAuth для аутентификации на сервере, в CLI и интерфейсе браузера, вводя управление безопасными сессиями и билетами WebSocket. Устранены многочисленные критические уязвимости безопасности, включая обходы авторизации и теневое замещение файлов cookie, что значительно повысило надежность системы. Внесены ключевые обновления в Python-привязки для Aether, Meridian и MAT, с акцентом на производительность, оптимизацию размера пакетов и кроссплатформенное тестирование, а также исправлены конвейеры развертывания и основные функции обучения.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix release publishing pipelines (#1417)
+
+Make deployment consume the exact published sensing-server image, publish the two Python packages in lock-step, and enforce the production witness gate.
+
+- fix release publishing pipelines (#1417)
+
+Make deployment consume the exact published sensing-server image, publish the two Python packages in lock-step, and enforce the production witness gate.
+
+- Merge #1397: Cognitum OAuth resource server, sign-in, and WebSocket auth (ADR-271/272)
+
+Cognitum OAuth for RuView: resource server, sign-in, and WebSocket authentication (ADR-271/272)
+
+- Merge remote-tracking branch &#39;origin/main&#39; into feat/ruview-auth-cognitum-oauth-verifier
+
+# Conflicts:
+#	v2/crates/wifi-densepose-sensing-server/src/main.rs
+
+- Merge #1387: Python components to SOTA (ADR-184..187) + QE hardening
+
+Python components to SOTA: ADR-184..187 (pip publish, P6 bindings, training API, archive/v1 deprecation)
+
+- chore(lock): record wifi-densepose-aether&#39;s serde_json dev-dependency
+
+bc0e8fd0 added `serde_json` to the aether crate&#39;s [dev-dependencies] for the
+native golden-parity test, but v2/Cargo.lock was not regenerated then (that
+worktree had no submodules, so the workspace could not build). CI passed only
+because it does not use `--locked`; committing the lockfile keeps Cargo.toml and
+Cargo.lock in sync and lets a `--locked`/`--frozen` build succeed.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- fix(python,training): validate PyO3 inputs; make the single-training-job guard atomic
+
+Closes the two findings from the adversarial review that were verified but left
+unfixed. Both now have proper tests, each proven to fail against the old code.
+
+1. PyO3 bindings panicked / over-allocated on caller input (aether.rs).
+   `EmbeddingExtractor(n_heads=0)` reached `d_model % n_heads` in the transformer
+   and panicked (surfacing to Python as an opaque PanicException); a non-divisor
+   head count tripped the native assert; and `AetherConfig(d_model=100_000)`
+   allocated multi-gigabyte weight matrices that abort the interpreter. The
+   binding did no validation.
+
+   Now both constructors return `PyResult` and validate at the boundary —
+   positive dims, `d_model % n_heads == 0`, and a generous MAX_DIM/MAX_LAYERS cap
+   — raising `ValueError`. Proven: `n_heads=0` -&gt; &#34;n_heads must be positive&#34;,
+   `d_model=100_000` -&gt; a clean ValueError, both previously a
+   PanicException / abort. +10 pytest cases (test_aether.py); a valid config
+   still constructs and embeds.
+
+2. The single-training-job guard was a TOCTOU race (training_api.rs).
+   `spawn_training_job` checked `is_active()` under a `state` READ lock, released
+   it, then set `active` later. A tokio RwLock read lock is SHARED, so two
+   concurrent `POST /train/start` could both hold it, both see the slot free, and
+   both spawn jobs — sharing/overwriting one status+cancel and orphaning a task
+   handle.
+
+   Extracted `claim_training_slot`, which does the check-and-set in ONE `status`
+   mutex scope — the atomicity lives on the status mutex, not the coarse state
+   lock — so concurrent starts serialise and exactly one wins. This also makes it
+   unit-testable without a full AppState.
+
+   Test: 32 threads hit a barrier and race to claim; asserts EXACTLY ONE wins.
+   Mutation-proven — reverting to the split check-then-set makes it fail
+   (`left: 3, right: 1`), and it returns to 1 with the fix.
+
+Verified on aarch64/macOS: training_api 28 pass (26 existing + 2 new), full
+python/tests suite 237 pass (227 + 10). The native module keeps its internal
+assert as a defence-in-depth invariant; the binding now enforces it at the edge.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- test(python): close the three parity-review findings (native anchor in CI, NaN, cosine)
+
+A cross-vendor review of the parity rework (2febbb81) found three issues; all
+verified and fixed here.
+
+1. HIGH — the native≈golden half never ran in CI, so a binding marshalling bug
+   could pass. The golden vectors were regenerated through the Python binding,
+   and only pytest (binding vs that golden) runs in CI — the native reference
+   tests in `python/tests/aether_parity.rs` link against the PyO3 crate and no
+   workflow runs them. A stable PyO3 conversion defect present at regeneration
+   would therefore be baked into the golden and go undetected.
+
+   Fix: a real native parity test IN the `wifi-densepose-aether` crate
+   (`tests/golden_parity.rs`), which is std-only and a member of the v2
+   workspace, so it runs under the existing `cargo test --workspace`. It
+   recomputes the embedding with no PyO3/marshalling and asserts it matches the
+   SAME committed golden within tolerance. Now native≈golden AND binding≈golden
+   both run in CI ⇒ binding≈native, and a binding-specific artifact in the
+   golden surfaces here as a native mismatch. serde_json added as a
+   dev-dependency only (test-only; never linked into the lib or the wheel, so
+   the crate stays runtime-dependency-free).
+
+   Independently proven at this commit: native output equals the committed
+   golden BIT-FOR-BIT (128/128 exact bits, Δ=0) for both base and loaded — the
+   golden is native-faithful today; this test keeps it that way.
+
+2. MEDIUM — the Python parity helper passed non-finite output. `abs(nan - b) &gt;
+   tol` is False, so an all-NaN embedding slipped through. Now every element
+   must be `math.isfinite` first. Proven: an all-NaN vector is rejected
+   (&#34;element 0 is not finite (nan)&#34;); the Rust helpers already caught it via
+   `&lt;=`.
+
+3. LOW — a coherent shift inside the per-element tolerance could move the whole
+   vector undetected. Added a whole-vector cosine-similarity bound (≥ 1 - 1e-6)
+   alongside the per-element check.
+
+Verified on aarch64/macOS: `test_aether` 13, full `python/tests/` suite 227
+passed against a `--features sota` build; the new native test passes
+(2/2) run standalone (the in-worktree `cargo test -p` only failed on an
+un-checked-out submodule; ci.yml checks out submodules recursively).
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- revert(python): keep the small base wheel — P6 stays source-build-only for now
+
+Reverses the release-wheel packaging change from 3ed43e9a after review.
+
+That commit built the published wheels with `--features sota` so
+`pip install wifi-densepose[aether]` would work. But it did so by abandoning a
+DELIBERATE, guarded design: `default = []`, the
+RuView#1387-default-wheel-budget-config fix-marker, and the wheel-size-budget
+job exist specifically to keep the base wheel small and make SOTA opt-in
+(ADR-117 §5.4). Building SOTA into every published wheel makes the base fat,
+turns the `[aether]`/`[mat]`/`[meridian]` extras into inert no-ops, and — worse
+— leaves the PUBLISHED wheel un-budget-checked (the budget job only builds the
+no-features wheel), so the ONNX Runtime dependency the fix-marker anticipates
+for `mat` would later balloon the shipped wheel past 5 MiB silently.
+
+A pip extra cannot enable a cargo feature on a prebuilt wheel, so &#34;small base +
+opt-in SOTA in binary wheels&#34; is only achievable by splitting into separate
+packages — tracked as #1412. Until that lands, P6 is source-build-only, and the
+honest thing is to say so.
+
+This commit:
+- Restores pip-release.yml to its original state (no --features in the release
+  build; original smoke test). Net packaging change across the branch is now
+  ZERO — the small-base design is fully intact.
+- Points the aether/mat/meridian import shims at the real interim path: a source
+  build with `--features &lt;x&gt;` (or `--features sota`), and #1412 for the binary
+  wheels follow-up. The earlier revision wrongly claimed &#34;the official wheels
+  include it&#34;, which is only true once #1412 ships.
+
+KEPT from 3ed43e9a (correct regardless of packaging): the AETHER parity tests
+are now arch-portable — they compare a golden VECTOR within tolerance instead of
+a SHA-256 of raw f32 bytes, which only ever matched the one architecture that
+generated it and failed on the aarch64/macOS-arm wheels this project builds.
+
+Verified on aarch64/macOS with a `--features sota` build (as python-ci does):
+test_aether 13, test_mat 7, test_meridian 13 pass; full suite unaffected.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- fix(python): ship SOTA bindings in release wheels; make parity tests arch-portable
+
+Three coupled defects, all found by building the wheel and running the real
+suite on Apple Silicon rather than trusting green CI.
+
+1. THE P6 SOTA BINDINGS NEVER REACHED USERS (release blocker).
+   `pip-release.yml`&#39;s cibuildwheel built the DEFAULT feature set, so published
+   wheels contained none of aether/mat/meridian. `pip install
+   wifi-densepose[aether]` then raised ImportError — and the extra is empty, so
+   its own error message (&#34;install the [aether] extra&#34;) sent users in a circle.
+   A pip extra cannot enable a Rust cargo feature on an already-built wheel, so
+   the only way P6 reaches PyPI is to compile it in.
+
+   Fix: the RELEASE build opts in via `MATURIN_PEP517_ARGS=&#34;--features sota&#34;`
+   (per-platform, since CIBW_ENVIRONMENT_LINUX overrides CIBW_ENVIRONMENT).
+   `default = []` in Cargo.toml, the RuView#1387-default-wheel-budget-config
+   fix-marker, and the wheel-size-budget job are all left UNTOUCHED — they keep
+   guarding the small base compile. Measured published wheel: 1.68 MiB, well
+   under the ADR-117 §5.4 5 MiB budget. Proven: built via the exact PEP517 path,
+   `import wifi_densepose.aether/mat/meridian` all succeed.
+
+2. THE WHEEL SMOKE TEST COULD NOT SEE #1.
+   CIBW_TEST_COMMAND only asserted `hello()` and PRINTED `__build_features__`.
+   The one signal that would reveal missing bindings was dumped to stdout and
+   ignored, so a featureless wheel published green. It now ASSERTS the p6
+   features are present and imports the three modules. Proven red→green: fails
+   on the old featureless wheel (&#34;missing SOTA bindings: [...]&#34;), passes on the
+   fixed one.
+
+3. THE AETHER PARITY TESTS WERE NOT PORTABLE ACROSS THE WHEEL MATRIX.
+   `test_aether.py` and the native `aether_parity.rs`/`aether_weights_parity.rs`
+   hashed the raw f32 embedding bytes (SHA-256) against a committed golden. The
+   embedding is pure f32 with transcendental ops (ln/sqrt/cos) that are not
+   bit-reproducible across CPUs/libm, so the hash only ever matched the one arch
+   that generated it. This passed in python-ci (x86) but fails on the aarch64 /
+   macOS-arm wheels this same project ships — latent until #1 is fixed and the
+   bindings actually load. Every tolerance/behavioral assertion already passed;
+   only the two byte-hash tests failed, which is the signature of a non-portable
+   golden, not a logic bug.
+
+   Fix: compare to a committed golden VECTOR within tolerance
+   (atol=rtol=1e-4 — ~100x cross-arch f32 drift, ~100x under any real algorithm
+   change), on both the Python and native sides against the SAME golden. Native
+   ≈ golden and binding ≈ golden together prove binding ≈ native, portably.
+   `.sha256` goldens replaced by `.json` vectors.
+
+Also: the aether/mat/meridian import shims told users to `pip install
+wifi-densepose[&lt;x&gt;]` on a missing feature — an empty extra that cannot help.
+Corrected to name the real fix (rebuild with `--features &lt;x&gt;`); message tests
+updated to assert the honest message and forbid the misleading one.
+
+Verified on aarch64/macOS: full `python/tests/` suite 227 passed against a wheel
+built with the new mechanism; `cargo check --tests --features aether` clean.
+The native `.rs` parity tests were converted by inspection and cargo-checked but
+not executed — they link against the PyO3 crate and no workflow runs them today
+(a pre-existing gap; wiring `cd python &amp;&amp; cargo test --features sota` into
+python-ci would make the native anchor actually run).
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- decide: browser sessions are read-only permanently; drop the dead step-up client
+
+Decision: browser-side admin is not wanted. `BROWSER_SIGNIN_SCOPE` stays
+`sensing:read`, and the escalate-on-demand design sketched while this was open
+is not being built. Destructive operations — training, model delete, recording
+delete — keep their home in the CLI, where `--admin` is explicit and typed by a
+person. Routing them through a browser would mean either asking every user to
+consent to delete capability in order to watch a stream, or building a second
+consent flow to avoid that.
+
+Consequences, now settled rather than open:
+
+- The UI&#39;s admin controls are unreachable from a Cognitum browser session, and
+  that is intended. The manual token-paste field is unchanged and still carries
+  whatever authority the pasted token has, so nothing that worked before stops
+  working.
+
+- REMOVED the client-side step-up redirect from ui/services/api.service.js. It
+  caught an RFC 6750 challenge that can never be issued to a browser, and it
+  ended in `return new Promise(() =&gt; {})` — so if any other 401 had ever grown
+  that header, every caller awaiting it would have hung forever with no error
+  and no timeout. Dead code with a trap in it is worse than no code.
+
+- KEPT ADMIN_REVERIFY_SECS as a server-side backstop. Fail-closed and free, so
+  if the requested scope is ever widened the freshness requirement is already
+  in place. Documented at its definition as a backstop specifically so nobody
+  reads its passing tests as evidence the control is exercised — the tests
+  reach it through a crate-internal seam that mints an admin cookie the real
+  flow does not produce.
+
+ADR-271 also stops hedging on the session TTL: chosen is A at one hour. Option B
+(server-side refresh-token store) is not built, and the ADR now names the
+residual instead of implying it is closed — within one hour a revoked Cognitum
+grant still reads sensing data through an existing browser session. There is no
+introspection endpoint, so nothing short of B closes that, and one hour is the
+size of the hole we accepted.
+
+Adds `the_cookie_max_age_matches_the_session_expiry`, which the previous ADR
+revision asked for and nobody had written: Max-Age and the payload&#39;s `exp` are
+two independent expressions of one lifetime, and drift means either the browser
+presents a session we reject or we hold authority the browser discarded.
+
+Verified: workspace 176 suites clean, UI 22, api.service.js parses.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- docs(adr): correct a false claim about browser scope; pin the decision in code
+
+A cross-vendor pre-merge sweep found no merge blockers, but did surface an
+error in ADR-271 that I wrote — and a coherence gap behind it.
+
+ADR-271 P2 stated that capping the browser session at `sensing:read` was
+&#34;considered and rejected, because the dashboard genuinely performs admin
+operations&#34;. That is wrong. `/oauth/start` (main.rs:9206) already requests
+`SENSING_READ` and nothing else, deliberately, with a comment saying so. The
+browser session is ALREADY read-only, so the breakage I claimed capping would
+cause is simply the current behaviour.
+
+Two consequences, now stated in the ADR instead of left to be discovered:
+
+1. The UI&#39;s admin controls do not work from a browser OAuth session.
+   `model.service.js:136` issues DELETE /api/v1/models/{id}, which 401s. Admin
+   work needs the CLI (`login --admin`) or a pasted admin bearer. A gap in a new
+   feature, not a regression — the token-paste path is unchanged.
+
+2. The ADMIN_REVERIFY_SECS step-up control added in the previous commit guards
+   a case that cannot currently arise. No browser session holds `sensing:admin`,
+   so the freshness branch never fires in production. Its tests pass because the
+   crate-internal seam mints an admin cookie the real flow never produces.
+
+That second point is worth being blunt about: it is the same shape as several
+defects this branch already fixed — correct code, green tests, unreachable call
+site. The difference is that here the guard is deliberately ahead of the need
+rather than mistakenly behind it, and saying which one it is matters.
+
+So the constant is now named `BROWSER_SIGNIN_SCOPE` rather than inlined, with
+the cost of widening it documented at the definition, and two tests:
+`browser_sign_in_stays_read_only_until_someone_decides_otherwise` pins the
+value, and `the_authorize_url_actually_carries_that_scope` proves it reaches the
+wire — asserting on the constant alone would pass even if `begin` were called
+with something else, which is exactly the isolation failure being guarded
+against.
+
+The ADR also records the coherent way to add browser-side admin if wanted:
+escalate-on-demand via the RFC 6750 challenge, keeping least privilege by
+default rather than asking every user to consent to delete capability to watch
+a stream. Not bundled here — it needs a scope parameter and a UI affordance.
+
+Sweep verdict: no merge blockers. Two other non-blocking risks it raised are
+accurate and unchanged: concurrent JWKS refresh at the stale boundary is not
+atomic (a duplicated idempotent GET, already documented as an accepted cost),
+and the service worker&#39;s SHELL_ASSETS use root-relative paths while the UI
+mounts under /ui, so offline shell precaching is incomplete — pre-existing,
+unrelated to this branch.
+
+Verified: workspace 176 suites clean.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- fix(auth): check scope before step-up, so read-only callers are not sent in a circle
+
+Found by an empirical route sweep during the pre-merge pass, not by a test.
+
+The step-up gate fired BEFORE the scope check, so a caller holding only
+`sensing:read` who attempted a privileged action with a session older than
+ADMIN_REVERIFY_SECS received the RFC 6750 &#34;reauthentication required&#34;
+challenge. `api.service.js` acts on that by redirecting through /oauth/start —
+and the user returns with exactly the same scopes and is refused again. One
+wasted round trip, and a reason for the refusal that was simply untrue: they
+were not refused for staleness, they were refused for capability.
+
+Now the scope check comes first, so only a caller who actually HOLDS
+`sensing:admin` is ever asked to prove the session is fresh. Not a loop before
+(the second refusal is a plain 401 with no challenge) and not a security issue
+either way — both paths refuse. It was misleading, and it cost a redirect.
+
+Also confirms the deny-by-default gate does not over-reach. Probed the real
+binary with auth off vs on:
+
+  /, /ui/*, /health, /health/{live,ready,metrics,version},
+  /oauth/{status,start}    unchanged
+  /api/field, /api/v1/*    200 -&gt; 401   (intended)
+  /metrics, /favicon.ico   404 -&gt; 401   (never existed; now uniform)
+
+Nothing that returned 2xx before returns 401 now, which is the property that
+matters for existing deployments.
+
+Tests: +2. `a_read_only_user_is_not_sent_to_reauthenticate_pointlessly` fails
+against the old ordering with the challenge header present; its counterpart
+`an_admin_holder_with_a_stale_session_does_get_the_challenge` ensures the fix
+does not simply disable the signal.
+
+Verified: workspace 176 suites clean, ruview-auth 62+25+2 --all-features.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- fix(auth): close P1/P2/P3 — JWKS stall, 12h session, cookie shadowing
+
+All three deferred findings from the qe-court round. Each fix is guarded by a
+test confirmed to FAIL against the old behaviour.
+
+P1 — JWKS: self-inflicted stall, and a blocking fetch on a tokio worker.
+
+`fetched_at` advances only on SUCCESS, and the only rate limiter sat behind
+`if fresh`. So once the TTL elapsed after the last successful fetch, `fresh`
+was permanently false, the limiter was never consulted, and EVERY request
+performed its own blocking 3s-timeout fetch. A Pi that loses WAN stalled
+itself 300s later with no attacker present; an attacker could force the same
+state by flooding tokens with an unknown `kid`.
+
+Now: `last_attempt_at` is recorded BEFORE every fetch regardless of outcome,
+and gates the stale path too; a stale-but-present key is served rather than
+erroring, which is the offline tolerance this module always claimed.
+Measured by the new test: 26 outbound fetches before, 1 after.
+
+Kept as TWO independent limiters. Merging them looks tidy and is wrong — a
+routine refetch would then suppress the unknown-`kid` path for 30s and delay
+pickup of a key rotation inside the TTL. I made that mistake first; two
+existing tests caught it.
+
+The blocking call also now runs in `spawn_blocking` at the verify boundary,
+matching what `main.rs` already does for the token exchange, where the comment
+reads &#34;the same mistake this codebase had to fix in jwks.rs&#34;. The hot
+verification path had never been given the same treatment. A panicked task
+fails closed.
+
+P2 — session lifetime, per decision: 1 hour, plus step-up.
+
+SESSION_TTL_SECS 12h -&gt; 1h, and privileged (`sensing:admin`) actions now
+require the user to have authenticated within ADMIN_REVERIFY_SECS (5 min),
+tracked by a new `auth_time` claim. Reads ride the full session; only the
+routes where a stale session does damage are re-verified, so a dashboard whose
+main use is watching a live stream does not re-auth hourly.
+
+`auth_time` is `#[serde(default)]`, so a cookie issued before the field existed
+reads as 0 — infinitely stale. Such a session keeps working for reads and
+cannot perform privileged actions. Fail-closed and self-healing on next sign-in.
+
+The refusal carries an RFC 6750 `WWW-Authenticate` error code, because the
+client&#39;s correct response differs from a plain 401: the user IS signed in and
+needs to prove it again. `api.service.js` acts on that and redirects through
+`/oauth/start` — otherwise a stale-session delete surfaces as a generic
+&#34;Request failed&#34; with no hint that signing in again fixes it.
+
+P3 — cookie shadowing.
+
+`read_cookie` returned the FIRST match, and RFC 6265 §5.4 sends longer-`Path`
+cookies first. Cookies are not isolated by port or scheme, so any other service
+on the host — or a plain-HTTP MITM injecting Set-Cookie — could plant
+`ruview_session=&lt;their own validly signed session&gt;; Path=/ui`. The victim sent
+both, the attacker&#39;s first, and it verified because it genuinely was signed:
+silent session takeover, with `/oauth/status` reporting the attacker&#39;s account.
+
+The signature was doing its job throughout, which is why &#34;it&#39;s signed&#34; never
+answered this. `__Host-` would, but requires `Secure`, and RuView is routinely
+reached over plain HTTP on a LAN.
+
+So both credential paths now accept only when EXACTLY ONE candidate verifies.
+An attacker can still cause a refusal by planting a second valid cookie — a
+nuisance — but no longer a takeover. Planting junk changes nothing, so this
+does not become a trivial DoS.
+
+Tests: +1 jwks (26-vs-1 fetch amplification), +4 step-up, +4 shadowing, +1
+duplicate-name reader. Mutation-verified: reverting the stale-path guard gives
+26 fetches; reverting to first-match cookie reads fails
+`a_shadowing_cookie_cannot_silently_take_over_the_session`.
+
+Verified: workspace 176 suites clean under CI flags, ruview-auth 62+25+2 with
+--all-features, UI 22.
+
+ADR-271: P1/P2/P3 marked RESOLVED with the analysis retained, since it explains
+why each fix has the shape it does.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- test(auth): cover browser sign-in; ADR-271/272 corrections and remediation plans
+
+Browser sign-in was the newest security surface in this PR and had no
+executable evidence behind it: browser_session.rs was 534 lines with 13 tests,
+every one of which hit a private helper (sign, unsign, cookie, read_cookie,
+is_live, has_scope). No test called issue, from_cookie_header, begin,
+verifier_for_callback or is_configured, and no test anywhere presented a session
+cookie to the gate.
+
++10 tests in browser_session, +6 in bearer_auth. Three mutants the adversarial
+review named, each now verified dead by actually applying the mutation:
+
+  (a) delete the `state` comparison in verifier_for_callback
+      -&gt; a_callback_whose_state_does_not_match_is_refused FAILED
+      Without it the callback accepts a code from a flow the user never
+      started: login CSRF, victim silently lands in the attacker&#39;s session.
+
+  (b) `session.is_live().then_some(session)` -&gt; `Some(session)`
+      -&gt; an_expired_session_cookie_does_not_authenticate FAILED
+      -&gt; an_expired_browser_session_is_refused FAILED
+      `is_live` was already unit-tested; nothing asserted the CALLER consults
+      it. Same &#34;tested in isolation, call site untested&#34; shape as the earlier
+      refresh-never-invoked defect.
+
+  (c) `session.has_scope(required)` -&gt; `true`
+      -&gt; a_read_scoped_browser_session_cannot_delete_or_train FAILED
+      Without it any browser session could delete models and start training.
+
+Mutant (c) initially appeared to SURVIVE. It did not — there are two
+has_scope call sites and the first substitution only hit one. Mutating the
+one in `session_or_unauthorized` kills the test. That accident confirmed a
+separate finding: the cookie branch inside require_bearer is unreachable when
+an Authorization header is present, because the OAuth step returns on both
+arms. It fails closed, so it is not a hole, but &#34;try the next credential&#34; is
+what the code reads like. Pinned by
+a_bad_bearer_beats_a_good_cookie_rather_than_falling_back.
+
+Adds two crate-internal test seams (init_secret_for_tests, test_cookie_value).
+test_cookie_value signs through the same path as `issue`, so tests presenting a
+cookie exercise real verification rather than a test-only bypass.
+
+ADR-271:
+- The &#34;browser cannot obtain an OAuth token&#34; section asserted
+  `grep -ril &#34;oauth|cognitum|pkce&#34; ui/` returns nothing. It now returns three
+  files, invalidated by commits in this same PR. Marked superseded, original
+  retained under a fold, replaced with what actually ships.
+- Records the two deferred decisions with designs rather than patches: P1 the
+  blocking JWKS fetch on a tokio worker (whose rate limiter is bypassed on
+  exactly the stale path that matters, because fetched_at updates only on
+  success — so after the TTL every request fetches, and a Pi that loses WAN
+  stalls itself with no attacker present); P2 the 12-hour session from a
+  15-minute token, with three costed options. Capping the session to
+  sensing:read was considered and rejected: the dashboard genuinely issues
+  DELETE /api/v1/models/{id}.
+- P3 records that dropping `__Host-` costs origin-integrity, not just Secure —
+  read_cookie takes the FIRST match and cookies are not port-scoped, so a
+  same-host writer can shadow a session. Forgery was never the threat that
+  prefix addresses.
+- Documents redirect_uri&#39;s hardcoded default and the unconsumed CLI credential
+  as known-incomplete, per decision to leave both as-is.
+
+ADR-272: corrected a claim that would mislead users into a 401. It stated the
+Python client DOES send Authorization: Bearer on the handshake; ws.py passes no
+headers at all (zero occurrences of extra_headers or Authorization), so every
+published client 401s once auth is enabled. Server-side decision unchanged.
+
+Verified: sensing-server 566 + 179 + 7 + 5 + 8 + 4 + 16 pass under CI flags,
+ruview-auth 61 + 25 + 2 with --all-features, auth_wiring 7.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- fix(auth): close /api/field bypass, two fail-opens, and a self-disarming test
+
+Findings from a qe-court adversarial round (4 prosecutors across 2 vendors).
+Each was verified against the code before being accepted; the ones below
+reproduced, the rest are reported in the PR thread rather than acted on.
+
+FATAL — `/api/field` was reachable with no credential, on both listeners.
+The gate protected `/api/v1/*` by prefix. `/api/field` is the REST sibling of
+`/ws/field` and serves the same signed FieldEvent stream — live presence, pose,
+vitals. `/ws/field` was gated in this PR; its twin one path segment over was
+not. Measured with RUVIEW_API_TOKEN set and no credential supplied:
+
+    /api/v1/models  401      (control)
+    /ws/field       401      (gated by this PR)
+    /api/field      200      on :8080 AND :8765
+
+Fixed by inverting the gate to deny-by-default with an explicit anonymous
+allowlist (`/`, `/ui`, `/health`, `/oauth/`). A route added at a new path is
+now gated because nobody exposed it, rather than exposed because nobody
+protected it — the same inversion already applied to the scope gate.
+
+FATAL — the wiring test disarmed itself exactly when it mattered.
+`Server::start` returned an Option that all five tests turned into `return`,
+so a server that failed to boot produced &#34;5 passed&#34; with zero assertions run,
+and cargo swallows the skip line without --nocapture. The one test that
+observes real wiring — the guard against both shipped bypasses — was silent
+for any change that breaks startup, including a boot panic in the auth path.
+It now panics with the child&#39;s stderr.
+
+MAJOR — a malformed client-id list silently disabled the audience check.
+An empty allowlist is the opt-out sentinel in verify.rs. `RUVIEW_OAUTH_CLIENT_IDS=&#34;,&#34;`
+is non-empty, passes the guard, then filters to an empty Vec — turning the
+audience boundary off with no log and admitting a token minted for any other
+Cognitum product. Only a literal `*` may opt out now; anything else that parses
+to nothing warns and falls back to the default. Same fail-open shape as the
+scope denylist this PR already had to invert.
+
+MAJOR — credentials were world-readable for a window on every refresh.
+`fs::write` creates at 0666 &amp; !umask (0644 by default), and both writers
+chmodded afterwards. The existing permissions test asserted on the FINAL file
+and passed throughout. Affected the CLI refresh token (rotated with reuse
+detection — a thief who presents it first takes the session family) and the
+browser session secret (the HMAC key for every session; stealing it forges any
+account at any scope). Both now create with mode 0600 via OpenOptions.
+
+MAJOR — ui/sw.js cached authenticated API responses.
+Closing the /oauth/ leg left the /api/ leg open. `networkFirst` cached every
+successful response, keyed by URL alone, purged by nothing at sign-out: sign in
+as A, load sensing data, sign out, sign in as B, lose the network, and B is
+served A&#39;s data with no authorization check. API responses are now network-only
+— which is also the correct behaviour for a live sensing dashboard, where
+replaying a stale reading can show a room occupied after the person left — plus
+a cache purge on sign-out.
+
+CI — 40 of ruview-auth&#39;s 87 tests never ran.
+The workspace runs --no-default-features, which switches off the `login` and
+`pkce` features. Measured: 47 tests vs 87. The whole interactive sign-in path —
+credential storage, single-flight refresh, the file lock, the loopback callback
+— was green locally and never executed in CI. Added an --all-features step.
+(Checked the sensing-server for the same problem and did NOT find it:
+bearer_auth&#39;s 49 and browser_session&#39;s 15 do run under CI flags.)
+
+Tests: +2 wiring tests (one fails against the old gate with
+&#34;http port served /api/field to an anonymous caller&#34;, passes after), +3 UI
+service-worker tests, +3 CLI scope tests, +1 temp-file permission test, +1
+client-id parsing test. wifi-densepose-cli/src/auth.rs had zero tests and
+builds its own scope string, so the library&#39;s least-privilege test said nothing
+about what the CLI requests.
+
+Verified: ruview-auth 61+25+2 pass (--all-features), sensing-server bearer_auth
+50, browser_session 15, auth_wiring 7, workspace 25 suites clean, UI 22.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- fix(ui): service worker cached /oauth/status, freezing browser sign-in
+
+Browser sign-in worked, but the settings panel kept offering &#34;Sign in with
+Cognitum&#34; afterwards; only a hard reload showed the true state. The server was
+correct throughout.
+
+Root cause: `ui/sw.js` routed cache-first as its CATCH-ALL for every path
+outside `/api/` and `/health/`. `/oauth/status` therefore had its first
+(signed-out) response stored in the Cache API and replayed to the page forever.
+The Cache API is not the HTTP cache and ignores `Cache-Control` entirely, so the
+`no-store, no-cache, must-revalidate` the server already sends could not prevent
+it. A hard reload bypasses the service worker, which is why that alone appeared
+to fix it, and why signing out re-poisoned the entry.
+
+Fixes, in order of blast radius:
+
+- `/oauth/` is never handled by the worker. Not network-first — that still
+  writes a copy, which would be replayed the moment the server is briefly
+  unreachable, silently reinstating a stale sign-in state.
+- Cache-first is now an ALLOWLIST (navigations and static asset extensions)
+  rather than the catch-all. This is the underlying defect: any endpoint added
+  outside `/api/` was frozen on its first response. Unrecognised paths now go
+  to the network untouched.
+- `CACHE_NAME` bumped to `ruview-v2`, so `activate` evicts the poisoned
+  `ruview-v1` from browsers that already ran the old worker. Verified: the
+  cache list went from `[ruview-v1]` to `[ruview-v2]` on update.
+- Shell lookups use `ignoreSearch` and store a search-less key, so the
+  `?signed_in=&lt;ms&gt;` the callback redirects to does not mint a fresh, never-hit
+  cache entry per sign-in.
+
+Also: re-check sign-in state on `pageshow` (bfcache restore, where no script
+re-runs) and on `visibilitychange` (signed in or out in another tab). Opening
+the panel alone is not sufficient — it may already be open.
+
+Verification, in a real browser driven end-to-end:
+- Reproduced with a valid session cookie: server returned `signed_in: true` to
+  curl while the page&#39;s own fetch got a cached `signed_in: false`, and the
+  request never appeared in the server log at all.
+- Confirmed the cached entry existed: `caches.open(&#39;ruview-v1&#39;).match(
+  &#39;/oauth/status&#39;)` returned the signed-out body.
+- After the fix, on a NORMAL (not hard) reload the panel reads
+  &#34;Signed in as &lt;account&gt; - sensing:read&#34; with Sign out shown.
+
+Tests: `ui/sw.test.mjs` loads the real `sw.js` with stubbed worker globals and
+asserts the routing decision per path. 4 of its 10 tests fail against the
+pre-fix worker and pass after; the other 6 pin pre-existing guards (non-GET,
+websocket upgrade, cross-origin, API paths, static assets, navigation) and pass
+in both, so they track behaviour rather than the rewrite.
+
+CI: adds a `ui-tests` job. Nothing ran the UI JavaScript before, so both this
+suite and the ADR-272 ws-ticket suite would have rotted unexecuted — which is
+the same blind spot that let this defect ship.
+
+Removes the temporary `/oauth/status` cookie logging and the panel console
+diagnostic added while tracking this down.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- fix(auth): two Set-Cookie headers were collapsing into one; clear the spent transaction
+
+Two bugs, one of which I introduced while fixing the other and caught only by
+checking the actual response.
+
+1. THE SPENT TRANSACTION COOKIE WAS NEVER CLEARED ON SUCCESS.
+   `clear_transaction` was only used on error paths, so after a successful
+   sign-in `ruview_oauth_txn` lingered for its full 10-minute TTL and every
+   subsequent request carried a dead cookie. Visible in the logs as
+   `names=ruview_oauth_txn,ruview_session`. Now cleared alongside issuing the
+   session, and on logout too.
+
+2. THE FIX FOR (1) BROKE SIGN-IN, AND THE TEST CAUGHT IT.
+   Axum&#39;s array-of-tuples response form REPLACES same-name headers rather than
+   appending. Adding a second `Set-Cookie` silently overwrote the first, so the
+   logout response emitted only the transaction clear and — had this shipped —
+   the CALLBACK would have emitted only the transaction clear too, dropping the
+   session cookie and making a successful OAuth round-trip a no-op.
+
+   Caught by looking at the real response headers rather than trusting the
+   change: `curl -D-` showed one Set-Cookie where there should have been two.
+
+   Now uses `axum::response::AppendHeaders`. Both cookies verified present.
+
+   Two tests pin this: one DOCUMENTS the footgun (the array form collapses two
+   Set-Cookie headers into one) and one asserts AppendHeaders emits both. The
+   first exists so the next person to reach for the tidier-looking array form
+   finds out here instead of in production.
+
+Also adds a cache-busting query to both redirect targets
+(`/ui/?signed_in=&lt;ms&gt;` and `?signed_out=&lt;ms&gt;`). Landing on the same URL let the
+browser restore the page from the back/forward cache with a stale panel, which
+is why signing in appeared not to work until a hard refresh — the session was
+established correctly every time, the page simply was not re-fetched.
+
+Tests: 549 sensing-server lib.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- fix(ui): actually call refreshSignInPanel — VERIFIED IN A REAL BROWSER
+
+`refreshSignInPanel` was exported and never invoked. The Cognitum Account panel
+would have rendered &#34;Checking…&#34; forever and the Sign in button would never have
+reflected a completed sign-in.
+
+That is the FOURTH defect of this exact shape today — implemented, unit-tested,
+and never called. The others: the refresh path no command invoked, scope
+resolved only at write time, and a WebSocket listener with no auth layer. The
+pattern is consistent: the logic was fine, the caller was missing, and a green
+suite could not see it.
+
+Now refreshed on every panel open — not once at construction — because the
+session may have been established in another tab or expired since page load.
+Buttons are also bound at construction so a click works before the first status
+fetch resolves.
+
+VERIFIED END TO END IN A REAL BROWSER (Chrome, http://127.0.0.1:8099/ui/), which
+is the gap that has been open all session:
+
+  1. panel showed &#34;This server requires sign-in.&#34; + Sign in with Cognitum
+  2. clicked -&gt; auth.cognitum.one -&gt; approved
+  3. server: &#34;browser sign-in complete&#34; sub=ed3efb51-…
+  4. DevTools: ruview_session cookie on 127.0.0.1, Path=/, HttpOnly, SameSite=Lax
+  5. after reload the panel reads:
+       &#34;Signed in as UyShaIh1B1gL7km9Xli9kCDSdRT2 — sensing:read&#34;  + Sign out
+
+So the browser half of gate G-3 is now proven, not argued: PKCE, consent, the
+server-side code exchange, ES256 verification with audience and scope checks,
+the signed session cookie, and the UI reading it back.
+
+Diagnosis note worth keeping: the first attempt appeared to fail because the
+browser tab had been open since BEFORE the fix — an already-loaded ES module
+stays in memory regardless of `Cache-Control: no-store`. The cookie had been
+stored correctly the whole time; the panel simply never re-queried. The server
+log showed zero /oauth/status probes, which is what distinguished &#34;fetch never
+fired&#34; from &#34;fetch got the wrong answer&#34;. Temporary cookie diagnostics added to
+find that are removed here.
+
+Tests: 547 sensing-server lib, unchanged.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- feat(ui): Sign in with Cognitum, zero-config session secret, executed JS tests
+
+Three loose ends from the browser sign-in work.
+
+--- 1. The last mile: a button ---
+
+The server endpoints existed but nothing in ui/ linked to them, so the feature
+was unreachable. QuickSettings gains a &#34;Cognitum Account&#34; panel that renders
+from `GET /oauth/status` and offers Sign in / Sign out.
+
+`/oauth/status` is a new endpoint and is deliberately UNGATED — a signed-OUT
+browser cannot ask a gated API whether sign-in is available. It returns only
+capability flags and, when a session exists, who it belongs to. Never a
+credential.
+
+The panel distinguishes four states rather than showing a button that might
+404: signed in; sign-in available; auth on but OAuth off (points at the
+existing static-token panel); no auth required. A 404 from /oauth/status means
+a server predating this work and says so plainly.
+
+Sign-in is a full-page navigation, not fetch(): the server replies 302 and the
+browser must follow it carrying the transaction cookie. An XHR would follow the
+redirect invisibly and land nowhere.
+
+--- 2. RUVIEW_SESSION_SECRET no longer required ---
+
+Previously `/oauth/start` returned 503 unless an operator invented a secret —
+a footgun, since they set RUVIEW_OAUTH_ISSUER, expect sign-in, and get a 503
+naming an env var they have never heard of.
+
+Now resolved in order: env var, then `&lt;data_dir&gt;/session-secret`, then generate
+one and persist it 0600 (temp file, chmod before rename — the discipline used
+for the CLI&#39;s credentials). Persisted rather than in-memory so a restart does
+not silently sign everyone out.
+
+The env var still wins, which is what a multi-instance deployment needs: several
+servers must share a secret or a session issued by one is rejected by the next.
+If the file cannot be written we log the reason and continue with an in-memory
+secret rather than refusing sign-in outright.
+
+Verified with NO configuration at all: secret generated, file mode 0600,
+/oauth/start returns 302, /oauth/status reports browser_signin: true.
+
+--- 3. The JavaScript is now executed by tests ---
+
+`ui/services/ws-ticket.test.mjs`, 9 tests, node:test built-in — no new
+dependency and no package.json needed. Run: `node --test ui/services/`.
+
+Covers: no token means no fetch and an unchanged URL; the bearer reaches the
+Authorization header and NEVER the URL; `?` vs `&amp;` when a query already exists;
+ticket URL-encoding; 404 treated as a pre-ADR-272 server (the property that
+lets one UI work against old and new servers, and therefore lets the legacy
+escape hatch be removed later); 503 and network failure swallowed rather than
+breaking the connect path; and that a fresh ticket is minted per call, since
+tickets are single-use and caching one fails on the second reconnect.
+
+STATED PRECISELY, because the distinction matters: this EXECUTES the module in
+Node with stubbed fetch/localStorage. It is more than the `node --check` it
+replaces and less than a browser — no real WebSocket upgrade, no real cookies,
+no page wiring. &#34;The UI JavaScript has never been run&#34; is no longer true of
+this module. &#34;Browser-tested&#34; still is not.
+
+Tests: 547 sensing-server lib, 5 wiring integration, 87 ruview-auth, 9 JS.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- feat(auth): browser sign-in — /oauth/start, /oauth/callback, session cookie
+
+Closes the gap adversarial review found: `wifi-densepose login` writes
+~/.ruview/credentials.json, which a BROWSER CANNOT READ. The UI therefore had no
+way to obtain a Cognitum token at all, and the WebSocket ticket mechanism
+ADR-272 built &#34;for browsers&#34; was only exercisable with the legacy static shared
+secret OAuth was meant to replace. The ADRs described a browser story that did
+not exist.
+
+Ported from cognitum-one/freetokens (src/auth/oauth.ts, live at
+freetokens.cognitum.one), whose shape is not the obvious one and is the whole
+point:
+
+  THE BROWSER NEVER HOLDS AN OAUTH TOKEN.
+
+The server generates the PKCE verifier and state, keeps them in an HMAC-signed
+cookie, performs the code exchange itself, verifies the token, and issues its
+OWN session cookie carrying an assertion — subject, account, scope, expiry — not
+a credential. So the access token cannot be read by an XSS, cannot sit in
+localStorage, and cannot leak through a URL. A stolen session cookie is useless
+against Cognitum or any sibling service.
+
+  GET /oauth/start    -&gt; 302 to auth.cognitum.one + signed transaction cookie
+  GET /oauth/callback -&gt; constant-time state check, exchange, verify, session
+  GET /oauth/logout   -&gt; clears the local session (not the Cognitum session)
+
+Verified against the running binary: /oauth/start returns the same 302 +
+HttpOnly/SameSite=Lax/Max-Age=600 shape freetokens does live; a forged `state`
+is refused 400; a forged session cookie is refused 401.
+
+DELIBERATE DEVIATION from freetokens: no `__Host-` cookie prefix. That prefix
+REQUIRES `Secure`, and RuView is routinely reached at http://localhost or over
+plain HTTP on a LAN, where such a cookie is never sent and sign-in would fail
+silently. `Secure` is set only when the request actually arrived over TLS
+(direct or via x-forwarded-proto). Every other attribute matches; the HMAC is
+what protects the value.
+
+Other decisions worth stating:
+- The callback verifies through the SAME `verify_access_token` every other
+  request uses — signature, audience (client_id), typ, expiry, scope. A sign-in
+  path must not be a softer path.
+- The session cookie is checked LAST in the middleware, after bearer and ticket:
+  it is the weakest-bound credential, so a presented bearer should win.
+- A browser session requests `sensing:read` only. Admin work goes through the
+  CLI&#39;s explicit `--admin`.
+- The token exchange runs in `spawn_blocking` — `ureq` is blocking, and parking
+  an async worker is the mistake this codebase just had to fix in jwks.rs.
+- `/oauth/*` sits outside `/api/v1/*` on purpose: gating the routes you use to
+  obtain a credential would deadlock.
+
+PKCE moved out from behind the `login` feature into its own light `pkce` feature
+(rand + sha2 + base64, no HTTP stack), so the server can build an authorize URL
+without pulling in the client-side login machinery. `login` now implies `pkce`.
+
+Tests: 13 new browser_session unit tests — signature round-trip, tampered
+payload, wrong secret, malformed cookie values, HttpOnly/SameSite/Secure
+attributes, exact scope matching with no implied escalation, a cookie name that
+merely ends with the target not matching, multi-scope URL encoding, and the
+core property that a session cookie never contains the access token.
+Totals: 547 sensing-server lib + 5 wiring integration, 87 ruview-auth.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- test(auth): boot the real binary and probe BOTH listeners (the wiring gap)
+
+Two authentication bypasses shipped in this PR and 526 green unit tests could
+not see either, because every auth test in the crate builds its OWN Router with
+a hand-picked subset of routes. A synthetic router cannot observe how the real
+one is assembled — and both defects were assembly, not logic:
+
+  1. the dedicated --ws-port listener had no `require_bearer` at all
+  2. `/ws/field` was .merge()d AFTER the auth layer, which in axum exempts it
+
+This spawns the actual `sensing-server` binary (via CARGO_BIN_EXE) on ephemeral
+ports and speaks raw HTTP/1.1 and real WebSocket upgrades to BOTH listeners. No
+mocks, no synthetic router, no in-process shortcuts.
+
+PROVEN TO HAVE TEETH, which matters more than it passing: with main.rs reverted
+to eb68e07a (the vulnerable commit), the suite fails —
+
+  assertion `left != right` failed: http port ACCEPTED an unauthenticated
+  upgrade to /ws/field — this is the bypass that shipped twice
+
+and passes again once restored. A regression test that has never been shown to
+fail is a comment.
+
+Five cases:
+- with auth ON, NO listener accepts an unauthenticated upgrade — all four WS
+  paths x both ports, with a REST 401 control first so the WS assertions cannot
+  pass for the wrong reason
+- a bearer on the upgrade is accepted on both listeners (native clients are not
+  browser-constrained and must not need the ticket round-trip)
+- with auth OFF both listeners stay open — the compatibility promise
+- the legacy escape hatch opens WebSockets WITHOUT weakening REST — scoped, or
+  it is a bypass wearing a migration label
+- /health stays anonymous on both listeners — a documented exemption, pinned so
+  it stays a decision rather than an accident
+
+The child inherits no RUVIEW_* variables (env_remove), or a developer&#39;s local
+export would silently change what the test proves. Ports are reserved by
+binding :0 and releasing, so a collision surfaces as a boot failure rather than
+a false pass.
+
+Tests: 5 new integration, 534 lib, 87 ruview-auth.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- fix(auth): close the four residual findings from the adversarial review
+
+(a) Test fixture still invented an `iss` claim.
+    `bearer_auth.rs`&#39;s `token_with_scope` added `&#34;iss&#34;: ISSUER` to its tokens.
+    Harmless today because the verifier ignores `iss` — but it is the same
+    fixture-invents-reality pattern that hid the original `iss` bug for a day,
+    sitting in the second-largest auth test suite. Removed, with a pointer to
+    ruview-auth&#39;s regression test.
+
+(b) Cross-process refresh race -&gt; session revocation.
+    The single-flight guarantee was per-PROCESS. Every CLI invocation is a new
+    process with its own Session and mutex over one shared credential file, so
+    two commands run close together inside the 60s refresh window would each
+    present the same rotating refresh token — and the second is replay, which
+    identity answers by revoking the whole session family. The user gets logged
+    out for running two commands at once.
+
+    Now guarded by an advisory file lock, taken NON-BLOCKING. A busy lock means
+    another process is already refreshing, so we wait and re-read its result
+    rather than race it (20 x 150ms, then proceed anyway — the lock is advisory,
+    not a correctness barrier, and a dead holder must not wedge us). Blocking on
+    the lock would have parked the async executor, which is the exact mistake
+    just fixed in jwks.rs.
+
+    Unix only. On other platforms it is a documented no-op — a lock that does
+    nothing while claiming to protect is worse than none.
+
+(c) One principal could exhaust the global ticket pool.
+    The 512 cap was global with no per-caller quota, so a single authenticated
+    `sensing:read` client looping on POST /api/v1/ws-ticket could hold every
+    slot for 30s and 503 everyone else — denial of service by the
+    lowest-privilege account the product issues. Added a 16-ticket
+    per-principal cap; a page needs a handful. Test asserts a noisy user hits
+    its own cap while a second user is still served and the global pool is
+    never exhausted.
+
+(d) Debug impls printed live credentials.
+    `AuthState` derived Debug over the raw RUVIEW_API_TOKEN and
+    `StoredCredentials` over both OAuth tokens. Not leaking today — I checked
+    every call site — but this PR had already hand-written redacting Debug for
+    `OAuthState` and `TicketStore` for exactly this reason, and the two types
+    actually holding secrets were the ones that missed out. Both now redact.
+
+Tests: 87 ruview-auth (2 new: lock exclusivity + non-blocking, Debug
+redaction), 534 sensing-server (1 new: per-principal quota).
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- fix(auth): enforce client_id as the audience — Cognitum&#39;s stand-in for `aud`
+
+Found by reading cognitum-one/freetokens, a live sibling service whose browser
+OAuth landed while this PR was open. Its integration contract states the
+platform rule outright:
+
+  &#34;Cognitum access tokens intentionally use custom `client_id` rather than a
+   registered JWT `aud` claim.&#34;  -- freetokens docs/AUTH_INTEGRATION.md
+
+and `src/auth/oauth.ts` enforces it on every sign-in:
+
+  payload.client_id !== config.OAUTH_CLIENT_ID  -&gt; reject
+
+RuView did not. An earlier revision here removed the `client_id` check and kept
+it only for logging, reasoning that clients borrow one another&#39;s registrations
+(musica shipped as `meta-proxy` while its own was pending) and that scope alone
+must therefore carry the boundary. That reasoned from a TRANSITIONAL state:
+RuView has its own registered client (identity migration 0017), and the platform
+does have an audience mechanism — it is simply spelled `client_id`.
+
+Consequence of the old behaviour: a Cognitum access token minted for ANY product
+— meta-proxy, musica, metaharness, freetokens — was accepted by a RuView server
+provided it carried a sensing scope. Scope was the only thing standing between
+another product&#39;s token and this one. Now there are two boundaries, audience and
+capability, which is what the platform intends.
+
+- `VerifierConfig.allowed_client_ids`; empty = accept any (explicit opt-out).
+- `RUVIEW_OAUTH_CLIENT_IDS` env, default `ruview`, `*` to disable with a loud
+  warning naming what is being given up. Comma-separated for the migration case
+  where a borrowed registration must be accepted alongside our own.
+- New `VerifyError::WrongAudience`, checked BEFORE scope, so the failure names
+  the real reason rather than blaming the scope.
+
+The existing cross-product test now asserts `WrongAudience` rather than
+`MissingScope` — the token is refused for the stronger reason. Three new tests:
+a correctly-scoped token from another product is still refused; the empty-list
+opt-out accepts anything (pinned so it stays deliberate); multiple allowed
+clients work.
+
+This also corrects the module docs and ADR-271, which claimed &#34;scope is the ONLY
+capability boundary&#34; — true of the code as written, but not of the platform.
+
+Tests: 85 ruview-auth, 533 sensing-server.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- docs: correct three doc-vs-code contradictions found by adversarial review
+
+All three are my own drift — the exact failure this session criticised in other
+repos&#39; ADRs and then reproduced.
+
+1. ADR-271 §2 still listed &#34;`iss` matches the configured issuer verbatim&#34; in the
+   accept-rule. That rule was removed from the code in 12635a85 because Cognitum
+   issues no `iss` and it rejected every real token. The ADR&#39;s own &#34;Facts about
+   the tokens&#34; section 30 lines above already said tokens carry no `iss` — the
+   document contradicted itself for a day. Also removed a claim that tests cover
+   &#34;issuer mismatch including a trailing-slash-only difference&#34;; that test was
+   deleted with the rule and no longer exists.
+
+2. `ruview-auth/src/lib.rs:59` said &#34;**No login flow.** ... this crate only
+   verifies&#34; — 15 lines above `pub mod login;`. Now states the accurate thing:
+   the login flow is behind the non-default `login` feature, so a verifying
+   server never compiles it.
+
+3. ADR-271&#39;s scope table still described the old prefix-denylist admin set.
+   Replaced with the fail-closed rule that actually ships, including why:
+   `/api/v1/adaptive/train` was reachable with `sensing:read`.
+
+Also records a KNOWN INCOMPLETE that the ADRs previously implied was done: the
+browser cannot obtain an OAuth token at all. `wifi-densepose login` writes
+~/.ruview/credentials.json, which a browser cannot read; the UI reads
+localStorage[&#39;ruview-api-token&#39;], populated only by the manual-paste
+QuickSettings panel. `grep -ril &#34;oauth|cognitum|pkce&#34; ui/` returns nothing.
+
+So the WebSocket ticket mechanism ADR-272 introduces &#34;for browsers&#34; is today
+only exercisable with the legacy static shared secret OAuth was meant to
+replace. Server-side gating is correct and complete; the browser half of the
+story these ADRs tell is not built. Recorded rather than left implied.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- fix(auth): scope gate was fail-OPEN; JWKS lock held across a blocking fetch
+
+Two charges from an adversarial multi-vendor review (qe-court). Both verified
+in source before fixing.
+
+--- 1. AUTHORIZATION BYPASS: POST /api/v1/adaptive/train reachable with read ---
+
+`required_scope_for` enumerated admin routes by prefix (`/api/v1/train/`, plus
+DELETE on models/recording) and let EVERYTHING ELSE fall through to
+`sensing:read`.
+
+`POST /api/v1/adaptive/train` (main.rs:8112 -&gt; handler main.rs:5028) calls
+`adaptive_classifier::train_from_recordings()`, writes the model to disk with
+`model.save()`, and swaps `state.adaptive_model` used by the live inference
+pipeline. It does not start with `/api/v1/train/`, so it landed on
+`sensing:read` — the scope `wifi-densepose login` requests BY DEFAULT. Exactly
+the blast radius the read/admin split exists to prevent, reachable by the
+lowest-privilege token the product issues.
+
+Fixed by inverting the polarity, which is the real defect — a denylist for a
+security gate keeps missing routes as routes keep being added:
+
+  GET/HEAD/OPTIONS            -&gt; sensing:read
+  any other method            -&gt; sensing:admin
+  ...unless the exact path is in READ_SAFE_MUTATIONS (an explicit allowlist of
+     mutations that change runtime state but destroy nothing: ws-ticket,
+     model load/unload/activate, calibration start/stop, recording start/stop,
+     vendor event ingest)
+
+A mutating route added tomorrow is now admin-gated by default. Pinned by
+`an_unknown_mutating_route_defaults_to_admin`. `POST /api/v1/ws-ticket` is
+allowlisted deliberately and has its own test: were it admin, the read scope
+could never open a stream from a browser at all.
+
+Enumerated all 17 mutating /api/v1 routes to build the allowlist rather than
+guessing. `POST /api/v1/config/ground-truth` now requires admin — a deliberate
+tightening, it writes config.
+
+--- 2. DoS: blocking JWKS fetch under std::sync::Mutex in async middleware ---
+
+Filed INDEPENDENTLY by two prosecutors, which is why it gets fixed rather than
+argued about.
+
+`decoding_key_for` locked a `std::sync::Mutex` and held it across a blocking
+`ureq` call (3s timeout, longer on a dead link), invoked from inside the async
+`require_bearer`. `Mutex::lock()` in an async fn is a blocking syscall, not a
+yield point — so one slow JWKS fetch blocked EVERY concurrent request on that
+mutex, including ones carrying already-cached valid tokens, and parked the
+tokio workers running them. On Pi-class hardware with few workers that stalls
+the whole server. It fires on the routine 300s TTL rollover whenever the link
+is degraded — the exact offline case the module exists to tolerate. Reachable
+by anyone able to send a syntactically valid ES256 header with an unknown kid,
+since kid lookup precedes signature verification.
+
+Now three phases: read under the lock, RELEASE, network, re-take only to
+install. Cost is a possible duplicated idempotent GET during a rollover, which
+is strictly better than serialising every request behind one socket. The
+codebase already uses spawn_blocking for outbound I/O elsewhere
+(main.rs:2490, 5272); moving verification fully onto spawn_blocking remains a
+follow-up — this removes the amplification, not every blocking millisecond.
+
+Tests: 533 sensing-server (7 new scope-polarity), 82 ruview-auth.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- fix(ws): gate the dedicated WS port and the merged field routes (ADR-272 was incomplete)
+
+The previous commit claimed WebSocket upgrades were gated. They were not. Found
+by an adversarial cross-vendor review, reproduced, and fixed here.
+
+MEASURED BEFORE (auth ON via RUVIEW_API_TOKEN, no credential presented):
+
+  HTTP port :3991  /ws/sensing  -&gt; 401   (what the previous fix covered)
+  HTTP port :3991  /ws/field    -&gt; 101   HOLE
+  WS   port :3990  /ws/sensing  -&gt; 101   HOLE
+  WS   port :3990  /ws/field    -&gt; 101   HOLE
+  control   :3991  /api/v1/models -&gt; 401
+
+Two independent defects, both from the same root cause — routes registered
+AFTER an axum `.layer()` are silently exempt from it:
+
+1. The dedicated WebSocket server on `--ws-port` was built with ONLY
+   `host_validation::require_allowed_host`. `require_bearer` was never applied
+   to it at all. My earlier verification only ever probed the HTTP port and I
+   generalised from it.
+
+   This is the worse of the two, because it is the port the UI actually uses:
+   `ui/services/sensing.service.js` maps HTTP 8080 -&gt; WS 8765. So the previous
+   fix protected a path the browser never takes, while the path it does take
+   stayed open.
+
+2. On the HTTP router, `/ws/field` (ADR-262) was `.merge()`d AFTER the
+   `require_bearer` layer, so it bypassed authentication entirely. The auth
+   layer is now applied after the merge, and the comment says why the ordering
+   is load-bearing.
+
+MEASURED AFTER, same conditions:
+
+  :3989 /ws/sensing -&gt; 401 · :3989 /ws/field -&gt; 401
+  :3988 /ws/sensing -&gt; 401 · :3988 /ws/field -&gt; 401
+  with bearer on the upgrade: 101 on both ports
+  ticket minted at POST /api/v1/ws-ticket on the HTTP port and redeemed on the
+    WS port: 101  (AuthState shares its TicketStore via Arc)
+  auth OFF: 101 — unchanged, no regression
+
+526 sensing-server tests still pass.
+
+TEST GAP, stated rather than papered over: no automated test covers this. The
+defect is in router WIRING in main.rs, not in logic a unit test reaches — both
+holes were invisible to 526 green tests and to the ws_gate_tests suite, which
+builds its own Router and therefore cannot see how the real one is assembled.
+Catching this class needs an integration test that boots the binary and probes
+BOTH ports; that is the honest follow-up.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- feat(ui): fetch WebSocket tickets, prefix-match WS paths, and write ADR-272
+
+Completes ADR-272. Three parts.
+
+1. PREFIX MATCHING, not an allowlist. Anything under `/ws/` is a WebSocket path,
+   plus `/api/v1/stream/pose` which lives outside it. An allowlist means every
+   WebSocket route added later ships ungated until someone remembers to extend
+   it — the same bug reintroduced on a delay. Not hypothetical:
+   `/ws/train/progress` (ADR-186, arriving with PR #1387) is ALREADY referenced
+   by ui/services/training.service.js and would have shipped unauthenticated.
+   Pinned by a test that asserts it is gated before it exists.
+
+2. UI wiring. A shared `withWsTicket()` helper mints a ticket immediately before
+   each connection attempt — never cached, because a ticket is single-use and
+   expires in seconds, so reusing one across reconnects fails on the second
+   attempt. Wired into the three sites that open gated sockets:
+   sensing.service.js, websocket-client.js, observatory/js/main.js.
+
+   It degrades in both directions on purpose: no stored token means auth is off
+   and no ticket is needed; a 404 from /api/v1/ws-ticket means a server
+   predating this ADR, which still exempts WebSockets, so connecting without a
+   ticket is correct there. The same UI therefore works against old and new
+   servers, which is what makes the escape hatch removable later rather than
+   permanent.
+
+   The long-lived bearer token is still never put in a URL — only the ticket is.
+
+3. ADR-272 itself. Previously cited in five places without existing; the same
+   dangling-reference mistake made with ADR-271 earlier today, so it is written
+   before this lands rather than after someone notices.
+
+   It records the measured before/after, why a credential in a URL is
+   acceptable here specifically (single use, seconds-long, not the credential),
+   why the escape hatch exists and why it is deliberately uncomfortable, and
+   what is deliberately NOT done — including that /health/metrics stays ungated,
+   with the caveat that this should be revisited if metrics ever carry
+   occupancy-derived values, since that would make them sensing data wearing an
+   ops label.
+
+Tests: 526 sensing-server (4 new path-matching), 82 ruview-auth. JS
+syntax-checked with `node --check`; there is no UI test suite to extend.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- feat(ws): gate WebSocket upgrades behind bearer-or-ticket (ADR-272)
+
+Closes the hole measured in 7d6d6694. Before, with RUVIEW_API_TOKEN set, a real
+handshake carrying no credential:
+
+  /ws/sensing 101 · /ws/introspection 101 · /api/v1/stream/pose 101
+  (/api/v1/models correctly 401)
+
+After, same server, same handshake:
+
+  /ws/sensing 401 · /ws/introspection 401 · /api/v1/stream/pose 401
+  bearer on the upgrade                         -&gt; 101
+  POST /api/v1/ws-ticket then ?ticket=&lt;value&gt;   -&gt; 101
+  the same ticket replayed                      -&gt; 401
+  a bogus ticket                                -&gt; 401
+  POST /api/v1/ws-ticket unauthenticated        -&gt; 401
+
+Two ways in, matching what each client can actually do:
+
+- Native clients (Python, Rust CLI, TS MCP) send a normal Authorization header
+  on the upgrade. They were never browser-constrained; forcing them through a
+  ticket would add a round-trip and a second credential path for nothing.
+- Browsers cannot set that header, so they exchange their credential at
+  POST /api/v1/ws-ticket — an ordinary request, where they can — for a 30s
+  single-use ticket passed as ?ticket=.
+
+A ticket inherits the issuing principal&#39;s scopes, so a sensing:read session
+cannot mint one that outranks itself, and it is not a REST credential: pinned
+by a test that `?ticket=` on /api/v1/models is still 401.
+
+ESCAPE HATCH (RUVIEW_WS_LEGACY_UNAUTHENTICATED=1) restores the old behaviour
+for deployments that cannot update server and UI in lockstep. It is a migration
+aid, not a supported configuration, and it says so on every boot in a warning
+that names the actual exposure (&#34;the live sensing stream — presence, pose and
+vital signs — is readable by anyone who can reach this port&#34;). Its blast radius
+is exactly the WebSocket paths: a test pins that it does not weaken REST.
+
+The flag is read once at construction, so a mid-flight environment change
+cannot silently open these paths on a running server.
+
+SUPERSEDES the PR #1313 test `enabled_exempts_pose_stream_websocket`, which
+asserted the old exemption. Its reasoning about browsers was correct; the
+conclusion was not. Renamed and inverted rather than deleted, with the history
+in the doc comment — and the half that still matters (the WebSocket rule must
+not leak to other /api/v1/* paths) is kept.
+
+Deployments with auth OFF see no change at all — pinned by a test.
+
+Tests: 522 passed in the sensing server (9 new WS-gating, 12 ticket-store).
+
+STILL OUTSTANDING for ADR-272: the browser UI does not yet fetch a ticket, so
+it needs the escape hatch until ui/services/api.service.js is updated. That is
+the next commit, not a permanent state.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- feat(ws): single-use WebSocket ticket store (ADR-272 groundwork)
+
+Audit finding this exists to close — verified empirically, not inferred. With
+RUVIEW_API_TOKEN set (operator believes auth is ON), a real WebSocket handshake
+carrying NO credential:
+
+  /ws/sensing         -&gt; 101 Switching Protocols
+  /ws/introspection   -&gt; 101 Switching Protocols
+  /api/v1/stream/pose -&gt; 101 Switching Protocols
+  /api/v1/models      -&gt; 401   (control: REST is correctly gated)
+
+The REST control plane is locked while the DATA plane — live presence, pose and
+vitals — is open to anyone who can reach the port. Two of those paths sit
+outside PROTECTED_PREFIX entirely; the third is the documented EXEMPT_PATHS
+entry. The exemption was reasonable when added (a browser cannot set
+Authorization on an upgrade) but its blast radius is larger than it looks, and
+phase 3 sharpened the contrast by making REST genuinely strong.
+
+(To be precise about what was proven: the handshake is accepted. A payload
+frame was not captured in that window, so this is &#34;the connection is
+established without a credential&#34;, not &#34;data was read&#34;.)
+
+This commit adds only the store; wiring it into the middleware is a breaking
+change for browser clients and lands with the UI update.
+
+Design notes:
+- Single use. `consume` REMOVES the entry, so a replay of the same URL fails
+  even inside the TTL. This is what makes a credential-in-a-query tolerable:
+  by the time it reaches an access log or a Referer header, it is spent.
+- 30-second TTL. Long enough for a page to open a socket; too short to harvest.
+- It is not the credential. It authorizes one WebSocket. It cannot be replayed
+  against /api/v1/*, cannot be refreshed, and carries no reusable identity.
+- The grant captures the ISSUING principal&#39;s scopes, so a WebSocket inherits
+  exactly the authority of the credential that asked for it — a sensing:read
+  session cannot mint a ticket that outranks itself.
+- Capped at 512 outstanding, self-healing as tickets expire, so an
+  authenticated but misbehaving caller cannot grow the map without bound.
+- In-memory because that is correct, not merely convenient: a ticket surviving
+  a restart would outlive the server that vouched for it.
+
+Native clients (Python, Rust CLI, TS MCP) are NOT browsers and will send a
+normal Authorization header on the upgrade instead — tickets would add a
+round-trip and a second credential path for no benefit.
+
+12 tests: single-use enforced, replay refused, expiry refused AND pruned,
+unknown ticket refused, 256-bit unpredictability, grant carries issuer scopes,
+cap enforced and self-healing, and query parsing including `?myticket=x` not
+being read as `?ticket=x`.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- docs: swap in musica promo image + fix alt text to Cognitum Musica
+
+- fix(cli): resolve scope from the token on read, and add `whoami --refresh`
+
+Two gaps that only appear with a credential file written by an earlier build —
+i.e. exactly the case a fresh-login test never exercises.
+
+1. `whoami` printed &#34;Scope: (not reported)&#34; for an existing file. The previous
+   commit resolved scope from the token claim at WRITE time only, so files
+   written before it stayed blank forever. `effective_scope()` now falls back at
+   READ time, which fixes existing files and any client that stored only what
+   the token response carried. The token is authoritative either way; the stored
+   field is a convenience copy.
+
+2. `whoami` said the token &#34;will refresh on next use&#34; — a promise nothing kept,
+   because no command called `ensure_fresh`. The refresh path was implemented
+   and unit-tested but never actually run. `--refresh` exercises it, and goes
+   through `Session::ensure_fresh` rather than reimplementing a second, subtly
+   different refresh, so it inherits the single-flight guarantee and the
+   persist-before-return ordering.
+
+   It is a flag, not silent behaviour: refreshing rotates the stored refresh
+   token — identity spends the old one — so it is a state change, not a read.
+
+VERIFIED AGAINST PRODUCTION, end to end:
+  whoami on a pre-existing file        -&gt; Scope: sensing:read (was &#34;not reported&#34;)
+  whoami --refresh                     -&gt; both tokens rotated
+                                          refresh sha256[:12] 50cfa06b -&gt; 2d37617a
+                                          access  sha256[:12] 61eebe8d -&gt; 14d8e8de
+                                          status: expired -&gt; valid
+  refreshed token GET  /api/v1/models      -&gt; 200
+  refreshed token POST /api/v1/train/start -&gt; 401 (still read-scoped)
+
+That exercises the rotating-refresh path against identity&#39;s real reuse
+detection — the one place a bug costs the user their session rather than a
+retry — and confirms the scope gate survives a refresh.
+
+Tests: 82 with --features login, 44 default, 501 sensing-server.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- fix(auth): stop requiring an `iss` claim Cognitum never issues (G-3 blocker)
+
+The verifier called `Validation::set_issuer` and listed `iss` in
+`set_required_spec_claims`. Cognitum access tokens have **no `iss` claim** — the
+real claim set is typ, sub, account_id, org_id, workspace_id, client_id, scope,
+family_id, jti, iat, exp, setup, workload. So the verifier rejected every
+genuine token with a flat 401.
+
+The whole 41-test suite was green throughout, because the test fixtures included
+an `iss` the real thing does not have. The tests validated my assumption instead
+of the platform. Found only by pointing a real token at a real server; no amount
+of additional unit testing against the same wrong fixture would have caught it.
+
+`valid_claims()` now mirrors production exactly, with a comment saying why, so
+the next person cannot reintroduce the drift by &#34;fixing&#34; an incomplete-looking
+fixture.
+
+What binds a token to its issuer, then: the JWKS. We accept only signatures made
+by a key served from the configured jwks_uri, so a valid signature IS proof of
+issuer. meta-llm&#39;s verifier — the org&#39;s only other resource-side verifier —
+checks neither `iss` nor `aud`, for the same reason. `VerifierConfig.issuer`
+stays, now documented as JWKS-derivation and logging rather than a claim
+assertion.
+
+Three tests replace the two that asserted issuer behaviour that cannot exist:
+a real-shaped (iss-less) token verifies; an unrelated `iss` changes nothing (so
+identity adding one later cannot silently start failing tokens); and a token
+signed by a different key is still refused — the complement that proves removing
+the issuer check did not remove the boundary.
+
+Also: report the granted scope from the token&#39;s `scope` claim when the
+/oauth/token envelope omits it, which identity&#39;s does. `login` and `whoami` said
+&#34;(not reported by the server)&#34; while the authoritative answer sat inside the
+token they had just stored. The claim-peek helper is display-only and documented
+at length as NOT verification — a client reading its own freshly issued token is
+a different situation from a server reading a stranger&#39;s.
+
+VERIFIED END TO END against production (gate G-3, previously open):
+  no credential            GET  /api/v1/models        -&gt; 401
+  garbage bearer           GET  /api/v1/models        -&gt; 401
+  real sensing:read token  GET  /api/v1/models        -&gt; 200
+  real sensing:read token  GET  /api/v1/recording/list-&gt; 200
+  real sensing:read token  POST /api/v1/train/start   -&gt; 401
+  real sensing:read token  POST /api/v1/train/stop    -&gt; 401
+Token obtained by a human through `wifi-densepose login` against
+auth.cognitum.one; server ran with RUVIEW_OAUTH_ISSUER set, JWKS fetched live
+at boot (key_count=1).
+
+Tests: 82 with --features login (58 unit + 22 matrix + 2 doctests).
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- docs: swap Cognitum Seed badge for the musica marketplace listing
+
+- docs(adr): amend ADR-271 — the login flow lives in ruview-auth behind a feature
+
+The ADR said the login flow was &#34;not in this crate&#34;. It is now, gated behind a
+non-default `login` feature. The original line existed to keep the sensing
+server lean; a feature gate achieves that without forcing the Tauri desktop app
+to grow a second copy of a PKCE + rotating-refresh implementation — the kind of
+duplication that drifts and then disagrees about something subtle.
+
+Recording the change rather than letting the ADR quietly go stale, which is the
+exact failure this session hit twice in other repos&#39; ADRs.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- feat(cli): `wifi-densepose login` — Cognitum sign-in (ADR-271 phase 2)
+
+Phase 1 could verify a token and phase 3 could gate on one, but there was no
+way for a user to OBTAIN one. This closes that: sign in with a Cognitum account
+and get a token a RuView sensing server accepts, instead of everyone sharing
+one static RUVIEW_API_TOKEN string.
+
+Lives in `ruview-auth` behind a non-default `login` feature rather than in the
+CLI, so the Tauri desktop app can reuse it instead of growing a second copy.
+A server built with default features still gets the verifier and nothing else —
+no reqwest, no tokio net, no browser launcher. (This amends ADR-271&#39;s &#34;no login
+flow in this crate&#34; note; the reason for that line was to keep the server lean,
+and a feature gate achieves it without duplication.)
+
+Ported from meta-proxy&#39;s src/oauth/, cross-checked against musica&#39;s
+cognitum_provider.rs — two independent implementations against this same AS.
+Where they agree, this follows both: redirect path EXACTLY /oauth/callback,
+60-second refresh skew, OOB fallback on SSH/CONTAINER//.dockerenv.
+
+Refresh is the part with teeth. Identity rotates refresh tokens with reuse
+detection, so presenting a spent one revokes the whole session family. Both
+obvious implementations are wrong: refreshing concurrently looks like replay,
+and retrying a failed refresh with the same token IS the replay. So
+`Session::ensure_fresh` holds an async mutex across the await, re-checks expiry
+after acquiring it (the waiter usually finds the work already done), persists
+the rotated token BEFORE returning it, and never retries. A missing expires_at
+counts as expired rather than being given a guessed default.
+
+Least scope by default: `login` requests `sensing:read`. `--admin` adds
+`sensing:admin` explicitly, and requests both because there is no scope
+hierarchy server-side. A session that streams poses should not casually hold
+the capability to delete the model it streams through.
+
+Credentials are written atomically and 0600 (temp file, chmod BEFORE rename) —
+the same discipline the seed applies to its cloud key. `logout` is local-only
+and says so: it makes this machine unable to act as you, but revoking the
+session everywhere is an account-level action.
+
+Also `whoami`, which reports whether the stored token is live — an
+expired-looking session is the most common reason a command starts 401ing, and
+it should be visible directly rather than inferred from a failure elsewhere.
+
+Verified against PRODUCTION, not just locally: authorize URLs built by this
+exact code path return HTTP 200 from auth.cognitum.one for both
+`sensing:read` and `sensing:read sensing:admin`, which exercises the real
+client_id, scope encoding, PKCE parameters and redirect_uri shape.
+
+Tests: 74 with --features login (51 unit + 21 verifier matrix + 2 doctests),
+including the RFC 7636 Appendix B vector, multi-scope URL encoding (a space
+that is hand-formatted rather than encoded silently truncates the request), a
+real TCP callback round-trip, callback timeout, 0600 permissions asserted on
+disk, atomic-save leaving no temp file, and refresh-window boundaries.
+Unchanged: 43 with default features, 501 in the sensing server.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- fix(client): send Authorization bearer token on WS upgrade (closes #1395)
+
+SensingClient now accepts a `token=` argument, defaulting to the
+RUVIEW_API_TOKEN env var, and sets `Authorization: Bearer &lt;token&gt;`
+directly on the WebSocket upgrade — no browser-style ticket workaround,
+since Python can set the header on the handshake. Empty/unset token
+means no auth (auth-disabled path unchanged).
+
+websockets version-compat: the header keyword was renamed in the
+`&gt;=12.0` range this package pins (`extra_headers` &lt;= 13,
+`additional_headers` &gt;= 14). Resolved by runtime detection —
+`_select_header_kwarg()` inspects `websockets.connect`&#39;s signature and
+passes the correct keyword — rather than raising the floor to `&gt;=14`.
+Chosen deliberately so existing users on older websockets are not forced
+to upgrade; keeps the `websockets&gt;=12.0` pin valid.
+
+Scope: only ws.py connects to the auth-enabled sensing-server. mqtt.py
+already supports username/password (its own auth convention); ha.py and
+primitives.py do no network I/O. OAuth (ADR-271) is out of scope.
+
+Tests: constructor token, env-var token, constructor-overrides-env,
+no-token/empty-token (no header), a parametrized test across both
+websockets kwarg conventions, and an end-to-end test asserting the
+bearer reaches the in-process server&#39;s upgrade request.
+
+- feat(sensing-server): accept Cognitum OAuth on /api/v1/*, scope-gated (ADR-271 phase 3)
+
+Wires `ruview-auth` into `bearer_auth.rs`. `RUVIEW_OAUTH_ISSUER` enables it;
+unset, nothing changes.
+
+Layering, in order:
+  1. `RUVIEW_API_TOKEN` set and the bearer matches exactly -&gt; allow. Byte-for-
+     byte today&#39;s behaviour.
+  2. Otherwise, if OAuth is configured, verify the bearer as a Cognitum access
+     token and require the scope the route needs.
+  3. Otherwise 401.
+
+The static compare goes first for compatibility, not security: a matching
+static token is not a JWT and a JWT never matches the static token. It means an
+existing deployment behaves identically even with OAuth switched on.
+
+Scope gate (`required_scope_for`), split by blast radius per ADR-060 —
+&#34;can this destroy something&#34;, not how many routes it covers:
+  sensing:admin  /api/v1/train/* (hours of Pi CPU, writes models)
+                 DELETE /api/v1/models/{id}      (irreversible)
+                 DELETE /api/v1/recording/{id}   (irreversible)
+  sensing:read   everything else
+Deliberately NOT admin: model load/unload and recording start. They mutate
+server state but destroy nothing, and gating them would push routine dashboard
+use into requesting delete capability — the opposite of least privilege.
+
+The legacy static token stays un-scope-gated. It predates scopes and carries no
+claims, so narrowing it would be a silent breaking change to deployments using
+it; migrating to OAuth is how an operator opts into the finer split.
+
+FAIL CLOSED at boot. If OAuth is requested but cannot work — empty issuer, or a
+JWKS we cannot fetch — the server logs why and exits rather than serving.
+Starting anyway would silently downgrade an operator who asked for OAuth to
+either an open API or a shared-secret one, with no signal it happened. The JWKS
+is warmed eagerly for the same reason: a bad `jwks_uri` should die at boot with
+a legible message, not surface as a puzzling 401 an hour later.
+
+The verified `Principal` is attached to request extensions, so handlers and
+audit logs can attribute a request (`sub`, `account_id`, `org_id`,
+`workspace_id`, `jti`) instead of knowing only &#34;someone had the secret&#34;. That
+is the point of moving off a shared bearer.
+
+Verification failures are logged with the reason and returned as a flat 401 —
+the reason is useful to an operator and equally useful to an attacker probing
+for which claim to forge next.
+
+Also aligns `ruview_auth::extract_bearer` to match the scheme
+case-insensitively (RFC 7235 §2.1). The sensing server has always done this
+deliberately, with a comment saying why; the two layers disagreeing about what
+a valid header looks like would be a latent bug.
+
+Tests: 16 new in `bearer_auth::oauth_tests`, driving a real Router end to end
+(request -&gt; middleware -&gt; verifier -&gt; handler) with ES256 tokens signed by a
+runtime-generated key. Covers the scope policy as a pure function, read-scoped
+tokens refused on delete and train, admin-scoped tokens allowed, an
+`inference`-only token from another Cognitum product refused on every route,
+garbage and absent bearers, both legacy-token layering directions, the
+principal reaching a handler, and the unset case remaining a no-op.
+
+`cargo test -p wifi-densepose-sensing-server --lib --no-default-features`:
+501 passed, 0 failed. `ruview-auth`: 43 passed across both feature configs.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- docs(adr): ADR-271 — RuView as a Cognitum OAuth resource server
+
+The previous commit referenced ADR-271 in five places without the ADR existing.
+This writes it.
+
+Records the decision and, more importantly, the direction — RuView verifies
+tokens users present, it does not obtain tokens to call Cognitum. Every other
+Cognitum OAuth integration in the org is the client side of a plane RuView does
+not have; the sole relevant precedent is meta-llm&#39;s oauthBearer.ts.
+
+Covers: why offline verification is a requirement rather than an optimisation
+(Pi-class hosts lose WAN, and no introspection endpoint exists); why the
+accept-rule is a port and not a design; why long-lived setup/workload
+credentials are refused (no database to check revocation); why scope — not
+`aud`, not `client_id` — is the capability boundary; and the alternatives,
+including the `cog_`-minting approach that was tried org-wide and found broken
+against production.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- feat(auth): ruview-auth — offline Cognitum OAuth access-token verification (ADR-271)
+
+RuView&#39;s `/api/v1/*` is gated today by `RUVIEW_API_TOKEN`: one shared secret,
+no expiry, no per-user attribution. This adds the verifier half of replacing
+that with Cognitum identity — RuView as an OAuth **resource server**, so a user
+signs in to their own sensing server with their Cognitum account.
+
+Note the direction: RuView does not call Cognitum. It never obtains a token for
+its own use; it verifies tokens users present. Every other Cognitum OAuth
+integration in the org (meta-proxy, musica, metaharness, the dashboard CLI) is
+the client side of a plane RuView doesn&#39;t have. The one existing resource-server
+verifier is `meta-llm/src/auth/oauthBearer.ts`, and this crate is a port of its
+accept-rule — divergence would be a bug, not a preference: a token meta-llm
+rejects must not be one RuView accepts.
+
+Verification is OFFLINE, and that is a requirement rather than an optimisation.
+RuView runs on Pi-class hardware that loses WAN, and identity publishes no
+introspection endpoint even when the network is up. So: ES256 over identity&#39;s
+published JWKS, cached by `kid`.
+
+What it accepts, mirroring oauthBearer.ts:
+  typ == &#34;access&#34; AND NOT setup AND NOT workload AND account_id non-empty AND
+  exp in the future AND iss matches verbatim AND the required scope is held.
+
+Long-lived setup (365-day) and workload credentials are refused outright for
+identity&#39;s own stated reason: their revocation lives in `oauth_setup_tokens`,
+and RuView — like meta-llm — has no database to check it. A 15-minute access
+token needs no revocation round-trip because it expires faster than revocation
+propagates; a 365-day one does.
+
+Scope is the capability boundary, and it has to be. Cognitum access tokens carry
+no `aud`, and `client_id` cannot substitute because clients borrow each other&#39;s
+registrations (musica ships DEFAULT_CLIENT_ID = &#34;meta-proxy&#34;). `sensing:read`
+covers streams and inference; `sensing:admin` covers training, model delete and
+recording delete. No hierarchy — admin does not imply read; consent means what
+it said. Registered in identity migration 0016 (cognitum-one/dashboard#116).
+
+Design notes:
+- `ureq`, not `reqwest`: the sensing server deliberately chose ureq as &#34;the
+  smallest&#34; HTTP client, and pulling reqwest in here would reverse that for the
+  whole graph. Transport sits behind a `JwksFetcher` trait, so a host can supply
+  its own and take no HTTP dependency at all (feature `ureq-transport`, default).
+- A JWKS refetch failure is survivable while a key set is already cached: a key
+  that verified a minute ago has not stopped being valid because the network
+  blipped, and failing closed there logs every user out of their own sensing
+  server whenever their internet wobbles. We fail closed in exactly one case —
+  no key set has ever been fetched.
+- Unknown `kid` forces one refetch so rotation is picked up without waiting out
+  the TTL, rate-limited so junk-kid tokens can&#39;t become a request amplifier
+  aimed at identity.
+- Expiry is reported distinctly from a bad signature: on an RTC-less Pi that is
+  usually a clock-sync fault, and an operator must be able to tell them apart.
+- Test keypairs are generated at runtime, never committed. This repo tracks zero
+  `.pem` files and committed key material shouldn&#39;t start here — it also means
+  no fixture can drift out of sync with the JWKS it&#39;s served by.
+
+Tests: 41 green (19 unit + 21 matrix + 1 doctest) under BOTH
+`cargo test --no-default-features` (the repo&#39;s canonical gate) and default
+features. The matrix signs real ES256 tokens rather than asserting on strings,
+and covers alg:none, forged signature, spliced payload, unknown kid, expired,
+leeway boundaries both sides, wrong issuer, issuer differing only by a trailing
+slash, missing/!=access typ, setup and workload smuggled onto typ=access,
+missing and empty account_id, and scope escalation.
+
+The highest-value case is `g2_a_genuinely_valid_token_from_another_cognitum_
+product_cannot_reach_the_sensing_surface`: a correctly signed, unexpired,
+right-issuer, right-typ token with client_id=meta-proxy and scope=inference is
+rejected. Nothing about its signature or identity claims distinguishes it — only
+scope does. A naive verifier accepts it, and an `inference` token becomes a key
+to someone&#39;s home sensor.
+
+No wiring into the sensing server yet; this crate is verification only, with no
+login flow and no outbound Cognitum calls.
+
+Co-Authored-By: Ruflo &amp; AQE
+
+- ci(python): gate python/ package in main CI + add fix-marker guards for filename-collision and wheel-budget regressions
+
+The python/ PyO3+maturin wheel (wifi-densepose, ADR-117/185) had ZERO
+per-PR CI coverage: pip-release.yml only fires on release triggers, so a
+PR could break the wheel build, a native-Rust parity test, or the wheel
+budget and nothing in the gating CI would catch it until release day.
+
+New .github/workflows/python-ci.yml (path-scoped to python/** + the
+backing crates, following the repo convention cf. firmware-ci.yml --
+GitHub has no per-job paths filter and no workflow here uses a
+change-detection action, so a dedicated path-scoped workflow is the
+idiomatic, no-new-dependency choice):
+  * parity-tests: cargo build of the aether/mat/train backing crates
+    (fast-fail attribution), then `maturin develop --features sota` +
+    `pytest python/tests/ -q`. sota builds the aether/meridian/mat
+    compiled submodules so their SHA-256 parity tests against native
+    Rust actually run (those test modules import the submodules at
+    collection time -- without the features they error, not skip).
+  * wheel-size-budget: builds the DEFAULT (no-features) wheel and fails
+    if it exceeds the ADR-117 5.4 5 MiB budget -- the real numeric
+    enforcement a string fix-marker cannot provide.
+
+Two fix-marker guards (scripts/fix-markers.json):
+  * RuView#1387-rvf-filename-collision: training_api.rs next_model_id()
+    must keep the microsecond timestamp (%6f) + AtomicU64 counter; the
+    forbid uses a negative lookahead so it fires only on a bare
+    second-resolution format lacking the disambiguator. Guards the
+    CI-caught collision fixed on this branch in 8409f434c.
+  * RuView#1387-default-wheel-budget-config: default Cargo features
+    empty, SOTA deps optional, maturin strip=true -- the config that
+    keeps the default wheel small. Bytes are enforced by the CI job
+    above, not a string marker (per the marker system&#39;s limits).
+
+Verification:
+  - python scripts/check_fix_markers.py -&gt; All 27 fix markers present (0 regressed)
+  - all 26 .github/workflows/*.yml parse (yaml.safe_load, utf-8)
+  - cargo build -p wifi-densepose-aether -&gt; Finished (exit 0)
+  - forbid regexes confirmed: fire on a simulated regression, clean on the current tree
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- docs(adr-184): record OIDC revert — token auth is the active path, OIDC is gated P1b
+
+- revert(adr-184): restore PYPI_API_TOKEN auth in pip-release.yml — OIDC needs pypi.org registration first (fix-marker RuView#786-pypi-token-auth)
+
+Reverts the OIDC-only publish path from cc153e8b5. Restores password:
+${{ secrets.PYPI_API_TOKEN }} on all four publish steps and drops the
+id-token: write / environment: pypi blocks from publish-v2 and
+publish-tombstone. OIDC-only is a net regression until the manual
+pypi.org Trusted Publisher registration exists — publishing would fail
+&#39;no trusted publisher configured&#39;. Token auth is the active working path.
+
+OIDC design retained as documented TODO(ADR-184 P1b) in the header; the
+switch becomes a dedicated gated follow-up once the owner confirms
+registration. Restores compliance with fix-marker RuView#786-pypi-token-auth.
+
+Refs ADR-184 P1.
+
+- docs(adr-185): mark §13.c(a) weight-loading DONE, keep (b)/(c) open
+
+- feat(adr-185): add weight-loading capability to AETHER EmbeddingExtractor (§13.a)
+
+Closes the ADR-185 §13.a follow-up (the tractable, data-independent one of
+the three §6.7 gaps): the bound EmbeddingExtractor was random-Xavier-init
+only, with NO way to load real weights — so it was structurally untrained.
+This adds the *capability* to load weights whenever a trained checkpoint
+exists. It does NOT itself produce trained/SOTA embeddings and does NOT
+close §6.7 (still no trained checkpoint, no labeled data, no eval harness).
+
+Serialization: not greenfield — EmbeddingExtractor already had
+flatten_weights()/unflatten_weights() (flat Vec&lt;f32&gt;). wifi-densepose-aether
+is a deliberately dependency-free std-only leaf crate (ADR-185 §13), so
+rather than add safetensors/serde/bincode (which would undo the zero-dep
+property), the on-disk format is raw little-endian f32 with a 12-byte header
+(magic &#34;AETHERW1&#34; + u32 param count) — zero new deps.
+
+Native (v2/crates/wifi-densepose-aether/src/embedding.rs):
+- EmbeddingExtractor::save_weights(path) / load_weights(path). load_weights
+  never panics: errors on unreadable file, short/oversized payload, bad
+  magic, or a param-count mismatch (delegated to unflatten_weights).
+- Default (no weights) construction is UNCHANGED — still random init,
+  clearly labeled untrained. Purely additive.
+
+Python binding (python/src/bindings/aether.rs, .pyi):
+- EmbeddingExtractor.load_weights(path) / save_weights(path) / param_count,
+  GIL-released, ValueError on bad input.
+
+Tests (both Rust and Python, per the task):
+- Rust unit (embedding.rs): load_weights_actually_replaces_weights_and_
+  round_trips proves the loaded weights MOVE the embedding away from the
+  random-init baseline (not a silent no-op), match the source extractor
+  (round-trip), and are bit-identical after the file round-trip; plus a
+  bad-magic/wrong-count rejection test.
+- Cross-language golden (aether_weights_parity.rs + test_aether.py): a
+  shared deterministic weight formula (w[i]=k/65536-0.5, exact in f32+f64)
+  written to the AETHER format; both native Rust and the Python binding load
+  it and must produce the byte-identical embedding SHA-256
+  (tests/golden/aether_loaded_embedding.sha256) — proving the binding&#39;s
+  load path is bit-identical to native, and (vs the random baseline) that
+  the loaded weights are actually used.
+
+Verified:
+  cargo test -p wifi-densepose-aether                       98 passed, 0 failed
+  cargo test --features aether --test aether_parity
+    --test aether_weights_parity                            3 passed, 0 failed
+  maturin develop --features aether + pytest test_aether.py 13/13 pass
+  default cargo build (no aether feature)                   clean
+
+- docs(adr-185): record §6.7 as genuine gap — untrained bindings, no eval harness
+
+- fix(adr-186): make exported .rvf filenames process-unique (fixes CI flake)
+
+Root cause: the trained-model filename was `trained-{type}-{%Y%m%d_%H%M%S}` — a
+**second-resolution** timestamp. Two training runs of the same type that finish
+in the same wall-clock second compute the SAME path and silently overwrite each
+other&#39;s artifact. This is a real robustness gap (a second rapid run clobbers the
+first model), and it surfaced as a flaky test on the Linux CI runner:
+`http_train_start_produces_model_and_streams` asserts (via a before/after
+directory diff) that a new `.rvf` appeared, but the concurrent
+`training_job_streams_real_progress_and_writes_model` test — same `supervised`
+type, same second — wrote to the identical path and then deleted it in its own
+cleanup, so the diff saw no new file. Windows scheduling happened to avoid the
+same-second overlap; Linux CI hit it (the sibling `TRAIN_ENV_LOCK` holders then
+failed via std::sync::Mutex poison-cascade after the first panic).
+
+Reproduced locally by isolating the three model-writing tests (which forces the
+overlap): ~10/20 runs flaked before; 0/30 after.
+
+Fix: `next_model_id()` appends microseconds (`%6f`) plus a monotonic per-process
+`AtomicU64` counter, so every run gets a distinct path even for same-microsecond
+concurrent completions. Pinned by `model_ids_are_unique_per_call` (1000 ids, all
+distinct) so the scheme can&#39;t regress to non-unique. No test-level band-aid
+(no added sleeps / serialization) — the collision is removed at the source.
+
+Verified: cargo test -p wifi-densepose-sensing-server -p wifi-densepose-train
+--no-default-features — bin 218 passed / 0 failed, all suites 0 failed; the
+isolated-tests stress loop is 0/15 flakes post-fix.
+
+- docs(adr-185): correct AETHER wheel-size claim to measured reality
+
+- fix(adr-185): hoist AETHER compute surface into a std-only leaf crate
+
+ADR-185 §13 flagged the `[aether]` wheel as linking the whole
+`wifi-densepose-sensing-server` Axum/tokio/worldgraph/ruvector tree via the
+non-optional deps of that crate. Hoist the pure-compute AETHER stack out so the
+binding depends only on pure Rust.
+
+New crate `wifi-densepose-aether` (std-only, ZERO external deps) holds the four
+self-contained modules the AETHER surface needs — `embedding`, `graph_transformer`,
+`sona`, `sparse_inference` (verified: no serde/tokio/axum/crate:: refs outside the
+set; the four form a closed dependency graph). `wifi-densepose-sensing-server`
+now `pub use`s them from the leaf crate, so its own code (`crate::embedding`, …)
+and public API (`wifi_densepose_sensing_server::embedding`, …) are unchanged —
+`main.rs`/`trainer.rs` untouched. The Python binding + parity test + `[aether]`
+feature repoint at the leaf crate; the sensing-server dep is dropped from python.
+
+MEASURED wheel size (maturin build --release --features aether --strip; each
+wheel install-verified to actually contain `AetherConfig`):
+  BEFORE (aether -&gt; sensing-server): 369,782 B (~361 KB)
+  AFTER  (aether -&gt; leaf crate):     319,719 B (~312 KB)
+
+HONEST CORRECTION to the §9/§13 premise: the pre-hoist wheel was NOT over the
+ADR-117 §5.4 5 MB budget — it was ~361 KB, ~14x under. Linker dead-code
+elimination (--gc-sections on the pyo3 cdylib) already strips the unreached
+server tree because the binding only reaches pure-compute symbols. So this is
+&#34;blows the budget&#34; CLAIMED, not MEASURED. The hoist is still worthwhile and
+lands the real, measured wins:
+  - `[aether]` build time 71s -&gt; 12s (no server tree to compile),
+  - python/Cargo.lock -1238 lines (server tree no longer resolved),
+  - ~50 KB smaller wheel,
+  - honest, minimal declared dependency surface + removes the latent risk that a
+    future change makes some server code reachable and *then* bloats the wheel.
+
+Verified this session (real counts):
+  - cargo test --features aether --test aether_parity: 2 passed / 0 failed
+  - pytest tests/test_aether.py (maturin develop --features aether): 9 passed
+  - cargo test -p wifi-densepose-sensing-server --no-default-features: 217 bin +
+    388 lib, 0 failed (no regression)
+  - cargo test -p wifi-densepose-aether: 96 passed (the relocated unit tests)
+
+The §9/§13 wheel-size narrative in ADR-185 (owned by the ADR author) should be
+corrected to reflect the measured reality — flagged to the team lead.
+
+- chore(adr-184): promote wifi-densepose to 2.0.0 stable + ruview 2.0.0 (P2)
+
+ADR-184 P2 (version promotion + changelog) — version-metadata prep only;
+triggers NO publish (P3&#39;s real PyPI upload is still gated on the manual
+Trusted Publisher registration on pypi.org).
+
+- python/pyproject.toml: version 2.0.0a1 -&gt; 2.0.0; classifier
+  &#34;Development Status :: 3 - Alpha&#34; -&gt; &#34;5 - Production/Stable&#34;.
+- python/ruview-meta/pyproject.toml: version 2.0.0a1 -&gt; 2.0.0; same
+  classifier bump; repointed the wifi-densepose dependency pins
+  (base + [client]) from ==2.0.0a1 to ==2.0.0 so the stable ruview
+  meta-package depends on the stable wifi-densepose, not the alpha.
+- python/wifi_densepose/__init__.py: runtime __version__ 2.0.0a1 -&gt; 2.0.0
+  (caught during the sanity check — it would otherwise contradict the
+  stable wheel version reported by `wifi_densepose.__version__`).
+- CHANGELOG.md: [Unreleased] entry recording the promotion.
+
+Sanity-checked that the core package genuinely deserves &#34;Production/Stable&#34;
+(not just a version-string change):
+  maturin build --release --strip  -&gt; default wheel 279 KB
+  pytest python/tests/ (excluding [aether]/[meridian]/[mat] extra modules)
+    -&gt; 185 passed, 0 failed (smoke/keypoint/pose/vitals/bfld/security/
+       WS+MQTT client)
+  post-bump: wheel installs as 2.0.0, __version__ = 2.0.0, smoke 6/6 pass.
+No publish/tag/release commands were run.
+
+- fix(adr-185): drop dead wifi-densepose-nn dep from train to slim [meridian] wheel
+
+Root cause (investigated, same rigor as the MAT fix): `wifi-densepose-train`
+declared `wifi-densepose-nn` as a dependency but NEVER imported it anywhere
+in src/ or bin/ — a dead dependency. (The tch-backend model path uses the
+`tch` crate directly, not wifi-densepose-nn; `grep -r wifi_densepose_nn
+src/` returns nothing.) That dead dep pulled `ort` (ONNX Runtime) +
+reqwest/hyper into every downstream consumer, including the ADR-185
+`[meridian]` wheel, which binds only train&#39;s pure-compute geometry /
+rapid_adapt / eval modules + signal::hardware_norm.
+
+`cargo tree -i wifi-densepose-nn` confirmed train was the SOLE path pulling
+nn into the wheel; after removal, the package is absent from the graph.
+
+Fix: remove the dead dep line from train&#39;s Cargo.toml (no code change, no
+feature-gating needed — nothing referenced it). Not a hoist: the coupling
+turned out to be nonexistent, not deep.
+
+Measured (maturin build --release --features meridian --strip):
+  BEFORE: 1.8 MB   AFTER: 1.7 MB   (both already within the ADR-117 §5.4
+  &lt;=5 MB budget). Honest note: unlike MAT — which instantiates OnnxSession
+  and thus bundles the ort native runtime (8.4 MB) — train never references
+  ort, so the native lib was dead-stripped and the wheel was already under
+  budget. The real win is removing ort/reqwest/hyper from train&#39;s dependency
+  graph and compile for ALL consumers, not a dramatic wheel shrink.
+
+Verified:
+  cargo build -p wifi-densepose-train                       (default=[]) OK
+  cargo tree -i wifi-densepose-nn  -&gt; no longer in the graph
+  cargo test --features meridian --test meridian_parity     2/2 pass
+  maturin develop --features meridian + pytest test_meridian 13/13 pass
+
+- docs(adr-186): confirm full-workspace regression green post race-fix (0 failed)
+
+- fix(adr-185): feature-gate MAT&#39;s ONNX ml module to cut [mat] wheel 8.4MB-&gt;2.0MB
+
+Root cause (investigated, not assumed): the heavy deps in a [mat] wheel
+were NOT on the survivor-detection/triage path the Python binding uses.
+`wifi-densepose-mat` pulled `wifi-densepose-nn` as a NON-optional dep, and
+nn&#39;s default `onnx` feature drags in `ort` (ONNX Runtime) + its
+download/reqwest/hyper stack. But nn is used ONLY by mat&#39;s `src/ml/`
+module (debris + vital-signs ONNX classifiers), which is an OPTIONAL
+runtime enhancement: `DetectionPipeline.ml_pipeline` is `Option&lt;_&gt;`,
+created only when `DetectionConfig::enable_ml` is set, and
+`from_disaster_config` (the DisasterResponse path) never enables it. So
+the ONNX stack was compiled-and-linked but never executed by the binding.
+
+Fix = feature-gating (not a hoist — a hoist was unnecessary):
+- `wifi-densepose-nn` made optional; new `ml` Cargo feature gates it.
+- `default = [..., &#34;ml&#34;]` so existing consumers are unchanged; `api`
+  implies `ml` (the REST surface exposes `ml_ready`).
+- `#[cfg(feature = &#34;ml&#34;)]` on the `ml` module, its crate-root + prelude
+  re-exports, the `MatError::Ml` variant, and every ml touchpoint in
+  detection/pipeline.rs (ml_config/ml_pipeline fields, constructor,
+  process_zone enhancement block, enhance_with_ml/get_ml_results/
+  initialize_ml/ml_ready/ml_pipeline accessors, update_config).
+- Fixed a latent feature-unification bug surfaced by dropping nn:
+  integration/hardware_adapter.rs uses `tokio::select!`, which needs
+  `tokio/macros`. That was only satisfied transitively via nn; now
+  declared explicitly on mat&#39;s own tokio dep so --no-default-features
+  builds compile.
+
+The ADR-185 [mat] wheel already depended on mat with
+`default-features = false, features = [&#34;std&#34;]`, so no python/ change was
+needed — dropping `ml` from the default now actually removes ort.
+
+Measured (maturin build --release --features mat --strip):
+  BEFORE (ml/ort in wheel): 8.4 MB  (over the ADR-117 §5.4 &lt;=5 MB budget)
+  AFTER  (ml gated off):    2.0 MB  (under budget) — 76% smaller
+
+Verified:
+  cargo build -p wifi-densepose-mat                         (default+ml)  OK
+  cargo build -p wifi-densepose-mat --no-default-features --features std  OK
+  cargo test --features mat --test mat_parity              2/2 pass
+  maturin develop --features mat + pytest tests/test_mat.py 7/7 pass
+  (same detection result: 1 survivor, triage Delayed — behavior-transparent)
+
+- feat(adr-186): P5/P6 + acceptance verification — dashboard honesty, HTTP tests, Accepted
+
+Completes ADR-186 phases P5 (dashboard honesty / fallback guarantee) and P6
+(tests + witness) on top of the P1–P4 reconnection, and flips the ADR to Accepted.
+
+P5 — dashboard honesty:
+- Backend (training_api): a runtime enablement gate (`RUVIEW_DISABLE_SERVER_TRAINING`)
+  makes the three start endpoints return a structured `{enabled:false, reason,
+  cli:&#34;wifi-densepose train-room&#34;}` HTTP 409 (never a silent success) when server
+  training is disabled; `/api/v1/train/status` now carries an `enabled` flag. A runtime
+  flag (not a Cargo feature) so `--no-default-features` builds keep training ON (resolves
+  §9.4). Handlers return `Response` to carry the 409.
+- Frontend (TrainingPanel.js): reads `enabled` off the status payload and disables the
+  Start/Pretrain/LoRA buttons with a CLI tooltip when server training is off; a rejected
+  start tears down the optimistically-opened WS and refreshes. The enabled path was
+  already fully wired (opens the WS before POST, renders live epoch/loss/ETA + terminal
+  state) — verified.
+
+P6 — tests &amp; witness:
+- New HTTP-level tests in a `#[cfg(test)] mod adr186_http_tests` built on a minimal
+  `AppStateInner::minimal()` test-state helper: a live-socket test that completes a
+  genuine 101 WebSocket handshake (tokio-tungstenite) and receives a real progress frame
+  after a POST start; a 426-not-404 route-wired check; a full POST→poll-status→`.rvf`-exists
+  round-trip; and the disabled-409 structured-response test. Added `tokio-tungstenite`
+  dev-dep (version already in the workspace lock).
+- CHANGELOG updated; ADR §6 ledger + §7 acceptance criteria checked off with evidence;
+  Status → Accepted. README/CLAUDE have no training route table (no edit needed).
+
+Fixed a test-only parallelism race found under `cargo test --workspace`: two
+model-writing tests deleted `.rvf`s by directory-diff and could remove a file a third
+test asserted existed. Each test now cleans only its own artifact (data/models is
+gitignored).
+
+Verified this session: `cargo test -p wifi-densepose-sensing-server -p wifi-densepose-train
+--no-default-features` — sensing-server bin 217 passed / 0 failed, all train suites 0
+failed. Full `--workspace` re-run in progress to reconfirm untouched crates.
+
+- docs(adr-185): record P1-P4 implementation status, remaining gaps
+
+- feat(adr-185): P4 benchmarks, examples, and README extras for the SOTA wheels
+
+ADR-185 §4.2 pytest-benchmark micro-benchmarks + runnable examples +
+README extras table for the aether/meridian/mat bindings.
+
+- python/bench/test_bench_{aether,meridian,mat}.py — follow the existing
+  test_bench_vitals.py pattern (skipped by default; --benchmark-only).
+- python/examples/{reid_from_csi,cross_room_calibrate,mat_triage}.py —
+  typed, runnable, mypy --strict clean.
+- python/README.md — SOTA extras table + example links.
+
+Measured on a RELEASE wheel (maturin develop --release --features sota),
+reference machine per ADR-117 §10:
+  AETHER embed()          mean ~150 us/window   (target &lt;2 ms)   PASS
+    batch scaling 1/8/64: 140 / 1091 / 8509 us  (linear, no O(n^2)) PASS
+  MERIDIAN normalize()    mean ~2.2 us/frame     (target &lt;200 us) PASS
+  MERIDIAN encode()       mean ~6.9 us           (target &lt;200 us) PASS
+  MAT ingest+scan_once()  mean ~40 ms/256-frame  (&lt; 500 ms interval) PASS
+
+Acceptance self-verification (ADR-185 §6), all run just now:
+  §6.1 default wheel 279 KB (&lt;=5 MB); build_features has no p6-* feature  PASS
+  §6.2 pytest tests/test_aether.py    9/9   PASS
+  §6.3 pytest tests/test_meridian.py  13/13 PASS
+  §6.4 pytest tests/test_mat.py       7/7   PASS
+  §6.5 benchmarks meet all targets (above)                                PASS
+  §6.6 parity harness: 3/3 SHA golden gates green (cargo test --features
+       sota, 6/6); CI *wiring* as a release gate is out of python/ scope  PARTIAL
+  §6.7 SOTA accuracy bars on labeled fixtures: NOT met (no labeled
+       fixtures / trained models available; parity proves path-equality,
+       not accuracy)                                                       OPEN
+  §6.8 .pyi stubs present for all three; mypy --strict on the 3 examples   PASS
+  §6.9 base wheel `import wifi_densepose.{aether,meridian,mat}` raises a
+       clear ImportError naming the extra                                  PASS
+  No regression: 76 pre-existing tests pass on the default wheel.
+
+Status NOT flipped to Accepted: §6.7 (accuracy bars) is unmet, §6.6 CI
+wiring is pending, and the per-extra wheel-size hoists (sensing-server /
+train / mat leaf crates) remain follow-ups. docs/adr/ is owned by another
+agent this session, so the ADR ledger edit is deferred to that owner.
+
+- feat(adr-185): P3 MAT bindings (wifi_densepose.mat) + parity harness
+
+Bind the ADR-024 MAT (Mass Casualty Assessment Tool) disaster-survivor
+detection + START triage surface into the wheel behind a gated [mat]
+extra / Cargo `mat` feature, mirroring the upstream disaster/ML gating.
+Also adds the [sota] superset extra (aether+meridian+mat).
+
+Surface (bound against the REAL code at HEAD, not the ADR wishlist):
+- DisasterType (9 variants) / TriageStatus (5, START) enums
+- DisasterConfig (builder-backed, continuous_monitoring forced off)
+- DisasterResponse: initialize_event / add_zone / push_csi_data /
+  scan_once / survivors / survivors_by_triage
+- Survivor (id, triage_status, confidence, location, latest_vitals)
+- VitalSignsReading (breathing/heartbeat rate, movement, confidence)
+- ScanZone.rectangle / ScanZone.circle
+push_csi_data + scan_once are GIL-released.
+
+Honest deviations from ADR section 3.4 (documented in module header):
+- ADR proposed adding a Rust-side sync scan_once() (section 11.3). That was
+  UNNECESSARY: the public async start_scanning() runs exactly one
+  scan_cycle and returns when continuous_monitoring == false. The binding
+  forces that flag off and drives one cycle on a private current-thread
+  tokio runtime -- NO change to wifi-densepose-mat.
+- scan_cycle requires an active event + Active zone, which the ADR surface
+  omitted; initialize_event + add_zone are bound as required additions.
+- Survivor.vital_signs is a *history* in the real code; bound as
+  Survivor.latest_vitals -&gt; Optional[VitalSignsReading].
+- DisasterType has 9 variants at HEAD (adds Landslide/MineCollapse/
+  Industrial/TunnelCollapse); all bound.
+
+Parity (section 4.1, release-blocking): committed fixture mat_input.json
+(synthetic breathing-modulated CSI stream) -&gt; native Rust reference
+(tests/mat_parity.rs, drives DisasterResponse directly) locks
+tests/golden/mat_result.sha256 over a canonical
+`count=&lt;K&gt;;triage_priorities=&lt;sorted&gt;` string (survivor UUIDs/timestamps
+excluded as non-deterministic); pytest (tests/test_mat.py) runs the same
+stream through the binding and asserts the identical hash. Both detect
+exactly 1 survivor, triage Delayed. Honest: synthetic fixture proves
+binding==native path equality, NOT live detection accuracy.
+
+Verified:
+  cargo test --features mat --test mat_parity -&gt; 2/2 pass
+  maturin develop --features mat + pytest tests/test_mat.py -&gt; 7/7 pass
+  default cargo build clean, 0 mat/tokio refs in the default dep graph.
+
+WHEEL-SIZE FINDING (ADR-185 section 9): default-features=false drops MAT&#39;s
+`api` (axum) and `ruvector` features, but MAT still carries NON-optional
+tokio (rt/sync/time), wifi-densepose-nn (ort/ONNX + reqwest/hyper),
+rustfft, geo, ndarray. So a [mat] wheel exceeds the ADR-117 section 5.4
+&lt;=5 MB budget -- same leaf-crate-hoist follow-up as AETHER/MERIDIAN. The
+default wheel is untouched (feature-gated).
+
+- feat(adr-185): P2 MERIDIAN bindings (wifi_densepose.meridian) + parity harness
+
+Bind the ADR-027 MERIDIAN cross-environment domain-generalization surface
+into the wheel behind a gated [meridian] extra / Cargo `meridian` feature.
+Inference/adaptation path only (tch-free), per ADR-185 section 3.3.
+
+Surface (bound against the REAL code at HEAD, not the ADR wishlist):
+- HardwareType / HardwareNormalizer / CanonicalCsiFrame (from
+  wifi-densepose-signal::hardware_norm)
+- MeridianGeometryConfig / GeometryEncoder (64-dim, permutation-invariant)
+- RapidAdaptation / AdaptationResult (push_frame + adapt, LoRA deltas)
+- CrossDomainEvaluator + mpjpe (from wifi-densepose-train, NO tch-backend)
+All compute paths GIL-released (py.allow_threads).
+
+Honest deviations from ADR section 3.3 (documented in the module header):
+- ADR&#39;s RapidAdaptation.calibrate(windows) and AdaptationResult.converged
+  DO NOT EXIST. Real API is push_frame + adapt(); result carries
+  {lora_weights, final_loss, frames_used, adaptation_epochs}. Bound as-is.
+- ADR&#39;s HardwareType.detect exposed as a staticmethod delegating to the
+  real HardwareNormalizer::detect_hardware.
+- ADR&#39;s normalize(frame: CsiFrame, hw) is really normalize(amplitude,
+  phase, hw) over f64 vectors returning Result; bound faithfully.
+- CanonicalCsiFrame fields are singular amplitude/phase (ADR said plural).
+Training-time types (DomainFactorizer, GradientReversalLayer,
+VirtualDomainAugmentor) are out of P6 scope (need the libtorch tier).
+
+Parity (section 4.1, release-blocking): committed fixture
+meridian_input.json -&gt; native Rust reference (tests/meridian_parity.rs,
+calls hardware_norm + geometry + rapid_adapt directly) locks
+tests/golden/meridian_output.sha256 over the concatenated f32 outputs
+(esp32+intel canonical frames, 64-dim geometry vector, rapid-adapt LoRA
+weights); pytest (tests/test_meridian.py) runs the same fixture through
+the binding and asserts the identical SHA-256. Both pass.
+
+Verified:
+  cargo test --features meridian --test meridian_parity -&gt; 2/2 pass
+  maturin develop --features meridian + pytest tests/test_meridian.py
+    -&gt; 13/13 pass
+  default cargo build clean, 0 train/signal/sensing-server refs in the
+    default dep graph (gate keeps the base wheel lean).
+
+WHEEL-SIZE FINDING (ADR-185 section 9 / section 1.2): the libtorch risk
+the ADR feared is AVOIDED -- wifi-densepose-train&#39;s `tch` dep is properly
+optional (feature tch-backend, OFF), so no libtorch links. BUT train
+still carries NON-optional deps: tokio (rt subset), the five ruvector-*
+crates, and wifi-densepose-nn (which itself pulls `ort` / ONNX Runtime +
+reqwest/hyper). So a [meridian] wheel exceeds the ADR-117 section 5.4
+&lt;=5 MB budget (though lighter than AETHER&#39;s axum/tokio server tree). The
+clean fix is the same leaf-crate hoist: move the pure inference modules
+(geometry, rapid_adapt, eval, hardware_norm) into a tch/tokio/ort-free
+leaf crate. A required pre-release follow-up, not a functional blocker;
+P2 binds real code and proves parity today.
+
+- feat(adr-186): reconnect orphaned in-server trainer + real /ws/train/progress
+
+The training pipeline in `training_api.rs` was written and committed but never
+declared as a module (no `mod training_api;`), so it was dead, uncompiled code.
+The live `/api/v1/train/start` was a stub that flipped a status string and
+logged one line without starting any job, and `/ws/train/progress` 404&#39;d
+(issue #1233). This wires the real trainer into the live server.
+
+- main.rs: declare `mod training_api;` (+ `mod path_safety;` for its load
+  guard), replace the `training_status`/`training_config` stub fields on
+  AppStateInner with `training_state: training_api::TrainingState` +
+  `training_progress_tx`, delete the three stub handlers, and
+  `.merge(training_api::routes())` before `.with_state` so `/api/v1/train/*`
+  (bearer-gated) and `/ws/train/progress` resolve against the shared state.
+- training_api.rs: decouple the training core (`run_training_job`) from the
+  ~60-field AppStateInner via a shared status handle (`Arc&lt;Mutex&lt;TrainingStatus&gt;&gt;`)
+  + cooperative cancel flag (`Arc&lt;AtomicBool&gt;`) + an owned frame_history
+  snapshot, making it unit-testable. Self-contained input schema (local
+  `RecordedFrame`/`RECORDINGS_DIR`) instead of coupling to the still-orphaned
+  `recording.rs`. Consolidate the single-job guard + spawn into
+  `spawn_training_job`.
+- Tests: real end-to-end test (synthetic CSI dataset -&gt; real progress frames
+  stream + an actual `.rvf` artifact is written), plus path-traversal-rejection
+  and cancellation tests.
+
+Verified: cargo test -p wifi-densepose-sensing-server -p wifi-densepose-train
+--no-default-features -&gt; 0 failed.
+
+P5 (feature-flagged disabled-build honesty) deferred as follow-up; the
+default/enabled build no longer silently no-ops.
+
+- feat(adr-185): P1 AETHER bindings (wifi_densepose.aether) + parity harness
+
+Bind the ADR-024 contrastive CSI embedding surface into the wheel behind
+a gated [aether] extra / Cargo `aether` feature, per ADR-185 section 3.2.
+
+Surface (bound against the REAL code at HEAD, not the ADR wishlist):
+- AetherConfig       -&gt; EmbeddingConfig {d_model,d_proj,temperature,normalize}
+- CsiAugmenter       -&gt; augment_pair(window, seed)
+- EmbeddingExtractor -&gt; embed(csi): 128-dim L2-normed, GIL-released
+- info_nce_loss, cosine_similarity (module fns)
+
+ADR-185 section 3.2 also names aether_loss/VICReg components,
+alignment_metric, uniformity_metric, forward_dual, and vicreg_* config
+fields. None exist in embedding.rs at HEAD, so they are intentionally NOT
+bound (a Rust-side gap, not a binding gap) rather than fabricated.
+
+Parity (section 4.1, release-blocking): committed fixture
+aether_input.json -&gt; native Rust reference (tests/aether_parity.rs, calls
+sensing-server EmbeddingExtractor directly) locks
+tests/golden/aether_embedding.sha256; pytest (tests/test_aether.py) runs
+the same fixture through the binding and asserts the identical SHA-256 of
+the LE f32 bytes. Both pass.
+
+Verified: cargo test --features aether --test aether_parity -&gt; 2/2 pass;
+maturin develop --features aether + pytest tests/test_aether.py -&gt; 9/9
+pass; default cargo build clean with 0 sensing-server refs in the dep
+graph (gate keeps the base wheel lean).
+
+HONEST WHEEL-SIZE FINDING (ADR-185 section 9 / Open Q 11.1, unresolved):
+wifi-densepose-sensing-server is an Axum/tokio crate whose tokio/axum/
+worldgraph/ruvector deps are NON-optional (only mqtt/matter are
+features), so default-features=false does NOT drop them. An [aether]
+wheel therefore links the full server tree and BREAKS the ADR-117 section
+5.4 &lt;=5 MB budget. The fix is the ADR-sanctioned hoist of embedding.rs
+(+ its graph_transformer/sona siblings) into a leaf crate so the wheel
+links pure compute only -- a change INSIDE wifi-densepose-sensing-server,
+owned by another agent this session, so deferred as a required
+pre-release follow-up. P1 binds real code and proves parity today; the
+hoist is a wheel-size optimization, not a functional blocker.
+
+Note: building required initializing the worldgraph/rufield/ruvector
+submodules (absent in the fresh worktree).
+
+- docs(changelog): record ADR-184/187 landed work
+
+Under [Unreleased]:
+- Changed: ADR-184 pip-release.yml migrated to PyPI OIDC Trusted Publishing (cc153e8b5),
+  flagged not-yet-active pending manual pypi.org Trusted Publisher registration.
+- Deprecated (new section): ADR-187 archive/v1 formal deprecation + three-tier
+  model-weights honest labeling in README.md/docs/user-guide.md (1fb5397dd, b1417fb6e).
+- Added: ADR-184/185/186/187 decision records; ADR-185/186 marked Proposed-only
+  (not yet implemented on this branch).
+
+- docs(adr-187): mark P1-P3 done, verify acceptance criteria
+
+Verified all 6 acceptance criteria against current file contents and checked them.
+Set Status to Accepted; marked P1/P2/P3 DONE (1fb5397dd); left P4 as ACCEPTED-FUTURE (#645).
+
+To make criterion 4 genuinely true (live ESP32 17-keypoint feature nowhere advertised
+without the first-cut/below-target/runtime-stub caveat), added the caveat to the three
+remaining live-pose advertisements in README.md: the recommended-hardware capability
+table, the hero image caption, and the Live-ESP32-pipeline note.
+
+Refs #509, #1125
+
+- docs(adr-187): deprecate archive/v1 + honest three-tier model-weights labeling
+
+Add archive/v1/DEPRECATED.md tombstone and a loud deprecation notice atop
+archive/v1/README.md: DensePoseHead is architecture-only (random kaiming_normal_
+init, zero committed checkpoints under archive/v1/), superseded by the v2/ workspace
+and the wifi-densepose 2.x / ruview pip wheel.
+
+Add a &#39;Model weights: what&#39;s real, what&#39;s not&#39; three-tier table to README.md and
+docs/user-guide.md distinguishing real+validated (presence 82.3%, MM-Fi pose 82.69%
+torso-PCK@20, count_v1), real-but-weak (committed pose_v1 at PCK@20=3.0%, runtime
+confidence=0 stub, below ADR-079 target), and architecture-only (archive/v1). Caveat
+the live single-ESP32 17-keypoint cog advertisement and answer #509 SISO / #1125.
+
+Refs #509, #1125
+
+- docs(adr-184): record P1 OIDC workflow migration status (cc153e8b5), await pypi.org registration
+
+- ci(adr-184): migrate pip-release publish to PyPI OIDC Trusted Publishing
+
+Drop all four PYPI_API_TOKEN password inputs from the publish-v2 and
+publish-tombstone jobs, grant id-token: write, and bind both jobs to the
+pypi GitHub environment so pypa/gh-action-pypi-publish uses secretless
+Trusted Publishing. Rewrite the header + add step comments documenting
+the blocking manual pypi.org trusted-publisher registration (ADR-184
+§3.1) and the token fallback (§3.2). Build matrix untouched.
+
+Refs ADR-184 P1.
+
+- docs(adr): index ADR-184..187 in ADR README, correct count to 193
+
+- docs(adr-186): propose training progress API fix (refs #1233)
+
+- docs(adr-185): propose P6 Python bindings for AETHER/MERIDIAN/MAT
+
+- docs(adr-187): propose archive/v1 deprecation + model-weights honest labeling (refs #509, #1125)
+
+- docs(adr-184): note interim PYPI_API_TOKEN rotation, OIDC migration still pending
+
+- docs(adr-184): propose ADR-117 completion via PyPI Trusted Publishing (refs #785)
+
+- fix(ci): bypass hardened entrypoint for asset inspection (#1364)
+
+- fix(ci): restore workflow and LAN smoke tests (#1362)
+
+- feat: implement ADR-270 vendor provider beta (#1360)
+
+- feat(hardware): add Qualcomm CSI simulator and vendor roadmap (#1359)
+
+- feat(hardware): add MediaTek Filogic CSI simulator (#1358)
+
+- feat: add RTL8720F Realtek radar beta support (#1356)
+
+* docs(adr): plan RTL8720F radar SDK integration
+
+* feat(hardware): add Rust RTL8720F radar simulator
+
+* feat(ruview): ingest RTL8720F radar frames
+
+- Merge pull request #1355 from ruvnet/agent/open-issues-release
+
+fix: open issue sweep and ESP32 v0.8.4 release
+
+- fix open issue release blockers
+
+- fix(sensing-server): canonicalize calibration frames to 56-tone grid (real HT40 fix)
+
+Follow-up to the calibration deadlock fix. With the status gate unstuck,
+maybe_feed_calibration reached feed_calibration, but a real ESP32 HT40 node
+streams 128-wide amplitude frames while the single-link FieldModel is the
+canonical 56-tone grid. LinkStats::update returned DimensionMismatch,
+feed_calibration bubbled it, and maybe_feed_calibration swallowed it at debug
+level — so frame_count stayed pinned at 0 on live hardware (presence/vitals,
+which read the global history, were unaffected).
+
+Resample each frame onto the model&#39;s canonical 56-tone grid via
+HardwareNormalizer::resample_to_canonical before feeding — the same length-only
+canonicalization the multistatic fusion path uses (#1170).
+
+Pinned by maybe_feed_calibration_resamples_wide_frames_and_accumulates
+(128-wide -&gt; Collecting + count 1). sensing-server bin: 173 passed, 0 failed.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix(sensing-server): unstick empty-room field-model calibration deadlock
+
+POST /api/v1/calibration/start created the FieldModel in Uncalibrated, but
+field_bridge::maybe_feed_calibration only fed frames while already Collecting
+— and the only thing that sets Collecting is feed_calibration on its first
+fed frame. The two gates deadlocked: no first frame was ever fed, so
+calibration_frame_count stayed 0 and status never left Uncalibrated. Observed
+live on a streaming ESP32 node as {&#34;status&#34;:&#34;Uncalibrated&#34;,&#34;frame_count&#34;:0}
+that never advanced.
+
+- field_bridge::maybe_feed_calibration: feed while Uncalibrated | Collecting
+  so the first frame flips the model to Collecting and the count advances.
+- calibration_stop: return structured {success:false, frame_count,
+  frames_needed} instead of an opaque 500 when finalized with too few frames.
+- FieldModel::min_calibration_frames() accessor for the guard above.
+- Regression test: maybe_feed_calibration_advances_uncalibrated_to_collecting.
+
+Presence/motion/vitals were unaffected (separate auto rolling baseline).
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- fix(firmware): accept WPA/WPA2-mixed routers; warn about compact-board thermal risk
+
+Lower the STA auth threshold from WPA2_PSK to WPA_PSK so routers running
+WPA/WPA2-mixed compatibility mode aren&#39;t rejected with
+WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD (reason=211), and log the
+disconnect reason/rssi instead of retrying blind. Also document the thermal
+risk of running this firmware&#39;s continuous-radio, tier-2 DSP pipeline on
+coin-sized clone boards (ESP32-S3-Zero, SuperMini) with minimal PCB copper
+and budget regulators, after a field report of three such boards failing to
+power on following a normal session.
+
+Co-Authored-By: claude-flow &lt;ruv@ruv.net&gt;
+
+- Potential fix for pull request finding
+
+Co-authored-by: Copilot Autofix powered by AI &lt;175728472+Copilot@users.noreply.github.com&gt;
+
+- fix(api): resolve event loop blocking in health and metrics endpoints
+
+- docs: align firmware ESP-IDF version references to v5.4 (fixes #1177 b
+
+- fix: rename HeartRateExtractor.extract() weights param to phases</div>
+</div>
+
+<a href="../project/ruvnet_RuView.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>

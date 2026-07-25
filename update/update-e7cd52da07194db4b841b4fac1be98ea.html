@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Updates in main (24 commits) - beam-cloud/beta9 - GitHub Subscriptions Digest</title>
+    <link rel="stylesheet" href="../static/style.css">
+    <meta name="description" content="Автоматический дайджест обновлений из GitHub репозиториев с AI-суммаризацией">
+</head>
+<body>
+    <header>
+        <h1>Updates in main (24 commits)</h1>
+<nav class="breadcrumb">
+    <a href="../index.html">Главная</a> /
+    <a href="../project/beam-cloud_beta9.html">beam-cloud/beta9</a> /
+    Updates in main (24 commits)
+</nav>
+    </header>
+
+    <main>
+<div class="detail-container">
+    <div class="meta-info">
+        <div class="meta-row">
+            <span class="meta-label">Проект:</span>
+            <span class="meta-value">
+                <a href="../project/beam-cloud_beta9.html">beam-cloud/beta9</a>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Тип обновления:</span>
+            <span class="meta-value">
+                <span class="update-type UpdateType.COMMIT_BATCH">UpdateType.COMMIT_BATCH</span>
+            </span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Дата:</span>
+            <span class="meta-value">2026-07-24 18:18 UTC</span>
+        </div>
+        <div class="meta-row">
+            <span class="meta-label">Источник:</span>
+            <span class="meta-value">
+                <a href="https://github.com/beam-cloud/beta9/commits/main" target="_blank">https://github.com/beam-cloud/beta9/commits/main</a>
+            </span>
+        </div>
+    </div>
+
+    <h2>Суммаризация (на русском)</h2>
+    <div class="container">
+        <p>The recent updates extensively improve the platform&#39;s performance, reliability, and developer experience. Key enhancements include significantly reducing cold-start latencies and checkpoint restore times, especially for gVisor and GPU workloads, through optimizations like direct I/O and faster worker address lookups. Stability under burst loads and during container lifecycle events has been hardened, addressing issues like dropped connections and shutdown races. Additionally, new features enhance tracking of pod runs, provide machine targeting, and refine cache operations.
+
+---
+
+**Russian Translation:**
+
+Недавние обновления значительно повысили производительность, надежность и удобство для разработчиков платформы. Основные улучшения включают существенное сокращение времени холодного запуска и восстановления контрольных точек, особенно для рабочих нагрузок gVisor и GPU, благодаря таким оптимизациям, как прямой ввод/вывод и ускоренный поиск адресов воркеров. Отказоустойчивость при пиковых нагрузках и во время жизненного цикла контейнеров была усилена, решая проблемы с обрывами соединений и гонками при завершении работы. Кроме того, новые функции улучшают отслеживание запусков подов, предоставляют возможность целевого назначения машин и оптимизируют операции кэширования.</p>
+    </div>
+
+    <h2>Исходный текст</h2>
+    <div class="source-content">- fix: recover direct sandbox connections during bursts (#1802)
+
+## What changed
+
+- Retry initial direct-worker client acquisition inside the existing
+25-second sandbox readiness window.
+- Replace a cached `ContainerClient` after a genuine transient readiness
+RPC failure.
+- Preserve healthy shared clients when an individual caller is canceled.
+- Keep compare-and-delete eviction and per-worker singleflight dialing
+under burst concurrency.
+- Add direct legacy-worker regression coverage for 100 concurrent
+callers, a deliberately poisoned cached connection, request
+cancellation, and a shared initial dial failure.
+
+## Root cause
+
+The failed production run used legacy provider workers with direct
+worker addresses, not the agent route path. All 100 process managers
+became ready, but 56 requests exhausted the gateway&#39;s 25-second
+readiness timeout without executing a command. A `ContainerClient` wraps
+a one-shot backend connection; after that transport becomes unusable,
+the old `SandboxConnect` path kept probing the same cached client for
+the full timeout. Request-local cancellation could also evict and close
+a healthy client shared by sibling requests.
+
+## Impact
+
+Sandbox connect now redials a direct worker when its cached transport
+becomes unusable, while avoiding cancellation-driven connection churn. A
+shared initial dial failure is retried rather than fanned out as an
+immediate burst-wide failure.
+
+## Validation
+
+- `go test ./pkg/abstractions/pod -count=1`
+- Focused 100-way regression tests, 10 consecutive runs
+- Focused tests under `go test -race`
+- Latest upstream ComputeSDK benchmarks at `cc891554` with
+`@computesdk/beam@0.3.0` and `@beamcloud/beam-js@1.0.13`
+- Okteto staging, CI-equivalent sequence at 0.1 CPU due staging quota:
+  - Sequential: 100/100, median 0.21s, p99 0.27s
+  - Staggered: 100/100, median 0.23s, p99 0.30s
+  - Burst: 100/100, median 1.27s, p99 1.53s
+- Okteto staging, standard 1 CPU: 24/24, median 1.74s, p99 2.15s
+- Gateway remained Ready with zero restarts and no matching
+connect/transport/panic errors; benchmark cleanup left zero active
+containers.
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Recovers direct-worker sandbox connections under burst load by using a
+reconnecting gRPC channel with fast backoff and `WaitForReady`, healing
+dropped transports in under 500ms while keeping the cached
+`ContainerClient`. Adds focused tests for burst recovery, application
+Unavailable handling (no redial), and initial address lookup retries.
+
+- **Bug Fixes**
+- Reconnecting client: introduced `NewContainerClientWithDialer` using a
+custom dialer and `grpc.ConnectParams` backoff; status probes call
+`grpc.WaitForReady(true)` to ride out transport drops without replacing
+the cached client.
+- `SandboxConnect`: acquires a client once during the readiness wait;
+removed cache-key eviction and redial paths; keeps per-worker
+singleflight dialing.
+- Status paths: removed evict+retry logic in `SandboxStatus` and runtime
+status; tests cover 100-way bursts (&lt;500ms recovery), Unavailable
+responses (no redial), and one-shot address publication failures.
+
+&lt;sup&gt;Written for commit 0a1fd4db38af01f000d2111c0152ce4363e2c45a.
+Summary will update on new commits.&lt;/sup&gt;
+
+&lt;a
+href=&#34;https://cubic.dev/pr/beam-cloud/beta9/pull/1802?utm_source=github&#34;
+target=&#34;_blank&#34; rel=&#34;noopener noreferrer&#34;
+data-no-image-dialog=&#34;true&#34;&gt;&lt;picture&gt;&lt;source
+media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;source
+media=&#34;(prefers-color-scheme: light)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-light.svg&#34;&gt;&lt;img
+alt=&#34;Review in cubic&#34;
+src=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;/picture&gt;&lt;/a&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- fix: keep worker routes ready during bursts (#1801)
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+## Summary by cubic
+Prevents ready worker routes from being overwritten by opening
+registrations during bursts and makes route/sandbox connections
+resilient under load. This keeps routes ready and avoids cold starts
+when many containers start at once.
+
+- **Bug Fixes**
+- Repository: Guarded `SetBackendRoute` with a Redis script to ignore
+opening worker registrations when an identical ready route with a
+`proxy_target` exists; routes reopen only if identity/params change.
+- Agent: Rechecks route readiness if an opening snapshot races an
+in-flight ready update; subscribes to route events before the initial
+snapshot to avoid missed registrations.
+- Pod: Deduplicates sandbox client dials per worker using
+`golang.org/x/sync/singleflight`; on transient connect errors, evicts
+only the matching cached client and redials; refreshes client during
+ready probes when needed.
+- Tests: Added burst and race coverage for Redis route registration,
+route proxy readiness rechecks, single-flight client dialing, and safe
+client eviction.
+
+- **Dependencies**
+- CI: Install Python dev tools from the lockfile via `uv sync --locked
+--group dev`.
+
+&lt;sup&gt;Written for commit d046ca056374828ebede7b456c04180f0f3263a0.
+Summary will update on new commits.&lt;/sup&gt;
+
+&lt;a
+href=&#34;https://cubic.dev/pr/beam-cloud/beta9/pull/1801?utm_source=github&#34;
+target=&#34;_blank&#34; rel=&#34;noopener noreferrer&#34;
+data-no-image-dialog=&#34;true&#34;&gt;&lt;picture&gt;&lt;source
+media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;source
+media=&#34;(prefers-color-scheme: light)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-light.svg&#34;&gt;&lt;img
+alt=&#34;Review in cubic&#34;
+src=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;/picture&gt;&lt;/a&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- harden shell sessions and reconnects
+
+- make pod shells fast and lifecycle-safe
+
+- add pod run tasks (#1800)
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+## Summary by cubic
+Track pod runs as tasks so each run has a `task_id` and `app_id`, with
+SDK-built dashboard links for easy tracking and cancellation. Also
+improves cancel behavior and log paging resilience.
+
+- **New Features**
+- Route pod runs through `TaskDispatcher` (when enabled); `PodRun`
+returns `container_id` and `task_id` in `pkg/abstractions/pod/http.go`.
+- API/proto/OpenAPI/config: remove server-built `management_url`; add
+`task_id` and `app_id`; drop the unused reserved field; remove
+`gateway.containerURLTemplate`. SDK `PodInstance` exposes these; CLI
+prints app/task links upfront using `SDKSettings.app_url_template` (env
+`BETA9_APP_URL_TEMPLATE`, auto-derived from `api_host`).
+- Register the pod-run task executor and persist container→task mapping
+for lifecycle tracking (`pkg/abstractions/pod/task.go`).
+- Support immediate container stop on task cancel for pod runs in
+`pkg/api/v1/task.go` and `pkg/gateway/services/task.go`.
+
+- **Bug Fixes**
+- S2 log reader: fall back to live tail when end is past tail; treat
+stream-not-found as empty (tests added).
+- Pod runs: dedupe exit-status recovery and ensure dispatcher state
+completes on early failures.
+
+&lt;sup&gt;Written for commit f61281ff1daa57c3117451a57cf5f576c6039afd.
+Summary will update on new commits.&lt;/sup&gt;
+
+&lt;a
+href=&#34;https://cubic.dev/pr/beam-cloud/beta9/pull/1800?utm_source=github&#34;
+target=&#34;_blank&#34; rel=&#34;noopener noreferrer&#34;
+data-no-image-dialog=&#34;true&#34;&gt;&lt;picture&gt;&lt;source
+media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;source
+media=&#34;(prefers-color-scheme: light)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-light.svg&#34;&gt;&lt;img
+alt=&#34;Review in cubic&#34;
+src=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;/picture&gt;&lt;/a&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+---------
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- bypass managed limits for private pools
+
+- Fix S2 log history past stream tail (#1799)
+
+- logging performance fixes (#1798)
+
+- Fix sandbox startup stalls and readiness (#1797)
+
+## What changed
+
+- restore concurrent healthy workspace-mount reuse with a per-workspace
+RWMutex
+- stop periodic GeeseFS cleanup from blocking container startup; mounts
+are cleaned during worker shutdown after scheduling is disabled
+- make sandbox auto-`/outputs` per-container ephemeral storage at mount
+construction, so direct-download/no-volume sandboxes bypass workspace
+FUSE
+- gate SandboxConnect on process-manager and deferred CPU-quota
+readiness
+- synchronize readiness state, signal early startup failures, retry
+transient probes, and avoid closing a shared cached worker connection
+
+## Root cause
+
+Commit `f15d0b1c` moved the healthy workspace-mount path behind an
+exclusive lock while background cleanup could hold that lock through
+GeeseFS&#39;s 60-second flush timeout. Burst starts serialized behind health
+checks and stale unmounts. Gateway connect also treated worker
+routability as sandbox readiness.
+
+## Impact
+
+No-volume sandboxes with direct workspace object download no longer
+require GeeseFS. Warm mounts are checked concurrently, and readiness is
+only returned after the sandbox process manager is usable.
+
+## Validation
+
+- `go test -race ./pkg/worker -run
+&#39;TestWaitForSandboxProcessManager|TestContainerSandboxStatusReports|TestWorkspaceStorage|TestRequiresWorkspaceStorageMount|TestReserveContainerInstance&#39;`
+- `go test ./pkg/abstractions/common ./pkg/abstractions/pod
+./pkg/abstractions/endpoint ./pkg/abstractions/taskqueue
+./pkg/abstractions/shell ./pkg/abstractions/function
+./pkg/abstractions/experimental/bot`
+- earlier full relevant suite: `go test ./pkg/worker
+./pkg/abstractions/pod ./pkg/types`
+- `git diff --check`
+
+Prod p99 needs confirmation after deploying both gateway and worker from
+this branch.
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Fixes sandbox startup stalls and readiness races by waiting for the
+process manager before reporting ready and by moving mount cleanup off
+the hot path. Also consolidates sandbox readiness logic with thread-safe
+state and consistent status reporting. Sandboxes now avoid persistent
+output mounts and write to local ephemeral `/outputs`, bypassing
+workspace FUSE/GeeseFS.
+
+- **Bug Fixes**
+- Unify sandbox readiness on `ContainerInstance` with thread-safe
+helpers; initialize on start and reset on clear;
+`ContainerSandboxStatus` reports pending until ready and returns a clear
+failure if initialization fails.
+- Gate `SandboxConnect` on process-manager readiness with a retrying
+probe and timeout; return a generic, non-leaky error on failures.
+- Restore concurrent healthy workspace-mount reuse with per-workspace
+`RWMutex`; remove background cleanup and run it only on worker shutdown
+after scheduling is disabled.
+- Omit sandbox `/outputs` mounts in `ConfigureContainerRequestMounts`;
+non-sandbox stubs still mount persistent outputs;
+direct-download/no-volume sandboxes bypass workspace FUSE/GeeseFS.
+  - Use typed `SandboxStatus` values end-to-end.
+
+&lt;sup&gt;Written for commit 7921552b82b6d781c77df6d7793623dcb011a89a.
+Summary will update on new commits.&lt;/sup&gt;
+
+&lt;a
+href=&#34;https://cubic.dev/pr/beam-cloud/beta9/pull/1797?utm_source=github&#34;
+target=&#34;_blank&#34; rel=&#34;noopener noreferrer&#34;
+data-no-image-dialog=&#34;true&#34;&gt;&lt;picture&gt;&lt;source
+media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;source
+media=&#34;(prefers-color-scheme: light)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-light.svg&#34;&gt;&lt;img
+alt=&#34;Review in cubic&#34;
+src=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;/picture&gt;&lt;/a&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- Reduce sandbox worker address lookup latency (#1796)
+
+## What changed
+
+Reduce the Redis worker-address polling interval from 250 ms to 25 ms
+while retaining the existing five-minute readiness timeout.
+
+## Why
+
+Sandbox connect requests were consistently spending about 250 ms in
+`worker_address_lookup` even though workers published their address much
+earlier. The coarse poll interval dominated steady-state cold-start
+latency.
+
+## Impact
+
+In the latest upstream ComputeSDK 100-iteration sequential benchmark,
+this change plus the coordinated client inline-exec path reduced Beam&#39;s
+reported TTI from:
+
+- median: 332.9 ms → 169.5 ms
+- p99: 442.4 ms → 214.9 ms
+- score: 96.25 → 98.20
+
+The production-order staggered run completed 100/100 with a reported p99
+of 228.8 ms.
+
+## Validation
+
+- `go test ./pkg/repository`
+- `git diff --check`
+- Latest ComputeSDK benchmark upstream, Node 24, scheduled production
+ordering
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Reduced the Redis worker-address poll interval from 250 ms to 25 ms to
+cut sandbox connect latency while keeping the 5-minute readiness
+timeout. This removes the ~250 ms wait in `worker_address_lookup` and
+speeds up cold starts.
+
+- **Performance**
+  - TTI median: 332.9 ms → 169.5 ms
+  - TTI p99: 442.4 ms → 214.9 ms
+  - Score: 96.25 → 98.20
+  - Production-order run: 100/100; p99 228.8 ms
+
+&lt;sup&gt;Written for commit b84c6532d4a7f6d92f911622ec3947bb73c30bc8.
+Summary will update on new commits.&lt;/sup&gt;
+
+&lt;a
+href=&#34;https://cubic.dev/pr/beam-cloud/beta9/pull/1796?utm_source=github&#34;
+target=&#34;_blank&#34; rel=&#34;noopener noreferrer&#34;
+data-no-image-dialog=&#34;true&#34;&gt;&lt;picture&gt;&lt;source
+media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;source
+media=&#34;(prefers-color-scheme: light)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-light.svg&#34;&gt;&lt;img
+alt=&#34;Review in cubic&#34;
+src=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;/picture&gt;&lt;/a&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- fix: cleanup on-demand messaging (#1795)
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- fix pod dx (#1794)
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+## Summary by cubic
+Adds machine targeting and better pod/shell DX across API, server, and
+CLI. Also improves scheduling reliability and returns a management URL
+on pod creation.
+
+- New Features
+- Machine placement: add optional `machine_id` to `CreatePodRequest` and
+`CreateStandaloneShellRequest`; validate and pin placement to that
+machine.
+- CLI: `run --detach`, `run --machine &lt;id&gt;`, `container list --machine
+&lt;id&gt;`, and `deploy --replicas` (sets both min/max replicas).
+- Management URL: `CreatePodResponse.management_url` returned;
+configurable via `gateway.containerURLTemplate`; exposed as
+`PodInstance.management_url` in the SDK.
+- Capacity UX: clearer credit/offers hints; CLI help respects active
+name (“beta9” or “beam”).
+- Scheduling window: pending TTL increased to 30m and scheduler retry
+duration to 20m to support on-demand/private pools.
+
+- Bug Fixes
+- Streaming: wait and poll for worker address before attaching to logs
+to avoid early failures.
+- Container metadata: fill `WorkerId`/`MachineId` from either persisted
+state or runtime info; persist `MachineId` in container state.
+- Noise reduction: suppress low-capacity GPU warnings when a
+private/on-demand pool is targeted.
+- OpenAPI/Protobuf aligned with new fields (`machineId`,
+`managementUrl`); tests added.
+
+&lt;sup&gt;Written for commit d12b8fd427e415fff1e13fbd54e66af6bf85b021.
+Summary will update on new commits.&lt;/sup&gt;
+
+&lt;a
+href=&#34;https://cubic.dev/pr/beam-cloud/beta9/pull/1794?utm_source=github&#34;
+target=&#34;_blank&#34; rel=&#34;noopener noreferrer&#34;
+data-no-image-dialog=&#34;true&#34;&gt;&lt;picture&gt;&lt;source
+media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;source
+media=&#34;(prefers-color-scheme: light)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-light.svg&#34;&gt;&lt;img
+alt=&#34;Review in cubic&#34;
+src=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;/picture&gt;&lt;/a&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+---------
+
+Co-authored-by: Cursor &lt;cursoragent@cursor.com&gt;
+
+- Fix pod failure retry cutoff (#1793)
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+## Summary by cubic
+Fixes the pod failure retry cutoff by enforcing shutdown at the failure
+threshold and adding a 1-minute cooldown so retries resume predictably.
+Failed exits now persist longer for accurate counting, then are
+shortened when the limit is hit.
+
+- **Bug Fixes**
+- stoppableContainers: force-stop when deployment is inactive or
+failures &gt;= threshold; overrides pending status and keep-warm locks.
+- Failure tracking and cooldown: exit codes keep 5m TTL on success and
+1h on failure; when the threshold is hit we scale desired containers to
+0 and clamp failed-exit TTLs to 1m via SetContainerFailureCooldown.
+Added tests for retention, cooldown, and pending-cancel behavior.
+
+&lt;sup&gt;Written for commit 9ab385e9cf7bb2c2df72b5a113f7121117c28b5e.
+Summary will update on new commits.&lt;/sup&gt;
+
+&lt;a
+href=&#34;https://cubic.dev/pr/beam-cloud/beta9/pull/1793?utm_source=github&#34;
+target=&#34;_blank&#34; rel=&#34;noopener noreferrer&#34;
+data-no-image-dialog=&#34;true&#34;&gt;&lt;picture&gt;&lt;source
+media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;source
+media=&#34;(prefers-color-scheme: light)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-light.svg&#34;&gt;&lt;img
+alt=&#34;Review in cubic&#34;
+src=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;/picture&gt;&lt;/a&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- Allow CRIU restores across ERMS differences (#1792)
+
+## Summary
+
+- Exclude ERMS from CRIU&#39;s x86 instruction compatibility mask.
+- Keep all existing ISA, XSAVE, FPU, and CPU image compatibility checks
+enabled.
+- Apply the patch when building the pinned CRIU version in the worker
+image.
+
+## Root cause
+
+Two RTX4090 workers use the same AMD EPYC 7B13 CPU family, model,
+stepping, and microcode, but their firmware exposes different raw CPUID
+capabilities. The checkpoint host exposes ERMS while the restore host
+does not. CRIU treats ERMS as required instruction availability and
+rejects the restore, even though ERMS only changes the optimized
+behavior of `REP MOVSB/STOSB`; those instructions remain valid without
+it.
+
+## Validation
+
+- Reproduced the production failure by dumping CPU metadata on the
+original checkpoint host and checking it on the original restore host
+with stock CRIU 4.2 from worker 0.1.694.
+- Built patched CRIU from the exact pinned commit and confirmed it
+accepts the real cross-host CPU metadata.
+- Added AVX-512F to a copy of the metadata and confirmed patched CRIU
+still rejects the unavailable ISA feature.
+- Confirmed all four worker CRIU patches apply cleanly in Dockerfile
+order.
+- Did not modify or restart any production worker or workload container.
+
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Allow CRIU restores across hosts that differ only in ERMS support,
+preventing false restore failures. All other CPU/ISA compatibility
+checks remain enforced.
+
+- **Bug Fixes**
+  - Exclude ERMS from CRIU’s x86 instruction compatibility mask.
+- Apply `criu-ignore-erms-compat.patch` during the pinned CRIU build in
+`docker/Dockerfile.worker`.
+
+&lt;sup&gt;Written for commit 0568806721c423223da0f5ea84225b872779eeb8.
+Summary will update on new commits.&lt;/sup&gt;
+
+&lt;a
+href=&#34;https://cubic.dev/pr/beam-cloud/beta9/pull/1792?utm_source=github&#34;
+target=&#34;_blank&#34; rel=&#34;noopener noreferrer&#34;
+data-no-image-dialog=&#34;true&#34;&gt;&lt;picture&gt;&lt;source
+media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;source
+media=&#34;(prefers-color-scheme: light)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-light.svg&#34;&gt;&lt;img
+alt=&#34;Review in cubic&#34;
+src=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;/picture&gt;&lt;/a&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- cache benchmark updates (#1790)
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+## Summary by cubic
+Improves raw cache read performance, resilience, and cancellation
+behavior with request shaping and overload protection, and adds a
+workspace-scoped volume object hash registry to stabilize content
+identity across mounts.
+
+- **New Features**
+- Raw read admission control with busy responses. Limits for request
+size, inflight bytes, and concurrent requests.
+- Client raw read window planning: 64 MiB request size, up to 8 parts
+per read, honoring per-host connection caps.
+- Workspace-scoped volume object hash registry. Normalizes
+ETags/endpoints and durably persists verified content hashes via the
+cache coordinator.
+
+- **Bug Fixes**
+- Hardened raw transport with progress write deadlines for
+sendfile/copies, reliable connection pooling, and cancellation
+propagation. Busy responses surface as `ErrRawReadBusy` and trigger host
+refresh/failover.
+- GeeseFS cache reads bounded to splice size with `max_read` clamped;
+FD-backed paths and prefetch tuning for stability. Registry hooks added
+to look up/store object hashes.
+- Worker storage unmounts under the workspace lock and only when idle;
+cache shutdown deferred until mounts flush.
+
+&lt;sup&gt;Written for commit 7bfc3f27c570b874a418a495a2ac22590a328ad1.
+Summary will update on new commits.&lt;/sup&gt;
+
+&lt;a
+href=&#34;https://cubic.dev/pr/beam-cloud/beta9/pull/1790?utm_source=github&#34;
+target=&#34;_blank&#34; rel=&#34;noopener noreferrer&#34;
+data-no-image-dialog=&#34;true&#34;&gt;&lt;picture&gt;&lt;source
+media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;source
+media=&#34;(prefers-color-scheme: light)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-light.svg&#34;&gt;&lt;img
+alt=&#34;Review in cubic&#34;
+src=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;/picture&gt;&lt;/a&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- Configure shmem THP for gVisor restores (#1789)
+
+## What changed
+
+- When a worker pool selects gVisor, change the host shmem
+transparent-huge-page policy from `never` or `deny` to `advise`.
+- Preserve already-enabled policies such as `advise`, `always`, and
+`within_size`.
+- Treat unsupported or unwritable kernel controls as a startup warning
+rather than failing the worker.
+- Leave runc pools unchanged.
+- Pin amd64 workers to `release-20260714.0-beam.3`, built from
+`beam-cloud/gvisor@5e447de02f83f59b0517ce44979a816a996a5f96`.
+
+## Why
+
+After the RTX 5090 reboot, `shmem_enabled` reset to `never`. That forced
+gVisor&#39;s restored CUDA memory through 4 KiB pages and made the required
+prefault take about 11.1 seconds. The merged gVisor change marks only
+restored CUDA mappings with `MADV_HUGEPAGE`, so `advise` does not force
+THP on unrelated host memory.
+
+The pinned gVisor release contains the ordered CUDA prefault, early
+huge-page advice, and NVIDIA driver ABI fallback merged through
+beam-cloud/gvisor#1 and beam-cloud/gvisor#2.
+
+## Validation
+
+- `go test ./pkg/worker -run TestEnsureGVisorShmemTHP -count=1`
+- `go test ./pkg/worker -count=1`
+- exact-master gVisor build
+- `//pkg/sentry/pgalloc:pgalloc_test`
+- `//pkg/sentry/control:control_test`
+- fresh release download matched the pinned SHA-512
+- amd64 `gvisor` Dockerfile stage built successfully and ran `runsc
+--version`
+- five consecutive Qwen scale-to-zero restores returned valid completion
+responses on the RTX 5090
+
+Raw gVisor restore times were 6.999s, 7.100s, 7.361s, 7.243s, and
+7.378s.
+
+No other production worker, gateway, pool, or shared worker image tag
+was changed during this update.
+
+- update memory profiling (#1788)
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+## Summary by cubic
+Switch gVisor OOM detection to kernel cgroup memory events and add 2 GiB
+runtime headroom to memory limits to match real enforcement and prevent
+false OOMs. Also default-enable `runsc`
+`--nvproxy-allow-unsupported-driver` and bump the gVisor release.
+
+- **Bug Fixes**
+- Use cgroup `memory.events` for OOM detection on `gVisor` (watch the
+sandbox cgroup from `Linux.CgroupsPath` or container ID).
+  - Start OOM watcher only when memory limits are enforced.
+- Add 2 GiB headroom to `gVisor` memory hard limit and set swap = limit;
+reservation unchanged.
+- Default `runsc` arg `--nvproxy-allow-unsupported-driver` (can opt out
+with `=false`).
+  - Updated tests for the new OOM watcher and memory accounting.
+
+- **Dependencies**
+  - Update gVisor to `release-20260714.0-beam.2` with new SHA512.
+
+&lt;sup&gt;Written for commit 27ccc961ccf3a14a3cf768a4e44176cdbe70a3b8.
+Summary will update on new commits.&lt;/sup&gt;
+
+&lt;a
+href=&#34;https://cubic.dev/pr/beam-cloud/beta9/pull/1788?utm_source=github&#34;
+target=&#34;_blank&#34; rel=&#34;noopener noreferrer&#34;
+data-no-image-dialog=&#34;true&#34;&gt;&lt;picture&gt;&lt;source
+media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;source
+media=&#34;(prefers-color-scheme: light)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-light.svg&#34;&gt;&lt;img
+alt=&#34;Review in cubic&#34;
+src=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;/picture&gt;&lt;/a&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- clip meta fix (#1787)
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+## Summary by cubic
+Fixes CLIP metadata handling and makes cache writes hit attached servers
+directly, reducing round-trips and allocations. Also tightens gVisor
+defaults and memory enforcement, improves OOM monitoring, and respects
+worker CPU quotas for agents.
+
+- **Bug Fixes**
+- Write to the selected attached cache server directly and update
+CacheFS metadata; treat attached servers as available store targets.
+- Content checks consult the local/attached server CAS and drop stale
+local routing on miss.
+- Eviction sizing uses the complete marker and streamed dir scans;
+stub-code cache sizes computed on delete to avoid eager scans.
+- Preserve loopback for GPU pod checkpoints and stop the OOM watcher
+before completing terminal snapshots.
+- Mount cached CLIP archives in local mode when the archive is local and
+reuse archive metadata during image mounts.
+
+- **Performance**
+- Stream S3 range reads into caller buffers via `ReadRangeInto` and
+ingest pages with preallocated buffers/cancellation to reduce copies and
+memory.
+- Disable detailed CLIP read tracing unless `DebugMode`; upgrade
+`github.com/beam-cloud/clip` and `github.com/hanwen/go-fuse/v2`.
+- Lower gVisor OOM watcher overhead by reading the proc task tree and
+caching PIDs with periodic refresh.
+- Honor worker CPU quotas by deriving GOMAXPROCS from the CPU millicores
+env; default agent install leaves capacity unbounded; apply Docker
+`--cpus`/`--memory` only when explicitly set.
+- Default gVisor to `--dcache=32768` and `--file-access=exclusive`;
+enforce memory for gVisor workloads and for GPU workloads without CPU
+throttling.
+
+&lt;sup&gt;Written for commit 4e0a5445c36264d8c962280a0d93589c24c3e83d.
+Summary will update on new commits.&lt;/sup&gt;
+
+&lt;a
+href=&#34;https://cubic.dev/pr/beam-cloud/beta9/pull/1787?utm_source=github&#34;
+target=&#34;_blank&#34; rel=&#34;noopener noreferrer&#34;
+data-no-image-dialog=&#34;true&#34;&gt;&lt;picture&gt;&lt;source
+media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;source
+media=&#34;(prefers-color-scheme: light)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-light.svg&#34;&gt;&lt;img
+alt=&#34;Review in cubic&#34;
+src=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;/picture&gt;&lt;/a&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- Optimize CLIP and gVisor startup and checkpoint reliability (#1786)
+
+## Summary
+
+- reduce CLIP/gVisor rootfs metadata overhead by reusing parsed archive
+metadata, caching immutable directory listings in the kernel, disabling
+detailed read tracing outside debug mode, and bounding runsc&#39;s dentry
+cache
+- reduce worker-side contention by honoring the worker CPU quota in
+`GOMAXPROCS`, avoiding repeated host-wide process scans in the gVisor
+OOM watcher, and enforcing gVisor memory limits
+- harden terminal GPU checkpoints by stopping the OOM watcher before
+capture and preserving loopback-sensitive pod sockets
+
+## Why
+
+Profiling on the staging RTX 5090 host showed that cached image
+preparation was already fast, while repeated FUSE metadata work,
+oversized worker Go scheduling, and OOM monitoring added avoidable
+runtime contention. Terminal checkpoint capture could also race the OOM
+watcher, and pod GPU workloads require their internal loopback sockets
+to remain available across restore.
+
+The CLIP dependency is pinned to the tested immutable directory-listing
+cache implementation. The default runtime remains gVisor systrap; no
+custom gVisor CUDA patch is included.
+
+## Validation
+
+- `go test ./pkg/types ./pkg/runtime ./pkg/cache ./pkg/worker`
+- raw Docker workload baseline: 15.0-15.3s
+- runc + CLIP p50: 15.558s
+- gVisor systrap non-checkpoint startup: approximately 22.7s
+- Qwen checkpoint archive: 7.48 GiB
+- worker restore: 6.476-6.929s across three runs
+- public completion API: 7.008-7.498s with valid `beam-ok` responses
+- forced cross-GPU restore from GPU 0 to GPU 1: valid completion in
+7.407s
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Speed up CLIP image mounts and gVisor startup by reusing metadata,
+bounding `runsc` dcache, switching gVisor rootfs to exclusive file
+access, honoring worker CPU quotas, and trimming OOM watcher overhead.
+Improve checkpoint reliability by stopping OOM monitoring before
+terminal snapshots and preserving loopback-sensitive GPU sockets; agents
+now default to host capacity unless limits are explicitly set.
+
+- **Bug Fixes**
+- Stop OOM watcher before terminal checkpoints; keep vLLM loopback
+sockets for pod GPU checkpoints.
+- Enforce memory limits for gVisor agent workloads; runc behavior
+unchanged.
+- Reduce OOM watcher overhead by reading RSS from procfs and discovering
+children via `/proc/*/task/*/children` with periodic refresh.
+- Derive `GOMAXPROCS` from the worker CPU quota when unset to reduce
+scheduler contention.
+- Use host capacity for agents by default; only set Docker
+`--cpus`/`--memory` when flags are provided, and resize worker totals to
+host capacity while preserving current usage.
+- Make eviction sizing faster and stable using complete-marker sizes and
+streamed dir reads; avoid eager stub cache sizing.
+- Default gVisor args: `--dcache=32768`, `--file-access=exclusive`,
+`--overlay2=none`. Disable detailed CLIP read tracing unless `debug`
+mode.
+
+- **Dependencies**
+- Update `github.com/beam-cloud/clip` to reuse immutable
+directory-listing metadata and pass `Metadata` into mounts for zero-copy
+reuse; tidy module checksums.
+  - Bump `github.com/hanwen/go-fuse/v2` to `v2.10.1`.
+
+&lt;sup&gt;Written for commit 54929dbf768559b856f16ca6f312c21321488835.
+Summary will update on new commits.&lt;/sup&gt;
+
+&lt;a
+href=&#34;https://cubic.dev/pr/beam-cloud/beta9/pull/1786?utm_source=github&#34;
+target=&#34;_blank&#34; rel=&#34;noopener noreferrer&#34;
+data-no-image-dialog=&#34;true&#34;&gt;&lt;picture&gt;&lt;source
+media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;source
+media=&#34;(prefers-color-scheme: light)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-light.svg&#34;&gt;&lt;img
+alt=&#34;Review in cubic&#34;
+src=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;/picture&gt;&lt;/a&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- Use direct I/O for gVisor checkpoint restore (#1782)
+
+## Summary
+- pass gVisor `--direct` during checkpoint restore
+- keep restore reads out of the host page cache
+- cover the restore argument in the runtime unit test
+
+## Validation
+- `go test ./pkg/runtime -count=1`
+- five cold, stopped-container Qwen2.5-1.5B restores returned HTTP 200
+with exact completion output
+- gVisor restore: 6.13s, 6.69s, 6.67s, 6.99s, 6.24s (p50 6.67s)
+- public request-to-completion: 7.31s, 7.87s, 7.81s, 8.16s, 7.39s (p50
+7.81s)
+- no-direct cold reference: 7.96s gVisor restore, 9.44s public request
+- host page cache remained stable across repeated restores
+
+## Scope
+This is a generic runtime optimization. It does not alter vLLM
+configuration, model state, KV cache sizing, or application behavior.
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Use direct I/O for gVisor checkpoint restore by passing --direct to
+restore. This avoids polluting the host page cache and reduces cold
+restore latency; updated the runtime unit test to assert the flag.
+
+- **Performance**
+  - gVisor restore p50: 6.67s vs 7.96s (no-direct).
+  - Request-to-completion p50: 7.81s vs 9.44s.
+  - Host page cache stayed stable across repeated restores.
+
+&lt;sup&gt;Written for commit 7882d32d25050e033232c61125b9585abe0c96f3.
+Summary will update on new commits.&lt;/sup&gt;
+
+&lt;a
+href=&#34;https://cubic.dev/pr/beam-cloud/beta9/pull/1782?utm_source=github&#34;
+target=&#34;_blank&#34; rel=&#34;noopener noreferrer&#34;
+data-no-image-dialog=&#34;true&#34;&gt;&lt;picture&gt;&lt;source
+media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;source
+media=&#34;(prefers-color-scheme: light)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-light.svg&#34;&gt;&lt;img
+alt=&#34;Review in cubic&#34;
+src=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;/picture&gt;&lt;/a&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- Fix pending container stop finalization (#1783)
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+## Summary by cubic
+Fixes a race where stopping a pending container could still be
+scheduled. Unassigned pending containers are now atomically finalized,
+and non-pending requests are no longer scheduled or retried.
+
+- **Bug Fixes**
+- Scheduler Stop: atomically mark unassigned pending containers as
+stopping, then delete their state; keep assigned pending containers and
+set to stopping for worker cancellation.
+- Repository: added `MarkPendingContainerStoppingIfUnassigned` Redis
+script to transition pending→stopping only when no `worker_id`, with
+TTL.
+- Worker scheduling: validate container state is `PENDING` at commit
+time; reject and restore capacity if not.
+- Scheduler: only schedule/retry if the request is still pending to
+avoid replaying canceled/deleted requests.
+- Gateway/CLI: omit zero timestamps in API; show &#34;N/A&#34; uptime when
+`started_at` is missing or epoch.
+
+&lt;sup&gt;Written for commit c9155f528485d304de073fb9b388cdab2f213174.
+Summary will update on new commits.&lt;/sup&gt;
+
+&lt;a
+href=&#34;https://cubic.dev/pr/beam-cloud/beta9/pull/1783?utm_source=github&#34;
+target=&#34;_blank&#34; rel=&#34;noopener noreferrer&#34;
+data-no-image-dialog=&#34;true&#34;&gt;&lt;picture&gt;&lt;source
+media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;source
+media=&#34;(prefers-color-scheme: light)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-light.svg&#34;&gt;&lt;img
+alt=&#34;Review in cubic&#34;
+src=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;/picture&gt;&lt;/a&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- Enable Xet for checkpoint model downloads (#1781)
+
+## Summary
+- stop forcing Hugging Face Hub onto the deprecated serial HTTP transfer
+path for checkpoint-enabled workloads
+- keep Xet transfer scratch data on local ephemeral storage while model
+files remain in workspace storage
+- cover transport environment behavior in gateway tests
+
+## Staging validation
+- exact Qwen2.5-1.5B-Instruct cold deploy on RTX5090
+- model transfer: 2.88 GiB in 22.3s
+- untouched checkpoint archive: 7.97 GiB
+- scale-to-zero restore and exact chat completion: HTTP 200 in 8.64s
+- gVisor runtime restore: 6.74s
+
+## Tests
+- `go test ./pkg/gateway/services -count=1`
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Enable Xet for checkpoint model downloads to improve transfer
+performance and keep workspace volumes small. Move Xet transfer cache to
+ephemeral storage and let the runtime choose the Hub transport.
+
+- **New Features**
+- Enable Xet for checkpoint-enabled model transfers; remove
+`HF_HUB_DISABLE_XET` and `HF_HUB_ENABLE_HF_TRANSFER` overrides.
+- Add `HF_XET_CACHE` in the ephemeral compile cache; keep model files in
+the workspace volume.
+  - Extend gateway tests to cover env layout and transport selection.
+
+&lt;sup&gt;Written for commit 35f34d464899993df400f30fd162f03028f09466.
+Summary will update on new commits.&lt;/sup&gt;
+
+&lt;a
+href=&#34;https://cubic.dev/pr/beam-cloud/beta9/pull/1781?utm_source=github&#34;
+target=&#34;_blank&#34; rel=&#34;noopener noreferrer&#34;
+data-no-image-dialog=&#34;true&#34;&gt;&lt;picture&gt;&lt;source
+media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;source
+media=&#34;(prefers-color-scheme: light)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-light.svg&#34;&gt;&lt;img
+alt=&#34;Review in cubic&#34;
+src=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;/picture&gt;&lt;/a&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- Fix pod proxy shutdown retirement race (#1780)
+
+## Summary
+
+- retire pod backends from proxy discovery before scheduler shutdown
+- propagate STOPPING state across gateway replicas and prune idle
+transports
+- queue concurrent cold-start requests when another gateway holds the
+scaling lock
+- preserve explicit force-stop semantics while rechecking connections
+for automatic scale-down
+
+## Root cause
+
+The autoscaler could select an idle pod for shutdown while its route and
+HTTP keepalive transport were still published. A request arriving at the
+shutdown boundary could reuse that transport and receive an immediate
+502 instead of waiting for a checkpoint restore. Discovery could also
+republish the still-RUNNING container before Scheduler.Stop committed
+STOPPING.
+
+## Validation
+
+- go test ./pkg/abstractions/common ./pkg/abstractions/pod -count=1
+- go test -race ./pkg/abstractions/pod -count=1
+- staging: repeated untouched Qwen checkpoint restores with exact chat
+completions, including shutdown-boundary and concurrent request waves;
+no 500/502 responses
+- restored staging to two stock gateway 0.1.722 replicas after Okteto
+testing
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Fixes a shutdown race in the pod proxy that caused 502s at scale-down.
+The proxy now retires backends before stopping containers, propagates
+STOPPING across replicas, and queues cold-starts when another gateway
+holds the scaling lock.
+
+- **Bug Fixes**
+- Retire containers from discovery and remove idle transports before
+`Scheduler.Stop` to prevent keepalive reuse.
+- Track retiring container IDs in `PodProxyBuffer` and filter them
+during discovery; allow canceling retirement if needed.
+- Propagate STOPPING via container events; prune transports on state
+change; check both local and shared connection counts.
+- Reject automatic stop when connections exist; keep explicit force-stop
+behavior.
+- On scaling lock contention, trigger autoscaler and allow requests to
+queue instead of erroring.
+
+&lt;sup&gt;Written for commit 8cbac8610f69c06454ea0a9ed0048fbae984a694.
+Summary will update on new commits.&lt;/sup&gt;
+
+&lt;a
+href=&#34;https://cubic.dev/pr/beam-cloud/beta9/pull/1780?utm_source=github&#34;
+target=&#34;_blank&#34; rel=&#34;noopener noreferrer&#34;
+data-no-image-dialog=&#34;true&#34;&gt;&lt;picture&gt;&lt;source
+media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;source
+media=&#34;(prefers-color-scheme: light)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-light.svg&#34;&gt;&lt;img
+alt=&#34;Review in cubic&#34;
+src=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;/picture&gt;&lt;/a&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;
+
+- Optimize gVisor GPU checkpoint restore (#1779)
+
+## Summary
+
+- use gVisor&#39;s native NVIDIA checkpoint path for GPU workloads
+- make automatic gVisor checkpoints terminal and overlap background CPU
+page loading with CUDA restore
+- pin the tested Beam gVisor amd64 release with SHA-512 verification
+- retain the official gVisor release for arm64 workers
+
+The gVisor patch is isolated in `beam-cloud/gvisor` at `4272182b` and is
+also open upstream as google/gvisor#13753. It prefaults only MemoryFile
+ranges mapped by restored CUDA processes before NVIDIA process resume.
+There are no vLLM-specific flags, KV-cache changes, eager mode, or
+workload-state reduction.
+
+## Staging results
+
+RTX 5090, untouched `Qwen/Qwen2.5-1.5B-Instruct` BF16 vLLM deployment,
+existing 7.3 GiB automatic checkpoint:
+
+- baseline gVisor runtime restore: roughly 25.7-29 seconds
+- optimized runtime restore: roughly 6.2-6.6 seconds
+- warm image load: 37 ms
+- warm checkpoint path: 7.16 seconds
+- request to exact valid chat completion: 7.62 seconds
+- first request after worker recycle: 8.94 seconds
+
+The exact release artifact and original checkpoint produced HTTP 200
+responses with exact requested completion text. The checkpoint remained
+available and no replacement snapshot was created.
+
+## Verification
+
+- `go test ./pkg/runtime ./pkg/worker`
+- gVisor `//pkg/sentry/mm:mm_test`
+- gVisor `//pkg/sentry/pgalloc:pgalloc_test`
+- gVisor `//runsc:runsc`
+- amd64 `gvisor` Docker stage build with checksum and version
+verification
+- repeated staging checkpoint restores through `/v1/chat/completions`
+
+&lt;!-- This is an auto-generated description by cubic. --&gt;
+---
+## Summary by cubic
+Optimize `gVisor` GPU checkpoint/restore by using its native NVIDIA path
+and making auto-checkpoints terminal, overlapping CPU page loading with
+CUDA resume. Cuts restore time on RTX 5090 `vLLM` from ~26–29s to
+~6.2–6.6s without changing checkpoints.
+
+- New Features
+- Use `gVisor` `nvproxy` via a GPU bundle annotation; bind
+`cuda-checkpoint`; pass `--cuda-checkpoint-path` on checkpoint and
+`--nvproxy` on restore; remove per-PID CUDA freezing.
+- Run `restore --background`, wait for completion, and add safe
+force-delete cleanup.
+- Treat `gVisor` auto-checkpoints as terminal (same as `runc`); add
+`VLLM_HOST_IP` and `VLLM_LOOPBACK_IP` loopback env vars for service
+checkpoints.
+
+- Dependencies
+- Pin amd64 `runsc` to `beam-cloud/gvisor` `release-20260714.0-beam.1`
+with SHA-512 digest verification; keep official `gVisor` release for
+arm64.
+
+&lt;sup&gt;Written for commit f59099b794d250fd1975867c6833ab6be8a8d267.
+Summary will update on new commits.&lt;/sup&gt;
+
+&lt;a
+href=&#34;https://cubic.dev/pr/beam-cloud/beta9/pull/1779?utm_source=github&#34;
+target=&#34;_blank&#34; rel=&#34;noopener noreferrer&#34;
+data-no-image-dialog=&#34;true&#34;&gt;&lt;picture&gt;&lt;source
+media=&#34;(prefers-color-scheme: dark)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;source
+media=&#34;(prefers-color-scheme: light)&#34;
+srcset=&#34;https://www.cubic.dev/buttons/review-in-cubic-light.svg&#34;&gt;&lt;img
+alt=&#34;Review in cubic&#34;
+src=&#34;https://www.cubic.dev/buttons/review-in-cubic-dark.svg&#34;&gt;&lt;/picture&gt;&lt;/a&gt;
+
+&lt;!-- End of auto-generated description by cubic. --&gt;</div>
+</div>
+
+<a href="../project/beam-cloud_beta9.html" class="back-link">Вернуться к проекту</a>
+    </main>
+
+    <footer>
+        <p>Сгенерировано автоматически с использованием GitHub Actions и Google Gemini AI</p>
+    </footer>
+</body>
+</html>
